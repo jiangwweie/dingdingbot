@@ -970,6 +970,23 @@ observation
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert the rollup, monitor ordering, zero remote interaction, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
+### 2026-06-19 BTPC L2 Keep / Revise / Fact Source Decision Checkpoint
+
+The P0.5 loop now turns the BTPC proxy replay quality rollup into a stable local
+decision packet. This prevents the BTPC branch from stopping at an explanatory
+report: it records the next local work as keep L2 shadow observation, attach
+live derivatives fact sources before live eligibility, review the strong-uptrend
+conflict disable rule, and review stale-signal freshness/classifier handling.
+
+| Item | Evidence |
+| --- | --- |
+| Decision artifact | `latest-btpc-l2-keep-revise-fact-source-decision.json` reports `status=btpc_l2_keep_revise_fact_source_decision_ready` |
+| Action rows | The packet emits four action rows: live derivatives fact-source mapping, strong-uptrend conflict rule review, freshness/classifier stale-signal review, and continued L2 shadow observation |
+| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs `btpc_l2_keep_revise_fact_source_decision` after `opportunity_decision_loop_final` |
+| Boundary | The decision packet is not live RequiredFacts, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_btpc_l2_keep_revise_fact_source_decision.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert action rows, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
+| Safety | Local decision-packet work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

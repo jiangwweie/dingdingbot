@@ -181,6 +181,39 @@ def _write_ready_btpc_proxy_replay_quality_review(command: list[str]) -> None:
     )
 
 
+def _write_ready_btpc_l2_keep_revise_fact_source_decision(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "btpc_l2_keep_revise_fact_source_decision_ready",
+            "decision": {
+                "keep_l2_shadow_observation": True,
+                "revise_fact_classifier_inputs_before_promotion": True,
+                "l2_promotion_recommended_now": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+            },
+            "interaction": {
+                "level": "L0_local_btpc_l2_keep_revise_fact_source_decision",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -204,6 +237,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
             _write_ready_btpc_proxy_replay_quality_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+        ):
+            _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -371,6 +410,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
         btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
         btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
+        btpc_l2_keep_revise_fact_source_decision_json=tmp_path
+        / "btpc-l2-decision.json",
+        btpc_l2_keep_revise_fact_source_decision_md=tmp_path
+        / "btpc-l2-decision.md",
         command_runner=fake_runner,
     )
 
@@ -391,6 +434,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_btpc_local_fact_proxy_review.py",
         "build_strategygroup_btpc_proxy_replay_quality_review.py",
         "build_strategygroup_opportunity_decision_loop.py",
+        "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py",
     ]
     assert len(decision_loop_commands) == 2
     assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
@@ -427,6 +471,12 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
             _write_ready_btpc_proxy_replay_quality_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+        ):
+            _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -563,6 +613,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
         btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
         btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
+        btpc_l2_keep_revise_fact_source_decision_json=tmp_path
+        / "btpc-l2-decision.json",
+        btpc_l2_keep_revise_fact_source_decision_md=tmp_path
+        / "btpc-l2-decision.md",
         command_runner=fake_runner,
     )
 
@@ -594,6 +648,12 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
             _write_ready_btpc_proxy_replay_quality_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+        ):
+            _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -792,6 +852,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
         btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
         btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
+        btpc_l2_keep_revise_fact_source_decision_json=tmp_path
+        / "btpc-l2-decision.json",
+        btpc_l2_keep_revise_fact_source_decision_md=tmp_path
+        / "btpc-l2-decision.md",
         command_runner=fake_runner,
     )
 
@@ -826,6 +890,12 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
             _write_ready_btpc_proxy_replay_quality_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+        ):
+            _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -982,6 +1052,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
         btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
         btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
+        btpc_l2_keep_revise_fact_source_decision_json=tmp_path
+        / "btpc-l2-decision.json",
+        btpc_l2_keep_revise_fact_source_decision_md=tmp_path
+        / "btpc-l2-decision.md",
         command_runner=fake_runner,
     )
 
@@ -1023,6 +1097,12 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
             _write_ready_btpc_proxy_replay_quality_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+        ):
+            _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1166,6 +1246,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
         btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
         btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
+        btpc_l2_keep_revise_fact_source_decision_json=tmp_path
+        / "btpc-l2-decision.json",
+        btpc_l2_keep_revise_fact_source_decision_md=tmp_path
+        / "btpc-l2-decision.md",
         command_runner=fake_runner,
     )
 
