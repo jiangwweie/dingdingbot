@@ -282,6 +282,40 @@ def _write_ready_btpc_classifier_rule_review(command: list[str]) -> None:
     )
 
 
+def _write_ready_strategygroup_decision_ledger(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "decision_ledger_ready",
+            "decision": {
+                "single_main_product": True,
+                "one_current_row_per_strategy_group": True,
+                "raw_replay_samples_duplicated": False,
+                "real_order_scope_change_recommended": False,
+                "l4_promotion_recommended": False,
+            },
+            "interaction": {
+                "level": "L0_local_strategygroup_decision_ledger",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "local_decision_ledger_only": True,
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -320,6 +354,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_classifier_rule_review.py":
             _write_ready_btpc_classifier_rule_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_decision_ledger.py":
+            _write_ready_strategygroup_decision_ledger(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -497,6 +534,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "btpc-live-source-mapping.md",
         btpc_classifier_rule_review_json=tmp_path / "btpc-classifier-rule.json",
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
+        strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
+        strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
         command_runner=fake_runner,
     )
 
@@ -520,6 +559,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py",
         "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py",
         "build_strategygroup_btpc_classifier_rule_review.py",
+        "build_strategygroup_decision_ledger.py",
     ]
     assert len(decision_loop_commands) == 2
     assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
@@ -571,6 +611,9 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_classifier_rule_review.py":
             _write_ready_btpc_classifier_rule_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_decision_ledger.py":
+            _write_ready_strategygroup_decision_ledger(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -717,6 +760,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "btpc-live-source-mapping.md",
         btpc_classifier_rule_review_json=tmp_path / "btpc-classifier-rule.json",
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
+        strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
+        strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
         command_runner=fake_runner,
     )
 
@@ -763,6 +808,9 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_classifier_rule_review.py":
             _write_ready_btpc_classifier_rule_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_decision_ledger.py":
+            _write_ready_strategygroup_decision_ledger(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -971,6 +1019,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "btpc-live-source-mapping.md",
         btpc_classifier_rule_review_json=tmp_path / "btpc-classifier-rule.json",
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
+        strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
+        strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
         command_runner=fake_runner,
     )
 
@@ -1020,6 +1070,9 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_classifier_rule_review.py":
             _write_ready_btpc_classifier_rule_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_decision_ledger.py":
+            _write_ready_strategygroup_decision_ledger(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1186,6 +1239,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "btpc-live-source-mapping.md",
         btpc_classifier_rule_review_json=tmp_path / "btpc-classifier-rule.json",
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
+        strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
+        strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
         command_runner=fake_runner,
     )
 
@@ -1242,6 +1297,9 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_classifier_rule_review.py":
             _write_ready_btpc_classifier_rule_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_decision_ledger.py":
+            _write_ready_strategygroup_decision_ledger(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1395,6 +1453,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "btpc-live-source-mapping.md",
         btpc_classifier_rule_review_json=tmp_path / "btpc-classifier-rule.json",
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
+        strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
+        strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
         command_runner=fake_runner,
     )
 

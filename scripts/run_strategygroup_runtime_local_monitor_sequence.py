@@ -121,6 +121,12 @@ DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_JSON = (
 DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-btpc-classifier-rule-review.md"
 )
+DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+)
+DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -195,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
         btpc_classifier_rule_review_json=Path(args.btpc_classifier_rule_review_json),
         btpc_classifier_rule_review_md=Path(args.btpc_classifier_rule_review_md),
+        strategygroup_decision_ledger_json=Path(
+            args.strategygroup_decision_ledger_json
+        ),
+        strategygroup_decision_ledger_md=Path(args.strategygroup_decision_ledger_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -276,6 +286,10 @@ def build_local_monitor_sequence_report(
         DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_JSON
     ),
     btpc_classifier_rule_review_md: Path = DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD,
+    strategygroup_decision_ledger_json: Path = (
+        DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON
+    ),
+    strategygroup_decision_ledger_md: Path = DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -649,6 +663,27 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_decision_ledger_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_decision_ledger.py"),
+        "--opportunity-decision-loop-json",
+        str(opportunity_decision_loop_json),
+        "--signal-coverage-json",
+        str(signal_coverage_json),
+        "--output-json",
+        str(strategygroup_decision_ledger_json),
+        "--output-owner-progress",
+        str(strategygroup_decision_ledger_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_decision_ledger",
+            strategygroup_decision_ledger_command,
+            strategygroup_decision_ledger_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -751,6 +786,9 @@ def build_local_monitor_sequence_report(
                 btpc_live_derivatives_fact_source_mapping_json
             ),
             "btpc_classifier_rule_review_json": str(btpc_classifier_rule_review_json),
+            "strategygroup_decision_ledger_json": str(
+                strategygroup_decision_ledger_json
+            ),
         },
     }
 
@@ -1405,6 +1443,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--btpc-classifier-rule-review-md",
         default=str(DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-decision-ledger-json",
+        default=str(DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-decision-ledger-md",
+        default=str(DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

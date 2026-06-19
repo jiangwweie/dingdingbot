@@ -24,10 +24,10 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` before apply |
-| Latest deployed runtime head | `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-e5f8c13b-cutover-ready-current` |
-| Latest deploy apply | `output/tokyo-git-deploy-apply-e5f8c13b.json`: `status=applied`, `blockers=[]`, `remote_interaction_count=7`, `remote_files_modified=true`, `calls_exchange_write=false`, `places_order=false` |
-| Latest postdeploy acceptance | `output/tokyo-runtime-deploy-session-e5f8c13b.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` |
+| Latest deployed runtime head | `e7506d4fccb302077a2361b4726f2e0b67f717a6` |
+| Latest Tokyo release | pending bounded deploy checkpoint for StrategyGroup Decision Ledger |
+| Latest deploy apply | pending `e7506d4f` bounded deploy checkpoint; previous applied head was `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
+| Latest postdeploy acceptance | pending `e7506d4f` postdeploy acceptance; previous accepted packet was `output/tokyo-runtime-deploy-session-e5f8c13b.json` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |

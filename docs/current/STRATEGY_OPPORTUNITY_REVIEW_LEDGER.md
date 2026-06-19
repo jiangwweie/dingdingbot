@@ -115,9 +115,9 @@ Replay must not be represented as:
 - real-submit authority;
 - proof of profitability.
 
-## Mainline Next Checkpoint
+## Current Local Checkpoint
 
-The next deploy-worthy local checkpoint is:
+The current local checkpoint is implemented:
 
 ```text
 high-priority no-action rows
@@ -127,9 +127,16 @@ high-priority no-action rows
 -> local monitor sequence integration
 ```
 
-The checkpoint is complete only when current `BRF-001`, `BTPC-001`, `LSR-001`,
-and `VCB-001` high-priority no-action rows produce decision rows without
-creating FinalGate, Operation Layer, exchange-write, or real-order authority.
+`scripts/build_strategygroup_decision_ledger.py` is the single main producer.
+It consumes lower-level signal coverage and opportunity decision loop evidence,
+then emits `output/runtime-monitor/latest-strategygroup-decision-ledger.json`
+and `output/runtime-monitor/latest-strategygroup-decision-ledger.md`.
+
+The local monitor sequence runs this producer after the opportunity decision
+loop and BTPC review-only fact/classifier steps. Current local output produces
+one decision row for `BRF-001`, `BTPC-001`, `LSR-001`, `RBR-001`, and
+`VCB-001` without creating FinalGate, Operation Layer, exchange-write, or
+real-order authority.
 
 ## Acceptance Constraints
 
