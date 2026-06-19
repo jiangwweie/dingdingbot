@@ -65,6 +65,31 @@
   "not_finalgate_input": true,
   "not_operation_layer_input": true,
   "not_order_sizing_default": true,
+  "strategy_opportunity_review": {
+    "contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
+    "not_promotion_authority_by_itself": true,
+    "tier_decision_inputs": [
+      "no_action_or_would_enter_rows",
+      "replay_coverage",
+      "required_facts_mapping",
+      "classifier_state",
+      "freshness_state",
+      "cost_or_edge_review",
+      "current_tier_policy"
+    ],
+    "allowed_decisions": [
+      "keep_observe_only",
+      "continue_l2_shadow",
+      "repair_classifier",
+      "map_required_facts",
+      "add_replay",
+      "prepare_l2_intake",
+      "park",
+      "kill",
+      "future_l4_review_after_owner_lane_change_or_post_mpg_live_closure"
+    ],
+    "real_order_authority": false
+  },
   "safety_invariants": {
     "l4_still_requires_official_runtime_chain": true,
     "no_strategy_group_directly_authorizes_real_submit": true,

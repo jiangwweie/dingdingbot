@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Current Document Authority
@@ -19,6 +19,7 @@ Start from:
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
 docs/current/strategy-group-handoffs/main-control-handoff-index.md
 ```
 
@@ -54,6 +55,28 @@ conservatism by lowering leverage, shrinking notional, reducing exposure, or
 slowing eligible submits merely because the trade is risky. Hard stops protect
 operational authority and mechanical correctness; they are not generic reasons
 to avoid in-boundary right-tail opportunities.
+
+Current planning must use this operating loop:
+
+```text
+P0 live path stays ready
+-> no-signal periods expand read-only opportunity discovery
+-> no-action / would-enter observations enter replay-to-review
+-> classifier, facts, freshness, cost, and tier gaps become decisions
+-> StrategyGroups are kept, revised, promoted, parked, or killed
+-> real allocated-subaccount outcomes later update the review ledger
+```
+
+The main bottleneck after the P0 runtime chain is StrategyGroup quality:
+opportunity discovery, no-action diagnosis, replay coverage, fact/source
+mapping, classifier repair, and tier governance. Reports and markdown are
+mainline only when they feed this loop.
+
+`Strategy Opportunity Review Ledger` is the pre-live strategy-learning ledger.
+It records no-action, would-enter, stale, missing-fact, and classifier-conflict
+observations before they become real-order authority. It complements the
+post-action Review Ledger; it does not replace FinalGate, Operation Layer, live
+RequiredFacts, or real lifecycle review.
 
 The Owner is not an operator. Owner-facing product surfaces must not turn
 internal execution gates, evidence objects, API routes, proof chains, or blocker

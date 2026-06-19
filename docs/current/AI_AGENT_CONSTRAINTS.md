@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # AI Agent Constraints
@@ -55,6 +55,23 @@ should happen through replay, synthetic signal fixtures, paper/simulator
 operation-layer lifecycle tests, post-submit simulation, and cost/slippage
 review inputs. Synthetic and replay signals must never be represented as live
 market signals and must never feed a real Operation Layer submit.
+
+After the P0 runtime path is live-ready, the main non-market work is
+StrategyGroup learning, not report decoration. Agents should turn high-priority
+no-action and would-enter observations into replay-to-review decisions:
+
+```text
+observation
+-> reason codes
+-> replay coverage
+-> classifier / facts / freshness / cost / tier gap
+-> decision action
+-> StrategyGroup keep / revise / prepare L2 / park / kill
+```
+
+Use `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` as the current contract
+for this pre-live learning loop. It is local/read-only decision support and must
+keep real-order authority false.
 
 Testnet is not a mainline value layer for this project. If used at all, it is a
 temporary API-shape diagnostic tool. Meaningful execution-quality evidence comes

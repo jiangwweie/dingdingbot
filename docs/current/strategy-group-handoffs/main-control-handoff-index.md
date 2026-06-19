@@ -22,6 +22,12 @@ docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md
 docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
 ```
 
+Pre-live StrategyGroup learning rows are defined in:
+
+```text
+docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
+```
+
 ## Batch
 
 | StrategyGroup | Role | Default Mode |
@@ -46,3 +52,7 @@ docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
 These handoffs are Strategy Picker and watcher-scope inputs only. They are not
 order authority, FinalGate pass evidence, Operation Layer evidence, deploy
 authority, credential changes, live profile changes, or order-sizing defaults.
+
+No-action, would-enter, stale, missing-fact, and classifier-conflict observations
+from these handoffs should enter the Strategy Opportunity Review Ledger before
+they influence tier decisions.

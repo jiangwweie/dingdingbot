@@ -38,6 +38,20 @@ work are included only when they help the system find opportunities, capture
 them through the official runtime path, preserve net edge after execution costs,
 and feed review decisions.
 
+The current planning phase is strategy learning on top of a live-ready P0
+chain. P0 remains ready for the first selected StrategyGroup allocated-subaccount
+live closure. P0.5 must now turn market observations into StrategyGroup learning
+decisions:
+
+```text
+live path waits
+-> broad read-only observation continues
+-> no-action / would-enter rows are captured
+-> replay-to-review explains or challenges them
+-> classifier, facts, cost, freshness, and tier gaps become decisions
+-> stage-worthy decisions deploy once, not continuously
+```
+
 ## Profitability-Oriented Operating Frame
 
 The final business target is profit. The current engineering acceptance target
@@ -61,6 +75,13 @@ Use this frame to prevent drift:
 | Execution Quality | Preserve net edge after market friction | Fee, funding, slippage, filters, partial fill, retry and error taxonomy |
 | Risk Capital | Use Owner-allocated loss-capable subaccount capital aggressively inside explicit boundaries | Probe, trial, promotion, parked, and kill capital states |
 | Learning Loop | Convert outcomes into better decisions | Review ledger, negative evidence, promote/revise/park/kill |
+
+The learning loop now has two ledgers:
+
+| Ledger | Stage | Purpose |
+| --- | --- | --- |
+| Strategy Opportunity Review Ledger | Before live submit | Learn from no-action, would-enter, replay, facts, classifier, and tier gaps |
+| Review Ledger | After live action | Learn from entry, exit, protection, costs, PnL, reconciliation, and final review |
 
 Engineering work is mainline only when it improves one of those layers. Extra
 evidence fields, broad UI work, historical cleanup, or strategy expansion are
@@ -145,6 +166,7 @@ market-dependent first real-order proof.
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | P0.5 Signal Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion/L2 readiness/tier-policy review ready | Use `latest-signal-coverage-diagnostic.json`, `latest-signal-coverage-expansion-review.json`, `latest-l2-readiness-review.json`, `latest-l2-intake-dry-run.json`, and `latest-l2-tier-policy-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs these packets after completion audit; current expansion review promotes `BTPC-001` to L2 non-executing shadow-candidate observation only, keeps `BRF-001`/`LSR-001`/`RBR-001`/`VCB-001` blocked from L2, reports each broader would-enter row with tier, suggested next tier, action, confidence, execution boundary, readiness gaps, and no-candidate reason, and does not treat broader preview signals as real-submit authority or L4 promotion authority |
+| P0.5 Strategy Opportunity Review Ledger | High-priority no-action and would-enter observations become durable pre-live learning rows before they influence strategy tier decisions | Main runtime window | planned next local checkpoint | Build local ledger rows from signal coverage, replay lab, L2 readiness, and opportunity decision loop artifacts. The first target rows are `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` high-priority no-action observations plus any non-parked would-enter observations. Each row must output reason codes, replay match status, gap type, decision action, tier effect, source artifacts, and `real_order_authority=false`. This is the next deploy-worthy P0.5 milestone when integrated into the local monitor sequence |
 | P0.5 Opportunity Decision Loop | Observed would-enter opportunities become repeatable local decisions by joining signal coverage, replay verification, blocking gaps, L2 tier state, and strategy-quality outcome | Main runtime window | local decision loop + LSR/VCB local revision execution + post-revision replay review + BTPC fact-quality/proxy/proxy-replay keep-revise/live-source mapping/classifier-rule review ready | Use `latest-opportunity-decision-loop.json` to turn broader observations into per-StrategyGroup actions and scheduled work items: continue L2 shadow quality review, repair RequiredFacts/classifier/economic gaps, build missing replay corpus, park low-quality vocabulary, or prepare future L2 intake without L4 scope change; current queue separates `local_replay_coverage_ready`, `fact_source_pending`, `strategy_decision_pending`, `strategy_review_pending`, and `parked`; covered LSR/VCB classifier/economic replay items can roll up into `strategy_quality_decisions` with `revise_before_l2`, concrete `revision_tasks`, `revision_completion.status=local_revision_completion_ready`, `revision_execution.status=local_revision_execution_complete`, and passed post-revision replay review when those rows are active; `latest-btpc-l2-shadow-fact-quality-review.json` classifies all five BTPC fact gaps, `latest-btpc-local-fact-proxy-review.json` attaches review-only derivatives/margin proxy coverage, and the local monitor sequence now reruns a final opportunity decision loop after `latest-btpc-proxy-replay-quality-review.json`; `latest-btpc-l2-keep-revise-fact-source-decision.json` freezes BTPC into keep L2 shadow + revise fact/classifier inputs, `latest-btpc-live-derivatives-fact-source-mapping.json` maps the future live derivatives/margin source routes, and `latest-btpc-classifier-rule-review.json` records the BTPC v1 strong-uptrend and stale-signal disable rules while keeping live RequiredFacts, L4 scope, FinalGate, Operation Layer, exchange-write, and real-order authority false; RBR remains parked |
 | P0.5 Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready; `BTPC-001` L2 shadow replay plus `BRF-001` / `VCB-001` / `LSR-001` L1 observe replay added | Keep MPG-001 eight-window corpus wired into local dry-run audit; use BTPC-001 L2 shadow replay and BRF/VCB/LSR L1 observe replay for no-action / would-enter diagnostics without expanding L4 real-order scope |
 | P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |

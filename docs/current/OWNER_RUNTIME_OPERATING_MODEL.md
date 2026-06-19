@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # Owner Runtime Operating Model
@@ -58,6 +58,27 @@ Operation Layer bypass, withdrawal, transfer, credential mutation, or
 unauthorized live-profile/sizing mutation. They are not generic reasons to make
 the system reduce leverage, shrink notional, slow eligible submits, or avoid
 right-tail opportunities after the Owner has allocated loss-capable capital.
+
+## Strategy Learning Mode
+
+When the live path is healthy but waiting for a fresh market signal, the system
+should continue improving StrategyGroup quality locally and through read-only
+observation:
+
+```text
+no-action / would-enter observation
+-> replay match or replay gap
+-> classifier, facts, freshness, cost, or tier diagnosis
+-> keep, revise, prepare L2, park, or kill decision
+```
+
+This is not Owner-operated trading. It is system learning. The Owner should not
+manually interpret raw no-action packets, replay files, or RequiredFacts gaps in
+normal operation.
+
+The pre-live learning record is the Strategy Opportunity Review Ledger. The
+post-action record remains the Review Ledger. Both are review artifacts; neither
+bypasses the official live path.
 
 ## Owner-Facing State
 

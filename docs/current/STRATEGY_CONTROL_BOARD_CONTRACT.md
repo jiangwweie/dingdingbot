@@ -2,7 +2,7 @@
 title: STRATEGY_CONTROL_BOARD_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-last_verified: 2026-06-15
+last_verified: 2026-06-19
 ---
 
 # Strategy Control Board Contract
@@ -25,6 +25,23 @@ tool, or operator workflow for internal execution gates.
 | `intervention` | `无需操作` unless Owner action is required |
 | `reason` | One plain sentence when unavailable or intervention is required |
 | `review_outcome` | `保留`, `调整`, `暂停`, `停用`, or `待复盘` |
+
+## Strategy Learning Surface
+
+The main control board may summarize Strategy Opportunity Review Ledger state,
+but it must not become a raw diagnostic table.
+
+| Internal source | Main Owner meaning |
+| --- | --- |
+| high-priority no-action | 有观察机会，系统正在复盘 |
+| would-enter observe-only | 有观察机会，暂不具备实盘权限 |
+| missing replay coverage | 样本不足，等待本地补充 |
+| classifier / facts gap | 策略条件待调整 |
+| parked low-priority vocabulary | 暂停观察，不影响主线 |
+
+The board should show one compact strategy-learning status only when it changes
+the Owner-relevant state. Healthy background replay or no-action review should
+stay quiet.
 
 ### Review Outcome Vocabulary Mapping
 

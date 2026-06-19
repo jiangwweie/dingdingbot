@@ -2,7 +2,7 @@
 title: RUNTIME_REPLAY_LAB
 status: CURRENT
 authority: docs/current/RUNTIME_REPLAY_LAB.md
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # Runtime Replay Lab
@@ -28,6 +28,11 @@ signal shape
 
 Replay exists to make the real live path faster to debug and more profitable
 to iterate. It is not an execution authority.
+
+Replay is now a required input to the Strategy Opportunity Review Ledger. A
+replay row is useful only when it changes a decision: add more replay, repair a
+classifier, map RequiredFacts, keep observing, prepare L2 intake, park, or kill.
+Replay output should not grow as a report-only surface.
 
 ## Current Scope
 
@@ -323,3 +328,4 @@ larger local replay/review corpus:
 | Better cost, slippage, and funding estimates | Better estimate of whether gross edge can survive execution friction |
 | Cross-StrategyGroup replay at L2 only | Add no-action / would-enter diagnostics without expanding real-order scope |
 | Simulator-to-review scoring | Turn fill/protection/reconciliation outcomes into promote/revise/park evidence |
+| Opportunity ledger integration | Convert replay matches and gaps into durable pre-live StrategyGroup decisions |

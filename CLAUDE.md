@@ -1,6 +1,6 @@
 # CLAUDE.md - BRC Claude Worker Guide
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Role
@@ -56,6 +56,13 @@ loss-capable experiment capital. Claude tasks must not reinterpret that budget
 into lower leverage, lower exposure, smaller notional, or slower eligible
 submits for caution. Stop only for explicit authority or mechanical boundaries
 listed below.
+
+Current mainline work after the P0 live path is ready is StrategyGroup learning:
+turn no-action and would-enter observations into replay-to-review decisions,
+then into Strategy Opportunity Review Ledger rows. Claude tasks in this area
+must keep all rows non-executing and must not treat replay, synthetic fixtures,
+or observe-only evidence as live signals, live RequiredFacts, FinalGate input,
+Operation Layer evidence, or real-order authority.
 
 ## Standing Authorization
 
