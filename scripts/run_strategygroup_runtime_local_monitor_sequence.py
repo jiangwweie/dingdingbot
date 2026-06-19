@@ -672,12 +672,14 @@ def build_local_monitor_sequence_report(
     expansion_review_resolved = _expansion_review_resolved(
         packets.get("l2_readiness_review", {}),
         packets.get("l2_tier_policy_review", {}),
+        packets.get("opportunity_decision_loop", {}),
     )
     signal_coverage_gap = _expansion_review_non_market_gap(
         packets.get("signal_coverage_expansion_review", {}),
         packets.get("l2_readiness_review", {}),
         packets.get("l2_intake_dry_run", {}),
         packets.get("l2_tier_policy_review", {}),
+        packets.get("opportunity_decision_loop", {}),
     )
     if signal_coverage_gap is None and not expansion_review_resolved:
         signal_coverage_gap = _signal_coverage_non_market_gap(
@@ -838,10 +840,20 @@ def _sequence_status(
     if completion_status == "not_complete_runtime_processing":
         return "processing"
     l2_readiness_status = _status(packets.get("l2_readiness_review"))
+    l2_dry_run_status = _status(packets.get("l2_intake_dry_run"))
     l2_tier_status = _status(packets.get("l2_tier_policy_review"))
     l2_tier_review_clears_expansion = l2_tier_status in {
         "l2_tier_policy_review_applied",
     } or l2_readiness_status == "l2_readiness_review_already_enabled"
+    expansion_review_clears_expansion = (
+        l2_tier_review_clears_expansion
+        or _opportunity_decision_loop_clears_expansion(
+            packets.get("opportunity_decision_loop", {}),
+            l2_readiness_status=l2_readiness_status,
+            l2_dry_run_status=l2_dry_run_status,
+            l2_tier_status=l2_tier_status,
+        )
+    )
     signal_coverage_status = _status(packets.get("signal_coverage"))
     if signal_coverage_status == "mainline_runtime_signal_ready":
         return "processing"
@@ -850,7 +862,7 @@ def _sequence_status(
         "broader_preview_invalid_needs_review",
     } or (
         signal_coverage_status == "mainline_no_signal_broader_would_enter"
-        and not l2_tier_review_clears_expansion
+        and not expansion_review_clears_expansion
     ):
         return "needs_non_market_repair"
     expansion_review_status = _status(packets.get("signal_coverage_expansion_review"))
@@ -858,7 +870,7 @@ def _sequence_status(
         "blocked_forbidden_effect",
     } or (
         expansion_review_status == "review_needed_broader_observe_only_would_enter"
-        and not l2_tier_review_clears_expansion
+        and not expansion_review_clears_expansion
     ):
         return "needs_non_market_repair"
     if l2_readiness_status in {
@@ -868,7 +880,6 @@ def _sequence_status(
         and not l2_tier_review_clears_expansion
     ):
         return "needs_non_market_repair"
-    l2_dry_run_status = _status(packets.get("l2_intake_dry_run"))
     if l2_dry_run_status in {
         "blocked_forbidden_effect",
         "l2_intake_dry_run_failed",
@@ -935,10 +946,45 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
 def _expansion_review_resolved(
     l2_packet: dict[str, Any],
     l2_tier_policy_packet: dict[str, Any],
+    opportunity_decision_loop_packet: dict[str, Any] | None = None,
 ) -> bool:
     return _status(l2_packet) == "l2_readiness_review_already_enabled" or _status(
         l2_tier_policy_packet
-    ) == "l2_tier_policy_review_applied"
+    ) == "l2_tier_policy_review_applied" or _opportunity_decision_loop_clears_expansion(
+        opportunity_decision_loop_packet or {},
+        l2_readiness_status=_status(l2_packet),
+        l2_dry_run_status="",
+        l2_tier_status=_status(l2_tier_policy_packet),
+    )
+
+
+def _opportunity_decision_loop_clears_expansion(
+    packet: dict[str, Any],
+    *,
+    l2_readiness_status: str,
+    l2_dry_run_status: str,
+    l2_tier_status: str,
+) -> bool:
+    if _status(packet) != "decision_loop_ready":
+        return False
+    if l2_tier_status in {
+        "blocked_forbidden_effect",
+        "l2_tier_policy_review_failed",
+        "l2_tier_policy_review_recommended",
+    }:
+        return False
+    if l2_dry_run_status in {
+        "blocked_forbidden_effect",
+        "l2_intake_dry_run_failed",
+        "l2_intake_dry_run_passed",
+    }:
+        return False
+    if l2_readiness_status in {
+        "blocked_forbidden_effect",
+        "l2_readiness_review_has_conditional_candidate",
+    }:
+        return False
+    return True
 
 
 def _expansion_review_non_market_gap(
@@ -946,10 +992,12 @@ def _expansion_review_non_market_gap(
     l2_packet: dict[str, Any] | None = None,
     l2_dry_run_packet: dict[str, Any] | None = None,
     l2_tier_policy_packet: dict[str, Any] | None = None,
+    opportunity_decision_loop_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     l2_packet = l2_packet or {}
     l2_dry_run_packet = l2_dry_run_packet or {}
     l2_tier_policy_packet = l2_tier_policy_packet or {}
+    opportunity_decision_loop_packet = opportunity_decision_loop_packet or {}
     if _status(l2_packet) == "l2_readiness_review_already_enabled":
         return None
     l2_tier_status = _status(l2_tier_policy_packet)
@@ -1043,6 +1091,13 @@ def _expansion_review_non_market_gap(
             "requirement": "L2 readiness review must stay non-executing",
             "missing_or_false": ["l2_readiness_review_forbidden_effect"],
         }
+    if _opportunity_decision_loop_clears_expansion(
+        opportunity_decision_loop_packet,
+        l2_readiness_status=l2_status,
+        l2_dry_run_status=l2_dry_run_status,
+        l2_tier_status=l2_tier_status,
+    ):
+        return None
     status = _status(packet)
     if status == "review_needed_broader_observe_only_would_enter":
         counts = packet.get("counts") if isinstance(packet.get("counts"), dict) else {}

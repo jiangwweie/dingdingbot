@@ -1787,6 +1787,22 @@ or the legacy `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env gate again.
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-19 Observation Decision Loop Gap Closure Checkpoint
+
+The P0.5 local loop now stops treating broader observe-only would-enter rows as
+unreviewed once the opportunity decision loop has converted them into repeatable
+decision output. This keeps the roadmap focused on useful next work instead of
+re-reporting an already reviewed observation-scope item.
+
+| Item | Result |
+| --- | --- |
+| Closed loop | `opportunity_decision_loop=decision_loop_ready` clears `observation_scope_expansion_review_needed` when no conditional L2 dry-run or tier-policy update is pending |
+| Preserved escalation | Actual conditional L2 intake/tier updates, failed dry-runs, and forbidden effects still remain non-market gaps |
+| Current local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: blockers empty, non-market gaps empty, remote interactions `0`, server mutation `false`, approaches real order `false` |
+| Remaining state | `needs_refresh` comes from monitor cache freshness, not from opportunity review or live-order readiness |
+| Deployment | Not deployed; this is local monitor sequence logic only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

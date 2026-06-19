@@ -1404,3 +1404,36 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
+
+
+def test_local_monitor_sequence_clears_expansion_gap_when_decision_loop_ready() -> None:
+    module = _load_module()
+
+    gap = module._expansion_review_non_market_gap(
+        {"status": "review_needed_broader_observe_only_would_enter"},
+        {"status": "l2_readiness_review_all_blocked"},
+        {"status": "l2_intake_dry_run_no_candidates"},
+        {"status": "l2_tier_policy_review_no_candidates"},
+        {"status": "decision_loop_ready"},
+    )
+
+    assert gap is None
+
+    status = module._sequence_status(
+        steps=[],
+        packets={
+            "daily_check": {"status": "waiting_for_market"},
+            "goal_progress": {"status": "waiting_for_market"},
+            "completion_audit": {"status": "not_complete_waiting_for_market"},
+            "signal_coverage": {"status": "mainline_no_signal_broader_would_enter"},
+            "signal_coverage_expansion_review": {
+                "status": "review_needed_broader_observe_only_would_enter"
+            },
+            "l2_readiness_review": {"status": "l2_readiness_review_all_blocked"},
+            "l2_intake_dry_run": {"status": "l2_intake_dry_run_no_candidates"},
+            "l2_tier_policy_review": {"status": "l2_tier_policy_review_no_candidates"},
+            "opportunity_decision_loop": {"status": "decision_loop_ready"},
+        },
+    )
+
+    assert status == "waiting_for_market"

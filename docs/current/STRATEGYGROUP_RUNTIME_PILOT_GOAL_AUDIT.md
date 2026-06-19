@@ -1433,3 +1433,22 @@ per-order chat confirmation or legacy env confirmation semantics.
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-19 Observation Decision Loop Gap Closure Checkpoint
+
+The local monitor sequence now treats `opportunity_decision_loop=decision_loop_ready`
+as a valid closure for broader observe-only would-enter opportunities when no
+conditional L2 dry-run or tier-policy update is pending. This keeps the P0.5
+loop aligned with the current project direction: once an observation has been
+converted into replay/gap/decision rows, it should not keep appearing as an
+unreviewed observation-scope gap.
+
+| Item | Evidence |
+| --- | --- |
+| Gap classification | `run_strategygroup_runtime_local_monitor_sequence.py` clears `observation_scope_expansion_review_needed` after the opportunity decision loop is ready |
+| Preserved blockers | Conditional L2 dry-run pass, tier-policy recommendation, failed dry-run, forbidden effect, and blocked L2 review still surface as non-market repair items |
+| Regression test | `test_local_monitor_sequence_clears_expansion_gap_when_decision_loop_ready` covers broader would-enter plus L2 all-blocked/no-candidate state |
+| Local validation | `test_strategygroup_runtime_local_monitor_sequence.py`: `6 passed` |
+| Local monitor sequence | `status=needs_refresh`, blockers empty, non-market gaps empty, remote interactions `0`; remaining refresh is monitor-cache freshness only |
+| Deployment | Not deployed; this is local monitor/reporting logic only |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
