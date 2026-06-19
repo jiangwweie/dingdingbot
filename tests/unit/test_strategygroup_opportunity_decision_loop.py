@@ -512,6 +512,9 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality["counts"]["revise_before_l2"] == 2
     assert quality["counts"]["keep_observing"] == 1
     assert quality["counts"]["park"] == 1
+    assert quality["counts"]["revision_task"] == 5
+    assert quality["counts"]["classifier_revision_task"] == 3
+    assert quality["counts"]["economic_revision_task"] == 2
     quality_rows = {row["strategy_group_id"]: row for row in quality["rows"]}
     assert quality_rows["VCB-001"]["strategy_quality_decision"] == "revise_before_l2"
     assert quality_rows["VCB-001"]["next_stage"] == (
@@ -519,19 +522,46 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     )
     assert quality_rows["VCB-001"]["evidence"]["coverage_ready_item_count"] == 2
     assert quality_rows["VCB-001"]["evidence"]["revise_sample_count"] == 1
+    assert quality_rows["VCB-001"]["revision_task_count"] == 2
+    vcb_revision_tasks = quality_rows["VCB-001"]["revision_tasks"]
+    assert {task["work_type"] for task in vcb_revision_tasks} == {
+        "classifier_or_rule_work",
+        "economic_replay_work",
+    }
+    assert all(
+        task["coverage_status"] == "local_replay_coverage_ready"
+        for task in vcb_revision_tasks
+    )
+    assert any(
+        task["revision_stage"] == "classifier_disable_state_revision"
+        and task["completion_signal"] == "disable false breakout before L2"
+        for task in vcb_revision_tasks
+    )
     assert quality_rows["LSR-001"]["strategy_quality_decision"] == "revise_before_l2"
     assert quality_rows["LSR-001"]["evidence"]["coverage_ready_item_count"] == 3
+    assert quality_rows["LSR-001"]["revision_task_count"] == 3
+    assert {
+        task["revision_stage"] for task in quality_rows["LSR-001"]["revision_tasks"]
+    } == {"classifier_disable_state_revision", "economic_survival_review"}
     assert quality_rows["BTPC-001"]["strategy_quality_decision"] == (
         "keep_observing_l2_shadow_with_fact_review"
     )
+    assert quality_rows["BTPC-001"]["revision_tasks"] == []
     assert quality_rows["RBR-001"]["strategy_quality_decision"] == (
         "park_until_new_edge"
     )
+    assert quality_rows["RBR-001"]["revision_tasks"] == []
     for row in quality["rows"]:
         assert row["not_l2_promotion_authority"] is True
         assert row["not_l4_scope_change"] is True
         assert row["real_order_authority"] is False
         assert row["candidate_or_finalgate_authority"] is False
+        for task in row["revision_tasks"]:
+            assert task["real_order_authority"] is False
+            assert task["not_l2_promotion_authority"] is True
+            assert task["not_l4_scope_change"] is True
+            assert task["candidate_or_finalgate_authority"] is False
+            assert "PYTHONDONTWRITEBYTECODE=1 python3" in task["validation_command"]
     assert quality["safety_invariants"]["calls_operation_layer"] is False
     assert quality["safety_invariants"]["places_order"] is False
     assert packet["decision"]["default_next_step"] == (
@@ -648,3 +678,4 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "strategy_quality_review_before_l2_no_promotion" in owner_text
     assert "Strategy Quality Decisions" in owner_text
     assert "revise_before_l2" in owner_text
+    assert "Revision Tasks" in owner_text

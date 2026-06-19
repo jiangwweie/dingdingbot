@@ -582,6 +582,21 @@ def _strategy_quality_decisions(
         str(row.get("strategy_quality_decision") or "unknown")
         for row in output_rows
     )
+    revision_task_count = sum(
+        len(row.get("revision_tasks") or []) for row in output_rows
+    )
+    classifier_revision_task_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "classifier_or_rule_work"
+    )
+    economic_revision_task_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "economic_replay_work"
+    )
     return {
         "status": "ready" if output_rows else "empty",
         "next_checkpoint": _strategy_quality_next_checkpoint(output_rows),
@@ -597,6 +612,9 @@ def _strategy_quality_decisions(
             "needs_replay": decision_counts.get(
                 "needs_replay_before_quality_decision", 0
             ),
+            "revision_task": revision_task_count,
+            "classifier_revision_task": classifier_revision_task_count,
+            "economic_revision_task": economic_revision_task_count,
             "real_order_authorized": 0,
             "l4_scope_change_recommended": 0,
         },
@@ -667,6 +685,10 @@ def _strategy_quality_decision_row(
     else:
         decision = "continue_observe_only_review"
         reason = "insufficient_quality_decision_evidence"
+    revision_tasks = _revision_tasks_for_quality_decision(
+        decision=decision,
+        work_items=work_items,
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "current_tier": row.get("current_tier"),
@@ -684,11 +706,53 @@ def _strategy_quality_decision_row(
             "parked_item_count": parked_count,
             "blocking_gap_count": len(row.get("blocking_gaps_before_l2") or []),
         },
+        "revision_tasks": revision_tasks,
+        "revision_task_count": len(revision_tasks),
         "not_l2_promotion_authority": True,
         "not_l4_scope_change": True,
         "real_order_authority": False,
         "candidate_or_finalgate_authority": False,
     }
+
+
+def _revision_tasks_for_quality_decision(
+    *,
+    decision: str,
+    work_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if decision != "revise_before_l2":
+        return []
+    tasks: list[dict[str, Any]] = []
+    for item in work_items:
+        if item.get("coverage_ready") is not True:
+            continue
+        work_type = str(item.get("work_type") or "")
+        if work_type not in {"classifier_or_rule_work", "economic_replay_work"}:
+            continue
+        tasks.append(
+            {
+                "queue_id": item.get("queue_id"),
+                "work_type": work_type,
+                "gap": item.get("gap"),
+                "actionable_task": item.get("actionable_task"),
+                "validation_command": item.get("validation_command"),
+                "completion_signal": item.get("completion_signal"),
+                "revision_stage": _revision_stage_for_work_type(work_type),
+                "coverage_status": item.get("coverage_status"),
+                "real_order_authority": False,
+                "not_l2_promotion_authority": True,
+                "not_l4_scope_change": True,
+                "candidate_or_finalgate_authority": False,
+            }
+        )
+    return tasks
+
+
+def _revision_stage_for_work_type(work_type: str) -> str:
+    return {
+        "classifier_or_rule_work": "classifier_disable_state_revision",
+        "economic_replay_work": "economic_survival_review",
+    }.get(work_type, "strategy_quality_revision")
 
 
 def _next_stage_for_strategy_quality_decision(decision: str) -> str:
@@ -1180,15 +1244,15 @@ def _work_queue_table(rows: list[dict[str, Any]]) -> str:
 
 def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready |\n| --- | --- | --- | --- | ---: | ---: | ---: |\n| none | - | - | - | - | - | - |"
+        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: |\n| none | - | - | - | - | - | - | - |"
     output = [
-        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         evidence = _as_dict(row.get("evidence"))
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} |".format(
+            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} |".format(
                 row.get("strategy_group_id"),
                 row.get("current_tier"),
                 row.get("strategy_quality_decision"),
@@ -1196,6 +1260,7 @@ def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
                 evidence.get("replay_sample_count", 0),
                 evidence.get("revise_sample_count", 0),
                 evidence.get("coverage_ready_item_count", 0),
+                row.get("revision_task_count", 0),
             )
         )
     return "\n".join(output)

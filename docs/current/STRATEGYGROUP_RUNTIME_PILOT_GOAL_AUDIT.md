@@ -815,6 +815,24 @@ promoting any group, widening L4 scope, or creating real-order authority.
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts the rollup counts, LSR/VCB revise decisions, BTPC keep-observing-with-fact-review, RBR parked state, Owner progress table, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Strategy Quality Revision Task Checkpoint
+
+The P0.5 decision loop now turns `revise_before_l2` into concrete revision
+tasks. This prevents the LSR/VCB quality decision from becoming another
+summary-only state and gives the next local checkpoint a classifier/economic
+repair surface to execute and verify.
+
+| Item | Evidence |
+| --- | --- |
+| Revision task output | `strategy_quality_decisions.rows[].revision_tasks` now carries queue id, work type, gap, actionable task, validation command, completion signal, revision stage, and no-authority flags |
+| Current local run | `revision_task=7`, `classifier_revision_task=4`, `economic_revision_task=3`, `revise_before_l2=2`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
+| LSR tasks | `LSR-001` emits classifier revisions for `lookahead_failed_proxy_requires_rewrite` and `lsr_disable_classifier_state_missing_from_runtime`, plus economic survival review for `cost_fill_slot_m2m_and_leverage_boundary_missing` |
+| VCB tasks | `VCB-001` emits classifier revisions for `false_breakout_disable_state_missing_from_runtime` and `pre_entry_classifier_does_not_reproduce_post_entry_edge`, plus economic survival review for `slot_m2m_equity_and_leverage_ruin_state_missing` and `volume_compression_cost_m2m_full_sequence_negative` |
+| Owner progress | The local Owner markdown `Strategy Quality Decisions` table includes `Revision Tasks` so the revise decision exposes work count without reading raw packets |
+| Boundary | Revision tasks are not strategy-parameter changes, tier-policy changes, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision-task counts, task stages, validation commands, completion signals, Owner progress table, and no live-authority expansion |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
