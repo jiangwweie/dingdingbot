@@ -35,12 +35,12 @@ to iterate. It is not an execution authority.
 | --- | --- |
 | First StrategyGroup | `MPG-001` remains the L4 live-order replay baseline |
 | L2 observation expansion | `BTPC-001` has a shadow replay corpus for no-action / would-enter diagnostics |
-| L1 observation expansion | `VCB-001` has an observe-only replay corpus for volatility-compression no-action / would-enter diagnostics |
+| L1 observation expansion | `VCB-001` has an observe-only replay corpus for volatility-compression no-action / would-enter diagnostics; `LSR-001` has an observe-only replay corpus for liquidity-sweep and rewrite-gap diagnostics |
 | Runtime source | local domain contract and local fixture files |
 | Report runner | `scripts/run_strategygroup_runtime_replay_lab.py` |
 | Dry-run integration | `scripts/runtime_dry_run_audit_chain.py` includes replay-lab validation |
 | Output intent | local audit packet and Owner-readable local progress note |
-| Replay corpus | `MPG-001` has eight local replay windows; `BTPC-001` has five L2 shadow replay windows; `VCB-001` has five L1 observe-only replay windows |
+| Replay corpus | `MPG-001` has eight local replay windows; `BTPC-001` has five L2 shadow replay windows; `VCB-001` and `LSR-001` each have five L1 observe-only replay windows |
 | Post-submit simulator | local matrix covers accepted, failed-protection, partial-fill, reject, closed, and still-open shapes |
 | Cost review | fee, slippage, funding, min-qty/step-size, and net-edge note fields are review inputs only |
 | Server deployment | out of scope for the P0.5 replay/simulator checkpoint |
@@ -159,6 +159,26 @@ The current local corpus covers five L1 observe-only windows:
 The would-enter case must not reach prepare, FinalGate, Operation Layer,
 exchange write, or real order authority. It is replay/review evidence only.
 
+## LSR-001 L1 Observe Replay Corpus
+
+`LSR-001` remains an `L1 observe_only` StrategyGroup. Its replay corpus exists
+to keep liquidity-sweep observations visible while the side-specific rewrite
+gap is still unresolved.
+
+The current local corpus covers five L1 observe-only windows:
+
+| Case | Purpose |
+| --- | --- |
+| `liquidity_sweep_long_would_enter_current_v0` | Shows the current-v0 long sweep observation for review |
+| `short_revival_rewrite_needed` | Documents the stronger short-revival research lane and rewrite gap |
+| `no_signal_no_sweep_reclaim` | Proves no-sweep windows stay visible but quiet |
+| `missing_range_context` | Proves missing range/sweep context blocks observation promotion review |
+| `stale_signal` | Proves freshness rejection before promotion review |
+
+The would-enter and rewrite cases must not reach prepare, FinalGate, Operation
+Layer, exchange write, or real order authority. They are replay/review evidence
+only.
+
 ## Post-Submit Simulator Matrix
 
 The local post-submit simulator matrix covers:
@@ -214,6 +234,7 @@ Operation Layer, protection, reconciliation, settlement, and review.
 | MPG synthetic fixtures | `docs/current/strategy-group-handoffs/MPG-001/replay/synthetic-signal-fixtures.json` |
 | BTPC L2 shadow replay corpus | `docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json` |
 | VCB L1 observe replay corpus | `docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json` |
+| LSR L1 observe replay corpus | `docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json` |
 | Post-submit simulator matrix | `docs/current/strategy-group-handoffs/MPG-001/replay/post-submit-simulator-matrix.json` |
 | Unit tests | `tests/unit/test_strategygroup_runtime_replay_lab.py` |
 | Dry-run audit tests | `tests/unit/test_runtime_dry_run_audit_chain.py` |
@@ -226,13 +247,15 @@ The current P0.5 checkpoint is accepted when:
 2. `BTPC-001` L2 shadow replay corpus validates locally without L4 authority.
 3. `VCB-001` L1 observe replay corpus validates locally without L2 or L4
    authority.
-4. The synthetic fixture set covers no-signal, fresh-pass, stale, missing-fact,
+4. `LSR-001` L1 observe replay corpus validates locally without L2 or L4
+   authority.
+5. The synthetic fixture set covers no-signal, fresh-pass, stale, missing-fact,
    conflict, protection-missing, and profile-boundary branches.
-5. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
+6. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
    reject, closed-by-SL, closed-by-TP1, and still-open shapes.
-6. Cost-review fields are present as review inputs only.
-7. Runtime dry-run audit exposes replay-lab checks in the unified packet.
-8. All replay and dry-run paths prove:
+7. Cost-review fields are present as review inputs only.
+8. Runtime dry-run audit exposes replay-lab checks in the unified packet.
+9. All replay and dry-run paths prove:
 
 ```text
 no Tokyo deploy

@@ -52,6 +52,13 @@ EXPECTED_VCB001_L1_REPLAY_CASES = {
     "missing_compression_context",
     "stale_signal",
 }
+EXPECTED_LSR001_L1_REPLAY_CASES = {
+    "liquidity_sweep_long_would_enter_current_v0",
+    "short_revival_rewrite_needed",
+    "no_signal_no_sweep_reclaim",
+    "missing_range_context",
+    "stale_signal",
+}
 EXPECTED_POST_SUBMIT_SIMULATOR_CASES = {
     "entry_accepted_protection_ok",
     "entry_filled_sl_creation_failed",
@@ -158,6 +165,7 @@ class StrategyGroupReplayEvent(StrategyGroupReplayModel):
                 | {"historical_momentum_continuation_sample"}
                 | EXPECTED_BTPC001_L2_REPLAY_CASES
                 | EXPECTED_VCB001_L1_REPLAY_CASES
+                | EXPECTED_LSR001_L1_REPLAY_CASES
             )
             if self.fixture_case not in known_historical_cases:
                 raise ValueError("unknown historical replay case")
@@ -805,6 +813,154 @@ def vcb001_l1_observe_replay_corpus(
     ]
 
 
+def lsr001_l1_observe_replay_corpus(
+    *, observed_at_ms: int
+) -> list[StrategyGroupReplayEvent]:
+    blocked_stage = {
+        "prepare_chain_ready": False,
+        "operation_layer_shape_reachable": False,
+    }
+    return [
+        _event(
+            strategy_group_id="LSR-001",
+            event_id="lsr-001-l1-liquidity-sweep-long-would-enter-current-v0",
+            fixture_case="liquidity_sweep_long_would_enter_current_v0",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="XRPUSDT",
+            side="long",
+            observed_at_ms=observed_at_ms + 30_000,
+            signal_confidence=Decimal("0.58"),
+            signal_status="would_enter_observe_only_current_v0",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            simulated_exit_outcome="l1_observe_review_only_no_shadow_candidate",
+            cost_review=_cost_review(
+                fee="0.011",
+                slippage="0.044",
+                funding="0.000",
+                min_qty_step="review_only_exchange_rules_shape_present",
+                note=(
+                    "LSR current-v0 long sweep sample keeps liquidity-sweep "
+                    "observations visible without L2 or L4 authority"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=[
+                "L1 observe-only replay.",
+                "Current broader preview long-side semantics conflict with the stronger short-revival research lane.",
+            ],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="LSR-001",
+            event_id="lsr-001-l1-short-revival-rewrite-needed",
+            fixture_case="short_revival_rewrite_needed",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="XRPUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 31_000,
+            signal_confidence=Decimal("0.55"),
+            signal_status="rewrite_required_before_would_enter",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            simulated_exit_outcome="rewrite_review_no_candidate",
+            cost_review=_cost_review(
+                fee="0.011",
+                slippage="0.052",
+                funding="0.000",
+                min_qty_step="review_only_rewrite_cost_shape",
+                note=(
+                    "short-revival sample documents the side-specific rewrite "
+                    "gap before any L2 promotion review"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=[
+                "Research lead is short upper-range revival, while current local evaluator is long sweep.",
+                "This case exists to keep the rewrite gap visible without changing runtime scope.",
+            ],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="LSR-001",
+            event_id="lsr-001-l1-no-signal-no-sweep-reclaim",
+            fixture_case="no_signal_no_sweep_reclaim",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="ETHUSDT",
+            side="none",
+            observed_at_ms=observed_at_ms + 32_000,
+            signal_confidence=Decimal("0.23"),
+            signal_status="no_signal",
+            required_facts_ready=True,
+            blocker_class="waiting_for_market",
+            expected_owner_state="waiting_for_opportunity",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_no_signal",
+                note="no-sweep replay keeps LSR quiet without hiding the StrategyGroup from review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=["No reclaim/rejection after sweep, so no observation candidate should be created."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="LSR-001",
+            event_id="lsr-001-l1-missing-range-context",
+            fixture_case="missing_range_context",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="ADAUSDT",
+            side="long",
+            observed_at_ms=observed_at_ms + 33_000,
+            signal_confidence=Decimal("0.57"),
+            signal_status="would_enter_missing_required_facts",
+            required_facts_ready=False,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_evaluated_missing_range_context",
+                note="LSR requires range and sweep context before observation promotion review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Missing range context keeps the sample observe-only."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="LSR-001",
+            event_id="lsr-001-l1-stale-signal",
+            fixture_case="stale_signal",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="XRPUSDT",
+            side="long",
+            observed_at_ms=observed_at_ms - 300_000,
+            signal_confidence=Decimal("0.58"),
+            signal_status="stale_signal",
+            required_facts_ready=True,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_stale_signal",
+                note="LSR stale replay proves freshness rejection before observation promotion review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Stale LSR observation cannot become L2 review evidence."],
+            **blocked_stage,
+        ),
+    ]
+
+
 def synthetic_signal_fixtures(*, observed_at_ms: int) -> list[StrategyGroupReplayEvent]:
     blocked_stage = {
         "prepare_chain_ready": False,
@@ -1052,11 +1208,18 @@ def build_mpg001_replay_lab_packet(
     l1_observe_samples = vcb001_l1_observe_replay_corpus(
         observed_at_ms=generated_at_ms
     )
+    l1_observe_samples.extend(
+        lsr001_l1_observe_replay_corpus(observed_at_ms=generated_at_ms)
+    )
     fixtures = synthetic_signal_fixtures(observed_at_ms=generated_at_ms)
     simulator_matrix = post_submit_simulator_matrix()
     replay_cases = {item.fixture_case for item in replay_samples}
     btpc_cases = {item.fixture_case for item in l2_shadow_samples}
-    vcb_cases = {item.fixture_case for item in l1_observe_samples}
+    lsr_cases = {
+        item.fixture_case
+        for item in l1_observe_samples
+        if item.strategy_group_id == "LSR-001"
+    }
     fixture_cases = {item.fixture_case for item in fixtures}
     fresh_pass = next(item for item in fixtures if item.fixture_case == "fresh_signal_pass")
     blocked_fixtures = [item for item in fixtures if item.fixture_case != "fresh_signal_pass"]
@@ -1074,6 +1237,11 @@ def build_mpg001_replay_lab_packet(
         item
         for item in l1_observe_samples
         if item.fixture_case == "compression_breakout_would_enter"
+    )
+    lsr_would_enter = next(
+        item
+        for item in l1_observe_samples
+        if item.fixture_case == "liquidity_sweep_long_would_enter_current_v0"
     )
 
     checks = {
@@ -1097,7 +1265,12 @@ def build_mpg001_replay_lab_packet(
             for item in btpc_blocked
         ),
         "vcb001_l1_observe_replay_cases_present": (
-            vcb_cases == EXPECTED_VCB001_L1_REPLAY_CASES
+            {
+                item.fixture_case
+                for item in l1_observe_samples
+                if item.strategy_group_id == "VCB-001"
+            }
+            == EXPECTED_VCB001_L1_REPLAY_CASES
         ),
         "vcb001_l1_would_enter_review_shape_present": (
             vcb_would_enter.signal_status == "would_enter_observe_only"
@@ -1111,6 +1284,24 @@ def build_mpg001_replay_lab_packet(
             item.stage_results.get("prepare_chain_ready") is False
             and item.stage_results.get("operation_layer_shape_reachable") is False
             for item in l1_observe_samples
+            if item.strategy_group_id == "VCB-001"
+        ),
+        "lsr001_l1_observe_replay_cases_present": (
+            lsr_cases == EXPECTED_LSR001_L1_REPLAY_CASES
+        ),
+        "lsr001_l1_would_enter_review_shape_present": (
+            lsr_would_enter.signal_status == "would_enter_observe_only_current_v0"
+            and lsr_would_enter.required_facts_ready is True
+            and lsr_would_enter.stage_results.get("prepare_chain_ready") is False
+            and lsr_would_enter.stage_results.get("operation_layer_shape_reachable")
+            is False
+            and lsr_would_enter.real_order_allowed is False
+        ),
+        "lsr001_l1_cases_do_not_reach_prepare_or_operation_layer": all(
+            item.stage_results.get("prepare_chain_ready") is False
+            and item.stage_results.get("operation_layer_shape_reachable") is False
+            for item in l1_observe_samples
+            if item.strategy_group_id == "LSR-001"
         ),
         "synthetic_fixture_cases_present": fixture_cases
         == EXPECTED_SYNTHETIC_FIXTURE_CASES,
@@ -1182,6 +1373,10 @@ def build_mpg001_replay_lab_packet(
                 (
                     "VCB-001 L1 observe-only replay corpus expands volatility "
                     "breakout visibility without L2 or L4 authority."
+                ),
+                (
+                    "LSR-001 L1 observe-only replay corpus keeps liquidity-sweep "
+                    "and short-revival rewrite gaps visible without L2 or L4 authority."
                 ),
                 (
                     "Synthetic fixtures cover fresh, stale, missing fact, "

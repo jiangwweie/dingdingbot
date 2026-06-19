@@ -3901,6 +3901,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "lsr001_l1_observe_replay_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "lsr001_l1_observe_replay_cases_present"
+            )
+            is True
+            and runtime_replay_lab.get("checks", {}).get(
+                "lsr001_l1_would_enter_review_shape_present"
+            )
+            is True
+            and runtime_replay_lab.get("checks", {}).get(
+                "lsr001_l1_cases_do_not_reach_prepare_or_operation_layer"
+            )
+            is True
+        ),
         "synthetic_signal_fixture_set_checked": (
             runtime_replay_lab.get("status") == "passed"
             and runtime_replay_lab.get("checks", {}).get(
@@ -4118,6 +4133,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "vcb001_l1_observe_replay_checked": checks[
             "vcb001_l1_observe_replay_checked"
+        ],
+        "lsr001_l1_observe_replay_checked": checks[
+            "lsr001_l1_observe_replay_checked"
         ],
         "synthetic_signal_fixture_set_checked": checks[
             "synthetic_signal_fixture_set_checked"

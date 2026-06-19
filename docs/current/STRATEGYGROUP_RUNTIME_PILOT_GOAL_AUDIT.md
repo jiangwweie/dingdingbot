@@ -639,6 +639,21 @@ to L2 shadow-candidate or L4 real-order scope.
 | L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `VCB-001` remains L1 observe-only |
 | Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 LSR L1 Observe Replay-to-Review Expansion
+
+The P0.5 replay lane now covers `LSR-001` as an L1 observe-only StrategyGroup.
+This keeps liquidity-sweep observations and the short-revival rewrite gap
+visible without promoting LSR to L2 shadow-candidate or L4 real-order scope.
+
+| Item | Evidence |
+| --- | --- |
+| LSR L1 corpus | `docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json` covers `liquidity_sweep_long_would_enter_current_v0`, `short_revival_rewrite_needed`, `no_signal_no_sweep_reclaim`, `missing_range_context`, and `stale_signal` |
+| Replay contract | `src/domain/strategygroup_runtime_replay.py` validates `LSR-001` L1 observe replay events and keeps them non-executing |
+| Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` reports L1 observe replay samples covering both `VCB-001` and `LSR-001` |
+| Dry-run audit | `runtime-dry-run-audit-chain` exposes `lsr001_l1_observe_replay_checked=true` |
+| L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `LSR-001` remains L1 observe-only |
+| Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
