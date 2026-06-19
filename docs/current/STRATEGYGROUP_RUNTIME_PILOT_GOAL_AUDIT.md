@@ -929,6 +929,24 @@ Operation Layer, exchange write, or real order.
 | Verification | `tests/unit/test_strategygroup_btpc_local_fact_proxy_review.py`, `tests/unit/test_strategygroup_btpc_l2_shadow_fact_quality_review.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert proxy coverage, forbidden-effect blocking, monitor integration, and no live-authority expansion |
 | Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
+### 2026-06-19 BTPC Proxy Replay Quality Review Checkpoint
+
+The P0.5 loop now consumes the BTPC local fact-proxy review and the BTPC L2
+replay corpus together. The output is a case-level quality review, so BTPC no
+longer stops at "proxy facts attached"; it can classify each replay case as
+keep-observing, no-action baseline, missing-derivatives proxy-reviewable,
+conflict revision, or freshness revision.
+
+| Item | Evidence |
+| --- | --- |
+| Review artifact | `latest-btpc-proxy-replay-quality-review.json` reports `status=btpc_proxy_replay_quality_review_ready`, `replay_case_count=5`, `would_enter_case_count=2`, `proxy_reviewable_would_enter_count=2`, and `proxy_resolved_missing_derivatives_context_count=1` |
+| Case-level outcomes | `bear_pullback_would_enter` remains keep-observing with proxy context; `missing_derivatives_context` becomes L2 proxy-reviewable only; `no_signal_bear_trend_not_ready` remains a no-action baseline; `strong_uptrend_conflict` and `stale_signal` remain revise-before-promotion cases |
+| Live boundary | `proxy_replay_satisfies_live_required_facts=false`, `real_order_authorized_count=0`, and `l4_scope_change_recommended_count=0` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_proxy_replay_quality_review` after `btpc_local_fact_proxy_review` |
+| Boundary | BTPC proxy replay quality review is not live RequiredFacts, tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_btpc_proxy_replay_quality_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert case-level outcomes, forbidden-effect blocking, monitor integration, and no live-authority expansion |
+| Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

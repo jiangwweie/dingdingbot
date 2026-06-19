@@ -93,6 +93,12 @@ DEFAULT_BTPC_LOCAL_FACT_PROXY_REVIEW_JSON = (
 DEFAULT_BTPC_LOCAL_FACT_PROXY_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-btpc-local-fact-proxy-review.md"
 )
+DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json"
+)
+DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-btpc-proxy-replay-quality-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -147,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         btpc_local_fact_proxy_review_json=Path(args.btpc_local_fact_proxy_review_json),
         btpc_local_fact_proxy_review_md=Path(args.btpc_local_fact_proxy_review_md),
+        btpc_proxy_replay_quality_review_json=Path(
+            args.btpc_proxy_replay_quality_review_json
+        ),
+        btpc_proxy_replay_quality_review_md=Path(
+            args.btpc_proxy_replay_quality_review_md
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -206,6 +218,12 @@ def build_local_monitor_sequence_report(
         DEFAULT_BTPC_LOCAL_FACT_PROXY_REVIEW_JSON
     ),
     btpc_local_fact_proxy_review_md: Path = DEFAULT_BTPC_LOCAL_FACT_PROXY_REVIEW_MD,
+    btpc_proxy_replay_quality_review_json: Path = (
+        DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_JSON
+    ),
+    btpc_proxy_replay_quality_review_md: Path = (
+        DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -459,6 +477,28 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    btpc_proxy_replay_quality_review_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_btpc_proxy_replay_quality_review.py"
+        ),
+        "--btpc-local-fact-proxy-json",
+        str(btpc_local_fact_proxy_review_json),
+        "--output-json",
+        str(btpc_proxy_replay_quality_review_json),
+        "--output-owner-progress",
+        str(btpc_proxy_replay_quality_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "btpc_proxy_replay_quality_review",
+            btpc_proxy_replay_quality_review_command,
+            btpc_proxy_replay_quality_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -549,6 +589,9 @@ def build_local_monitor_sequence_report(
                 btpc_l2_shadow_fact_quality_review_json
             ),
             "btpc_local_fact_proxy_review_json": str(btpc_local_fact_proxy_review_json),
+            "btpc_proxy_replay_quality_review_json": str(
+                btpc_proxy_replay_quality_review_json
+            ),
         },
     }
 
@@ -1118,6 +1161,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--btpc-local-fact-proxy-review-md",
         default=str(DEFAULT_BTPC_LOCAL_FACT_PROXY_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--btpc-proxy-replay-quality-review-json",
+        default=str(DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--btpc-proxy-replay-quality-review-md",
+        default=str(DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

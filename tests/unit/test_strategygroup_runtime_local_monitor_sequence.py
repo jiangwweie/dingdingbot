@@ -148,6 +148,39 @@ def _write_ready_btpc_local_fact_proxy_review(command: list[str]) -> None:
     )
 
 
+def _write_ready_btpc_proxy_replay_quality_review(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "btpc_proxy_replay_quality_review_ready",
+            "decision": {
+                "proxy_replay_quality_review_ready": True,
+                "proxy_replay_satisfies_live_required_facts": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+            },
+            "interaction": {
+                "level": "L0_local_btpc_proxy_replay_quality_review",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "proxy_replay_is_not_live_required_fact": True,
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -166,6 +199,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_local_fact_proxy_review.py":
             _write_ready_btpc_local_fact_proxy_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
+            _write_ready_btpc_proxy_replay_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -331,6 +367,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         btpc_local_fact_proxy_review_json=tmp_path / "btpc-proxy-review.json",
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
+        btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
+        btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
         command_runner=fake_runner,
     )
 
@@ -349,6 +387,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_opportunity_decision_loop.py",
         "build_strategygroup_btpc_l2_shadow_fact_quality_review.py",
         "build_strategygroup_btpc_local_fact_proxy_review.py",
+        "build_strategygroup_btpc_proxy_replay_quality_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -376,6 +415,9 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_local_fact_proxy_review.py":
             _write_ready_btpc_local_fact_proxy_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
+            _write_ready_btpc_proxy_replay_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -510,6 +552,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         btpc_local_fact_proxy_review_json=tmp_path / "btpc-proxy-review.json",
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
+        btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
+        btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
         command_runner=fake_runner,
     )
 
@@ -538,6 +582,9 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_local_fact_proxy_review.py":
             _write_ready_btpc_local_fact_proxy_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
+            _write_ready_btpc_proxy_replay_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -734,6 +781,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         btpc_local_fact_proxy_review_json=tmp_path / "btpc-proxy-review.json",
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
+        btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
+        btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
         command_runner=fake_runner,
     )
 
@@ -765,6 +814,9 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_local_fact_proxy_review.py":
             _write_ready_btpc_local_fact_proxy_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
+            _write_ready_btpc_proxy_replay_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -919,6 +971,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         btpc_local_fact_proxy_review_json=tmp_path / "btpc-proxy-review.json",
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
+        btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
+        btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
         command_runner=fake_runner,
     )
 
@@ -957,6 +1011,9 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_local_fact_proxy_review.py":
             _write_ready_btpc_local_fact_proxy_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_proxy_replay_quality_review.py":
+            _write_ready_btpc_proxy_replay_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1098,6 +1155,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         btpc_local_fact_proxy_review_json=tmp_path / "btpc-proxy-review.json",
         btpc_local_fact_proxy_review_md=tmp_path / "btpc-proxy-review.md",
+        btpc_proxy_replay_quality_review_json=tmp_path / "btpc-proxy-replay.json",
+        btpc_proxy_replay_quality_review_md=tmp_path / "btpc-proxy-replay.md",
         command_runner=fake_runner,
     )
 
