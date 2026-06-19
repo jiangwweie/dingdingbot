@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.domain.strategygroup_runtime_replay import (
+    EXPECTED_BRF001_L1_REPLAY_CASES,
     EXPECTED_BTPC001_L2_REPLAY_CASES,
     EXPECTED_LSR001_L1_REPLAY_CASES,
     EXPECTED_SYNTHETIC_FIXTURE_CASES,
@@ -33,6 +34,9 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
         "lsr001_l1_observe_replay_cases_present": True,
         "lsr001_l1_would_enter_review_shape_present": True,
         "lsr001_l1_cases_do_not_reach_prepare_or_operation_layer": True,
+        "brf001_l1_observe_replay_cases_present": True,
+        "brf001_l1_would_enter_review_shape_present": True,
+        "brf001_l1_cases_do_not_reach_prepare_or_operation_layer": True,
         "synthetic_fixture_cases_present": True,
         "post_submit_simulator_cases_present": True,
         "post_submit_simulator_non_executing": True,
@@ -187,6 +191,48 @@ def test_lsr001_l1_observe_replay_keeps_rewrite_gap_visible_without_shadow_autho
     assert rewrite.stage_results["operation_layer_shape_reachable"] is False
 
 
+def test_brf001_l1_observe_replay_expands_bear_rally_failure_visibility_without_shadow_authority() -> None:
+    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+
+    brf_samples = [
+        item
+        for item in packet.l1_observe_replay_samples
+        if item.strategy_group_id == "BRF-001"
+    ]
+    cases = {item.fixture_case for item in brf_samples}
+    assert cases == EXPECTED_BRF001_L1_REPLAY_CASES
+    assert packet.checks["brf001_l1_observe_replay_cases_present"] is True
+    assert packet.checks["brf001_l1_would_enter_review_shape_present"] is True
+    assert (
+        packet.checks["brf001_l1_cases_do_not_reach_prepare_or_operation_layer"]
+        is True
+    )
+
+    would_enter = next(
+        item
+        for item in brf_samples
+        if item.fixture_case == "bear_rally_failure_short_would_enter"
+    )
+    assert would_enter.signal_status == "would_enter_observe_only"
+    assert would_enter.required_facts_ready is True
+    assert would_enter.stage_results["prepare_chain_ready"] is False
+    assert would_enter.stage_results["operation_layer_shape_reachable"] is False
+    assert would_enter.not_live_market_signal is True
+    assert would_enter.not_execution_authority is True
+    assert would_enter.operation_layer_submit_allowed is False
+    assert would_enter.exchange_write_allowed is False
+    assert would_enter.real_order_allowed is False
+
+    revision = next(
+        item
+        for item in brf_samples
+        if item.fixture_case == "short_squeeze_risk_revision_needed"
+    )
+    assert revision.review_recommendation.value == "revise"
+    assert revision.stage_results["prepare_chain_ready"] is False
+    assert revision.stage_results["operation_layer_shape_reachable"] is False
+
+
 def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
     packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
 
@@ -323,7 +369,7 @@ def test_owner_markdown_summarizes_replay_corpus_post_submit_and_cost_review() -
 
     assert "- Replay samples: 8" in text
     assert "- L2 shadow replay samples: 5" in text
-    assert "- L1 observe replay samples: 10" in text
+    assert "- L1 observe replay samples: 15" in text
     assert "- Post-submit simulator cases: 7" in text
     assert "- Cost review skeleton: present" in text
     assert "- Exchange write: 否" in text
@@ -420,6 +466,50 @@ def test_tracked_lsr001_l1_observe_replay_corpus_exists() -> None:
     )
     assert all(item["exchange_write_allowed"] is False for item in corpus["replay_samples"])
     assert all(item["real_order_allowed"] is False for item in corpus["replay_samples"])
+    assert all(
+        item["cost_review"]["not_submit_authority"] is True
+        for item in corpus["replay_samples"]
+    )
+
+
+def test_tracked_brf001_l1_observe_replay_corpus_exists() -> None:
+    replay_path = Path(
+        "docs/current/strategy-group-handoffs/BRF-001/replay/"
+        "brf-001-l1-observe-replay-corpus.json"
+    )
+    corpus = json.loads(replay_path.read_text(encoding="utf-8"))
+
+    assert corpus["schema_version"] == "brc.strategygroup.l1_observe_replay_corpus.v1"
+    assert corpus["strategy_group_id"] == "BRF-001"
+    assert corpus["scope"] == "l1_observe_only_review"
+    assert corpus["live_order_eligible"] is False
+    assert {item["fixture_case"] for item in corpus["replay_samples"]} == (
+        EXPECTED_BRF001_L1_REPLAY_CASES
+    )
+    assert any(
+        item["fixture_case"] == "bear_rally_failure_short_would_enter"
+        and item["prepare_chain_ready"] is False
+        and item["operation_layer_shape_reachable"] is False
+        for item in corpus["replay_samples"]
+    )
+    assert any(
+        item["fixture_case"] == "short_squeeze_risk_revision_needed"
+        and item["review_recommendation"] == "revise"
+        for item in corpus["replay_samples"]
+    )
+    assert all(
+        item["operation_layer_submit_allowed"] is False
+        and item["exchange_write_allowed"] is False
+        and item["real_order_allowed"] is False
+        for item in corpus["replay_samples"]
+    )
+    assert all(item["replay_only"] is True for item in corpus["replay_samples"])
+    assert all(
+        item["not_live_market_signal"] is True for item in corpus["replay_samples"]
+    )
+    assert all(
+        item["not_execution_authority"] is True for item in corpus["replay_samples"]
+    )
     assert all(
         item["cost_review"]["not_submit_authority"] is True
         for item in corpus["replay_samples"]

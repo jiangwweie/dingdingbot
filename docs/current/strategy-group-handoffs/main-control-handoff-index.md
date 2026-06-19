@@ -39,6 +39,7 @@ docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
 | `BTPC-001` | Bear trend pullback continuation | `L2 policy: shadow_candidate; handoff: non-executing input` | May support L2 shadow-candidate observation through runtime tier policy only; not L4 real-order scope |
 | `VCB-001` | Volatility compression breakout | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter replay review only; not L2 shadow-candidate or L4 real-order scope |
 | `LSR-001` | Liquidity sweep reversal / short-revival rewrite lane | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter / rewrite-gap replay review only; not L2 shadow-candidate or L4 real-order scope |
+| `BRF-001` | Bear rally failure short lane | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter / squeeze-risk replay review only; not L2 shadow-candidate or L4 real-order scope |
 
 ## Boundary
 

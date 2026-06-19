@@ -33,6 +33,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "btpc001_l2_shadow_replay_checked": True,
         "vcb001_l1_observe_replay_checked": True,
         "lsr001_l1_observe_replay_checked": True,
+        "brf001_l1_observe_replay_checked": True,
         "synthetic_signal_fixture_set_checked": True,
         "post_submit_simulator_matrix_checked": True,
         "cost_review_skeleton_checked": True,
@@ -87,6 +88,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "btpc001_l2_shadow_replay_checked": True,
         "vcb001_l1_observe_replay_checked": True,
         "lsr001_l1_observe_replay_checked": True,
+        "brf001_l1_observe_replay_checked": True,
         "synthetic_signal_fixture_set_checked": True,
         "post_submit_simulator_matrix_checked": True,
         "cost_review_skeleton_checked": True,
@@ -291,6 +293,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert replay_lab["checks"]["lsr001_l1_would_enter_review_shape_present"] is True
     assert (
         replay_lab["checks"]["lsr001_l1_cases_do_not_reach_prepare_or_operation_layer"]
+        is True
+    )
+    assert replay_lab["checks"]["brf001_l1_observe_replay_cases_present"] is True
+    assert replay_lab["checks"]["brf001_l1_would_enter_review_shape_present"] is True
+    assert (
+        replay_lab["checks"]["brf001_l1_cases_do_not_reach_prepare_or_operation_layer"]
         is True
     )
     assert replay_lab["checks"]["synthetic_fixture_cases_present"] is True

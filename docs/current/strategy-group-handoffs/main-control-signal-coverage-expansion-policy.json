@@ -57,6 +57,25 @@
         "cost_fill_slot_m2m_and_leverage_boundary_missing"
       ]
     },
+    "BRF-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P0_5",
+      "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+      "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "runtime semantics builder already defines BRF-001 bear rally failure short entry and structure-extreme protection vocabulary",
+        "main-control runtime tier policy keeps BRF as a known new L1 observe-only group",
+        "BRF shares the short-continuation research track with BTPC but has not passed separate L2 intake"
+      ],
+      "blocking_gaps_before_l2": [
+        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
+        "short_squeeze_risk_classifier_missing_from_runtime",
+        "separate_brf_l2_intake_dry_run_missing",
+        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+      ]
+    },
     "RBR-001": {
       "current_main_control_tier": "L1",
       "coverage_review_priority": "P2",

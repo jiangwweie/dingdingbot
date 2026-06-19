@@ -654,6 +654,21 @@ visible without promoting LSR to L2 shadow-candidate or L4 real-order scope.
 | L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `LSR-001` remains L1 observe-only |
 | Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 BRF L1 Observe Replay-to-Review Expansion
+
+The P0.5 replay lane now covers `BRF-001` as an L1 observe-only StrategyGroup.
+This expands bear-rally-failure short visibility and short-squeeze-risk review
+without promoting BRF to L2 shadow-candidate or L4 real-order scope.
+
+| Item | Evidence |
+| --- | --- |
+| BRF L1 corpus | `docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json` covers `bear_rally_failure_short_would_enter`, `no_signal_rally_not_failed`, `short_squeeze_risk_revision_needed`, `missing_rally_context`, and `stale_signal` |
+| Replay contract | `src/domain/strategygroup_runtime_replay.py` validates `BRF-001` L1 observe replay events and keeps them non-executing |
+| Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` reports L1 observe replay samples covering `BRF-001`, `VCB-001`, and `LSR-001` |
+| Dry-run audit | `runtime-dry-run-audit-chain` exposes `brf001_l1_observe_replay_checked=true` |
+| L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `BRF-001` remains L1 observe-only |
+| Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

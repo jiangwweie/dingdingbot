@@ -59,6 +59,13 @@ EXPECTED_LSR001_L1_REPLAY_CASES = {
     "missing_range_context",
     "stale_signal",
 }
+EXPECTED_BRF001_L1_REPLAY_CASES = {
+    "bear_rally_failure_short_would_enter",
+    "no_signal_rally_not_failed",
+    "short_squeeze_risk_revision_needed",
+    "missing_rally_context",
+    "stale_signal",
+}
 EXPECTED_POST_SUBMIT_SIMULATOR_CASES = {
     "entry_accepted_protection_ok",
     "entry_filled_sl_creation_failed",
@@ -166,6 +173,7 @@ class StrategyGroupReplayEvent(StrategyGroupReplayModel):
                 | EXPECTED_BTPC001_L2_REPLAY_CASES
                 | EXPECTED_VCB001_L1_REPLAY_CASES
                 | EXPECTED_LSR001_L1_REPLAY_CASES
+                | EXPECTED_BRF001_L1_REPLAY_CASES
             )
             if self.fixture_case not in known_historical_cases:
                 raise ValueError("unknown historical replay case")
@@ -961,6 +969,154 @@ def lsr001_l1_observe_replay_corpus(
     ]
 
 
+def brf001_l1_observe_replay_corpus(
+    *, observed_at_ms: int
+) -> list[StrategyGroupReplayEvent]:
+    blocked_stage = {
+        "prepare_chain_ready": False,
+        "operation_layer_shape_reachable": False,
+    }
+    return [
+        _event(
+            strategy_group_id="BRF-001",
+            event_id="brf-001-l1-bear-rally-failure-short-would-enter",
+            fixture_case="bear_rally_failure_short_would_enter",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="SOLUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 40_000,
+            signal_confidence=Decimal("0.56"),
+            signal_status="would_enter_observe_only",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            simulated_exit_outcome="l1_observe_review_only_no_shadow_candidate",
+            cost_review=_cost_review(
+                fee="0.014",
+                slippage="0.047",
+                funding="0.001",
+                min_qty_step="review_only_exchange_rules_shape_present",
+                note=(
+                    "BRF L1 would-enter sample makes bear-rally-failure "
+                    "short observations visible without L2 or L4 authority"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=[
+                "L1 observe-only replay.",
+                "Rally-high protection shape is visible but cannot authorize a shadow candidate.",
+            ],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BRF-001",
+            event_id="brf-001-l1-no-signal-rally-not-failed",
+            fixture_case="no_signal_rally_not_failed",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="ETHUSDT",
+            side="none",
+            observed_at_ms=observed_at_ms + 41_000,
+            signal_confidence=Decimal("0.24"),
+            signal_status="no_signal",
+            required_facts_ready=True,
+            blocker_class="waiting_for_market",
+            expected_owner_state="waiting_for_opportunity",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_no_signal",
+                note="rally-not-failed replay keeps BRF quiet without hiding it from review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=["Rally did not fail, so BRF should not create observation evidence."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BRF-001",
+            event_id="brf-001-l1-short-squeeze-risk-revision-needed",
+            fixture_case="short_squeeze_risk_revision_needed",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="BTCUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 42_000,
+            signal_confidence=Decimal("0.53"),
+            signal_status="would_enter_squeeze_risk_revision_needed",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            simulated_exit_outcome="squeeze_risk_review_no_candidate",
+            cost_review=_cost_review(
+                fee="0.015",
+                slippage="0.058",
+                funding="0.004",
+                min_qty_step="review_only_squeeze_risk_cost_shape",
+                note=(
+                    "short-squeeze-risk sample should revise BRF classifier "
+                    "before any L2 promotion review"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=[
+                "Short-side rally failure can be right-tail, but squeeze risk must stay visible.",
+                "This warning is review evidence, not a P0 live-order blocker.",
+            ],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BRF-001",
+            event_id="brf-001-l1-missing-rally-context",
+            fixture_case="missing_rally_context",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="SOLUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 43_000,
+            signal_confidence=Decimal("0.55"),
+            signal_status="would_enter_missing_required_facts",
+            required_facts_ready=False,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_evaluated_missing_rally_context",
+                note="BRF requires rally-high, rejection close, and squeeze-risk context before promotion review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Missing rally context keeps BRF observe-only."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BRF-001",
+            event_id="brf-001-l1-stale-signal",
+            fixture_case="stale_signal",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="SOLUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms - 300_000,
+            signal_confidence=Decimal("0.56"),
+            signal_status="stale_signal",
+            required_facts_ready=True,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_stale_signal",
+                note="BRF stale replay proves freshness rejection before observation promotion review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Stale BRF observation cannot become L2 review evidence."],
+            **blocked_stage,
+        ),
+    ]
+
+
 def synthetic_signal_fixtures(*, observed_at_ms: int) -> list[StrategyGroupReplayEvent]:
     blocked_stage = {
         "prepare_chain_ready": False,
@@ -1211,6 +1367,9 @@ def build_mpg001_replay_lab_packet(
     l1_observe_samples.extend(
         lsr001_l1_observe_replay_corpus(observed_at_ms=generated_at_ms)
     )
+    l1_observe_samples.extend(
+        brf001_l1_observe_replay_corpus(observed_at_ms=generated_at_ms)
+    )
     fixtures = synthetic_signal_fixtures(observed_at_ms=generated_at_ms)
     simulator_matrix = post_submit_simulator_matrix()
     replay_cases = {item.fixture_case for item in replay_samples}
@@ -1219,6 +1378,11 @@ def build_mpg001_replay_lab_packet(
         item.fixture_case
         for item in l1_observe_samples
         if item.strategy_group_id == "LSR-001"
+    }
+    brf_cases = {
+        item.fixture_case
+        for item in l1_observe_samples
+        if item.strategy_group_id == "BRF-001"
     }
     fixture_cases = {item.fixture_case for item in fixtures}
     fresh_pass = next(item for item in fixtures if item.fixture_case == "fresh_signal_pass")
@@ -1242,6 +1406,11 @@ def build_mpg001_replay_lab_packet(
         item
         for item in l1_observe_samples
         if item.fixture_case == "liquidity_sweep_long_would_enter_current_v0"
+    )
+    brf_would_enter = next(
+        item
+        for item in l1_observe_samples
+        if item.fixture_case == "bear_rally_failure_short_would_enter"
     )
 
     checks = {
@@ -1302,6 +1471,23 @@ def build_mpg001_replay_lab_packet(
             and item.stage_results.get("operation_layer_shape_reachable") is False
             for item in l1_observe_samples
             if item.strategy_group_id == "LSR-001"
+        ),
+        "brf001_l1_observe_replay_cases_present": (
+            brf_cases == EXPECTED_BRF001_L1_REPLAY_CASES
+        ),
+        "brf001_l1_would_enter_review_shape_present": (
+            brf_would_enter.signal_status == "would_enter_observe_only"
+            and brf_would_enter.required_facts_ready is True
+            and brf_would_enter.stage_results.get("prepare_chain_ready") is False
+            and brf_would_enter.stage_results.get("operation_layer_shape_reachable")
+            is False
+            and brf_would_enter.real_order_allowed is False
+        ),
+        "brf001_l1_cases_do_not_reach_prepare_or_operation_layer": all(
+            item.stage_results.get("prepare_chain_ready") is False
+            and item.stage_results.get("operation_layer_shape_reachable") is False
+            for item in l1_observe_samples
+            if item.strategy_group_id == "BRF-001"
         ),
         "synthetic_fixture_cases_present": fixture_cases
         == EXPECTED_SYNTHETIC_FIXTURE_CASES,
@@ -1377,6 +1563,10 @@ def build_mpg001_replay_lab_packet(
                 (
                     "LSR-001 L1 observe-only replay corpus keeps liquidity-sweep "
                     "and short-revival rewrite gaps visible without L2 or L4 authority."
+                ),
+                (
+                    "BRF-001 L1 observe-only replay corpus expands bear-rally-failure "
+                    "short visibility without L2 or L4 authority."
                 ),
                 (
                     "Synthetic fixtures cover fresh, stale, missing fact, "
