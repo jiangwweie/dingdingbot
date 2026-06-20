@@ -342,6 +342,144 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-teq",
+                strategy_family_id="TEQ-001",
+                strategy_family_version_id="TEQ-001-v0",
+                side="long",
+                symbol="INTC/USDT:USDT",
+            )
+        ]
+    )
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path)),
+        client=client,
+        monitor_builder=lambda args: {
+            "status": "blocked",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": [
+                "strategy_stop_reference_unavailable",
+                "order_candidate_id_or_authorization_id_required",
+            ],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "resolve"},
+            "latest_packet": {
+                "observation_payload": {
+                    "signal_packet": {
+                        "evaluation_result": {
+                            "status": "ready_for_semantic_binding",
+                            "evaluator_id": "TEQ001PilotReferenceEvaluator",
+                            "can_call_semantic_binding": True,
+                            "semantics_binding_found": True,
+                            "strategy_candidate_mode": (
+                                "shadow_order_candidate_allowed"
+                            ),
+                            "output": {
+                                "signal_type": "would_enter",
+                                "required_execution_mode": "observe_only",
+                                "side": "long",
+                                "reason_codes": ["teq_breakout_close_confirmed"],
+                                "human_summary": "TEQ observe-only would-enter.",
+                                "confidence": "0.62",
+                                "timestamp_ms": 1781920800000,
+                                "data_quality": {"status": "ok"},
+                                "signal_snapshot": {
+                                    "context_tags": {
+                                        "market_state": "TREND_UP",
+                                        "entry_pattern": (
+                                            "equity_like_momentum_breakout"
+                                        ),
+                                    }
+                                },
+                            },
+                        }
+                    }
+                }
+            },
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "attempt_counter_mutated": False,
+                "runtime_budget_mutated": False,
+            },
+        },
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["blockers"] == []
+    summary = packet["runtime_summaries"][0]
+    assert summary["status"] == "waiting_for_signal"
+    assert summary["blockers"] == []
+    assert (
+        "non_actionable_observation_blocker:strategy_stop_reference_unavailable"
+        in summary["warnings"]
+    )
+    assert (
+        "non_actionable_observation_blocker:order_candidate_id_or_authorization_id_required"
+        in summary["warnings"]
+    )
+    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_active_monitor_keeps_stop_reference_gap_hard_when_not_observe_only(tmp_path):
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-live",
+                strategy_family_id="MPG-001",
+                strategy_family_version_id="MPG-001-v0",
+                side="long",
+            )
+        ]
+    )
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path)),
+        client=client,
+        monitor_builder=lambda args: {
+            "status": "blocked",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_stop_reference_unavailable"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "resolve"},
+            "latest_packet": {
+                "observation_payload": {
+                    "signal_packet": {
+                        "evaluation_result": {
+                            "status": "ready_for_semantic_binding",
+                            "output": {
+                                "signal_type": "would_enter",
+                                "required_execution_mode": "live",
+                                "side": "long",
+                            },
+                        }
+                    }
+                }
+            },
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blockers"] == [
+        "runtime-live:strategy_stop_reference_unavailable"
+    ]
+
+
 def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effect(
     tmp_path,
 ):

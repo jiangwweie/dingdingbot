@@ -39,6 +39,9 @@ NON_ACTIONABLE_OBSERVATION_BLOCKERS = {
     "runtime_attempts_exhausted",
     "order_candidate_id_or_authorization_id_required",
 }
+OBSERVE_ONLY_REVIEW_BLOCKERS = {
+    "strategy_stop_reference_unavailable",
+}
 WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
@@ -470,7 +473,11 @@ def _downgrade_non_actionable_observation_blockers(
     blockers = [str(blocker) for blocker in packet.get("blockers") or []]
     if not blockers:
         return packet
-    if any(blocker not in NON_ACTIONABLE_OBSERVATION_BLOCKERS for blocker in blockers):
+    observation_only = _is_observe_only_review_packet(packet)
+    allowed_blockers = set(NON_ACTIONABLE_OBSERVATION_BLOCKERS)
+    if observation_only:
+        allowed_blockers.update(OBSERVE_ONLY_REVIEW_BLOCKERS)
+    if any(blocker not in allowed_blockers for blocker in blockers):
         return packet
     safety = packet.get("safety_invariants")
     if not isinstance(safety, dict):
@@ -516,6 +523,11 @@ def _downgrade_non_actionable_observation_blockers(
     downgraded["operator_command_plan"] = plan
     downgraded["non_actionable_observation_blockers"] = blockers
     return downgraded
+
+
+def _is_observe_only_review_packet(packet: dict[str, Any]) -> bool:
+    summary = _signal_summary(packet)
+    return str(summary.get("required_execution_mode") or "") == "observe_only"
 
 
 def _is_waiting_for_signal_blocker(*, status: str, blocker: str) -> bool:
