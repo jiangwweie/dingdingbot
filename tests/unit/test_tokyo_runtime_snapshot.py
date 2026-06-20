@@ -338,6 +338,37 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["interaction"]["level"] == "L1_readonly_snapshot"
     assert report["interaction"]["remote_interaction_count"] == 1
     assert report["interaction"]["mutates_remote_files"] is False
+
+
+def test_tokyo_runtime_snapshot_local_host_does_not_self_ssh():
+    module = _load_module()
+    calls = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(
+            stdout=json.dumps(_healthy_remote_payload()),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="local",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head=None,
+        runner=runner,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == "sh"
+    assert calls[0][1] == "-lc"
+    assert "ssh" not in calls[0]
+    assert report["interaction"]["level"] == "L0_tokyo_local_snapshot"
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_exchange_write"] is False
     assert report["status"] == "ready"

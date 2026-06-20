@@ -908,6 +908,27 @@ def test_local_monitor_sequence_artifact_daily_check_uses_report_json_path(
     assert "--auto-cache" not in command
 
 
+def test_local_monitor_sequence_auto_cache_uses_local_snapshot_inside_tokyo_release(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module,
+        "REPO_ROOT",
+        Path("/home/ubuntu/brc-deploy/releases/brc-runtime-governance-test"),
+    )
+
+    command = module._daily_check_command(
+        mode="auto-cache",
+        output_json=tmp_path / "daily.json",
+        output_owner_progress=tmp_path / "daily.md",
+    )
+
+    assert "--auto-cache" in command
+    assert command[command.index("--snapshot-host") + 1] == "local"
+
+
 def test_local_monitor_sequence_surfaces_completion_non_market_gap(
     tmp_path: Path,
 ) -> None:

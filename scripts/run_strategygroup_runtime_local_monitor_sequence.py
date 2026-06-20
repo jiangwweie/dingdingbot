@@ -1090,7 +1090,11 @@ def _daily_check_command(
     elif mode == "artifact":
         mode_args = ["--report-json-path", str(output_json)]
     else:
-        mode_args = ["--auto-cache"]
+        mode_args = [
+            "--auto-cache",
+            "--snapshot-host",
+            _default_snapshot_host_for_repo(),
+        ]
     return [
         sys.executable,
         str(REPO_ROOT / "scripts/run_strategygroup_runtime_daily_check.py"),
@@ -1120,6 +1124,11 @@ def _run_step(
         "output_json": str(output_json),
         "packet": packet,
     }
+
+
+def _default_snapshot_host_for_repo() -> str:
+    repo_path = str(REPO_ROOT)
+    return "local" if repo_path.startswith("/home/ubuntu/brc-deploy/") else "tokyo"
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:

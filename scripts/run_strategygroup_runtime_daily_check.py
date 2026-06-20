@@ -118,6 +118,7 @@ def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any
         _read_json(Path(args.snapshot_json_path))
         if args.snapshot_json_path
         else _run_snapshot(
+            snapshot_host=args.snapshot_host,
             expected_runtime_head=expected_heads["expected_runtime_head"],
             expected_frontend_head=expected_heads["expected_frontend_head"],
         )
@@ -143,6 +144,7 @@ def _build_auto_cache_daily_check_report(args: argparse.Namespace) -> dict[str, 
         _read_json(Path(args.snapshot_json_path))
         if args.snapshot_json_path
         else _run_snapshot(
+            snapshot_host=args.snapshot_host,
             expected_runtime_head=expected_heads["expected_runtime_head"],
             expected_frontend_head=expected_heads["expected_frontend_head"],
         )
@@ -713,10 +715,17 @@ def _is_waiting_for_market(
 
 def _run_snapshot(
     *,
+    snapshot_host: str,
     expected_runtime_head: str | None,
     expected_frontend_head: str | None,
 ) -> dict[str, Any]:
-    command = [sys.executable, str(SNAPSHOT_SCRIPT), "--json"]
+    command = [
+        sys.executable,
+        str(SNAPSHOT_SCRIPT),
+        "--json",
+        "--host",
+        snapshot_host,
+    ]
     if expected_runtime_head:
         command.extend(["--expected-runtime-head", expected_runtime_head])
     if expected_frontend_head:
@@ -1418,6 +1427,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Print Codex heartbeat XML using notification.decision.",
     )
     parser.add_argument("--snapshot-json-path")
+    parser.add_argument("--snapshot-host", default="tokyo")
     parser.add_argument(
         "--report-json-path",
         help="Read a prebuilt daily-check report JSON without probing Tokyo.",

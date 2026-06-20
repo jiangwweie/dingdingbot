@@ -162,8 +162,10 @@ def collect_remote_snapshot(
         report_dir=report_dir,
         frontend_root=frontend_root,
     )
-    result = command_runner(
-        (
+    command = (
+        ("sh", "-lc", remote_command)
+        if _is_local_host(host)
+        else (
             "ssh",
             "-o",
             f"ConnectTimeout={int(connect_timeout_seconds)}",
@@ -171,6 +173,7 @@ def collect_remote_snapshot(
             remote_command,
         )
     )
+    result = command_runner(command)
     if result.returncode != 0:
         return {
             "collector_status": "failed",
@@ -356,8 +359,12 @@ def evaluate_runtime_snapshot(
         "scope": "tokyo_runtime_snapshot",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "interaction": {
-            "level": "L1_readonly_snapshot",
-            "remote_interaction_count": 1,
+            "level": (
+                "L0_tokyo_local_snapshot"
+                if _is_local_host(host)
+                else "L1_readonly_snapshot"
+            ),
+            "remote_interaction_count": 0 if _is_local_host(host) else 1,
             "mutates_remote_files": False,
             "approaches_real_order": False,
             "calls_finalgate": False,
@@ -559,6 +566,10 @@ def _run(command: tuple[str, ...]) -> CommandResult:
         stderr=completed.stderr,
         returncode=completed.returncode,
     )
+
+
+def _is_local_host(host: str) -> bool:
+    return host in {"local", "localhost", "127.0.0.1", "::1"}
 
 
 def _report_payload(reports: dict[str, Any], filename: str) -> dict[str, Any]:
