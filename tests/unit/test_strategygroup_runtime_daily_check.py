@@ -1160,6 +1160,47 @@ def test_daily_check_auto_cache_uses_fresh_cache_without_snapshot_probe(
     assert not owner_progress_path.exists()
 
 
+def test_daily_check_auto_cache_refreshes_fresh_monitor_refresh_report(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    cache_path = tmp_path / "latest-daily-check.json"
+    owner_progress_path = tmp_path / "latest-owner-progress.md"
+    refresh_report = module._cache_unavailable_report(
+        reason="runtime_progress_cache_missing",
+        detail="cache not found",
+    )
+    refresh_report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    cache_path.write_text(
+        json.dumps(refresh_report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def one_snapshot(**kwargs):
+        calls.append(kwargs)
+        return _snapshot()
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(
+        module,
+        "DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD",
+        owner_progress_path,
+    )
+    monkeypatch.setattr(module, "_run_snapshot", one_snapshot)
+
+    exit_code = module.main(["--auto-cache", "--owner-progress"])
+
+    captured = capsys.readouterr()
+    refreshed = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert refreshed["status"] == "waiting_for_market"
+    assert refreshed["checks"].get("monitor_refresh_needed") is not True
+    assert "- 交互等级: L1_daily_check_from_snapshot" in captured.out
+    assert owner_progress_path.exists()
+
+
 def test_daily_check_auto_cache_refreshes_stale_cache_once_and_writes_outputs(
     tmp_path, monkeypatch, capsys
 ):

@@ -918,6 +918,11 @@ def _is_fresh_cache_report(
 ) -> bool:
     if report.get("schema_version") != DAILY_CHECK_REPORT_SCHEMA_VERSION:
         return False
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    if report.get("status") == "needs_refresh":
+        return False
+    if checks.get("monitor_refresh_needed") is True:
+        return False
     if (
         _cache_status_text(
             generated_at=str(report.get("generated_at_utc") or "unknown"),
