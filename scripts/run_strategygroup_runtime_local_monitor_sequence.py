@@ -36,6 +36,12 @@ DEFAULT_COMPLETION_AUDIT_JSON = (
 DEFAULT_COMPLETION_AUDIT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md"
 )
+DEFAULT_DRY_RUN_AUDIT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-dry-run-audit-chain.json"
+)
+DEFAULT_DRY_RUN_AUDIT_DIR = (
+    REPO_ROOT / "output/runtime-monitor/runtime-dry-run-audit-chain"
+)
 DEFAULT_REPLAY_LAB_JSON = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.json"
 DEFAULT_REPLAY_LAB_MD = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.md"
 DEFAULT_SIGNAL_COVERAGE_JSON = (
@@ -196,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         goal_progress_md=Path(args.goal_progress_md),
         completion_audit_json=Path(args.completion_audit_json),
         completion_audit_md=Path(args.completion_audit_md),
+        dry_run_audit_json=Path(args.dry_run_audit_json),
+        dry_run_audit_dir=Path(args.dry_run_audit_dir),
         replay_lab_json=Path(args.replay_lab_json),
         replay_lab_md=Path(args.replay_lab_md),
         signal_coverage_json=Path(args.signal_coverage_json),
@@ -309,6 +317,8 @@ def build_local_monitor_sequence_report(
     goal_progress_md: Path = DEFAULT_GOAL_PROGRESS_MD,
     completion_audit_json: Path = DEFAULT_COMPLETION_AUDIT_JSON,
     completion_audit_md: Path = DEFAULT_COMPLETION_AUDIT_MD,
+    dry_run_audit_json: Path = DEFAULT_DRY_RUN_AUDIT_JSON,
+    dry_run_audit_dir: Path = DEFAULT_DRY_RUN_AUDIT_DIR,
     replay_lab_json: Path = DEFAULT_REPLAY_LAB_JSON,
     replay_lab_md: Path = DEFAULT_REPLAY_LAB_MD,
     signal_coverage_json: Path = DEFAULT_SIGNAL_COVERAGE_JSON,
@@ -412,6 +422,23 @@ def build_local_monitor_sequence_report(
     )
     steps.append(_run_step("daily_check", daily_command, daily_check_json, runner))
 
+    dry_run_audit_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/runtime_dry_run_audit_chain.py"),
+        "--output-dir",
+        str(dry_run_audit_dir),
+        "--output-json",
+        str(dry_run_audit_json),
+    ]
+    steps.append(
+        _run_step(
+            "runtime_dry_run_audit_chain",
+            dry_run_audit_command,
+            dry_run_audit_json,
+            runner,
+        )
+    )
+
     live_cutover_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/runtime_live_cutover_readiness.py"),
@@ -444,6 +471,8 @@ def build_local_monitor_sequence_report(
         sys.executable,
         str(REPO_ROOT / "scripts/runtime_first_bounded_live_order_completion_audit.py"),
         "--owner-progress",
+        "--dry-run-audit-json",
+        str(dry_run_audit_json),
         "--output-json",
         str(completion_audit_json),
         "--output-owner-progress",
@@ -995,6 +1024,7 @@ def build_local_monitor_sequence_report(
         ],
         "source_paths": {
             "daily_check_json": str(daily_check_json),
+            "dry_run_audit_json": str(dry_run_audit_json),
             "live_cutover_json": str(live_cutover_json),
             "goal_progress_json": str(goal_progress_json),
             "completion_audit_json": str(completion_audit_json),
@@ -1053,13 +1083,14 @@ def _daily_check_command(
     output_json: Path,
     output_owner_progress: Path,
 ) -> list[str]:
-    if mode not in {"cache", "auto-cache"}:
+    if mode not in {"cache", "auto-cache", "artifact"}:
         raise ValueError(f"unsupported daily_check_mode: {mode}")
-    mode_args = (
-        ["--from-cache", "--require-fresh-cache"]
-        if mode == "cache"
-        else ["--auto-cache"]
-    )
+    if mode == "cache":
+        mode_args = ["--from-cache", "--require-fresh-cache"]
+    elif mode == "artifact":
+        mode_args = ["--report-json-path", str(output_json)]
+    else:
+        mode_args = ["--auto-cache"]
     return [
         sys.executable,
         str(REPO_ROOT / "scripts/run_strategygroup_runtime_daily_check.py"),
@@ -1586,9 +1617,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--owner-progress", action="store_true")
     parser.add_argument(
         "--daily-check-mode",
-        choices=["cache", "auto-cache"],
+        choices=["cache", "auto-cache", "artifact"],
         default="cache",
-        help="cache is local-only; auto-cache may perform one L1 readonly refresh.",
+        help=(
+            "cache is local-only; auto-cache may perform one L1 readonly refresh; "
+            "artifact reads the supplied daily-check JSON without probing Tokyo."
+        ),
     )
     parser.add_argument("--daily-check-json", default=str(DEFAULT_DAILY_CHECK_JSON))
     parser.add_argument("--daily-owner-progress", default=str(DEFAULT_DAILY_OWNER_PROGRESS))
@@ -1598,6 +1632,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--goal-progress-md", default=str(DEFAULT_GOAL_PROGRESS_MD))
     parser.add_argument("--completion-audit-json", default=str(DEFAULT_COMPLETION_AUDIT_JSON))
     parser.add_argument("--completion-audit-md", default=str(DEFAULT_COMPLETION_AUDIT_MD))
+    parser.add_argument("--dry-run-audit-json", default=str(DEFAULT_DRY_RUN_AUDIT_JSON))
+    parser.add_argument("--dry-run-audit-dir", default=str(DEFAULT_DRY_RUN_AUDIT_DIR))
     parser.add_argument("--replay-lab-json", default=str(DEFAULT_REPLAY_LAB_JSON))
     parser.add_argument("--replay-lab-md", default=str(DEFAULT_REPLAY_LAB_MD))
     parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))

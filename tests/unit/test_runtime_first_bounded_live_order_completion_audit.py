@@ -636,6 +636,44 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     assert "## Input Source Gaps" in owner_text
 
 
+def test_completion_audit_cli_writes_repair_packet_when_dry_run_input_missing(tmp_path):
+    daily = tmp_path / "daily.json"
+    goal = tmp_path / "goal.json"
+    dry = tmp_path / "missing-dry.json"
+    cutover = tmp_path / "cutover.json"
+    output = tmp_path / "audit.json"
+    owner = tmp_path / "audit.md"
+    daily.write_text(json.dumps(_daily_check()), encoding="utf-8")
+    goal.write_text(json.dumps(_goal_progress()), encoding="utf-8")
+    cutover.write_text(json.dumps(_live_cutover()), encoding="utf-8")
+
+    exit_code = script.main(
+        [
+            "--daily-check-json",
+            str(daily),
+            "--goal-progress-json",
+            str(goal),
+            "--dry-run-audit-json",
+            str(dry),
+            "--live-cutover-json",
+            str(cutover),
+            "--output-json",
+            str(output),
+            "--output-owner-progress",
+            str(owner),
+        ]
+    )
+
+    packet = json.loads(output.read_text(encoding="utf-8"))
+    owner_text = owner.read_text(encoding="utf-8")
+    assert exit_code == 2
+    assert packet["status"] == "needs_non_market_repair"
+    assert "dry_run_audit:exists" in packet["input_source_gaps"]
+    assert "dry_run_audit:schema" in packet["input_source_gaps"]
+    assert "dry_run_audit:exists" in owner_text
+    assert "FileNotFoundError" not in owner_text
+
+
 def test_completion_audit_cli_treats_runtime_processing_as_success(tmp_path):
     daily = tmp_path / "daily.json"
     goal = tmp_path / "goal.json"

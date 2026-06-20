@@ -541,9 +541,44 @@ def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
     )
 
 
+def _write_passed_runtime_dry_run_audit_chain(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "schema": "brc.runtime_dry_run_audit_chain.v1",
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 14,
+            "checks": {
+                "dangerous_effects_absent": True,
+                "required_scenarios_present": True,
+                "all_scenarios_passed": True,
+            },
+            "interaction": {
+                "level": "L0_local_runtime_dry_run_audit_chain",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+
 def _maybe_write_strategygroup_closure_step(
     script: str, command: list[str]
 ) -> subprocess.CompletedProcess[str] | None:
+    if script == "runtime_dry_run_audit_chain.py":
+        _write_passed_runtime_dry_run_audit_chain(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_quality_wave.py":
         _write_ready_strategygroup_quality_wave(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -813,6 +848,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
 
     assert calls == [
         "run_strategygroup_runtime_daily_check.py",
+        "runtime_dry_run_audit_chain.py",
         "runtime_live_cutover_readiness.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
@@ -851,6 +887,25 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
+
+
+def test_local_monitor_sequence_artifact_daily_check_uses_report_json_path(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+
+    command = module._daily_check_command(
+        mode="artifact",
+        output_json=tmp_path / "daily.json",
+        output_owner_progress=tmp_path / "daily.md",
+    )
+
+    assert "--report-json-path" in command
+    assert command[command.index("--report-json-path") + 1] == str(
+        tmp_path / "daily.json"
+    )
+    assert "--from-cache" not in command
+    assert "--auto-cache" not in command
 
 
 def test_local_monitor_sequence_surfaces_completion_non_market_gap(

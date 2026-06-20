@@ -87,6 +87,25 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _read_input_json(path: Path, source_name: str) -> dict[str, Any]:
+    try:
+        return _read_json(path)
+    except FileNotFoundError:
+        return {
+            "schema": None,
+            "scope": f"{source_name}_input",
+            "status": "missing_input",
+            "input_error": f"missing:{path}",
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "schema": None,
+            "scope": f"{source_name}_input",
+            "status": "invalid_json_input",
+            "input_error": f"invalid_json:{exc}",
+        }
+
+
 def _input_source_summary(path: Path, packet: dict[str, Any]) -> dict[str, Any]:
     source = _dict(packet.get("source"))
     return {
@@ -743,10 +762,10 @@ def main(argv: list[str] | None = None) -> int:
     goal_progress_path = Path(args.goal_progress_json)
     dry_run_audit_path = Path(args.dry_run_audit_json)
     live_cutover_path = Path(args.live_cutover_json)
-    daily_check = _read_json(daily_check_path)
-    goal_progress = _read_json(goal_progress_path)
-    dry_run_audit = _read_json(dry_run_audit_path)
-    live_cutover = _read_json(live_cutover_path)
+    daily_check = _read_input_json(daily_check_path, "daily_check")
+    goal_progress = _read_input_json(goal_progress_path, "goal_progress")
+    dry_run_audit = _read_input_json(dry_run_audit_path, "dry_run_audit")
+    live_cutover = _read_input_json(live_cutover_path, "live_cutover")
     report = build_completion_audit_report(
         daily_check=daily_check,
         goal_progress=goal_progress,
