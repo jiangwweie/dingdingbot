@@ -1286,6 +1286,29 @@ def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     }
 
 
+def test_daily_check_resolves_local_git_head_sentinel_from_baseline_file(
+    tmp_path, monkeypatch
+):
+    module = _load_module()
+    baseline = tmp_path / "runtime-monitor-baseline.json"
+    baseline.write_text(
+        """
+{
+  "expected_runtime_head": "LOCAL_GIT_HEAD"
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_local_git_head", lambda: "runtime-head-from-git")
+
+    args = module._parse_args(["--baseline-json", str(baseline)])
+
+    assert module._resolve_expected_heads(args) == {
+        "expected_runtime_head": "runtime-head-from-git",
+        "expected_frontend_head": None,
+    }
+
+
 def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
     module = _load_module()
     baseline = tmp_path / "runtime-monitor-baseline.json"

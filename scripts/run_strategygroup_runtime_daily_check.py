@@ -1035,10 +1035,14 @@ def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]
 def _resolve_expected_heads(args: argparse.Namespace) -> dict[str, str | None]:
     baseline = _read_monitor_baseline(Path(args.baseline_json)) if args.baseline_json else {}
     return {
-        "expected_runtime_head": args.expected_runtime_head
-        or _optional_text(baseline.get("expected_runtime_head")),
-        "expected_frontend_head": args.expected_frontend_head
-        or _optional_text(baseline.get("expected_frontend_head")),
+        "expected_runtime_head": _resolve_expected_head_value(
+            args.expected_runtime_head
+            or _optional_text(baseline.get("expected_runtime_head"))
+        ),
+        "expected_frontend_head": _resolve_expected_head_value(
+            args.expected_frontend_head
+            or _optional_text(baseline.get("expected_frontend_head"))
+        ),
     }
 
 
@@ -1053,6 +1057,29 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _resolve_expected_head_value(value: str | None) -> str | None:
+    if value in {"LOCAL_GIT_HEAD", "__LOCAL_GIT_HEAD__"}:
+        return _local_git_head()
+    return value
+
+
+def _local_git_head() -> str | None:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError:
+        return None
+    if completed.returncode != 0:
+        return None
+    return _optional_text(completed.stdout)
 
 
 def _int_or_zero(value: Any) -> int:

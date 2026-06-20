@@ -353,3 +353,39 @@ def test_cli_writes_packet_and_owner_progress(tmp_path, capsys):
     assert "策略机会覆盖诊断" in owner_text
     assert "宽观察 Would-Enter 信号" in owner_text
     assert "当前判断" in owner_text
+
+
+def test_cli_treats_missing_runtime_summary_as_non_executing_no_signal(
+    tmp_path, capsys
+):
+    module = _load_module()
+    runtime_path = tmp_path / "missing-runtime.json"
+    preview_path = tmp_path / "preview.json"
+    output_path = tmp_path / "diagnostic.json"
+    owner_path = tmp_path / "owner.md"
+    preview_path.write_text(json.dumps(_preview(would_enter=False)), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--runtime-summary-json",
+            str(runtime_path),
+            "--broader-preview-json",
+            str(preview_path),
+            "--source",
+            "sample",
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["source"]["runtime_summary_status"] == "runtime_summary_missing"
+    assert packet["checks"]["runtime_ready_signal_count"] == 0
+    assert packet["diagnosis"]["mainline_runtime_is_waiting"] is True
+    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["operator_command_plan"]["calls_final_gate"] is False
+    assert packet["operator_command_plan"]["calls_operation_layer"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False

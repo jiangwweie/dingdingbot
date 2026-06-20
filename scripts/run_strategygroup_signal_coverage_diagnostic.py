@@ -612,6 +612,31 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_runtime_summary_or_missing(path: Path) -> dict[str, Any]:
+    try:
+        return _load_json_object(path)
+    except FileNotFoundError:
+        return {
+            "status": "runtime_summary_missing",
+            "runtime_signal_summaries": [],
+            "source": {
+                "missing_path": str(path),
+                "missing_is_not_live_signal": True,
+            },
+            "safety_invariants": {
+                "local_missing_runtime_summary_placeholder": True,
+                "server_files_mutated": False,
+                "runtime_started": False,
+                "execution_intent_created": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "order_created": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+
 def _build_preview(source_name: str) -> dict[str, Any]:
     from scripts.preview_strategy_group_readonly_observation import build_preview_packet
 
@@ -640,7 +665,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress")
     args = parser.parse_args(argv)
 
-    runtime_packet = _load_json_object(Path(args.runtime_summary_json).expanduser())
+    runtime_packet = _load_runtime_summary_or_missing(
+        Path(args.runtime_summary_json).expanduser()
+    )
     if args.broader_preview_json:
         preview_packet = _load_json_object(Path(args.broader_preview_json).expanduser())
     else:

@@ -144,10 +144,11 @@ def build_live_submit_readiness_bridge(
         completion_status=str(completion_audit.get("status") or ""),
     )
     owner_state = _owner_state_for_status(status, hard_fact_blockers)
-    live_submit_ready = (
+    ready_for_finalgate_checkpoint = (
         status == "processing_ready_for_finalgate_checkpoint"
         and not hard_fact_blockers
     )
+    live_submit_ready = False
     packet = {
         "schema": "brc.strategygroup_live_submit_readiness_bridge.v1",
         "scope": "p0_live_submit_readiness_bridge",
@@ -169,7 +170,7 @@ def build_live_submit_readiness_bridge(
                 if fresh_signal_state == "none"
                 else "action_time_required_facts_not_ready"
                 if hard_fact_blockers
-                else None
+                else "awaiting_finalgate_and_operation_layer"
             ),
             "blockers_empty_when_waiting_for_market": (
                 fresh_signal_state != "none" or not hard_fact_blockers
@@ -197,6 +198,7 @@ def build_live_submit_readiness_bridge(
             "blockers": [] if status == "live_submit_standby_waiting_for_market" else hard_fact_blockers,
             "hard_fact_blockers": hard_fact_blockers,
             "pre_live_rehearsal_ready": pre_live_ready,
+            "ready_for_finalgate_checkpoint": ready_for_finalgate_checkpoint,
             "live_submit_ready": live_submit_ready,
             "owner_intervention_required": owner_state["owner_intervention_required"],
             "fresh_signal_state": fresh_signal_state,
@@ -209,7 +211,15 @@ def build_live_submit_readiness_bridge(
                 "processing_collecting_action_time_required_facts",
                 "processing_ready_for_finalgate_checkpoint",
             },
+            "ready_for_finalgate_checkpoint": ready_for_finalgate_checkpoint,
             "live_submit_ready": live_submit_ready,
+            "live_submit_ready_false_reason": (
+                "no_fresh_signal"
+                if fresh_signal_state == "none"
+                else "action_time_required_facts_not_ready"
+                if hard_fact_blockers
+                else "awaiting_finalgate_and_operation_layer"
+            ),
             "actionable_now": False,
             "real_order_authority": False,
             "default_next_step": _default_next_step(status),
@@ -253,6 +263,11 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
     decision = _as_dict(packet.get("decision"))
     if decision.get("pre_live_rehearsal_ready") is not True:
         errors.append("pre_live_rehearsal_not_ready")
+    checks = _as_dict(packet.get("checks"))
+    if decision.get("live_submit_ready") is True:
+        errors.append("live_submit_ready_requires_official_chain")
+    if checks.get("live_submit_ready") is True:
+        errors.append("checks_live_submit_ready_requires_official_chain")
     matrix = _dict_rows(packet.get("action_time_required_facts_matrix"))
     matrix_keys = [str(row.get("key") or "") for row in matrix]
     expected_keys = [row["key"] for row in ACTION_TIME_FACTS]
@@ -282,7 +297,6 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
     if owner_state.get("owner_manual_packet_read_required") is not False:
         errors.append("owner_manual_packet_read_required")
     if packet.get("status") == "live_submit_standby_waiting_for_market":
-        checks = _as_dict(packet.get("checks"))
         runtime = _as_dict(packet.get("runtime_consumption"))
         if checks.get("blockers") != []:
             errors.append("waiting_for_market_blockers_not_empty")

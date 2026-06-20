@@ -505,6 +505,7 @@ def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
             "checks": {
                 "blockers": [],
                 "pre_live_rehearsal_ready": True,
+                "ready_for_finalgate_checkpoint": False,
                 "live_submit_ready": False,
                 "owner_intervention_required": False,
                 "fresh_signal_state": "none",
@@ -512,7 +513,9 @@ def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
             "decision": {
                 "pre_live_rehearsal_ready": True,
                 "live_submit_standby_ready": True,
+                "ready_for_finalgate_checkpoint": False,
                 "live_submit_ready": False,
+                "live_submit_ready_false_reason": "no_fresh_signal",
                 "actionable_now": False,
                 "real_order_authority": False,
             },

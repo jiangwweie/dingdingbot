@@ -88,7 +88,13 @@ def test_fresh_signal_transitions_to_processing_requiredfacts_chain() -> None:
     ]
     assert packet["fresh_signal_transition"]["p05_work_preempted_on_fresh_signal"] is True
     assert packet["owner_state"]["owner_status"] == "processing"
-    assert packet["decision"]["live_submit_ready"] is True
+    assert packet["checks"]["ready_for_finalgate_checkpoint"] is True
+    assert packet["decision"]["ready_for_finalgate_checkpoint"] is True
+    assert packet["decision"]["live_submit_ready"] is False
+    assert (
+        packet["decision"]["live_submit_ready_false_reason"]
+        == "awaiting_finalgate_and_operation_layer"
+    )
     assert packet["decision"]["actionable_now"] is False
 
 
@@ -147,6 +153,25 @@ def test_negative_actionable_now_true_is_rejected() -> None:
     errors = validate_packet(packet)
 
     assert "forbidden_true:decision.actionable_now" in errors
+
+
+def test_negative_live_submit_ready_true_is_rejected_at_bridge_layer() -> None:
+    packet = build_live_submit_readiness_bridge(
+        pre_live_readiness=_pre_live_ready(),
+        daily_check=_daily("processing"),
+        live_cutover=_cutover(),
+        goal_progress=_goal("processing"),
+        completion_audit=_completion(),
+        fact_sources=_ready_fact_sources(),
+        signal_status_override="fresh",
+    )
+    packet["decision"]["live_submit_ready"] = True
+    packet["checks"]["live_submit_ready"] = True
+
+    errors = validate_packet(packet)
+
+    assert "live_submit_ready_requires_official_chain" in errors
+    assert "checks_live_submit_ready_requires_official_chain" in errors
 
 
 def test_cli_check_mode_passes_after_generation() -> None:
