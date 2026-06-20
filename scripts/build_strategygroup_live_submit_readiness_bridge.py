@@ -38,6 +38,13 @@ DEFAULT_OUTPUT_MD = (
 
 ACTION_TIME_FACTS = [
     {
+        "key": "trusted_submit_fact_snapshot",
+        "question": "trusted submit fact snapshot",
+        "ready_status": "ready",
+        "stale_status": "stale",
+        "missing_status": "missing",
+    },
+    {
         "key": "account_facts",
         "question": "account facts freshness",
         "ready_status": "ready",
@@ -61,6 +68,27 @@ ACTION_TIME_FACTS = [
     {
         "key": "protection_template",
         "question": "protection template",
+        "ready_status": "ready",
+        "stale_status": "stale",
+        "missing_status": "missing",
+    },
+    {
+        "key": "submit_idempotency_policy",
+        "question": "submit idempotency policy",
+        "ready_status": "ready",
+        "stale_status": "stale",
+        "missing_status": "missing",
+    },
+    {
+        "key": "duplicate_submit_guard",
+        "question": "duplicate-submit guard",
+        "ready_status": "ready",
+        "stale_status": "stale",
+        "missing_status": "missing",
+    },
+    {
+        "key": "protection_failure_policy",
+        "question": "protection failure policy",
         "ready_status": "ready",
         "stale_status": "stale",
         "missing_status": "missing",
@@ -193,6 +221,27 @@ def build_live_submit_readiness_bridge(
         },
         "action_time_required_facts_matrix": matrix,
         "operation_layer_input_boundary": _operation_layer_input_boundary(),
+        "action_time_submit_readiness_closure": _action_time_submit_readiness_closure(
+            status=status,
+            pre_live_ready=pre_live_ready,
+            fresh_signal_state=fresh_signal_state,
+            hard_fact_blockers=hard_fact_blockers,
+            ready_for_finalgate_checkpoint=ready_for_finalgate_checkpoint,
+        ),
+        "first_live_submit_closure_preparation": (
+            _first_live_submit_closure_preparation(
+                status=status,
+                pre_live_ready=pre_live_ready,
+                fresh_signal_state=fresh_signal_state,
+                hard_fact_blockers=hard_fact_blockers,
+            )
+        ),
+        "live_outcome_calibration_preparation": (
+            _live_outcome_calibration_preparation()
+        ),
+        "strategygroup_advancement_preparation": (
+            _strategygroup_advancement_preparation()
+        ),
         "owner_state": owner_state,
         "checks": {
             "blockers": [] if status == "live_submit_standby_waiting_for_market" else hard_fact_blockers,
@@ -296,6 +345,26 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
     owner_state = _as_dict(packet.get("owner_state"))
     if owner_state.get("owner_manual_packet_read_required") is not False:
         errors.append("owner_manual_packet_read_required")
+    p1 = _as_dict(packet.get("action_time_submit_readiness_closure"))
+    if p1.get("live_submit_ready") is not False:
+        errors.append("p1_live_submit_ready_requires_official_chain")
+    if p1.get("strategy_uncertainty_blocks_engineering_progress") is not False:
+        errors.append("p1_strategy_uncertainty_blocks_engineering_progress")
+    p2 = _as_dict(packet.get("first_live_submit_closure_preparation"))
+    if p2.get("real_submit_completed") is not False:
+        errors.append("p2_real_submit_completed_requires_live_outcome")
+    if p2.get("real_order_authority") is not False:
+        errors.append("p2_real_order_authority_forbidden")
+    p3 = _as_dict(packet.get("live_outcome_calibration_preparation"))
+    if p3.get("live_outcome_calibrated") is not False:
+        errors.append("p3_live_outcome_calibrated_requires_real_outcome")
+    if p3.get("requires_real_live_outcome") is not True:
+        errors.append("p3_requires_real_live_outcome_not_true")
+    p4 = _as_dict(packet.get("strategygroup_advancement_preparation"))
+    if p4.get("promotion_quality_final") is not False:
+        errors.append("p4_promotion_quality_final_requires_evidence")
+    if p4.get("actionable_now") is not False:
+        errors.append("p4_actionable_now_forbidden")
     if packet.get("status") == "live_submit_standby_waiting_for_market":
         runtime = _as_dict(packet.get("runtime_consumption"))
         if checks.get("blockers") != []:
@@ -347,7 +416,10 @@ def _action_time_required_facts_matrix(
                 else "missing"
             )
         else:
-            raw_status = str(source.get("status") or "pending_action_time")
+            raw_status = str(
+                source.get("status")
+                or ("missing" if action_time_check_active else "pending_action_time")
+            )
         status = _fact_status(spec, raw_status, action_time_check_active)
         blocks = action_time_check_active and status not in {
             spec["ready_status"],
@@ -414,6 +486,145 @@ def _operation_layer_input_boundary() -> dict[str, Any]:
         "real_order_authority": False,
         "places_order": False,
         "calls_operation_layer": False,
+    }
+
+
+def _action_time_submit_readiness_closure(
+    *,
+    status: str,
+    pre_live_ready: bool,
+    fresh_signal_state: str,
+    hard_fact_blockers: list[str],
+    ready_for_finalgate_checkpoint: bool,
+) -> dict[str, Any]:
+    if status == "live_submit_standby_waiting_for_market":
+        closure_status = "closed_waiting_for_fresh_signal"
+    elif ready_for_finalgate_checkpoint:
+        closure_status = "closed_ready_for_finalgate_checkpoint"
+    elif hard_fact_blockers:
+        closure_status = "closed_fact_gap_localized"
+    elif not pre_live_ready:
+        closure_status = "not_ready_pre_live_rehearsal_missing"
+    else:
+        closure_status = "closed_processing"
+    return {
+        "status": closure_status,
+        "trusted_submit_fact_snapshot_check": True,
+        "stale_or_missing_fact_behavior": "localized_blocker_when_action_time_active",
+        "submit_idempotency_policy_check": True,
+        "duplicate_submit_guard_check": True,
+        "protection_failure_policy_check": True,
+        "ready_for_finalgate_checkpoint": ready_for_finalgate_checkpoint,
+        "live_submit_ready": False,
+        "live_submit_ready_false_reason": (
+            "no_fresh_signal"
+            if fresh_signal_state == "none"
+            else "action_time_required_facts_not_ready"
+            if hard_fact_blockers
+            else "awaiting_finalgate_and_operation_layer"
+        ),
+        "missing_or_stale_facts": hard_fact_blockers,
+        "strategy_uncertainty_blocks_engineering_progress": False,
+        "owner_scoped_risk_acceptance_can_promote_trial_eligibility": True,
+        "owner_scoped_risk_acceptance_can_set_actionable_now": False,
+        "owner_scoped_risk_acceptance_can_bypass_runtime_safety_gates": False,
+    }
+
+
+def _first_live_submit_closure_preparation(
+    *,
+    status: str,
+    pre_live_ready: bool,
+    fresh_signal_state: str,
+    hard_fact_blockers: list[str],
+) -> dict[str, Any]:
+    if status == "live_submit_standby_waiting_for_market":
+        preparation_status = "ready_to_fire_prepared_waiting_for_fresh_signal"
+    elif hard_fact_blockers:
+        preparation_status = "ready_to_fire_prepared_fact_gap_localized"
+    elif pre_live_ready:
+        preparation_status = "ready_to_fire_prepared_processing"
+    else:
+        preparation_status = "not_ready_pre_live_rehearsal_missing"
+    return {
+        "status": preparation_status,
+        "finalgate_checkpoint_input_shape_ready": True,
+        "operation_layer_input_boundary_ready": True,
+        "submit_packet_shape_ready": True,
+        "idempotency_ready": True,
+        "protection_branch_ready": True,
+        "reconciliation_baseline_ready": True,
+        "review_ledger_shape_ready": True,
+        "fresh_signal_required_for_final_acceptance": True,
+        "real_submit_completed": False,
+        "real_order_authority": False,
+        "live_submit_still_gated": True,
+        "current_market_dependency": (
+            "fresh_selected_strategygroup_signal"
+            if fresh_signal_state == "none"
+            else None
+        ),
+        "hard_fact_blockers": hard_fact_blockers,
+    }
+
+
+def _live_outcome_calibration_preparation() -> dict[str, Any]:
+    return {
+        "status": "capture_surface_ready_live_outcome_pending",
+        "capture_schema_ready": True,
+        "live_outcome_calibrated": False,
+        "requires_real_live_outcome": True,
+        "capture_fields": [
+            "exchange_accept_or_reject",
+            "fill_status",
+            "partial_fill_quantity",
+            "average_fill_price",
+            "slippage",
+            "fee",
+            "funding",
+            "protection_order_acceptance",
+            "settlement_status",
+            "realized_pnl",
+            "reconciliation_result",
+            "review_ledger_outcome",
+        ],
+        "final_acceptance_dependencies": [
+            "real_exchange_response",
+            "real_fill_or_reject",
+            "real_protection_acceptance",
+            "real_reconciliation_settlement",
+            "realized_pnl_review",
+        ],
+    }
+
+
+def _strategygroup_advancement_preparation() -> dict[str, Any]:
+    return {
+        "status": "advancement_skeleton_ready_evidence_pending",
+        "advancement_engine_ready_for_evidence": True,
+        "promotion_quality_final": False,
+        "actionable_now": False,
+        "allowed_decisions": [
+            "keep",
+            "revise",
+            "promote",
+            "downshift",
+            "park",
+            "kill",
+            "go_live",
+            "do_not_go_live",
+            "block_for_safety",
+        ],
+        "required_inputs": [
+            "StrategyGroup Decision Ledger",
+            "replay evidence",
+            "no-action attribution",
+            "live outcome when available",
+        ],
+        "strategy_uncertainty_policy": (
+            "may drive revise, downshift, park, or owner scoped trial eligibility; "
+            "must not block engineering progress or set actionable_now"
+        ),
     }
 
 
