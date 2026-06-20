@@ -23,20 +23,24 @@ def _load_module():
     return module
 
 
-def test_post_revision_replay_review_accepts_lsr_vcb_revision_cases() -> None:
+def test_post_revision_replay_review_accepts_brf_lsr_vcb_revision_cases() -> None:
     module = _load_module()
 
     packet = module.build_post_revision_replay_review()
 
     assert packet["status"] == "passed"
-    assert packet["counts"]["review_case_count"] == 5
-    assert packet["counts"]["passed_case_count"] == 5
+    assert packet["counts"]["review_case_count"] == 8
+    assert packet["counts"]["passed_case_count"] == 8
     assert packet["counts"]["failed_case_count"] == 0
-    assert packet["counts"]["would_enter_case_count"] == 2
-    assert packet["counts"]["disable_or_no_action_case_count"] == 3
+    assert packet["counts"]["brf_case_count"] == 3
+    assert packet["counts"]["would_enter_case_count"] == 3
+    assert packet["counts"]["disable_or_no_action_case_count"] == 5
     assert packet["counts"]["real_order_authorized_count"] == 0
     assert packet["counts"]["l4_scope_change_recommended_count"] == 0
     assert packet["checks"] == {
+        "brf_bear_rally_failure_short_would_enter": True,
+        "brf_rally_extension_without_rejection_disabled": True,
+        "brf_strong_uptrend_conflict_disabled": True,
         "lsr_short_revival_would_enter": True,
         "lsr_old_long_preview_disabled": True,
         "vcb_true_breakout_with_volume_would_enter": True,
@@ -50,12 +54,42 @@ def test_post_revision_replay_review_accepts_lsr_vcb_revision_cases() -> None:
         for row in packet["review_rows"]
     }
     assert set(rows) == {
+        ("BRF-001", "bear_rally_failure_short_would_enter"),
+        ("BRF-001", "rally_extension_without_rejection_disabled"),
+        ("BRF-001", "strong_uptrend_conflict_disabled"),
         ("LSR-001", "short_revival_short_would_enter"),
         ("LSR-001", "old_long_preview_disabled"),
         ("VCB-001", "true_breakout_with_volume_would_enter"),
         ("VCB-001", "false_breakout_reversal_disabled"),
         ("VCB-001", "volume_expansion_missing_disabled"),
     }
+
+    brf_short = rows[("BRF-001", "bear_rally_failure_short_would_enter")]
+    assert brf_short["observed_signal_type"] == "would_enter"
+    assert brf_short["observed_side"] == "short"
+    assert brf_short["logic_version"] == "brf-001-price-action-v0"
+    assert {
+        "brf_bear_rally_extended",
+        "brf_rally_high_rejected",
+        "brf_short_squeeze_risk_reviewed",
+    }.issubset(set(brf_short["reason_codes"]))
+    assert brf_short["price_action_structure"]["bear_rally_failure"] is True
+    assert brf_short["short_squeeze_risk"]["status"] == "reviewed"
+    assert brf_short["short_squeeze_risk"]["hard_stop_required"] is True
+    assert (
+        brf_short["short_squeeze_risk"]["runtime_confirmation_mode"]
+        == "runtime_bounded_auto_attempts"
+    )
+
+    brf_no_rejection = rows[("BRF-001", "rally_extension_without_rejection_disabled")]
+    assert brf_no_rejection["observed_signal_type"] == "no_action"
+    assert brf_no_rejection["observed_side"] == "none"
+    assert brf_no_rejection["reason_codes"] == ["brf_no_action_no_rejection_close"]
+
+    brf_htf_conflict = rows[("BRF-001", "strong_uptrend_conflict_disabled")]
+    assert brf_htf_conflict["observed_signal_type"] == "no_action"
+    assert brf_htf_conflict["observed_side"] == "none"
+    assert brf_htf_conflict["reason_codes"] == ["brf_no_action_htf_uptrend_conflict"]
 
     lsr_short = rows[("LSR-001", "short_revival_short_would_enter")]
     assert lsr_short["observed_signal_type"] == "would_enter"
@@ -112,7 +146,7 @@ def test_post_revision_replay_review_accepts_lsr_vcb_revision_cases() -> None:
         "l2_promotion_recommended_now": False,
         "l4_scope_change_recommended": False,
         "real_order_scope_change_recommended": False,
-        "default_next_step": "record_lsr001_vcb001_post_revision_quality_before_l2",
+        "default_next_step": "record_brf001_lsr001_vcb001_post_revision_quality_before_l2",
     }
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["approaches_real_order"] is False
@@ -149,7 +183,8 @@ def test_post_revision_replay_review_cli_writes_json_and_owner_progress(
     assert file_payload["scope"] == "strategygroup_post_revision_replay_review"
     assert file_payload["status"] == "passed"
     owner_text = output_md.read_text(encoding="utf-8")
-    assert "LSR/VCB Post-Revision Replay Review" in owner_text
+    assert "BRF/LSR/VCB Post-Revision Replay Review" in owner_text
+    assert "bear_rally_failure_short_would_enter" in owner_text
     assert "short_revival_short_would_enter" in owner_text
     assert "false_breakout_reversal_disabled" in owner_text
-    assert "record_lsr001_vcb001_post_revision_quality_before_l2" in owner_text
+    assert "record_brf001_lsr001_vcb001_post_revision_quality_before_l2" in owner_text

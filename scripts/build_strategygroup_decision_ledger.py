@@ -28,6 +28,9 @@ DEFAULT_TIER_POLICY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
 )
+DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
 )
@@ -52,6 +55,7 @@ def build_strategygroup_decision_ledger(
     opportunity_decision_loop_packet: dict[str, Any],
     signal_coverage_packet: dict[str, Any],
     tier_policy: dict[str, Any],
+    post_revision_replay_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     no_action_by_group = _high_priority_no_action_by_group(signal_coverage_packet)
     quality_rows = _dict_rows(
@@ -85,6 +89,13 @@ def build_strategygroup_decision_ledger(
             )
         )
 
+    completed_post_revision_groups = _completed_post_revision_groups(
+        post_revision_replay_packet or {}
+    )
+    ledger_rows = [
+        _apply_post_revision_completion(row, completed_post_revision_groups)
+        for row in ledger_rows
+    ]
     ledger_rows = sorted(
         [_normalize_ledger_row(row) for row in ledger_rows],
         key=lambda row: str(row.get("strategy_group_id") or ""),
@@ -92,6 +103,7 @@ def build_strategygroup_decision_ledger(
     forbidden_effects = _forbidden_effects(
         opportunity_decision_loop_packet,
         signal_coverage_packet,
+        post_revision_replay_packet or {},
     )
     decision_counts = Counter(str(row.get("decision") or "unknown") for row in ledger_rows)
     tier_review_rows = [_tier_review_row(row) for row in ledger_rows]
@@ -395,6 +407,45 @@ def _tier_review_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _completed_post_revision_groups(packet: dict[str, Any]) -> dict[str, int]:
+    if packet.get("status") != "passed":
+        return {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in _dict_rows(packet.get("review_rows")):
+        group = str(row.get("strategy_group_id") or "")
+        if not group:
+            continue
+        grouped.setdefault(group, []).append(row)
+    return {
+        group: len(rows)
+        for group, rows in grouped.items()
+        if rows and all(row.get("passed") is True for row in rows)
+    }
+
+
+def _apply_post_revision_completion(
+    row: dict[str, Any],
+    completed_groups: dict[str, int],
+) -> dict[str, Any]:
+    group = str(row.get("strategy_group_id") or "")
+    if str(row.get("decision") or "") != "revise" or group not in completed_groups:
+        return row
+    completed = dict(row)
+    case_count = completed_groups[group]
+    completed["decision"] = "keep_observing"
+    completed["reason"] = _join_reason_parts(
+        [
+            str(row.get("reason") or ""),
+            f"post_revision_replay_passed:{case_count}_cases",
+        ]
+    )
+    completed["required_next_evidence"] = "tier_review_after_post_revision_quality"
+    completed["next_checkpoint"] = (
+        "run_post_revision_stage_review_before_any_l2_or_l4_scope_change"
+    )
+    return completed
+
+
 def _high_priority_no_action_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = _dict_rows(
         _as_dict(packet.get("broader_observation")).get("high_priority_no_action_signals")
@@ -434,6 +485,11 @@ def _current_tier_by_group(policy: dict[str, Any]) -> dict[str, str]:
 def _default_next_step(rows: list[dict[str, Any]], forbidden_effects: list[str]) -> str:
     if forbidden_effects:
         return "stop_and_repair_forbidden_source_effects"
+    if any(
+        str(row.get("next_checkpoint") or "").startswith("run_post_revision_stage_review")
+        for row in rows
+    ):
+        return "run_post_revision_stage_review_before_any_tier_policy_change"
     if any(row.get("decision") == "revise" for row in rows):
         return "execute_or_verify_top_revision_checkpoints_without_live_authority_expansion"
     if any(row.get("decision") == "promote" for row in rows):
@@ -545,6 +601,10 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_optional_json_object(path: Path) -> dict[str, Any] | None:
+    return _load_json_object(path) if path.exists() else None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -553,6 +613,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
+    parser.add_argument(
+        "--post-revision-replay-review-json",
+        default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
@@ -565,6 +629,9 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.signal_coverage_json).expanduser()
         ),
         tier_policy=_load_json_object(Path(args.tier_policy_json).expanduser()),
+        post_revision_replay_packet=_load_optional_json_object(
+            Path(args.post_revision_replay_review_json).expanduser()
+        ),
     )
     payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the local LSR/VCB post-revision replay review packet.
+"""Build the local BRF/LSR/VCB post-revision replay review packet.
 
-This review executes deterministic local evaluator fixtures after the LSR/VCB
+This review executes deterministic local evaluator fixtures after the BRF/LSR/VCB
 classifier revisions. It proves the revised classifiers can distinguish
 would-enter observation cases from disable/no-action cases. It is not L2
 promotion authority, L4 scope authority, FinalGate input, Operation Layer input,
@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator  # noqa: E402
 from src.domain.reference_price_action_evaluators import (  # noqa: E402
     LSR001PriceActionEvaluator,
     VCB001PriceActionEvaluator,
@@ -46,6 +47,43 @@ NOW_MS = 1781869000000
 
 def build_post_revision_replay_review() -> dict[str, Any]:
     rows = [
+        _review_case(
+            strategy_group_id="BRF-001",
+            version_id="BRF-001-v0",
+            fixture_case="bear_rally_failure_short_would_enter",
+            evaluator=BRF001PriceActionEvaluator(),
+            one_hour=_brf_bear_rally_failure_1h(),
+            four_hour=_brf_down_context_4h(),
+            expected_signal_type=SignalType.WOULD_ENTER,
+            expected_side=SignalSide.SHORT,
+            expected_reason_codes={
+                "brf_bear_rally_extended",
+                "brf_rally_high_rejected",
+                "brf_short_squeeze_risk_reviewed",
+            },
+        ),
+        _review_case(
+            strategy_group_id="BRF-001",
+            version_id="BRF-001-v0",
+            fixture_case="rally_extension_without_rejection_disabled",
+            evaluator=BRF001PriceActionEvaluator(),
+            one_hour=_brf_no_rejection_1h(),
+            four_hour=_brf_down_context_4h(),
+            expected_signal_type=SignalType.NO_ACTION,
+            expected_side=SignalSide.NONE,
+            expected_reason_codes={"brf_no_action_no_rejection_close"},
+        ),
+        _review_case(
+            strategy_group_id="BRF-001",
+            version_id="BRF-001-v0",
+            fixture_case="strong_uptrend_conflict_disabled",
+            evaluator=BRF001PriceActionEvaluator(),
+            one_hour=_brf_bear_rally_failure_1h(),
+            four_hour=_brf_strong_uptrend_context_4h(),
+            expected_signal_type=SignalType.NO_ACTION,
+            expected_side=SignalSide.NONE,
+            expected_reason_codes={"brf_no_action_htf_uptrend_conflict"},
+        ),
         _review_case(
             strategy_group_id="LSR-001",
             version_id="LSR-001-v0",
@@ -110,6 +148,7 @@ def build_post_revision_replay_review() -> dict[str, Any]:
     ]
     failed_rows = [row for row in rows if row["passed"] is not True]
     status = "passed" if not failed_rows else "blocked"
+    brf_rows = [row for row in rows if row["strategy_group_id"] == "BRF-001"]
     lsr_rows = [row for row in rows if row["strategy_group_id"] == "LSR-001"]
     vcb_rows = [row for row in rows if row["strategy_group_id"] == "VCB-001"]
     return {
@@ -130,6 +169,7 @@ def build_post_revision_replay_review() -> dict[str, Any]:
             "review_case_count": len(rows),
             "passed_case_count": len(rows) - len(failed_rows),
             "failed_case_count": len(failed_rows),
+            "brf_case_count": len(brf_rows),
             "lsr_case_count": len(lsr_rows),
             "vcb_case_count": len(vcb_rows),
             "would_enter_case_count": sum(
@@ -142,6 +182,15 @@ def build_post_revision_replay_review() -> dict[str, Any]:
             "l4_scope_change_recommended_count": 0,
         },
         "checks": {
+            "brf_bear_rally_failure_short_would_enter": _case_passed(
+                rows, "BRF-001", "bear_rally_failure_short_would_enter"
+            ),
+            "brf_rally_extension_without_rejection_disabled": _case_passed(
+                rows, "BRF-001", "rally_extension_without_rejection_disabled"
+            ),
+            "brf_strong_uptrend_conflict_disabled": _case_passed(
+                rows, "BRF-001", "strong_uptrend_conflict_disabled"
+            ),
             "lsr_short_revival_would_enter": _case_passed(
                 rows, "LSR-001", "short_revival_short_would_enter"
             ),
@@ -171,9 +220,9 @@ def build_post_revision_replay_review() -> dict[str, Any]:
             "l4_scope_change_recommended": False,
             "real_order_scope_change_recommended": False,
             "default_next_step": (
-                "record_lsr001_vcb001_post_revision_quality_before_l2"
+                "record_brf001_lsr001_vcb001_post_revision_quality_before_l2"
                 if status == "passed"
-                else "repair_lsr001_vcb001_post_revision_replay_failures"
+                else "repair_brf001_lsr001_vcb001_post_revision_replay_failures"
             ),
         },
         "safety_invariants": {
@@ -198,7 +247,7 @@ def build_post_revision_replay_review() -> dict[str, Any]:
 
 def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
     lines = [
-        "# LSR/VCB Post-Revision Replay Review",
+        "# BRF/LSR/VCB Post-Revision Replay Review",
         "",
         "## Summary",
         "",
@@ -227,6 +276,7 @@ def _review_case(
     fixture_case: str,
     evaluator: Any,
     one_hour: list[dict[str, Any]],
+    four_hour: list[dict[str, Any]] | None = None,
     expected_signal_type: SignalType,
     expected_side: SignalSide,
     expected_reason_codes: set[str],
@@ -235,6 +285,7 @@ def _review_case(
         family_id=strategy_group_id,
         version_id=version_id,
         one_hour=one_hour,
+        four_hour=four_hour,
     )
     output = evaluator.evaluate(signal_input)
     observed_reason_codes = {str(item) for item in output.reason_codes}
@@ -249,7 +300,7 @@ def _review_case(
     return {
         "strategy_group_id": strategy_group_id,
         "fixture_case": fixture_case,
-        "logic_version": str(evidence.get("logic_version") or ""),
+        "logic_version": _logic_version(output, evidence),
         "observed_signal_type": output.signal_type.value,
         "expected_signal_type": expected_signal_type.value,
         "observed_side": output.side.value,
@@ -259,6 +310,8 @@ def _review_case(
         "entry_states": _as_dict(evidence.get("entry_states")),
         "disable_states": _as_dict(evidence.get("disable_states")),
         "classifier_revision": _as_dict(evidence.get("classifier_revision")),
+        "price_action_structure": _as_dict(evidence.get("price_action_structure")),
+        "short_squeeze_risk": _as_dict(evidence.get("short_squeeze_risk")),
         "passed": passed,
         "real_order_authority": False,
         "candidate_or_finalgate_authority": False,
@@ -277,11 +330,22 @@ def _case_passed(rows: list[dict[str, Any]], group: str, fixture_case: str) -> b
     )
 
 
+def _logic_version(output: Any, evidence: dict[str, Any]) -> str:
+    signal_snapshot = _as_dict(getattr(output, "signal_snapshot", None))
+    return str(
+        evidence.get("logic_version")
+        or signal_snapshot.get("logic_version")
+        or evidence.get("brf_logic_version")
+        or ""
+    )
+
+
 def _signal_input(
     *,
     family_id: str,
     version_id: str,
     one_hour: list[dict[str, Any]],
+    four_hour: list[dict[str, Any]] | None = None,
 ) -> StrategyFamilySignalInput:
     return StrategyFamilySignalInput(
         evaluation_id=f"post-revision-{family_id}",
@@ -303,7 +367,7 @@ def _signal_input(
             atr=Decimal("4"),
             timeframe="1h",
             candle_context={
-                "windows": {"1h": one_hour, "4h": _mixed_context_4h()},
+                "windows": {"1h": one_hour, "4h": four_hour or _mixed_context_4h()},
                 "closed_bar": True,
             },
         ),
@@ -365,6 +429,47 @@ def _mixed_context_4h() -> list[dict[str, Any]]:
         _candle(2, "102", "105", "100", "101"),
         _candle(3, "101", "104", "99", "102"),
     ]
+
+
+def _brf_down_context_4h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "122", "123", "119", "120"),
+        _candle(1, "120", "121", "117", "118"),
+        _candle(2, "118", "119", "115", "116"),
+        _candle(3, "116", "117", "113", "114"),
+    ]
+
+
+def _brf_strong_uptrend_context_4h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "100", "102", "99", "101"),
+        _candle(1, "101", "105", "100", "104"),
+        _candle(2, "104", "108", "103", "107"),
+        _candle(3, "107", "111", "106", "110"),
+    ]
+
+
+def _brf_bear_rally_failure_1h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "101", "102", "99", "100"),
+        _candle(1, "100", "103", "99", "102"),
+        _candle(2, "102", "105", "101", "104"),
+        _candle(3, "104", "106", "103", "105"),
+        _candle(4, "105", "108", "104", "107"),
+        _candle(5, "107", "109", "106", "108"),
+        _candle(6, "108", "110", "107", "109"),
+        _candle(7, "109", "111", "108", "110"),
+        _candle(8, "110", "112", "109", "111"),
+        _candle(9, "111", "113", "110", "112"),
+        _candle(10, "112", "113", "109", "111"),
+        _candle(11, "111", "114", "105", "106"),
+    ]
+
+
+def _brf_no_rejection_1h() -> list[dict[str, Any]]:
+    candles = _brf_bear_rally_failure_1h()
+    candles[-1] = _candle(11, "111", "113", "110", "112")
+    return candles
 
 
 def _lsr_old_long_preview_1h() -> list[dict[str, Any]]:

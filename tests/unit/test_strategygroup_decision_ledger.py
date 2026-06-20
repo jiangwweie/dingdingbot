@@ -185,6 +185,45 @@ def _tier_policy() -> dict:
     }
 
 
+def _post_revision_replay_review() -> dict:
+    return {
+        "status": "passed",
+        "review_rows": [
+            {
+                "strategy_group_id": "BRF-001",
+                "fixture_case": "bear_rally_failure_short_would_enter",
+                "passed": True,
+            },
+            {
+                "strategy_group_id": "LSR-001",
+                "fixture_case": "short_revival_short_would_enter",
+                "passed": True,
+            },
+            {
+                "strategy_group_id": "VCB-001",
+                "fixture_case": "false_breakout_reversal_disabled",
+                "passed": True,
+            },
+        ],
+        "interaction": {
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "server_files_mutated": False,
+            "final_gate_called": False,
+            "operation_layer_called": False,
+            "exchange_write_called": False,
+            "order_created": False,
+        },
+    }
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -218,6 +257,56 @@ def test_decision_ledger_outputs_one_minimal_row_per_strategygroup():
         "revise_before_tier_change": 3,
     }
     assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
+def test_decision_ledger_rolls_completed_revision_rows_to_observation() -> None:
+    module = _load_module()
+    opportunity = _opportunity_decision_loop()
+    signal = _signal_coverage()
+    signal["broader_observation"]["high_priority_no_action_signals"].extend(
+        [
+            {
+                "strategy_group_id": "BRF-001",
+                "signal_type": "no_action",
+                "coverage_review_priority": "P0_5",
+                "human_summary": "BRF waits for rally-failure and squeeze-risk review.",
+                "reason_codes": ["brf_no_action_no_rally_extension"],
+                "policy_l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+                "policy_recommended_action": (
+                    "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached"
+                ),
+            },
+        ]
+    )
+
+    packet = module.build_strategygroup_decision_ledger(
+        opportunity_decision_loop_packet=opportunity,
+        signal_coverage_packet=signal,
+        tier_policy=_tier_policy(),
+        post_revision_replay_packet=_post_revision_replay_review(),
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
+    assert rows["VCB-001"]["decision"] == "keep_observing"
+    assert rows["VCB-001"]["required_next_evidence"] == (
+        "tier_review_after_post_revision_quality"
+    )
+    assert rows["VCB-001"]["next_checkpoint"] == (
+        "run_post_revision_stage_review_before_any_l2_or_l4_scope_change"
+    )
+    assert rows["VCB-001"]["reason"].endswith("post_revision_replay_passed:1_cases")
+    assert rows["LSR-001"]["decision"] == "keep_observing"
+    assert rows["BRF-001"]["decision"] == "keep_observing"
+    assert packet["decision"]["default_next_step"] == (
+        "run_post_revision_stage_review_before_any_tier_policy_change"
+    )
+    assert packet["tier_review"]["counts"] == {
+        "keep_current_tier": 3,
+        "park": 1,
+        "revise_before_tier_change": 1,
+    }
     assert packet["interaction"]["places_order"] is False
     assert packet["safety_invariants"]["order_created"] is False
 
