@@ -1,0 +1,376 @@
+{
+  "closures": [
+    {
+      "closed_or_guarded": true,
+      "closure_id": "quality-wave-shared-source-drift-guard",
+      "closure_type": "machine_checkable_test",
+      "evidence": "tests validate safety invariants, actionability false, and source-derived rows",
+      "gap_class": "authority_boundary_gap",
+      "proves_owner_risk_acceptance_not_actionability": true,
+      "shared_infrastructure": true,
+      "strategy_group_id": "ALL_INCLUDED"
+    },
+    {
+      "closed_or_guarded": true,
+      "closure_id": "quality-wave-vcb-001-stale_or_missing_artifact_gap",
+      "closure_type": "explicit_classification",
+      "evidence": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "proves_owner_risk_acceptance_not_actionability": false,
+      "shared_infrastructure": false,
+      "strategy_group_id": "VCB-001"
+    },
+    {
+      "closed_or_guarded": true,
+      "closure_id": "quality-wave-vcb-001-fact_source_gap",
+      "closure_type": "explicit_classification",
+      "evidence": "RequiredFacts mapping is absent for this StrategyGroup",
+      "gap_class": "fact_source_gap",
+      "proves_owner_risk_acceptance_not_actionability": false,
+      "shared_infrastructure": false,
+      "strategy_group_id": "VCB-001"
+    },
+    {
+      "closed_or_guarded": true,
+      "closure_id": "quality-wave-rbr-001-stale_or_missing_artifact_gap",
+      "closure_type": "explicit_classification",
+      "evidence": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "proves_owner_risk_acceptance_not_actionability": false,
+      "shared_infrastructure": false,
+      "strategy_group_id": "RBR-001"
+    }
+  ],
+  "contradictions": [],
+  "decision_counts": {
+    "keep_observing": 3,
+    "park": 1,
+    "revise": 1
+  },
+  "gap_counts": {
+    "fact_source_gap": 1,
+    "parked_low_priority_gap": 1,
+    "stale_or_missing_artifact_gap": 3
+  },
+  "gap_findings": [
+    {
+      "description": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "VCB-001"
+    },
+    {
+      "description": "RequiredFacts mapping is absent for this StrategyGroup",
+      "gap_class": "fact_source_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "VCB-001"
+    },
+    {
+      "description": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "LSR-001"
+    },
+    {
+      "description": "RequiredFacts mapping is absent for this StrategyGroup",
+      "gap_class": "fact_source_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "LSR-001"
+    },
+    {
+      "description": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "BRF-001"
+    },
+    {
+      "description": "RequiredFacts mapping is absent for this StrategyGroup",
+      "gap_class": "fact_source_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "BRF-001"
+    },
+    {
+      "description": "handoff pack is absent and must stay explicit before promotion",
+      "gap_class": "stale_or_missing_artifact_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "RBR-001"
+    },
+    {
+      "description": "replay corpus is absent and promotion must remain parked or blocked",
+      "gap_class": "replay_quality_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "RBR-001"
+    },
+    {
+      "description": "RequiredFacts mapping is absent for this StrategyGroup",
+      "gap_class": "fact_source_gap",
+      "shared_infrastructure": false,
+      "strategy_group_id": "RBR-001"
+    },
+    {
+      "description": "Owner risk acceptance cannot set runtime actionability or bypass gates",
+      "gap_class": "authority_boundary_gap",
+      "shared_infrastructure": true,
+      "strategy_group_id": "ALL_INCLUDED"
+    }
+  ],
+  "global_authority_model": {
+    "owner_controls": [
+      "policy",
+      "tier",
+      "risk_scope",
+      "capital_scope",
+      "pause_resume",
+      "promote_downshift_park_kill",
+      "production_stage_transition"
+    ],
+    "owner_risk_acceptance_cannot_set_actionable_now_true": true,
+    "review_updates": [
+      "strategy_governance"
+    ],
+    "runtime_decides": [
+      "actionable_now"
+    ],
+    "system_controls": [
+      "normal_process_execution"
+    ]
+  },
+  "included_strategy_groups": [
+    "BTPC-001",
+    "VCB-001",
+    "LSR-001",
+    "BRF-001",
+    "RBR-001"
+  ],
+  "rows": [
+    {
+      "actionable_now": false,
+      "authority_boundary": "quality_governance_only; actionable_now=false; real_order_authority=false; owner_risk_acceptance_may_affect_trial_or_tier_policy_only; no_runtime_gate_bypass",
+      "current_decision": "revise",
+      "current_tier": "L2",
+      "do_not_promote_reason": "current ledger requires revision before any tier change",
+      "eats": "Capture bear-trend pullback continuation when weak rally loses structure and derivatives/crowding context is reviewable.",
+      "next_engineering_checkpoint": "complete_fact_source_and_classifier_revision_guard",
+      "owner_label": "熊市回抽延续",
+      "owner_policy_action_required": false,
+      "primary_gap_class": "fact_source_gap",
+      "real_order_authority": false,
+      "required_next_evidence": "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision",
+      "secondary_gap_class": "classifier_gap",
+      "source_coverage": {
+        "decision_ledger_row": true,
+        "handoff_pack": true,
+        "handoff_path": "docs/current/strategy-group-handoffs/BTPC-001/handoff.json",
+        "local_monitor_entrypoint": "btpc_l2_shadow_fact_quality_review,btpc_l2_keep_revise_fact_source_decision,btpc_live_derivatives_fact_source_mapping,btpc_classifier_rule_review,strategygroup_decision_ledger",
+        "registry_baseline_row": true,
+        "replay_corpus": true,
+        "replay_path": "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json",
+        "required_facts_mapping": true,
+        "runtime_tier_policy": true,
+        "tier_review_row": true
+      },
+      "strategy_group_id": "BTPC-001",
+      "system_can_continue": true
+    },
+    {
+      "actionable_now": false,
+      "authority_boundary": "quality_governance_only; actionable_now=false; real_order_authority=false; owner_risk_acceptance_may_affect_trial_or_tier_policy_only; no_runtime_gate_bypass",
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "do_not_promote_reason": "current ledger supports continued observation, not tier promotion",
+      "eats": "Capture compression breakout when true breakout evidence survives false-breakout disable review.",
+      "next_engineering_checkpoint": "create_or_accept_explicit_missing_handoff_boundary_for_VCB-001",
+      "owner_label": "波动压缩突破",
+      "owner_policy_action_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "real_order_authority": false,
+      "required_next_evidence": "tier_review_after_post_revision_quality",
+      "secondary_gap_class": "replay_quality_gap",
+      "source_coverage": {
+        "decision_ledger_row": true,
+        "handoff_pack": false,
+        "handoff_path": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+        "registry_baseline_row": true,
+        "replay_corpus": true,
+        "replay_path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json",
+        "required_facts_mapping": false,
+        "runtime_tier_policy": false,
+        "tier_review_row": true
+      },
+      "strategy_group_id": "VCB-001",
+      "system_can_continue": true
+    },
+    {
+      "actionable_now": false,
+      "authority_boundary": "quality_governance_only; actionable_now=false; real_order_authority=false; owner_risk_acceptance_may_affect_trial_or_tier_policy_only; no_runtime_gate_bypass",
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "do_not_promote_reason": "current ledger supports continued observation, not tier promotion",
+      "eats": "Capture liquidity sweep or short-revival setups after side-specific rewrite quality is proven.",
+      "next_engineering_checkpoint": "create_or_accept_explicit_missing_handoff_boundary_for_LSR-001",
+      "owner_label": "流动性扫盘/短线复活",
+      "owner_policy_action_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "real_order_authority": false,
+      "required_next_evidence": "tier_review_after_post_revision_quality",
+      "secondary_gap_class": "replay_quality_gap",
+      "source_coverage": {
+        "decision_ledger_row": true,
+        "handoff_pack": false,
+        "handoff_path": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+        "registry_baseline_row": true,
+        "replay_corpus": true,
+        "replay_path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json",
+        "required_facts_mapping": false,
+        "runtime_tier_policy": false,
+        "tier_review_row": true
+      },
+      "strategy_group_id": "LSR-001",
+      "system_can_continue": true
+    },
+    {
+      "actionable_now": false,
+      "authority_boundary": "quality_governance_only; actionable_now=false; real_order_authority=false; owner_risk_acceptance_may_affect_trial_or_tier_policy_only; no_runtime_gate_bypass",
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "do_not_promote_reason": "current ledger supports continued observation, not tier promotion",
+      "eats": "Capture short continuation after a bear-market rally fails instead of shorting early breakdowns.",
+      "next_engineering_checkpoint": "create_or_accept_explicit_missing_handoff_boundary_for_BRF-001",
+      "owner_label": "熊市反弹失败",
+      "owner_policy_action_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "real_order_authority": false,
+      "required_next_evidence": "tier_review_after_post_revision_quality",
+      "secondary_gap_class": "replay_quality_gap",
+      "source_coverage": {
+        "decision_ledger_row": true,
+        "handoff_pack": false,
+        "handoff_path": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+        "registry_baseline_row": true,
+        "replay_corpus": true,
+        "replay_path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json",
+        "required_facts_mapping": false,
+        "runtime_tier_policy": false,
+        "tier_review_row": true
+      },
+      "strategy_group_id": "BRF-001",
+      "system_can_continue": true
+    },
+    {
+      "actionable_now": false,
+      "authority_boundary": "quality_governance_only; actionable_now=false; real_order_authority=false; owner_risk_acceptance_may_affect_trial_or_tier_policy_only; no_runtime_gate_bypass",
+      "current_decision": "park",
+      "current_tier": "L1",
+      "do_not_promote_reason": "current ledger parks this StrategyGroup until new evidence",
+      "eats": "Range-boundary reversion vocabulary kept only if materially new edge evidence appears.",
+      "next_engineering_checkpoint": "keep_parked_until_material_new_edge_evidence",
+      "owner_label": "区间边界回归",
+      "owner_policy_action_required": false,
+      "primary_gap_class": "parked_low_priority_gap",
+      "real_order_authority": false,
+      "required_next_evidence": "material_new_edge_evidence",
+      "secondary_gap_class": "replay_quality_gap",
+      "source_coverage": {
+        "decision_ledger_row": true,
+        "handoff_pack": false,
+        "handoff_path": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+        "registry_baseline_row": true,
+        "replay_corpus": false,
+        "replay_path": null,
+        "required_facts_mapping": false,
+        "runtime_tier_policy": false,
+        "tier_review_row": true
+      },
+      "strategy_group_id": "RBR-001",
+      "system_can_continue": false
+    }
+  ],
+  "safety_invariants": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "changes_live_profile": false,
+    "changes_order_sizing_defaults": false,
+    "places_order": false,
+    "real_order_authority": false,
+    "withdrawal_or_transfer": false
+  },
+  "schema": "brc.strategygroup_quality_wave.v1",
+  "scope": "p05_strategygroup_quality_wave",
+  "source_authority": {
+    "decision_ledger": "output/runtime-monitor/latest-strategygroup-decision-ledger.json",
+    "local_monitor_sequence": "output/runtime-monitor/latest-local-monitor-sequence.json",
+    "registry_baseline": "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json",
+    "required_facts_map": "docs/current/strategy-group-handoffs/main-control-required-facts-map.md",
+    "tier_policy": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json",
+    "tier_review": "docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json"
+  },
+  "source_coverage": {
+    "BRF-001": {
+      "decision_ledger_row": true,
+      "handoff_pack": false,
+      "handoff_path": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+      "registry_baseline_row": true,
+      "replay_corpus": true,
+      "replay_path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json",
+      "required_facts_mapping": false,
+      "runtime_tier_policy": false,
+      "tier_review_row": true
+    },
+    "BTPC-001": {
+      "decision_ledger_row": true,
+      "handoff_pack": true,
+      "handoff_path": "docs/current/strategy-group-handoffs/BTPC-001/handoff.json",
+      "local_monitor_entrypoint": "btpc_l2_shadow_fact_quality_review,btpc_l2_keep_revise_fact_source_decision,btpc_live_derivatives_fact_source_mapping,btpc_classifier_rule_review,strategygroup_decision_ledger",
+      "registry_baseline_row": true,
+      "replay_corpus": true,
+      "replay_path": "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json",
+      "required_facts_mapping": true,
+      "runtime_tier_policy": true,
+      "tier_review_row": true
+    },
+    "LSR-001": {
+      "decision_ledger_row": true,
+      "handoff_pack": false,
+      "handoff_path": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+      "registry_baseline_row": true,
+      "replay_corpus": true,
+      "replay_path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json",
+      "required_facts_mapping": false,
+      "runtime_tier_policy": false,
+      "tier_review_row": true
+    },
+    "RBR-001": {
+      "decision_ledger_row": true,
+      "handoff_pack": false,
+      "handoff_path": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+      "registry_baseline_row": true,
+      "replay_corpus": false,
+      "replay_path": null,
+      "required_facts_mapping": false,
+      "runtime_tier_policy": false,
+      "tier_review_row": true
+    },
+    "VCB-001": {
+      "decision_ledger_row": true,
+      "handoff_pack": false,
+      "handoff_path": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategygroup_decision_ledger",
+      "registry_baseline_row": true,
+      "replay_corpus": true,
+      "replay_path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json",
+      "required_facts_mapping": false,
+      "runtime_tier_policy": false,
+      "tier_review_row": true
+    }
+  },
+  "status": "quality_wave_ready"
+}

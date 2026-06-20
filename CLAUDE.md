@@ -1,6 +1,6 @@
 # CLAUDE.md - BRC Claude Worker Guide
 
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Role
@@ -18,15 +18,29 @@ Before starting work, read:
 
 ```text
 AGENTS.md
+docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
+docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 ```
 
 Then read only the task-specific files listed in the Codex task card.
 
 Do not use compressed historical docs as active instructions unless the task
 explicitly asks for recovery or provenance.
+
+## Source Discipline
+
+Claude must treat docs, registry rows, machine config, runtime state, generated
+views, and archive material according to
+`docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`.
+
+If a task reads generated output, treat it as checkpoint evidence, not a
+hand-edited source of truth. If a task changes StrategyGroup semantics, tie the
+change back to the StrategyGroup registry contract, handoff pack, runtime tier
+policy, Decision Ledger, or an explicit Codex-issued task card.
 
 ## Current Product Direction
 
@@ -66,6 +80,35 @@ must not treat replay, synthetic fixtures, or observe-only evidence as live
 signals, live RequiredFacts, FinalGate input, Operation Layer evidence, or
 real-order authority.
 
+## Authority Model For Worker Tasks
+
+Claude must preserve this global split:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+The Owner controls StrategyGroup enable/pause/resume, promote/downshift,
+park/kill, scoped risk acceptance, capital/profile/scope changes, and
+production-stage transition.
+
+Claude task execution should keep engineering progress moving when the remaining
+gap is fact mapping, classifier repair, replay coverage, monitor integration,
+runtime readiness, or another non-authority implementation defect.
+
+Do not reinterpret those engineering gaps as a request for the Owner to manually
+judge RequiredFacts, fresh signal validity, candidate/auth evidence, FinalGate,
+Operation Layer, replay samples, no-action rows, or ordinary in-boundary
+execution steps.
+
+Owner scoped risk acceptance may advance `trial_eligible` or tier eligibility.
+It must not set `actionable_now=true`, bypass FinalGate, bypass Operation Layer,
+or override stale-fact, missing-protection, duplicate-submit, account, exchange,
+or authority hard stops.
+
 ## Standing Authorization
 
 During the development-stage pilot, do not block task progress on fresh chat
@@ -102,6 +145,10 @@ Why
 Allowed files
 Forbidden files
 Requirements
+Global Authority Model
+Capability Unlocked
+Next Engineering Bottleneck
+Rehearsal/Simulation Boundary
 Tests
 Done When
 Hard Stop

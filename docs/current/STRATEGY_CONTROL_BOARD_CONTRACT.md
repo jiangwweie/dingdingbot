@@ -2,7 +2,7 @@
 title: STRATEGY_CONTROL_BOARD_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-last_verified: 2026-06-19
+last_verified: 2026-06-20
 ---
 
 # Strategy Control Board Contract
@@ -10,6 +10,37 @@ last_verified: 2026-06-19
 The Strategy Control Board is the Owner-facing automation supervision surface.
 It must not become a packet browser, research-doc index, manual gate assembly
 tool, or operator workflow for internal execution gates.
+
+## Control Principle
+
+The board must express this authority split in product language:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+The board may ask the Owner to enable, pause, resume, promote, downshift, park,
+kill, adjust risk scope, adjust capital/profile/scope, or review an abnormal
+intervention. It must not ask the Owner to manually judge RequiredFacts, fresh
+signal validity, candidate/auth evidence, FinalGate, Operation Layer, replay
+samples, no-action rows, or ordinary in-boundary execution steps.
+
+## Source Boundaries
+
+The board may combine:
+
+| Source | Board use |
+| --- | --- |
+| StrategyGroup Registry | Explain what the strategy is, what it eats, and what risk gap matters |
+| Runtime state | Decide whether the strategy is running, waiting, processing, unavailable, or needs intervention |
+| Decision Ledger | Summarize keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block state |
+| Review Ledger | Summarize live outcome review after real action |
+
+The board must not manually compute live order authority from documents. It
+must consume runtime state for `actionable_now`.
 
 ## Required Row Fields
 

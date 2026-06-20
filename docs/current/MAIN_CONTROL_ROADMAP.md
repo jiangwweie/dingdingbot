@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-19
+last_verified: 2026-06-20
 ---
 
 # Main Control Roadmap
@@ -10,6 +10,12 @@ last_verified: 2026-06-19
 ## Purpose
 
 This is the short planning table for the main runtime window.
+
+For source authority, follow
+`docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`. This roadmap describes
+stage direction and checkpoints. It must not override current code, machine
+config, verified runtime state, explicit Owner policy, or generated evidence
+from the current monitor sequence.
 
 The main goal is still the StrategyGroup runtime pilot, but the global project
 objective is profitability through a small-capital right-tail experimentation
@@ -54,11 +60,13 @@ live path waits
 
 ## Current Execution Constraints
 
-The next phase is governed by six execution constraints:
+The next phase is governed by eight execution constraints:
 
 | Constraint | Meaning |
 | --- | --- |
 | P0 preemption | A real fresh `MPG-001`/selected StrategyGroup signal immediately interrupts lower-priority P0.5 work |
+| Authority split | Owner controls policy and tier/risk scope; the system continues normal process execution inside selected boundaries |
+| Capability closure | Every goal-mode task must close one engineering problem class, unlock a concrete capability, and expose the next engineering bottleneck |
 | Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
 | Decision-ledger gate | New P0.5 artifacts must change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
@@ -128,6 +136,62 @@ are risky. The project is constrained, but aggressive inside those constraints.
 Do not use risk language as a generic reason to delay, reduce, or avoid an
 otherwise eligible live action. Missing a valid right-tail opportunity is a
 project failure mode.
+
+## Engineering Progression Rule
+
+Goal-mode work must progress by engineering bottleneck, not by report count:
+
+```text
+close one engineering problem
+-> unlock one system capability
+-> reveal the next engineering problem
+```
+
+This rule prevents `waiting_for_market` or `needs_real_trade` from becoming a
+blanket answer. Only real fresh signal, action-time live facts, exchange
+acceptance, and real outcome calibration are truly market/live dependent. Even
+then, they block only real submit or live calibration; they do not block
+non-executing rehearsal, simulation, lifecycle modeling, or review-shape work.
+
+Small-capital execution frictions are not reasons to stop the engineering lane:
+
+| Friction | Default engineering treatment |
+| --- | --- |
+| Fill probability | Try through official small-capital path after gates pass; handle timeout/reject |
+| Slippage | Use coarse spread/fee/funding buffer, then calibrate from live outcomes |
+| Protection acceptance | Pre-check exchange rules and implement failure recovery/hard stop |
+| Partial fill | Model lifecycle state and follow-up protection/reconciliation |
+| Reject recovery | Classify reject, stop or retry inside official boundary, then review |
+| PnL settlement | Estimate before action, reconcile after fills, record Review Ledger outcome |
+
+Every Goal Packet should state `Capability unlocked` and
+`Next engineering bottleneck`. If it only produces a packet or explains why
+progress is blocked, the architecture verdict should be `partial` unless the
+Evidence Packet proves no engineering closure is currently possible.
+
+### Rehearsal-Before-Live Policy
+
+The main runtime window should exhaust non-executing closure before declaring a
+live dependency:
+
+| Engineering branch | Must be closable before live | Live dependency that remains |
+| --- | --- | --- |
+| Submit accepted/rejected | Yes, by paper/simulator Operation Layer and lifecycle tests | Actual exchange response calibration |
+| Partial fill | Yes, by simulated fill branches | Actual partial-fill distribution |
+| Protection accepted/failed | Yes, by rule precheck, failure branch, and hard-stop path | Actual protection acceptance at exchange |
+| Slippage/fees/funding | Yes, by coarse buffer and cost model | Actual fill and funding calibration |
+| PnL/reconciliation/settlement | Yes, by local estimate and reconciliation shape | Actual account settlement |
+
+Live facts and live outcomes are validation layers, not the first engineering
+closure path. A gate may say `live_submit blocked`; it must not say
+`engineering blocked` when dry-run, simulator, replay, local lifecycle, or
+review-shape work remains available.
+
+Owner upgrade/downshift authority is strategy governance, not manual operation.
+If a StrategyGroup is risky but still within scoped policy, the system should
+continue the engineering path toward the appropriate tier. Escalate only when
+the decision changes policy, tier, capital/profile/scope, pause/resume,
+promote/downshift/park/kill, production transition, or abnormal intervention.
 
 ## No-Signal Progress Policy
 

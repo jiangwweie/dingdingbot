@@ -1,6 +1,6 @@
 # Runtime Order-Capable Experiment Profile
 
-Last updated: 2026-06-18
+Last updated: 2026-06-20
 
 ## Purpose
 
@@ -21,6 +21,26 @@ The allocated subaccount capital is loss-capable experiment capital. This
 profile is not a request to reduce leverage, notional, exposure, or submit speed
 for caution after the Owner has selected the official runtime profile. It is a
 permission profile for fast in-boundary opportunity capture.
+
+## Rehearsal Boundary
+
+Order-capable permission does not mean engineering must wait for live submit to
+close lifecycle branches.
+
+Before a fresh signal appears, the system should use non-executing dry-run,
+paper/simulator Operation Layer, synthetic fixtures, and post-submit lifecycle
+simulation to close:
+
+- submit accepted / rejected branches;
+- timeout and retry/stop branches;
+- partial-fill handling;
+- protection acceptance and protection-failure handling;
+- rough fee, funding, slippage, and PnL calculation;
+- reconciliation, settlement, and Review Ledger shape.
+
+These rehearsal outputs may unlock engineering readiness. They must not set
+`actionable_now=true`, fabricate live RequiredFacts, bypass FinalGate or
+Operation Layer, or create exchange writes.
 
 ## Required Server Overlay
 

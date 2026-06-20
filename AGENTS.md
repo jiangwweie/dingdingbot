@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Current Document Authority
@@ -16,10 +16,15 @@ When project documents conflict, follow this order:
 Start from:
 
 ```text
+docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/MAIN_CONTROL_ROADMAP.md
+docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
+docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 docs/current/strategy-group-handoffs/main-control-handoff-index.md
 ```
 
@@ -32,6 +37,28 @@ docs/history-archive-2026-06-15-pre-governance.tar.gz
 The archive is recovery material only. It must not reintroduce per-deploy chat
 confirmation, per-order chat confirmation inside the official runtime path, or
 evidence-packet-as-Owner-interface workflows.
+
+## Global Information Architecture
+
+Current project truth must follow:
+
+```text
+Docs explain.
+Registry defines strategy assets.
+Policy records Owner-authorized control.
+Runtime stores current system state.
+Generated views summarize.
+Archives preserve provenance.
+```
+
+`docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` defines source classes and
+authority order. `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md`
+defines the StrategyGroup asset layer. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`
+defines how architecture direction becomes bounded execution work.
+
+Do not turn generated output, historical archive material, stale roadmap text,
+or chat summaries into current authority when current code, machine config,
+runtime state, or explicit Owner decisions disagree.
 
 ## Product Objective
 
@@ -85,6 +112,55 @@ The Owner is not an operator. Owner-facing product surfaces must not turn
 internal execution gates, evidence objects, API routes, proof chains, or blocker
 codes into the main information architecture.
 
+## Global Authority Model
+
+Use this authority split across planning, implementation, review, and Owner
+surfaces:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+The Owner controls StrategyGroup policy: enable, pause, resume, promote,
+downshift, park, kill, scoped risk acceptance, capital scope, runtime profile,
+symbol/side scope, and production-stage transitions.
+
+The system controls normal process execution after a bounded StrategyGroup and
+runtime profile are selected:
+
+```text
+observation
+-> RequiredFacts mapping
+-> fresh signal detection
+-> candidate / authorization evidence
+-> action-time FinalGate
+-> official Operation Layer
+-> protection
+-> reconciliation
+-> settlement
+-> review capture
+```
+
+Owner scoped risk acceptance may advance `trial_eligible`, observation, shadow,
+armed-observation, or L4 eligibility. It must not set `actionable_now=true`,
+bypass action-time RequiredFacts, bypass FinalGate, bypass Operation Layer,
+ignore missing protection, ignore stale facts, or override account/exchange
+safety facts.
+
+Do not convert StrategyGroup governance into Owner manual operation. Do not ask
+the Owner to manually judge raw no-action rows, replay samples, signal
+freshness, RequiredFacts assembly, candidate/auth evidence, FinalGate, Operation
+Layer, or ordinary in-boundary execution steps.
+
+If the remaining gap is fact mapping, classifier repair, replay coverage,
+monitor integration, runtime readiness, or a non-authority engineering defect,
+continue engineering progress. Escalate to the Owner only for policy, tier,
+capital/profile/scope, pause/resume, promote/downshift/park/kill, production
+transition, or abnormal intervention.
+
 ## Standing Authorization
 
 During the development-stage pilot, do not create new chat-confirmation
@@ -134,6 +210,25 @@ Every blocker must classify itself as one of:
 
 Gates protect bounded real-funds safety. They must not become opaque all-AND
 project blockers.
+
+Gate checks must be scoped by execution surface:
+
+| Surface | What gates may block | What gates must not block |
+| --- | --- | --- |
+| `rehearsal` | Unsafe or inconsistent local proof, missing test fixtures, broken lifecycle model | Non-executing dry-run, simulation, or packet generation merely because there is no live signal |
+| `shadow` | Candidate/readiness evidence that would mislead tier or Owner state | Read-only observation, replay, classifier repair, RequiredFacts mapping, or monitor integration |
+| `live_submit` | Real exchange write, stale facts, missing protection, duplicate submit, wrong scope, FinalGate/Operation Layer bypass | Engineering closure that remains non-executing and keeps `actionable_now=false` |
+| `review` | Review claims unsupported by evidence | Recording negative evidence, rough cost estimates, or simulator outcomes as non-authority review input |
+
+No live-only condition may block pre-live engineering closure. A missing fresh
+signal, missing action-time live fact, or absent real exchange outcome blocks
+real submit and live outcome calibration only. It does not block simulation,
+dry-run, paper Operation Layer, post-submit lifecycle rehearsal, rough cost/PnL
+calculation, or Review Ledger shape work.
+
+Rehearsal and simulation may unlock the next engineering capability, but they
+must never set `actionable_now=true`, pretend to be live RequiredFacts, or become
+Operation Layer submit authority.
 
 Monitor cache freshness is a reporting constraint, not a trading safety gate.
 `runtime_progress_cache_stale`, `runtime_progress_cache_missing`,
@@ -247,6 +342,10 @@ Why
 Allowed files
 Forbidden files
 Requirements
+Global Authority Model
+Capability Unlocked
+Next Engineering Bottleneck
+Rehearsal/Simulation Boundary
 Tests
 Done When
 Hard Stop

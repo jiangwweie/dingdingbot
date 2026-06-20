@@ -1,0 +1,81 @@
+{
+  "btpc_state": {
+    "actionable_now": false,
+    "classifier_guard_ready": true,
+    "classifier_review_satisfies_live_required_facts": false,
+    "current_tier": "L2",
+    "decision": "revise",
+    "fact_source_guard_ready": true,
+    "l2_promotion_authority": false,
+    "l2_shadow_observation_can_continue": true,
+    "l4_scope_change_recommended": false,
+    "mapping_satisfies_live_required_facts": false,
+    "real_order_authority": false,
+    "strategy_group_id": "BTPC-001"
+  },
+  "decision": {
+    "classifier_review_satisfies_live_required_facts": false,
+    "default_next_step": "continue_btpc_l2_shadow_observation_with_fact_classifier_guard",
+    "keep_l2_shadow_observation": true,
+    "l2_promotion_recommended_now": false,
+    "l4_scope_change_recommended": false,
+    "mapping_satisfies_live_required_facts": false,
+    "owner_risk_acceptance_cannot_set_actionable_now_true": true,
+    "owner_risk_acceptance_may_advance_trial_eligibility_only": true,
+    "real_order_scope_change_recommended": false,
+    "revise_fact_classifier_inputs_before_promotion": true,
+    "tier_policy_change_recommended_now": false
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_btpc_fact_classifier_guard",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "safety_invariants": {
+    "actionable_now": false,
+    "exchange_write_called": false,
+    "final_gate_called": false,
+    "live_profile_changed": false,
+    "local_guard_only": true,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_defaults_changed": false,
+    "real_order_authority": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.strategygroup_btpc_fact_classifier_guard.v1",
+  "scope": "strategygroup_btpc_fact_classifier_guard",
+  "source_rows": [
+    {
+      "artifact": "btpc_l2_keep_revise_fact_source_decision",
+      "default_next_step": "execute_btpc_l2_fact_source_and_classifier_review_tasks_locally",
+      "expected_status": "btpc_l2_keep_revise_fact_source_decision_ready",
+      "forbidden_effects": [],
+      "ready": true,
+      "status": "btpc_l2_keep_revise_fact_source_decision_ready"
+    },
+    {
+      "artifact": "btpc_live_derivatives_fact_source_mapping",
+      "default_next_step": "review_btpc_conflict_and_freshness_classifier_rules_before_any_l2_promotion_review",
+      "expected_status": "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority",
+      "forbidden_effects": [],
+      "ready": true,
+      "status": "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority"
+    },
+    {
+      "artifact": "btpc_classifier_rule_review",
+      "default_next_step": "continue_btpc_l2_shadow_observation_with_classifier_rule_review_recorded",
+      "expected_status": "btpc_classifier_rule_review_recorded_without_live_authority",
+      "forbidden_effects": [],
+      "ready": true,
+      "status": "btpc_classifier_rule_review_recorded_without_live_authority"
+    }
+  ],
+  "status": "btpc_fact_classifier_guard_ready",
+  "validation_errors": []
+}

@@ -316,6 +316,252 @@ def _write_ready_strategygroup_decision_ledger(command: list[str]) -> None:
     )
 
 
+def _write_ready_strategygroup_quality_wave(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "quality_wave_ready",
+            "rows": [
+                {
+                    "strategy_group_id": "BTPC-001",
+                    "current_tier": "L2",
+                    "current_decision": "revise",
+                },
+                {
+                    "strategy_group_id": "VCB-001",
+                    "current_tier": "L1",
+                    "current_decision": "keep_observing",
+                },
+                {
+                    "strategy_group_id": "LSR-001",
+                    "current_tier": "L1",
+                    "current_decision": "keep_observing",
+                },
+                {
+                    "strategy_group_id": "BRF-001",
+                    "current_tier": "L1",
+                    "current_decision": "keep_observing",
+                },
+                {
+                    "strategy_group_id": "RBR-001",
+                    "current_tier": "L1",
+                    "current_decision": "park",
+                },
+            ],
+            "interaction": {
+                "level": "L0_local_quality_wave",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _write_ready_handoff_boundary_closure(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "handoff_boundary_closure_ready",
+            "interaction": {
+                "level": "L0_local_handoff_boundary_closure",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _write_ready_btpc_fact_classifier_guard(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "btpc_fact_classifier_guard_ready",
+            "interaction": {
+                "level": "L0_local_btpc_fact_classifier_guard",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
+def _write_ready_lifecycle_rehearsal(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "lifecycle_rehearsal_ready",
+            "interaction": {
+                "level": "L0_local_lifecycle_rehearsal",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
+def _write_ready_pre_live_rehearsal_readiness(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "pre_live_rehearsal_ready",
+            "decision": {
+                "pre_live_rehearsal_ready": True,
+                "live_submit_ready": False,
+                "live_outcome_calibrated": False,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_pre_live_rehearsal_readiness",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
+def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "live_submit_standby_waiting_for_market",
+            "runtime_consumption": {
+                "standard_local_monitor_sequence_step": True,
+                "tokyo_runtime_can_consume_after_deploy": True,
+                "pre_live_rehearsal_ready_visible": True,
+                "live_submit_ready_false_reason": "no_fresh_signal",
+            },
+            "owner_state": {
+                "owner_status": "waiting_for_opportunity",
+                "owner_label": "等待机会",
+                "owner_intervention_required": False,
+                "owner_manual_packet_read_required": False,
+            },
+            "checks": {
+                "blockers": [],
+                "pre_live_rehearsal_ready": True,
+                "live_submit_ready": False,
+                "owner_intervention_required": False,
+                "fresh_signal_state": "none",
+            },
+            "decision": {
+                "pre_live_rehearsal_ready": True,
+                "live_submit_standby_ready": True,
+                "live_submit_ready": False,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_live_submit_readiness_bridge",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
+def _maybe_write_strategygroup_closure_step(
+    script: str, command: list[str]
+) -> subprocess.CompletedProcess[str] | None:
+    if script == "build_strategygroup_quality_wave.py":
+        _write_ready_strategygroup_quality_wave(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_handoff_boundary_closure.py":
+        _write_ready_handoff_boundary_closure(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_btpc_fact_classifier_guard.py":
+        _write_ready_btpc_fact_classifier_guard(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_lifecycle_rehearsal.py":
+        _write_ready_lifecycle_rehearsal(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_pre_live_rehearsal_readiness.py":
+        _write_ready_pre_live_rehearsal_readiness(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_live_submit_readiness_bridge.py":
+        _write_ready_live_submit_readiness_bridge(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    return None
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -324,6 +570,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
         calls.append(script)
+        closure_result = _maybe_write_strategygroup_closure_step(script, command)
+        if closure_result is not None:
+            return closure_result
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -536,6 +785,26 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
         strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
         strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
+        strategygroup_quality_wave_json=tmp_path / "quality-wave.json",
+        strategygroup_quality_wave_md=tmp_path / "quality-wave.md",
+        strategygroup_handoff_boundary_closure_json=tmp_path
+        / "handoff-boundary.json",
+        strategygroup_handoff_boundary_closure_md=tmp_path
+        / "handoff-boundary.md",
+        strategygroup_btpc_fact_classifier_guard_json=tmp_path
+        / "btpc-guard.json",
+        strategygroup_btpc_fact_classifier_guard_md=tmp_path
+        / "btpc-guard.md",
+        strategygroup_lifecycle_rehearsal_json=tmp_path / "lifecycle.json",
+        strategygroup_lifecycle_rehearsal_md=tmp_path / "lifecycle.md",
+        strategygroup_pre_live_rehearsal_readiness_json=tmp_path
+        / "pre-live-readiness.json",
+        strategygroup_pre_live_rehearsal_readiness_md=tmp_path
+        / "pre-live-readiness.md",
+        strategygroup_live_submit_readiness_bridge_json=tmp_path
+        / "live-submit-bridge.json",
+        strategygroup_live_submit_readiness_bridge_md=tmp_path
+        / "live-submit-bridge.md",
         command_runner=fake_runner,
     )
 
@@ -560,6 +829,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py",
         "build_strategygroup_btpc_classifier_rule_review.py",
         "build_strategygroup_decision_ledger.py",
+        "build_strategygroup_quality_wave.py",
+        "build_strategygroup_handoff_boundary_closure.py",
+        "build_strategygroup_btpc_fact_classifier_guard.py",
+        "build_strategygroup_lifecycle_rehearsal.py",
+        "build_strategygroup_pre_live_rehearsal_readiness.py",
+        "build_strategygroup_live_submit_readiness_bridge.py",
     ]
     assert len(decision_loop_commands) == 2
     assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
@@ -582,6 +857,9 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        closure_result = _maybe_write_strategygroup_closure_step(script, command)
+        if closure_result is not None:
+            return closure_result
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -762,6 +1040,26 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
         strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
         strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
+        strategygroup_quality_wave_json=tmp_path / "quality-wave.json",
+        strategygroup_quality_wave_md=tmp_path / "quality-wave.md",
+        strategygroup_handoff_boundary_closure_json=tmp_path
+        / "handoff-boundary.json",
+        strategygroup_handoff_boundary_closure_md=tmp_path
+        / "handoff-boundary.md",
+        strategygroup_btpc_fact_classifier_guard_json=tmp_path
+        / "btpc-guard.json",
+        strategygroup_btpc_fact_classifier_guard_md=tmp_path
+        / "btpc-guard.md",
+        strategygroup_lifecycle_rehearsal_json=tmp_path / "lifecycle.json",
+        strategygroup_lifecycle_rehearsal_md=tmp_path / "lifecycle.md",
+        strategygroup_pre_live_rehearsal_readiness_json=tmp_path
+        / "pre-live-readiness.json",
+        strategygroup_pre_live_rehearsal_readiness_md=tmp_path
+        / "pre-live-readiness.md",
+        strategygroup_live_submit_readiness_bridge_json=tmp_path
+        / "live-submit-bridge.json",
+        strategygroup_live_submit_readiness_bridge_md=tmp_path
+        / "live-submit-bridge.md",
         command_runner=fake_runner,
     )
 
@@ -779,6 +1077,9 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        closure_result = _maybe_write_strategygroup_closure_step(script, command)
+        if closure_result is not None:
+            return closure_result
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -1021,6 +1322,26 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
         strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
         strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
+        strategygroup_quality_wave_json=tmp_path / "quality-wave.json",
+        strategygroup_quality_wave_md=tmp_path / "quality-wave.md",
+        strategygroup_handoff_boundary_closure_json=tmp_path
+        / "handoff-boundary.json",
+        strategygroup_handoff_boundary_closure_md=tmp_path
+        / "handoff-boundary.md",
+        strategygroup_btpc_fact_classifier_guard_json=tmp_path
+        / "btpc-guard.json",
+        strategygroup_btpc_fact_classifier_guard_md=tmp_path
+        / "btpc-guard.md",
+        strategygroup_lifecycle_rehearsal_json=tmp_path / "lifecycle.json",
+        strategygroup_lifecycle_rehearsal_md=tmp_path / "lifecycle.md",
+        strategygroup_pre_live_rehearsal_readiness_json=tmp_path
+        / "pre-live-readiness.json",
+        strategygroup_pre_live_rehearsal_readiness_md=tmp_path
+        / "pre-live-readiness.md",
+        strategygroup_live_submit_readiness_bridge_json=tmp_path
+        / "live-submit-bridge.json",
+        strategygroup_live_submit_readiness_bridge_md=tmp_path
+        / "live-submit-bridge.md",
         command_runner=fake_runner,
     )
 
@@ -1041,6 +1362,9 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        closure_result = _maybe_write_strategygroup_closure_step(script, command)
+        if closure_result is not None:
+            return closure_result
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -1241,6 +1565,26 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
         strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
         strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
+        strategygroup_quality_wave_json=tmp_path / "quality-wave.json",
+        strategygroup_quality_wave_md=tmp_path / "quality-wave.md",
+        strategygroup_handoff_boundary_closure_json=tmp_path
+        / "handoff-boundary.json",
+        strategygroup_handoff_boundary_closure_md=tmp_path
+        / "handoff-boundary.md",
+        strategygroup_btpc_fact_classifier_guard_json=tmp_path
+        / "btpc-guard.json",
+        strategygroup_btpc_fact_classifier_guard_md=tmp_path
+        / "btpc-guard.md",
+        strategygroup_lifecycle_rehearsal_json=tmp_path / "lifecycle.json",
+        strategygroup_lifecycle_rehearsal_md=tmp_path / "lifecycle.md",
+        strategygroup_pre_live_rehearsal_readiness_json=tmp_path
+        / "pre-live-readiness.json",
+        strategygroup_pre_live_rehearsal_readiness_md=tmp_path
+        / "pre-live-readiness.md",
+        strategygroup_live_submit_readiness_bridge_json=tmp_path
+        / "live-submit-bridge.json",
+        strategygroup_live_submit_readiness_bridge_md=tmp_path
+        / "live-submit-bridge.md",
         command_runner=fake_runner,
     )
 
@@ -1268,6 +1612,9 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        closure_result = _maybe_write_strategygroup_closure_step(script, command)
+        if closure_result is not None:
+            return closure_result
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -1455,6 +1802,26 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         btpc_classifier_rule_review_md=tmp_path / "btpc-classifier-rule.md",
         strategygroup_decision_ledger_json=tmp_path / "decision-ledger.json",
         strategygroup_decision_ledger_md=tmp_path / "decision-ledger.md",
+        strategygroup_quality_wave_json=tmp_path / "quality-wave.json",
+        strategygroup_quality_wave_md=tmp_path / "quality-wave.md",
+        strategygroup_handoff_boundary_closure_json=tmp_path
+        / "handoff-boundary.json",
+        strategygroup_handoff_boundary_closure_md=tmp_path
+        / "handoff-boundary.md",
+        strategygroup_btpc_fact_classifier_guard_json=tmp_path
+        / "btpc-guard.json",
+        strategygroup_btpc_fact_classifier_guard_md=tmp_path
+        / "btpc-guard.md",
+        strategygroup_lifecycle_rehearsal_json=tmp_path / "lifecycle.json",
+        strategygroup_lifecycle_rehearsal_md=tmp_path / "lifecycle.md",
+        strategygroup_pre_live_rehearsal_readiness_json=tmp_path
+        / "pre-live-readiness.json",
+        strategygroup_pre_live_rehearsal_readiness_md=tmp_path
+        / "pre-live-readiness.md",
+        strategygroup_live_submit_readiness_bridge_json=tmp_path
+        / "live-submit-bridge.json",
+        strategygroup_live_submit_readiness_bridge_md=tmp_path
+        / "live-submit-bridge.md",
         command_runner=fake_runner,
     )
 

@@ -127,6 +127,52 @@ DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON = (
 DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.md"
 )
+DEFAULT_STRATEGYGROUP_QUALITY_WAVE_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
+)
+DEFAULT_STRATEGYGROUP_QUALITY_WAVE_MD = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.md"
+)
+DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json"
+)
+DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_MD = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.md"
+)
+DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json"
+)
+DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_MD = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.md"
+)
+DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json"
+)
+DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_MD = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.md"
+)
+DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json"
+)
+DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.md"
+)
+DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-live-submit-readiness-bridge.json"
+)
+DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-live-submit-readiness-bridge.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -205,6 +251,38 @@ def main(argv: list[str] | None = None) -> int:
             args.strategygroup_decision_ledger_json
         ),
         strategygroup_decision_ledger_md=Path(args.strategygroup_decision_ledger_md),
+        strategygroup_quality_wave_json=Path(args.strategygroup_quality_wave_json),
+        strategygroup_quality_wave_md=Path(args.strategygroup_quality_wave_md),
+        strategygroup_handoff_boundary_closure_json=Path(
+            args.strategygroup_handoff_boundary_closure_json
+        ),
+        strategygroup_handoff_boundary_closure_md=Path(
+            args.strategygroup_handoff_boundary_closure_md
+        ),
+        strategygroup_btpc_fact_classifier_guard_json=Path(
+            args.strategygroup_btpc_fact_classifier_guard_json
+        ),
+        strategygroup_btpc_fact_classifier_guard_md=Path(
+            args.strategygroup_btpc_fact_classifier_guard_md
+        ),
+        strategygroup_lifecycle_rehearsal_json=Path(
+            args.strategygroup_lifecycle_rehearsal_json
+        ),
+        strategygroup_lifecycle_rehearsal_md=Path(
+            args.strategygroup_lifecycle_rehearsal_md
+        ),
+        strategygroup_pre_live_rehearsal_readiness_json=Path(
+            args.strategygroup_pre_live_rehearsal_readiness_json
+        ),
+        strategygroup_pre_live_rehearsal_readiness_md=Path(
+            args.strategygroup_pre_live_rehearsal_readiness_md
+        ),
+        strategygroup_live_submit_readiness_bridge_json=Path(
+            args.strategygroup_live_submit_readiness_bridge_json
+        ),
+        strategygroup_live_submit_readiness_bridge_md=Path(
+            args.strategygroup_live_submit_readiness_bridge_md
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -290,6 +368,38 @@ def build_local_monitor_sequence_report(
         DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON
     ),
     strategygroup_decision_ledger_md: Path = DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD,
+    strategygroup_quality_wave_json: Path = DEFAULT_STRATEGYGROUP_QUALITY_WAVE_JSON,
+    strategygroup_quality_wave_md: Path = DEFAULT_STRATEGYGROUP_QUALITY_WAVE_MD,
+    strategygroup_handoff_boundary_closure_json: Path = (
+        DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_JSON
+    ),
+    strategygroup_handoff_boundary_closure_md: Path = (
+        DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_MD
+    ),
+    strategygroup_btpc_fact_classifier_guard_json: Path = (
+        DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_JSON
+    ),
+    strategygroup_btpc_fact_classifier_guard_md: Path = (
+        DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_MD
+    ),
+    strategygroup_lifecycle_rehearsal_json: Path = (
+        DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_JSON
+    ),
+    strategygroup_lifecycle_rehearsal_md: Path = (
+        DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_MD
+    ),
+    strategygroup_pre_live_rehearsal_readiness_json: Path = (
+        DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_JSON
+    ),
+    strategygroup_pre_live_rehearsal_readiness_md: Path = (
+        DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD
+    ),
+    strategygroup_live_submit_readiness_bridge_json: Path = (
+        DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON
+    ),
+    strategygroup_live_submit_readiness_bridge_md: Path = (
+        DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -684,6 +794,134 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_quality_wave_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_quality_wave.py"),
+        "--output-json",
+        str(strategygroup_quality_wave_json),
+        "--output-md",
+        str(strategygroup_quality_wave_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_quality_wave",
+            strategygroup_quality_wave_command,
+            strategygroup_quality_wave_json,
+            runner,
+        )
+    )
+
+    strategygroup_handoff_boundary_closure_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_handoff_boundary_closure.py"),
+        "--quality-wave-json",
+        str(strategygroup_quality_wave_json),
+        "--output-json",
+        str(strategygroup_handoff_boundary_closure_json),
+        "--output-owner-progress",
+        str(strategygroup_handoff_boundary_closure_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_handoff_boundary_closure",
+            strategygroup_handoff_boundary_closure_command,
+            strategygroup_handoff_boundary_closure_json,
+            runner,
+        )
+    )
+
+    strategygroup_btpc_fact_classifier_guard_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_btpc_fact_classifier_guard.py"),
+        "--btpc-l2-decision-json",
+        str(btpc_l2_keep_revise_fact_source_decision_json),
+        "--btpc-live-source-mapping-json",
+        str(btpc_live_derivatives_fact_source_mapping_json),
+        "--btpc-classifier-rule-review-json",
+        str(btpc_classifier_rule_review_json),
+        "--output-json",
+        str(strategygroup_btpc_fact_classifier_guard_json),
+        "--output-owner-progress",
+        str(strategygroup_btpc_fact_classifier_guard_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_btpc_fact_classifier_guard",
+            strategygroup_btpc_fact_classifier_guard_command,
+            strategygroup_btpc_fact_classifier_guard_json,
+            runner,
+        )
+    )
+
+    strategygroup_lifecycle_rehearsal_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_lifecycle_rehearsal.py"),
+        "--output-json",
+        str(strategygroup_lifecycle_rehearsal_json),
+        "--output-owner-progress",
+        str(strategygroup_lifecycle_rehearsal_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_lifecycle_rehearsal",
+            strategygroup_lifecycle_rehearsal_command,
+            strategygroup_lifecycle_rehearsal_json,
+            runner,
+        )
+    )
+
+    strategygroup_pre_live_rehearsal_readiness_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_pre_live_rehearsal_readiness.py"),
+        "--quality-wave-json",
+        str(strategygroup_quality_wave_json),
+        "--handoff-boundary-json",
+        str(strategygroup_handoff_boundary_closure_json),
+        "--btpc-guard-json",
+        str(strategygroup_btpc_fact_classifier_guard_json),
+        "--lifecycle-rehearsal-json",
+        str(strategygroup_lifecycle_rehearsal_json),
+        "--output-json",
+        str(strategygroup_pre_live_rehearsal_readiness_json),
+        "--output-owner-progress",
+        str(strategygroup_pre_live_rehearsal_readiness_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_pre_live_rehearsal_readiness",
+            strategygroup_pre_live_rehearsal_readiness_command,
+            strategygroup_pre_live_rehearsal_readiness_json,
+            runner,
+        )
+    )
+
+    strategygroup_live_submit_readiness_bridge_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_live_submit_readiness_bridge.py"),
+        "--pre-live-readiness-json",
+        str(strategygroup_pre_live_rehearsal_readiness_json),
+        "--daily-check-json",
+        str(daily_check_json),
+        "--live-cutover-json",
+        str(live_cutover_json),
+        "--goal-progress-json",
+        str(goal_progress_json),
+        "--completion-audit-json",
+        str(completion_audit_json),
+        "--output-json",
+        str(strategygroup_live_submit_readiness_bridge_json),
+        "--output-owner-progress",
+        str(strategygroup_live_submit_readiness_bridge_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_live_submit_readiness_bridge",
+            strategygroup_live_submit_readiness_bridge_command,
+            strategygroup_live_submit_readiness_bridge_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -788,6 +1026,22 @@ def build_local_monitor_sequence_report(
             "btpc_classifier_rule_review_json": str(btpc_classifier_rule_review_json),
             "strategygroup_decision_ledger_json": str(
                 strategygroup_decision_ledger_json
+            ),
+            "strategygroup_quality_wave_json": str(strategygroup_quality_wave_json),
+            "strategygroup_handoff_boundary_closure_json": str(
+                strategygroup_handoff_boundary_closure_json
+            ),
+            "strategygroup_btpc_fact_classifier_guard_json": str(
+                strategygroup_btpc_fact_classifier_guard_json
+            ),
+            "strategygroup_lifecycle_rehearsal_json": str(
+                strategygroup_lifecycle_rehearsal_json
+            ),
+            "strategygroup_pre_live_rehearsal_readiness_json": str(
+                strategygroup_pre_live_rehearsal_readiness_json
+            ),
+            "strategygroup_live_submit_readiness_bridge_json": str(
+                strategygroup_live_submit_readiness_bridge_json
             ),
         },
     }
@@ -1451,6 +1705,54 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-decision-ledger-md",
         default=str(DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-quality-wave-json",
+        default=str(DEFAULT_STRATEGYGROUP_QUALITY_WAVE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-quality-wave-md",
+        default=str(DEFAULT_STRATEGYGROUP_QUALITY_WAVE_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-handoff-boundary-closure-json",
+        default=str(DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-handoff-boundary-closure-md",
+        default=str(DEFAULT_STRATEGYGROUP_HANDOFF_BOUNDARY_CLOSURE_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-btpc-fact-classifier-guard-json",
+        default=str(DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-btpc-fact-classifier-guard-md",
+        default=str(DEFAULT_STRATEGYGROUP_BTPC_FACT_CLASSIFIER_GUARD_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-lifecycle-rehearsal-json",
+        default=str(DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-lifecycle-rehearsal-md",
+        default=str(DEFAULT_STRATEGYGROUP_LIFECYCLE_REHEARSAL_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-pre-live-rehearsal-readiness-json",
+        default=str(DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-pre-live-rehearsal-readiness-md",
+        default=str(DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-live-submit-readiness-bridge-json",
+        default=str(DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-live-submit-readiness-bridge-md",
+        default=str(DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

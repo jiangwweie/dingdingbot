@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-19
+last_verified: 2026-06-20
 ---
 
 # AI Agent Constraints
@@ -49,6 +49,86 @@ Inside the selected StrategyGroup, selected symbol/side universe, allocated
 subaccount capital, and configured leverage/notional profile, the system should
 prefer fast opportunity capture over additional discretionary de-risking.
 
+## Global Authority Model
+
+Agents must preserve this split:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+Owner policy includes StrategyGroup enable/pause/resume, promote/downshift,
+park/kill, scoped risk acceptance, capital/profile/scope changes, and
+production-stage transition.
+
+System process includes observation, RequiredFacts mapping, fresh signal
+detection, candidate/auth evidence, action-time FinalGate, official Operation
+Layer, protection, reconciliation, settlement, and review capture.
+
+Owner scoped risk acceptance may advance `trial_eligible` or tier eligibility.
+It must not set `actionable_now=true` and must not bypass execution safety or
+authority hard stops.
+
+Do not convert StrategyGroup governance into Owner manual operation. Do not ask
+the Owner to manually judge RequiredFacts, fresh signal, candidate/auth,
+FinalGate, Operation Layer, replay samples, no-action rows, or ordinary
+in-boundary execution steps.
+
+If the remaining gap is engineering work, fact mapping, classifier repair,
+replay coverage, monitor integration, or runtime readiness, continue the
+engineering path. Escalate only for Owner policy, tier, capital/profile/scope,
+pause/resume, promote/downshift/park/kill, production transition, or abnormal
+intervention.
+
+## Capability-Closure Discipline
+
+Goal-mode tasks must not stop at explanation. Each task must close one
+engineering problem class, unlock one concrete capability, and expose the next
+engineering bottleneck.
+
+Required Evidence Packet fields for non-trivial work:
+
+- `closed_engineering_problem`;
+- `capability_unlocked`;
+- `next_engineering_bottleneck`;
+- validation proving the capability works or the bottleneck is
+  machine-checkable.
+
+Do not mark a task complete when it only says a capability is missing. Convert
+the missing capability into code, tests, generated checks, monitor integration,
+or a precise next bottleneck. Use `partial` if the task only produced a packet,
+summary, or diagnosis.
+
+Small-capital execution frictions are engineering lifecycle branches before
+they are live blockers. Implement coarse cost estimates, submit/reject/partial/
+timeout handling, protection failure handling, reconciliation shape, and Review
+Ledger feedback paths locally where possible. Live outcomes calibrate these
+branches; they should not be used as generic reasons to stop engineering.
+
+## Phased Gate Discipline
+
+Gate checks must identify which surface they block:
+
+| Surface | Blocks | Must not block |
+| --- | --- | --- |
+| `rehearsal` | Broken local proof, fixture inconsistency, unsafe simulated lifecycle | Non-executing dry-run, simulation, packet generation, cost estimate, or recovery modeling because no live signal exists |
+| `shadow` | Misleading candidate/readiness evidence or tier state | Read-only observation, replay, classifier repair, RequiredFacts mapping, or monitor integration |
+| `live_submit` | Real exchange write when FinalGate, Operation Layer, protection, scope, account, or exchange facts fail | Non-executing engineering closure that keeps `actionable_now=false` |
+| `review` | Claims that lack supporting evidence | Negative evidence, simulated outcomes, and rough cost/PnL as non-authority review input |
+
+Do not require live signal, live fill, or live PnL before closing pre-live
+engineering branches. Dry-run, simulation, paper Operation Layer, and
+post-submit lifecycle rehearsal should be used to close submit/reject/partial/
+timeout/protection/reconciliation/review shapes before live validation.
+
+The boundary is authority, not progress. Rehearsal may unlock the next
+engineering bottleneck, but it must not set `actionable_now=true`, fabricate
+live RequiredFacts, bypass FinalGate or Operation Layer, or create exchange
+writes.
+
 When the system is healthy but waiting for market opportunity, agents should
 not treat `waiting_for_market` as a blocker. Non-market-dependent progress
 should happen through replay, synthetic signal fixtures, paper/simulator
@@ -75,6 +155,30 @@ is not a full opportunity log: records enter the main control layer only when
 they change one of these decisions: `go_live`, `do_not_go_live`,
 `keep_observing`, `revise`, `park`, `kill`, `promote`, or
 `block_for_safety`.
+
+## Global Source Discipline
+
+Agents must follow `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` when
+choosing sources. In short:
+
+```text
+Docs explain.
+Registry defines strategy assets.
+Policy records Owner-authorized control.
+Runtime stores current system state.
+Generated views summarize.
+Archives preserve provenance.
+```
+
+StrategyGroup semantics belong in reviewed handoff packs and the registry
+contract. Dynamic actionability belongs to runtime state. Owner risk acceptance
+belongs to explicit Owner policy or current scoped decisions. Generated monitor,
+replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
+into authority.
+
+Goal-mode work must follow `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`.
+Architecture direction should enter execution as one bounded Goal Packet, and
+execution must return an Evidence Packet before the next architectural verdict.
 
 ## P0 / P0.5 Execution Discipline
 
@@ -222,6 +326,12 @@ Every blocker must classify itself as one of:
 
 Gates exist to preserve bounded real-funds safety. They must not become opaque
 all-AND project blockers.
+
+Gate scope must be explicit. A live-submit gate may block only real exchange
+write or live actionability. It must not block local dry-run, simulation,
+paper/simulator Operation Layer, post-submit lifecycle rehearsal, rough
+cost/PnL estimation, or monitor/review shape work when those artifacts remain
+non-executing and non-authoritative.
 
 Monitor cache freshness is not a live-trading safety blocker. Cache missing,
 stale cache age, stale cache schema, or runtime-head mismatch must be classified

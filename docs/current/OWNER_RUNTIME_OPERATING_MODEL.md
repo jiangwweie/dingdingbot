@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-19
+last_verified: 2026-06-20
 ---
 
 # Owner Runtime Operating Model
@@ -16,6 +16,29 @@ enable StrategyGroup
 -> Owner intervenes only when intervention is requested
 -> Owner reviews outcomes later
 ```
+
+## Authority Split
+
+The global authority model is:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+| Layer | Owner authority | System responsibility |
+| --- | --- | --- |
+| Strategy policy | Enable, pause, resume, promote, downshift, park, kill, or accept scoped strategy risk | Maintain registry, tier state, and decision evidence |
+| Runtime scope | Allocate subaccount risk budget, profile, symbol/side scope, and production-stage transition | Enforce selected scope without hidden de-risking |
+| Normal process | Supervise status and intervene only when requested | Observe, check, prepare, submit through official path, protect, reconcile, settle, and record |
+| Actionability | Cannot hand-set `actionable_now=true` | Derive `actionable_now` from fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account, and exchange facts |
+
+The Owner can decide that a risky StrategyGroup deserves higher or lower tier
+eligibility. The Owner should not be turned into the operator who manually
+assembles facts, validates every signal, approves every in-boundary candidate,
+or reads raw packets before routine process execution can continue.
 
 ## Owner Decisions
 
@@ -50,6 +73,30 @@ The system handles:
 - post-submit finalize, reconciliation, budget settlement, and review evidence.
 
 Those are system responsibilities, not normal Owner workflow steps.
+
+If the remaining gap is fact mapping, classifier repair, replay coverage,
+monitor integration, runtime readiness, or a non-authority engineering defect,
+the system and agents should continue engineering progress instead of escalating
+ordinary process work to the Owner.
+
+Execution frictions in the small-capital pilot are engineering lifecycle
+branches first and live calibration questions second. Fill probability, coarse
+slippage, reject handling, partial-fill handling, protection acceptance,
+reconciliation, settlement, and PnL calculation should be modeled, tested, and
+reviewed before the first real outcome. Live trading calibrates those branches;
+it is not a generic reason to pause engineering.
+
+Owner-facing readiness must separate pre-live closure from live validation:
+
+| Layer | Meaning |
+| --- | --- |
+| `pre_live_rehearsal_ready` | Dry-run, simulation, local lifecycle, rough cost/PnL, reconciliation shape, and review shape are closed without exchange write |
+| `live_submit_ready` | Fresh signal and action-time RequiredFacts/candidate/auth/FinalGate/Operation Layer/protection/account/exchange facts allow real submit |
+| `live_outcome_calibrated` | Real fills, slippage, protection acceptance, settlement, and PnL have been observed and reviewed |
+
+Missing `live_submit_ready` or `live_outcome_calibrated` must not erase
+`pre_live_rehearsal_ready`. The system should keep moving through rehearsal
+until the remaining gap is truly live-only.
 
 The system's hard stops are operational boundaries: wrong account, out-of-scope
 StrategyGroup/symbol/side/profile, stale facts, duplicate submit risk, missing
@@ -101,6 +148,22 @@ The Owner should see product states:
 Raw evidence packets remain available for audit but are not the Owner's daily
 operating interface.
 
+## Strategy Asset Layer
+
+The StrategyGroup asset layer is the registry, not the runtime state. The
+registry explains what a StrategyGroup eats, how it trades, what risks remain,
+and what would promote, downshift, park, or kill it.
+
+`trial_eligible` and `actionable_now` must stay separate:
+
+| Field | Owner meaning |
+| --- | --- |
+| `trial_eligible` | This StrategyGroup may be considered for small-capital trial eligibility under scoped policy |
+| `actionable_now` | Fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account, and exchange facts currently allow action |
+
+No fresh signal makes `actionable_now=false`. It does not automatically make
+the StrategyGroup a bad strategy or remove its trial eligibility.
+
 ## Runtime Product State
 
 During the StrategyGroup runtime pilot, the server should refresh Owner-readable
@@ -135,6 +198,8 @@ Do not show a next-step prompt for healthy automation.
 
 ## Document Authority
 
-This file is the current Owner-operating SSOT. Historical docs compressed into
+This file is the current Owner-operating SSOT. The broader source-class and
+authority rules live in `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`.
+Historical docs compressed into
 `docs/history-archive-2026-06-15-pre-governance.tar.gz` are recovery material
 only and must not become current operating instructions.

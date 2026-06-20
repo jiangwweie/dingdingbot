@@ -1,7 +1,7 @@
 # Main-Control StrategyGroup Handoff Index
 
 Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 
 ## Research Sync
 
@@ -15,11 +15,62 @@ status: reviewed_and_synced_to_main_control_baseline
 
 See `docs/current/strategy-group-handoffs/main-control-research-sync.md`.
 
+## Authority Entrypoints
+
+Before interpreting StrategyGroup handoffs, follow:
+
+```text
+docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
+docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
+docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
+```
+
+Use the global authority split:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+StrategyGroup handoffs and registry rows may support `trial_eligible`, tier
+review, and Owner policy decisions. They do not set `actionable_now=true` and
+must not turn the Owner into the manual operator of RequiredFacts, fresh signal,
+candidate/auth, FinalGate, Operation Layer, replay rows, or no-action rows.
+
 Runtime eligibility tiers are defined in:
 
 ```text
 docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md
 docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
+```
+
+Strategy asset registry semantics are defined in:
+
+```text
+docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
+```
+
+Current StrategyGroup asset baseline rows are generated at:
+
+```text
+docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json
+docs/current/strategy-group-handoffs/strategygroup-registry-baseline.md
+```
+
+Current StrategyGroup tier review rows are generated at:
+
+```text
+docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json
+docs/current/strategy-group-handoffs/strategygroup-tier-review-current.md
+```
+
+Current StrategyGroup quality-governance wave rows are generated at:
+
+```text
+docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json
+docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.md
 ```
 
 Pre-live StrategyGroup decision rows are defined in:
