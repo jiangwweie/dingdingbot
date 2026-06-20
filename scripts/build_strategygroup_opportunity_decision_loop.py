@@ -55,11 +55,14 @@ def build_opportunity_decision_loop(
 ) -> dict[str, Any]:
     post_revision_review_packet = post_revision_review_packet or {}
     btpc_proxy_replay_quality_packet = btpc_proxy_replay_quality_packet or {}
-    review_rows = _dict_rows(expansion_review_packet.get("review_rows"))
     readiness_by_group = {
         str(row.get("strategy_group_id") or "unknown"): row
         for row in _dict_rows(l2_readiness_packet.get("readiness_rows"))
     }
+    review_rows = _decision_source_rows(
+        _dict_rows(expansion_review_packet.get("review_rows")),
+        readiness_by_group,
+    )
     intake_by_group = {
         str(row.get("strategy_group_id") or "unknown"): row
         for row in _dict_rows(l2_intake_packet.get("source_readiness_rows"))
@@ -312,13 +315,21 @@ def _decision_row(
         )
         for gap in gaps
     ]
+    observed_source = str(
+        review_row.get("source") or "signal_coverage_expansion_review"
+    )
+    observed_would_enter = (
+        review_row.get("would_enter")
+        if isinstance(review_row.get("would_enter"), bool)
+        else True
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "symbol": review_row.get("symbol") or readiness_row.get("symbol"),
         "side": review_row.get("side") or readiness_row.get("side"),
         "observed_signal": {
-            "source": "signal_coverage_expansion_review",
-            "would_enter": True,
+            "source": observed_source,
+            "would_enter": observed_would_enter,
             "confidence": review_row.get("confidence"),
             "reason_codes": [str(item) for item in review_row.get("reason_codes") or []],
             "execution_boundary": review_row.get("execution_boundary"),
@@ -339,6 +350,35 @@ def _decision_row(
         "l4_scope_change_recommended": False,
         "candidate_or_finalgate_authority": False,
     }
+
+
+def _decision_source_rows(
+    review_rows: list[dict[str, Any]],
+    readiness_by_group: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows = list(review_rows)
+    existing_groups = {
+        str(row.get("strategy_group_id") or "unknown") for row in review_rows
+    }
+    for group, readiness in sorted(readiness_by_group.items()):
+        if group in existing_groups:
+            continue
+        if readiness.get("l2_readiness") != "l2_shadow_candidate_observation_enabled":
+            continue
+        rows.append(
+            {
+                "strategy_group_id": group,
+                "symbol": readiness.get("symbol"),
+                "side": readiness.get("side"),
+                "current_tier": readiness.get("current_tier"),
+                "source": "l2_readiness_enabled_shadow_continuity",
+                "would_enter": False,
+                "confidence": None,
+                "reason_codes": ["l2_shadow_candidate_observation_enabled"],
+                "execution_boundary": "local L2 shadow quality review only; no FinalGate/Operation Layer",
+            }
+        )
+    return rows
 
 
 def _replay_summary_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:

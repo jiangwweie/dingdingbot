@@ -36,8 +36,11 @@ def build_l2_readiness_review(
     expansion_review_packet: dict[str, Any],
     expansion_policy: dict[str, Any],
 ) -> dict[str, Any]:
-    review_rows = _dict_rows(expansion_review_packet.get("review_rows"))
     policy_groups = _as_dict(expansion_policy.get("strategy_groups"))
+    review_rows = _review_rows_with_enabled_l2_policy(
+        _dict_rows(expansion_review_packet.get("review_rows")),
+        policy_groups,
+    )
     readiness_rows = [
         _readiness_row(row=row, policy=_as_dict(policy_groups.get(str(row.get("strategy_group_id") or ""))))
         for row in review_rows
@@ -216,7 +219,9 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
         "strategy_group_id": strategy_group_id,
         "symbol": row.get("symbol"),
         "side": row.get("side"),
-        "current_tier": row.get("current_tier"),
+        "current_tier": row.get("current_tier")
+        or policy.get("current_main_control_tier")
+        or policy.get("current_tier"),
         "coverage_review_priority": policy.get("coverage_review_priority") or "unknown",
         "l2_readiness": l2_readiness,
         "recommended_action": policy.get("recommended_action")
@@ -233,6 +238,34 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
         "may_create_shadow_candidate_now": False,
         "may_place_real_order_now": False,
     }
+
+
+def _review_rows_with_enabled_l2_policy(
+    review_rows: list[dict[str, Any]],
+    policy_groups: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows = list(review_rows)
+    existing_groups = {
+        str(row.get("strategy_group_id") or "unknown") for row in review_rows
+    }
+    for group, policy_value in sorted(policy_groups.items()):
+        if group in existing_groups:
+            continue
+        policy = _as_dict(policy_value)
+        if str(policy.get("l2_readiness") or "") not in L2_ALREADY_ENABLED:
+            continue
+        rows.append(
+            {
+                "strategy_group_id": group,
+                "symbol": policy.get("symbol"),
+                "side": policy.get("side"),
+                "current_tier": policy.get("current_main_control_tier")
+                or policy.get("current_tier"),
+                "source": "runtime_tier_policy_enabled_l2_shadow",
+                "would_enter": False,
+            }
+        )
+    return rows
 
 
 def _classifier_repair_spec(policy: dict[str, Any]) -> dict[str, Any]:

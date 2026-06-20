@@ -983,6 +983,51 @@ def test_decision_loop_rolls_btpc_proxy_replay_quality_into_l2_decision():
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_decision_loop_keeps_enabled_btpc_l2_shadow_without_fresh_review_row():
+    module = _load_module()
+    expansion = {
+        **_expansion_review(),
+        "review_rows": [
+            row
+            for row in _expansion_review()["review_rows"]
+            if row["strategy_group_id"] != "BTPC-001"
+        ],
+    }
+    readiness = _l2_readiness()
+    intake = _l2_intake()
+    replay = _replay_lab()
+
+    packet = module.build_opportunity_decision_loop(
+        expansion_review_packet=expansion,
+        l2_readiness_packet=readiness,
+        l2_intake_packet=intake,
+        replay_lab_packet=replay,
+        btpc_proxy_replay_quality_packet=_btpc_proxy_replay_quality(),
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    assert "BTPC-001" in rows
+    assert rows["BTPC-001"]["observed_signal"]["source"] == (
+        "l2_readiness_enabled_shadow_continuity"
+    )
+    assert rows["BTPC-001"]["observed_signal"]["would_enter"] is False
+    assert rows["BTPC-001"]["decision_action"] == (
+        "continue_l2_shadow_quality_review"
+    )
+    quality_rows = {
+        row["strategy_group_id"]: row
+        for row in packet["strategy_quality_decisions"]["rows"]
+    }
+    assert quality_rows["BTPC-001"]["strategy_quality_decision"] == (
+        "keep_l2_shadow_and_revise_fact_classifier_inputs"
+    )
+    assert quality_rows["BTPC-001"]["btpc_proxy_replay_quality"]["ready"] is True
+    assert quality_rows["BTPC-001"]["real_order_authority"] is False
+    assert quality_rows["BTPC-001"]["not_l4_scope_change"] is True
+    assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["interaction"]["places_order"] is False
+
+
 def test_decision_loop_blocks_forbidden_source_effects():
     module = _load_module()
     readiness = _l2_readiness()
