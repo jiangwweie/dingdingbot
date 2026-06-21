@@ -106,7 +106,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
             "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
-        expected_remote_migration_count=79,
+        expected_remote_migration_count=84,
         expected_remote_latest_migration=(
             "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
         ),
@@ -155,8 +155,8 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "systemctl start brc-owner-console-backend.service" in all_commands
     assert "--expected-current-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
     assert "--deployed-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
-    assert "--expected-min-migrations 79" in all_commands
-    assert "--expected-migration-count 79" in all_commands
+    assert "--expected-min-migrations 84" in all_commands
+    assert "--expected-migration-count 84" in all_commands
     assert (
         "--expected-latest-migration "
         "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
