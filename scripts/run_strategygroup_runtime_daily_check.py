@@ -341,8 +341,16 @@ def build_daily_check_report(
         or live_closure_rejected
     ):
         waiting_for_market = False
+    deployment_issue = _has_deployment_issue([*blockers, *hard_failures])
+    safety_blocked = any(
+        _is_safety_blocker(item) for item in [*blockers, *hard_failures]
+    )
     status = "ready"
-    if blockers or hard_failures:
+    if safety_blocked:
+        status = "blocked"
+    elif deployment_issue:
+        status = DEPLOYMENT_ISSUE_STATUS
+    elif blockers or hard_failures:
         status = "blocked"
     elif product_gaps:
         status = "degraded"
@@ -362,7 +370,7 @@ def build_daily_check_report(
         status=status,
         waiting_for_market=waiting_for_market,
     )
-    monitor_status = "fresh"
+    monitor_status = "deployment_issue" if deployment_issue else "fresh"
     owner_status = _owner_status_for(
         runtime_status=runtime_status,
         monitor_status=monitor_status,
@@ -417,6 +425,14 @@ def build_daily_check_report(
         "strategygroup_tier_boundary_ready": strategygroup_tier_boundary_ready,
         "real_order_readiness_summary": dict(real_order_readiness_summary),
         "frontend_scope": checks.get("frontend_scope") or "externalized",
+        "deployment_issue": deployment_issue,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": (
+            ["runtime_head_mismatch"] if "runtime_head_mismatch" in blockers else []
+        ),
+        "refresh_required": False,
+        "automation_notify": False,
+        "owner_notify": visibility["owner_intervention_required"],
     }
 
     return {
@@ -636,11 +652,20 @@ def _owner_visibility(
     waiting_for_market: bool,
 ) -> dict[str, Any]:
     if blockers:
-        category = (
-            "safety_blocker"
-            if any(_is_safety_blocker(blocker) for blocker in blockers)
-            else "engineering_blocker"
-        )
+        if any(_is_safety_blocker(blocker) for blocker in blockers):
+            category = "safety_blocker"
+        elif _has_deployment_issue(blockers):
+            category = "deployment_issue"
+        else:
+            category = "engineering_blocker"
+        if category == "deployment_issue":
+            return {
+                "category": category,
+                "label": "暂不可用",
+                "detail": "Tokyo 运行 head 与当前基线不一致",
+                "next_action": "处理部署基线不一致",
+                "owner_intervention_required": False,
+            }
         return {
             "category": category,
             "label": "安全边界阻断" if category == "safety_blocker" else "工程状态暂不可用",
@@ -716,9 +741,22 @@ def _is_safety_blocker(blocker: str) -> bool:
     return any(token in lowered for token in tokens)
 
 
+def _has_deployment_issue(blockers: list[str]) -> bool:
+    deployment_tokens = (
+        "runtime_head_mismatch",
+        "runtime_goal_status_deployment_not_aligned",
+    )
+    return any(
+        any(token in str(blocker) for token in deployment_tokens)
+        for blocker in blockers
+    )
+
+
 def _owner_blocker_detail(blockers: list[str]) -> str:
     if any(_is_safety_blocker(blocker) for blocker in blockers):
         return "真实订单保持关闭，等待安全状态恢复"
+    if _has_deployment_issue(blockers):
+        return "Tokyo 运行 head 与当前基线不一致"
     return "运行、观察、部署或状态源需要恢复"
 
 
@@ -1075,6 +1113,8 @@ def _gated_cache_report(
 
 
 def _runtime_status_for(*, status: str, waiting_for_market: bool) -> str:
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "temporarily_unavailable"
     if waiting_for_market or status == "waiting_for_market":
         return "waiting_for_market"
     if status == "processing":

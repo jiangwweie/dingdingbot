@@ -511,6 +511,38 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
     assert report["notification"]["reason"] == "blocker_present"
 
 
+def test_daily_check_projects_runtime_head_mismatch_as_deployment_issue():
+    module = _load_module()
+    snapshot = _snapshot(
+        status="blocked",
+        checks={
+            "blockers": ["runtime_head_mismatch"],
+            "product_gaps": [],
+            "backend_active": True,
+            "watcher_timer_active": True,
+            "source_readiness_ready": True,
+            "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
+            "runtime_execution_chain_closure_status_ready": True,
+            "frontend_scope": "externalized",
+        },
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "temporarily_unavailable_deployment_issue"
+    assert report["runtime_status"] == "temporarily_unavailable"
+    assert report["monitor_status"] == "deployment_issue"
+    assert report["owner_status"] == "temporarily_unavailable"
+    assert report["checks"]["deployment_issue"] is True
+    assert report["checks"]["owner_notify"] is False
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["visibility"]["category"] == "deployment_issue"
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["owner_notify"] is False
+
+
 def test_daily_check_classifies_safety_blocker_separately():
     module = _load_module()
     snapshot = _snapshot(
