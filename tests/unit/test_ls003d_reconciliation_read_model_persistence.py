@@ -381,7 +381,10 @@ def test_alembic_single_head():
     assert len(script.get_heads()) == 1
 
 
-def test_clean_temp_db_migration_upgrade_downgrade_upgrade(tmp_path):
+def test_clean_temp_db_migration_upgrade_downgrade_upgrade(tmp_path, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
     db_path = tmp_path / "ls003d_migration.db"
     config = Config()
     config.set_main_option("script_location", str(Path("migrations").resolve()))

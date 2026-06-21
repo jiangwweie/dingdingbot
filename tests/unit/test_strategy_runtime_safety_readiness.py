@@ -132,9 +132,11 @@ def test_safety_readiness_allows_owner_codex_confirmation_when_boundary_complete
         "protection_creation_failure_policy_confirmed",
         "protection_readiness_source_confirmed",
         "stale_fact_behavior_confirmed",
+        "submit_idempotency_policy_id",
         "symbol_side_boundary_confirmed",
         "trusted_account_fact_source_confirmed",
         "trusted_active_position_source_confirmed",
+        "trusted_submit_fact_snapshot_id",
     }
     assert result.not_execution_authority is True
     assert result.execution_intent_created is False

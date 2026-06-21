@@ -191,6 +191,38 @@ async def test_fact_collector_clear_facts_reaches_testnet_ready():
             "available_margin": "800",
         }
 
+    async def market_metadata(_profile):
+        return {
+            "source": "fake_market_metadata",
+            "symbol": profile.symbol,
+            "min_notional": "5",
+            "min_amount": "0.001",
+            "amount_step": "0.001",
+            "tick_size": "0.01",
+            "read_only_guarantee": True,
+        }
+
+    async def protection_readiness(_profile):
+        return {
+            "source": "fake_protection_readiness",
+            "protection_plan_type": "single_tp_plus_sl",
+            "tp_ready": True,
+            "sl_ready": True,
+            "price_source_ready": True,
+            "read_only_guarantee": True,
+        }
+
+    async def recording_readiness(_profile):
+        return {
+            "source": "fake_recording_readiness",
+            "execution_intents_writable": True,
+            "orders_writable": True,
+            "review_writable": True,
+            "audit_writable": True,
+            "result_envelope_writable": True,
+            "read_only_check": True,
+        }
+
     snapshot = await TrialPreflightFactCollector(
         position_reader=empty,
         open_order_reader=empty,
@@ -198,6 +230,9 @@ async def test_fact_collector_clear_facts_reaches_testnet_ready():
         startup_guard_reader=startup,
         reconciliation_reader=reconciliation,
         account_facts_reader=account,
+        market_metadata_reader=market_metadata,
+        protection_readiness_reader=protection_readiness,
+        recording_readiness_reader=recording_readiness,
     ).collect(profile)
     readiness = build_bnb_strategy_trial_readiness(
         observation_case=_bnb_case(),

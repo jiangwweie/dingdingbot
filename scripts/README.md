@@ -3,7 +3,8 @@
 Historical scripts were archived on 2026-04-29 to reduce research and migration noise.
 
 Archived material:
-- `archive/2026-04-29-pre-live-safe-replan/scripts/`
+- `docs/history-archive-2026-06-15-pre-governance.tar.gz`
+- Git history before commit `878dcb99`
 
 Only reintroduce scripts here when they serve the new baseline directly.
 

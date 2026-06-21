@@ -1,12 +1,7 @@
-"""
-Shared config globals - single source of truth for both api.py and api_v1_config.py.
-
-This module exists solely to break the circular import between api.py and api_v1_config.py.
-Both modules import from here, and both modules write to here.
-"""
+"""Shared config globals for the current BRC FastAPI composition root."""
 from typing import Optional, Any
 
-# Config repositories (shared between api.py and api_v1_config.py)
+# Config repositories for the current runtime composition root.
 _strategy_repo: Optional[Any] = None  # StrategyConfigRepository instance
 _risk_repo: Optional[Any] = None  # RiskConfigRepository instance
 _system_repo: Optional[Any] = None  # SystemConfigRepository instance

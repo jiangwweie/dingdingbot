@@ -113,6 +113,7 @@ async def test_repository_round_trip_seed_and_queries(repo):
     assert {item.family_id for item in hypothesis_only} == {
         "VB-001-live-readonly-v0",
         "CPM-RO-001",
+        "MR-001-live-readonly-v0",
     }
 
 
@@ -125,4 +126,4 @@ async def test_repository_upsert_is_idempotent(repo):
     hypothesis_only = await repo.list_registered_hypothesis_only_families()
 
     assert len(active) == 1
-    assert len(hypothesis_only) == 2
+    assert len(hypothesis_only) == 3

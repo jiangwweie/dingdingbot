@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for the first-real-submit history namespace."""
+"""Read-only compatibility wrapper for the explicit Owner first-real-submit packet namespace.
+
+This wrapper does not modify runtime state, create execution intent, or place orders.
+"""
 
 from __future__ import annotations
 

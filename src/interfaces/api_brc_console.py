@@ -6288,6 +6288,11 @@ async def _strategy_group_live_readonly_observation_response(
             current = await repo.list_current_by_candidate(candidate_ids=candidate_ids)
             if not current:
                 current = preview.current_signals
+            else:
+                current_by_candidate = {record.candidate_id: record for record in current}
+                for record in preview.current_signals:
+                    current_by_candidate.setdefault(record.candidate_id, record)
+                current = list(current_by_candidate.values())
         history = await repo.list_recent(limit=50)
         review_repo = PgStrategyGroupForwardReviewRepository()
         reviews = await review_repo.list_by_observation_ids(

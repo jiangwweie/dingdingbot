@@ -751,7 +751,7 @@ def _observation_record_from_output(
         confidence=str(output.confidence),
         reason_codes=list(output.reason_codes),
         human_summary=output.human_summary,
-        evidence_payload=output.evidence_payload,
+        evidence_payload=_evidence_payload_with_required_metadata(spec, output.evidence_payload),
         signal_snapshot=output.signal_snapshot,
         signal_input_snapshot=(
             signal_input.model_dump(mode="json") if signal_input is not None else {}
@@ -762,6 +762,26 @@ def _observation_record_from_output(
         input_refs=output.input_refs.model_dump(mode="json"),
         runtime_signal_planning_readiness=dict(runtime_signal_planning_readiness or {}),
     )
+
+
+def _evidence_payload_with_required_metadata(
+    spec: _ObservationSpec,
+    evidence_payload: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = dict(evidence_payload)
+    if "candidate_semantics" in spec.evidence_payload_fields and "candidate_semantics" not in evidence:
+        evidence["candidate_semantics"] = {
+            "candidate_id": spec.candidate_id,
+            "strategy_family_id": spec.strategy_group_id,
+            "strategy_family_version_id": spec.strategy_family_version_id,
+            "playbook_id": spec.playbook_id,
+            "observation_role": spec.observation_role,
+            "status": "metadata_only_unavailable_from_invalid_signal",
+            "not_order": True,
+            "not_execution_intent": True,
+            "not_execution_authority": True,
+        }
+    return evidence
 
 
 def build_strategy_group_live_readonly_observation_v1(
@@ -852,10 +872,10 @@ def build_strategy_group_live_readonly_observation_v1(
             "not_runtime_source_of_truth": True,
         },
         runner_mapping={
-            "existing_runner": "brc_live_read_only_detection_runner",
-            "runner_source": "src/application/brc_live_read_only_detection_runner.py",
             "can_record_metadata_and_evidence_without_orders": True,
             "strategy_specific_signal_evaluator_glue_wired": True,
+            "legacy_runner_retired": True,
+            "observation_v1_endpoint": "/api/brc/strategy-groups/live-readonly-observation/v1",
             "observation_sink_wiring_status": "process_local_sink_ready_pg_sink_schema_gap",
             "one_shot_observation_api_ready": True,
             "live_runner_started_by_this_endpoint": False,

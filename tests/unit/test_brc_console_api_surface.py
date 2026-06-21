@@ -666,7 +666,7 @@ def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
     assert "MI-001 SOL long" in mi["representative_candidates"]
     assert "MI-001 BNB long" in mi["representative_candidates"]
     assert "coverage repaired" in " ".join(mi["confidence_flags"]).lower()
-    assert mi["live_readonly_observation_readiness"] == "live_readonly_observation_v1_evaluator_ready_requires_runner_binding"
+    assert mi["live_readonly_observation_readiness"] == "live_readonly_observation_v1_ready_runner_retired"
     assert mi["no_execution_permission"] is True
     assert mi["no_order_permission"] is True
     assert mi["no_runtime_start"] is True

@@ -1,9 +1,0 @@
-{
-  "mode_id": "sq02_downside_cont_review",
-  "strategy_contract_id": "SQ02_DOWNSIDE_CONT_V0",
-  "why": "candidate setup deserves Owner review inside local sandbox only",
-  "evidence": ["closed_bar_setup_packet", "docs_only_candidate_context"],
-  "caveats": ["design_only_no_runtime_candidate", "no_exchange_or_account_access"],
-  "default_action": "observe",
-  "llm_role": "explain_audit_suggest_only"
-}

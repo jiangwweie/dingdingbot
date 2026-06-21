@@ -125,7 +125,7 @@ def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account()
     )
 
 
-def test_signal_input_packet_ready_for_btpc_shadow_prepare(monkeypatch, tmp_path):
+def test_signal_input_packet_observe_only_for_btpc_non_entry_snapshot(monkeypatch, tmp_path):
     class FakeSource:
         source_id = "unit_market_source"
         source_type = "unit_read_only"
@@ -165,10 +165,10 @@ def test_signal_input_packet_ready_for_btpc_shadow_prepare(monkeypatch, tmp_path
         )
     )
 
-    assert payload["status"] == "ready_for_shadow_candidate_prepare"
-    assert payload["evaluation_result"]["status"] == "ready_for_semantic_binding"
+    assert payload["status"] == "observe_only"
+    assert payload["evaluation_result"]["status"] == "observe_only"
     assert payload["operator_command_plan"]["next_step"] == (
-        "run_runtime_next_attempt_prepare_api_flow"
+        "observe_only_or_wait_for_next_closed_bar"
     )
     assert payload["safety_invariants"]["execution_intent_created"] is False
     assert payload["safety_invariants"]["order_candidate_created"] is False

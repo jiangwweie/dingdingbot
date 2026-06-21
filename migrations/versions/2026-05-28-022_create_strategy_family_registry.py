@@ -76,7 +76,7 @@ def upgrade() -> None:
             ),
             sa.CheckConstraint(
                 "family_type IN ('trend_following', 'volatility_breakout', "
-                "'pullback_continuation', 'event_driven_discretionary', "
+                "'mean_reversion', 'pullback_continuation', 'event_driven_discretionary', "
                 "'funding_oi_dislocation', 'unknown')",
                 name="ck_brc_strategy_family_registry_type",
             ),

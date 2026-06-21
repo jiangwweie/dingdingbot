@@ -243,7 +243,7 @@ async def test_next_attempt_observation_api_waits_for_observe_only_signal(monkey
 
 
 @pytest.mark.asyncio
-async def test_next_attempt_observation_api_ready_for_prepare_without_records(
+async def test_next_attempt_observation_api_waits_without_entry_signal(
     monkeypatch,
 ):
     runtime = _runtime()
@@ -266,10 +266,10 @@ async def test_next_attempt_observation_api_ready_for_prepare_without_records(
         ),
     )
 
-    assert payload["status"] == "ready_for_prepare"
-    assert payload["signal_packet"]["status"] == "ready_for_shadow_candidate_prepare"
+    assert payload["status"] == "waiting_for_signal"
+    assert payload["signal_packet"]["status"] == "observe_only"
     assert payload["operator_command_plan"]["next_step"] == (
-        "run_official_runtime_next_attempt_prepare_api_flow"
+        "observe_only_or_wait_for_next_closed_bar"
     )
     assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
     assert payload["operator_command_plan"]["creates_execution_intent"] is False

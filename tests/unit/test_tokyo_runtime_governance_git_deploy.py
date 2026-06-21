@@ -90,7 +90,7 @@ def _ready_git_plan():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -203,7 +203,7 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -257,7 +257,7 @@ def test_git_deploy_plan_classifies_remote_probe_network_failure():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -324,7 +324,7 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
     assert report["checks"]["remote_mutation_authorization"]
-    assert report["inputs"]["target_migration_count"] == 84
+    assert report["inputs"]["target_migration_count"] == 79
     assert report["inputs"]["local_latest_migration"] == (
         "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
     )
@@ -361,9 +361,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert '"status": "postdeploy_accepted"' in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
-    assert "--expected-min-migrations 84" in all_commands
+    assert "--expected-min-migrations 79" in all_commands
     assert "--base-revision 081 --head-revision 084 --expected-revision-count 3" in all_commands
-    assert "--expected-migration-count 84" in all_commands
+    assert "--expected-migration-count 79" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
 
@@ -433,7 +433,7 @@ def test_git_deploy_plan_allows_dirty_worktree_for_remote_git_export():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -491,7 +491,7 @@ def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_chec
         api_base="http://127.0.0.1:18080",
         previous_release="current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),

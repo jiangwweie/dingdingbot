@@ -1,7 +1,7 @@
 """Create strategy group read-only observation evidence table
 
 Revision ID: 028
-Revises: 027
+Revises: 022
 Create Date: 2026-05-31
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "028"
-down_revision: Union[str, None] = "027"
+down_revision: Union[str, None] = "022"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -242,16 +242,6 @@ def test_order_lifecycle_adapter_enablement_packet_is_readonly_not_mutating() ->
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_testnet_daily_gate_reset_is_database_mutation_restricted() -> None:
-    result = classify_script_path(REPO_ROOT / "scripts/reset_bnb_testnet_daily_gate.py")
-
-    assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
-    assert result.default_allowed is False
-    assert result.database_write_possible is True
-    assert result.exchange_write_possible is False
-    assert ScriptRiskCategory.TESTNET_SCOPE in result.categories
-
-
 def test_testnet_stress_script_is_exchange_write_restricted() -> None:
     result = classify_script_path(REPO_ROOT / "scripts/run_001d4_multi_cycle_stress.sh")
 

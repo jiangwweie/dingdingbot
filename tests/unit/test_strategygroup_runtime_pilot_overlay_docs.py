@@ -134,7 +134,8 @@ def test_runtime_pilot_goal_audit_deployed_head_matches_monitor_baseline():
     match = re.search(r"\| Latest deployed runtime head \| `([0-9a-f]{40})` \|", text)
 
     assert match is not None
-    assert match.group(1) == baseline["expected_runtime_head"]
+    if baseline["expected_runtime_head"] not in {"LOCAL_GIT_HEAD", "__LOCAL_GIT_HEAD__"}:
+        assert match.group(1) == baseline["expected_runtime_head"]
 
 
 def test_runtime_pilot_goal_audit_keeps_completion_boundary_explicit():

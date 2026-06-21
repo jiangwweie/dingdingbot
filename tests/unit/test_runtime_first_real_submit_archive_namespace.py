@@ -5,7 +5,6 @@ import importlib
 
 ARCHIVED_MODULES = (
     "build_runtime_first_real_submit_owner_packet",
-    "runtime_executable_submit_readiness_from_reports",
     "runtime_legacy_compatibility_isolation_packet",
     "build_runtime_first_real_submit_action_authorization_packet",
     "runtime_first_real_submit_api_flow",
