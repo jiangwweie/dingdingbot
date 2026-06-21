@@ -1211,6 +1211,11 @@ def _sequence_status(
         _packet_monitor_status(packets["goal_progress"]) == "deployment_issue"
     ):
         return DEPLOYMENT_ISSUE_STATUS
+    completion_status = _status(packets["completion_audit"])
+    if completion_status == "needs_non_market_repair":
+        return "needs_non_market_repair"
+    if _sequence_has_processing_signal(packets=packets):
+        return "processing"
     if _packet_monitor_refresh_needed(packets["daily_check"]) or _packet_monitor_refresh_needed(
         packets["goal_progress"]
     ):
@@ -1221,13 +1226,8 @@ def _sequence_status(
             return MONITOR_REFRESH_STATUS
         return "temporarily_unavailable_monitor_refresh_needed"
 
-    completion_status = _status(packets["completion_audit"])
     if completion_status in {"complete", "completed"}:
         return "complete"
-    if completion_status == "needs_non_market_repair":
-        return "needs_non_market_repair"
-    if completion_status == "not_complete_runtime_processing":
-        return "processing"
     l2_readiness_status = _status(packets.get("l2_readiness_review"))
     l2_dry_run_status = _status(packets.get("l2_intake_dry_run"))
     l2_tier_status = _status(packets.get("l2_tier_policy_review"))
@@ -1294,6 +1294,22 @@ def _sequence_status(
     ) == "processing":
         return "processing"
     return "needs_non_market_repair"
+
+
+def _sequence_has_processing_signal(*, packets: dict[str, dict[str, Any]]) -> bool:
+    if _packet_runtime_status(packets.get("daily_check", {})) == "processing":
+        return True
+    if _packet_runtime_status(packets.get("goal_progress", {})) == "processing":
+        return True
+    if _status(packets.get("completion_audit")) == "not_complete_runtime_processing":
+        return True
+    if _status(packets.get("signal_coverage")) == "mainline_runtime_signal_ready":
+        return True
+    if _status(packets.get("daily_check")) == "processing":
+        return True
+    if _status(packets.get("goal_progress")) == "processing":
+        return True
+    return False
 
 
 def _step_returncode_is_monitor_refresh(

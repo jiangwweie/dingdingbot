@@ -2015,6 +2015,61 @@ def test_local_monitor_sequence_success_allows_waiting_monitor_refresh() -> None
     )
 
 
+def test_local_monitor_sequence_fresh_signal_processing_beats_cache_refresh() -> None:
+    module = _load_module()
+    packets = {
+        "daily_check": {
+            "status": "processing",
+            "runtime_status": "processing",
+            "monitor_status": "needs_refresh",
+            "checks": {
+                "monitor_refresh_needed": True,
+                "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
+            },
+        },
+        "goal_progress": {
+            "status": "processing",
+            "runtime_status": "processing",
+            "monitor_status": "needs_refresh",
+            "checks": {
+                "monitor_refresh_needed": True,
+                "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
+            },
+        },
+        "completion_audit": {"status": "not_complete_runtime_processing"},
+        "signal_coverage": {"status": "mainline_runtime_signal_ready"},
+    }
+
+    status = module._sequence_status(steps=[], packets=packets)
+    monitor_status = module._sequence_monitor_status(status=status, packets=packets)
+    runtime_status = module._sequence_runtime_status(status=status, packets=packets)
+    owner_status = module._sequence_owner_status(
+        status=status,
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        owner_decision_required=False,
+    )
+
+    assert status == "processing"
+    assert runtime_status == "processing"
+    assert monitor_status == "needs_refresh"
+    assert owner_status == "processing"
+    assert module._sequence_report_is_success(
+        {
+            "status": status,
+            "runtime_status": runtime_status,
+            "monitor_status": monitor_status,
+            "checks": {
+                "blockers": [],
+                "execution_blockers": [],
+                "non_market_gaps": [],
+                "engineering_gaps": [],
+                "owner_decision_required": False,
+            },
+        }
+    )
+
+
 def test_local_monitor_sequence_success_rejects_deployment_issue() -> None:
     module = _load_module()
 
