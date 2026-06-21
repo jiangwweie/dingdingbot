@@ -271,7 +271,7 @@ market-dependent first real-order proof.
 | P1 Owner Console Mainline Stabilization | External frontend can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain static frontend or UI QA in this worktree |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
-| P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | pending | Start with read-only audit summaries and Feishu notification text only |
+| P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | local event-adapter ready | Start with read-only audit summaries and Feishu notification text only; `runtime_advisory_event_adapter` now converts daily-check, completion-audit, watcher, trade-closed, and review-due artifacts into push-only / ledger-only advisory events without creating execution authority |
 | P2 External Information Capture | External information can inform research/watch context without becoming execution authority | Strategy/research window first | pending | Treat as research input, not live-submit permission |
 
 ## P0 Subgoal: Owner Console Source Readiness Productization
