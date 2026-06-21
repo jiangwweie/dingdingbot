@@ -1105,6 +1105,49 @@ def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
 
 
+def test_goal_progress_keeps_deployment_issue_out_of_owner_decision():
+    module = _load_module()
+    daily_check = _daily_check(status="temporarily_unavailable_deployment_issue")
+    daily_check["runtime_status"] = "temporarily_unavailable"
+    daily_check["monitor_status"] = "deployment_issue"
+    daily_check["owner_status"] = "temporarily_unavailable"
+    daily_check["owner_summary"]["state"] = "暂不可用"
+    daily_check["owner_summary"]["current_action"] = "处理部署基线不一致"
+    daily_check["owner_summary"]["owner_intervention_required"] = False
+    daily_check["owner_summary"]["visibility"] = {
+        "category": "deployment_issue",
+        "label": "暂不可用",
+        "owner_intervention_required": False,
+    }
+    daily_check["notification"] = {
+        "decision": "NOTIFY",
+        "reason": "runtime_head_mismatch",
+        "owner_intervention_required": False,
+    }
+    daily_check["checks"]["blockers"] = [
+        "runtime_head_mismatch",
+        "l1_snapshot_blocked",
+    ]
+    daily_check["checks"]["deployment_issue"] = True
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "temporarily_unavailable_deployment_issue"
+    assert report["runtime_status"] == "temporarily_unavailable"
+    assert report["monitor_status"] == "deployment_issue"
+    assert report["owner_status"] == "temporarily_unavailable"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["owner_notify"] is False
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
+    assert tracks["p0_live_closure"]["blockers"] == []
+
+
 def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     module = _load_module()
     daily_check_path = tmp_path / "daily-check.json"

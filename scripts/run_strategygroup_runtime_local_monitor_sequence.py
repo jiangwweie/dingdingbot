@@ -982,6 +982,7 @@ def build_local_monitor_sequence_report(
         for step in steps
         if int(step.get("returncode") or 0) not in (0,)
         and not _step_returncode_is_monitor_refresh(step, packets)
+        and not _step_returncode_is_deployment_issue(step, packets)
         and not (
             step["name"] == "completion_audit"
             and _status(packets["completion_audit"]) == "needs_non_market_repair"
@@ -1195,11 +1196,16 @@ def _sequence_status(
     steps: list[dict[str, Any]],
     packets: dict[str, dict[str, Any]],
 ) -> str:
+    if _packet_monitor_status(packets["daily_check"]) == "deployment_issue" or (
+        _packet_monitor_status(packets["goal_progress"]) == "deployment_issue"
+    ):
+        return DEPLOYMENT_ISSUE_STATUS
     failed_steps = [
         step
         for step in steps
         if int(step.get("returncode") or 0) != 0
         and not _step_returncode_is_monitor_refresh(step, packets)
+        and not _step_returncode_is_deployment_issue(step, packets)
         and not (
             step["name"] == "completion_audit"
             and _status(packets["completion_audit"]) == "needs_non_market_repair"
@@ -1207,10 +1213,6 @@ def _sequence_status(
     ]
     if failed_steps:
         return "needs_non_market_repair"
-    if _packet_monitor_status(packets["daily_check"]) == "deployment_issue" or (
-        _packet_monitor_status(packets["goal_progress"]) == "deployment_issue"
-    ):
-        return DEPLOYMENT_ISSUE_STATUS
     completion_status = _status(packets["completion_audit"])
     if completion_status == "needs_non_market_repair":
         return "needs_non_market_repair"
@@ -1322,6 +1324,20 @@ def _step_returncode_is_monitor_refresh(
         and _packet_monitor_refresh_needed(packets[step["name"]])
         and not (packets[step["name"]].get("checks") or {}).get("blockers")
     )
+
+
+def _step_returncode_is_deployment_issue(
+    step: dict[str, Any],
+    packets: dict[str, dict[str, Any]],
+) -> bool:
+    if step["name"] not in {"daily_check", "goal_progress"}:
+        return False
+    if int(step.get("returncode") or 0) == 0:
+        return False
+    packet = packets.get(step["name"], {})
+    return _packet_monitor_status(packet) == "deployment_issue" or _status(
+        packet
+    ) == DEPLOYMENT_ISSUE_STATUS
 
 
 def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | None:

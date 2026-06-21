@@ -2089,6 +2089,54 @@ def test_local_monitor_sequence_success_rejects_deployment_issue() -> None:
     )
 
 
+def test_local_monitor_sequence_classifies_deployment_returncodes_without_owner_decision() -> None:
+    module = _load_module()
+    packets = {
+        "daily_check": {
+            "status": "temporarily_unavailable_deployment_issue",
+            "runtime_status": "temporarily_unavailable",
+            "monitor_status": "deployment_issue",
+            "owner_summary": {"owner_intervention_required": False},
+            "checks": {
+                "blockers": ["runtime_head_mismatch", "l1_snapshot_blocked"],
+                "deployment_issue": True,
+                "owner_decision_required": False,
+            },
+        },
+        "goal_progress": {
+            "status": "temporarily_unavailable_deployment_issue",
+            "runtime_status": "temporarily_unavailable",
+            "monitor_status": "deployment_issue",
+            "owner_summary": {"owner_intervention_required": False},
+            "checks": {"blockers": [], "owner_decision_required": False},
+        },
+        "completion_audit": {"status": "not_complete_waiting_for_market"},
+    }
+    steps = [
+        {"name": "daily_check", "returncode": 2},
+        {"name": "goal_progress", "returncode": 2},
+        {"name": "completion_audit", "returncode": 0},
+    ]
+
+    execution_blockers = [
+        f"{step['name']}:returncode:{step['returncode']}"
+        for step in steps
+        if int(step.get("returncode") or 0) not in (0,)
+        and not module._step_returncode_is_monitor_refresh(step, packets)
+        and not module._step_returncode_is_deployment_issue(step, packets)
+    ]
+
+    assert module._sequence_status(steps=steps, packets=packets) == (
+        "temporarily_unavailable_deployment_issue"
+    )
+    assert execution_blockers == []
+    assert module._sequence_owner_decision_required(
+        packets=packets,
+        execution_blockers=execution_blockers,
+        engineering_gaps=[],
+    ) is False
+
+
 def test_local_monitor_sequence_success_rejects_owner_decision() -> None:
     module = _load_module()
 

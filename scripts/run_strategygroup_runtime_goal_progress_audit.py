@@ -1079,7 +1079,7 @@ def _p0_track(
     owner: dict[str, Any],
     visibility: dict[str, Any],
 ) -> dict[str, Any]:
-    blockers = [str(item) for item in checks.get("blockers") or []]
+    blockers = _p0_action_blockers(checks)
     waiting = checks.get("waiting_for_market") is True or daily_check.get("status") == "waiting_for_market"
     processing = daily_check.get("status") == "processing" or (
         visibility.get("category") == "processing"
@@ -1112,6 +1112,21 @@ def _p0_track(
         ],
         "blockers": blockers,
     }
+
+
+def _p0_action_blockers(checks: dict[str, Any]) -> list[str]:
+    blockers = [str(item) for item in checks.get("blockers") or []]
+    if checks.get("deployment_issue") is not True:
+        return blockers
+    deployment_tokens = {
+        "runtime_head_mismatch",
+        "runtime_goal_status_deployment_not_aligned",
+    }
+    return [
+        blocker
+        for blocker in blockers
+        if blocker not in deployment_tokens and blocker != "l1_snapshot_blocked"
+    ]
 
 
 def _runtime_interaction_track(
@@ -1310,11 +1325,13 @@ def _owner_state(status: str) -> str:
 
 
 def _runtime_status_for(*, status: str, waiting_for_market: bool) -> str:
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "temporarily_unavailable"
     if waiting_for_market or status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
         return "waiting_for_market"
     if status == "processing":
         return "processing"
-    if status in {"blocked", "degraded", DEPLOYMENT_ISSUE_STATUS}:
+    if status in {"blocked", "degraded"}:
         return "temporarily_unavailable"
     return "running"
 
