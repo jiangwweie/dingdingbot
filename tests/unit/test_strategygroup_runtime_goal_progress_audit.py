@@ -1060,8 +1060,11 @@ def test_goal_progress_rejects_remote_interaction_in_local_audit():
 
 def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
     module = _load_module()
-    daily_check = _daily_check(status="needs_refresh")
-    daily_check["owner_summary"]["state"] = "监控状态需刷新"
+    daily_check = _daily_check(status="waiting_for_market_monitor_refresh_needed")
+    daily_check["runtime_status"] = "waiting_for_market"
+    daily_check["monitor_status"] = "needs_refresh"
+    daily_check["owner_status"] = "waiting_for_opportunity"
+    daily_check["owner_summary"]["state"] = "等待机会"
     daily_check["owner_summary"]["current_action"] = "刷新本地 runtime monitor 缓存"
     daily_check["owner_summary"]["visibility"] = {
         "category": "monitor_refresh",
@@ -1083,11 +1086,18 @@ def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
         tier_policy=_tier_policy(),
     )
 
-    assert report["status"] == "needs_refresh"
+    assert report["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "needs_refresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
     assert report["checks"]["blockers"] == []
     assert report["checks"]["product_gaps"] == []
     assert report["checks"]["monitor_refresh_needed"] is True
+    assert report["checks"]["refresh_required"] is True
+    assert report["checks"]["automation_notify"] is True
+    assert report["checks"]["owner_notify"] is False
     assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["state"] == "等待机会"
     assert report["completion_boundary"]["status"] == "not_complete_waiting_for_market"
     assert report["completion_boundary"]["completion_blocker_class"] == "waiting_for_market"
     tracks = {track["id"]: track for track in report["tracks"]}

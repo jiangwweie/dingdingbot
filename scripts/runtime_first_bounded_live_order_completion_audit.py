@@ -209,6 +209,17 @@ def _flag(packet: dict[str, Any], key: str) -> Any:
     return None
 
 
+def _current_boundary_ready(packet: dict[str, Any], key: str) -> bool:
+    boundary = _dict(packet.get(key))
+    return boundary.get("status") == "ready"
+
+
+def _prefer_current_boundary(current_boundary_ready: bool, legacy_value: Any) -> Any:
+    if current_boundary_ready:
+        return True
+    return legacy_value
+
+
 def _section_status(packet: dict[str, Any], section_name: str) -> Any:
     for section in _list(packet.get("sections")):
         if isinstance(section, dict) and section.get("name") == section_name:
@@ -266,6 +277,96 @@ def _live_closure_boundary_in_progress(live_closure: dict[str, Any]) -> bool:
     }
 
 
+def _packet_status_projection(packet: dict[str, Any], key: str) -> str:
+    value = packet.get(key)
+    return str(value).strip() if value is not None else ""
+
+
+def _completion_runtime_status(
+    *,
+    status: str,
+    daily_check: dict[str, Any],
+    goal_progress: dict[str, Any],
+) -> str:
+    for packet in (goal_progress, daily_check):
+        projected = _packet_status_projection(packet, "runtime_status")
+        if projected:
+            return projected
+    if status == "complete":
+        return "completed"
+    if status == "not_complete_runtime_processing":
+        return "processing"
+    if status == "not_complete_waiting_for_market":
+        return "waiting_for_market"
+    return "temporarily_unavailable"
+
+
+def _completion_monitor_status(
+    daily_check: dict[str, Any],
+    goal_progress: dict[str, Any],
+) -> str:
+    for packet in (goal_progress, daily_check):
+        projected = _packet_status_projection(packet, "monitor_status")
+        if projected:
+            return projected
+    for packet in (goal_progress, daily_check):
+        checks = _dict(packet.get("checks"))
+        if checks.get("deployment_issue") is True:
+            return "deployment_issue"
+        if checks.get("monitor_refresh_needed") is True:
+            return "needs_refresh"
+    return "fresh"
+
+
+def _completion_owner_decision_required(
+    *,
+    daily_check: dict[str, Any],
+    goal_progress: dict[str, Any],
+    non_market_gaps: list[dict[str, Any]],
+) -> bool:
+    for packet in (daily_check, goal_progress):
+        if _packet_status_projection(packet, "owner_status") == "needs_intervention":
+            return True
+        owner_summary = _dict(packet.get("owner_summary"))
+        if owner_summary.get("owner_intervention_required") is True:
+            return True
+        checks = _dict(packet.get("checks"))
+        if checks.get("owner_decision_required") is True:
+            return True
+    owner_tokens = (
+        "owner_policy",
+        "owner_decision",
+        "owner_intervention",
+        "capital_adjustment",
+        "pause_decision",
+        "risk_acceptance",
+    )
+    return any(
+        token in str(gap).lower()
+        for gap in non_market_gaps
+        for token in owner_tokens
+    )
+
+
+def _completion_owner_status(
+    *,
+    runtime_status: str,
+    monitor_status: str,
+    owner_decision_required: bool,
+) -> str:
+    if owner_decision_required:
+        return "needs_intervention"
+    if runtime_status == "waiting_for_market":
+        return "waiting_for_opportunity"
+    if runtime_status == "processing":
+        return "processing"
+    if runtime_status == "completed":
+        return "completed"
+    if monitor_status == "deployment_issue":
+        return "temporarily_unavailable"
+    return "temporarily_unavailable"
+
+
 def _proof_missing_or_false(
     proof: dict[str, Any],
     *,
@@ -292,6 +393,22 @@ def _audit_items(
     contract_checks = _contract_checks(live_cutover)
     completion = _completion_boundary(goal_progress)
     live_closure = _live_closure_boundary(goal_progress)
+    entry_fast_boundary_ready = _current_boundary_ready(
+        goal_progress,
+        "entry_fast_chain_boundary",
+    )
+    exit_hardening_boundary_ready = _current_boundary_ready(
+        goal_progress,
+        "exit_hardening_boundary",
+    )
+    strategygroup_tier_boundary_ready = _current_boundary_ready(
+        goal_progress,
+        "strategygroup_tier_boundary",
+    )
+    live_cutover_boundary_ready = _current_boundary_ready(
+        goal_progress,
+        "live_cutover_readiness_boundary",
+    )
     current_read = _dict(daily_check.get("current_read_interaction"))
     if not current_read:
         current_read = _dict(daily_check.get("interaction"))
@@ -310,17 +427,30 @@ def _audit_items(
                     live_cutover,
                     "strategy_scope",
                 ),
-                "only_mpg_tiny_real_order_eligible_checked": _flag(
-                    dry_run_audit,
-                    "only_mpg_tiny_real_order_eligible_checked",
+                "only_mpg_tiny_real_order_eligible_checked": (
+                    _prefer_current_boundary(
+                        strategygroup_tier_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "only_mpg_tiny_real_order_eligible_checked",
+                        ),
+                    )
                 ),
-                "allocated_subaccount_profile_boundary_checked": _flag(
-                    dry_run_audit,
-                    "allocated_subaccount_profile_boundary_checked",
+                "allocated_subaccount_profile_boundary_checked": (
+                    _prefer_current_boundary(
+                        strategygroup_tier_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "allocated_subaccount_profile_boundary_checked",
+                        ),
+                    )
                 ),
-                "strategygroup_adapter_boundary_checked": _flag(
-                    dry_run_audit,
-                    "strategygroup_adapter_boundary_checked",
+                "strategygroup_adapter_boundary_checked": _prefer_current_boundary(
+                    strategygroup_tier_boundary_ready,
+                    _flag(
+                        dry_run_audit,
+                        "strategygroup_adapter_boundary_checked",
+                    ),
                 ),
             },
         },
@@ -333,21 +463,21 @@ def _audit_items(
                     live_cutover,
                     "entry_fast_chain",
                 ),
-                "fresh_signal_fast_auto_chain_checked": _flag(
-                    dry_run_audit,
-                    "fresh_signal_fast_auto_chain_checked",
+                "fresh_signal_fast_auto_chain_checked": _prefer_current_boundary(
+                    entry_fast_boundary_ready,
+                    _flag(dry_run_audit, "fresh_signal_fast_auto_chain_checked"),
                 ),
-                "required_facts_readiness_checked": _flag(
-                    dry_run_audit,
-                    "required_facts_readiness_checked",
+                "required_facts_readiness_checked": _prefer_current_boundary(
+                    entry_fast_boundary_ready,
+                    _flag(dry_run_audit, "required_facts_readiness_checked"),
                 ),
-                "non_executing_prepare_auto_bridge_checked": _flag(
-                    dry_run_audit,
-                    "non_executing_prepare_auto_bridge_checked",
+                "non_executing_prepare_auto_bridge_checked": _prefer_current_boundary(
+                    entry_fast_boundary_ready,
+                    _flag(dry_run_audit, "non_executing_prepare_auto_bridge_checked"),
                 ),
-                "selected_strategygroup_dispatch_guard_checked": _flag(
-                    dry_run_audit,
-                    "selected_strategygroup_dispatch_guard_checked",
+                "selected_strategygroup_dispatch_guard_checked": _prefer_current_boundary(
+                    entry_fast_boundary_ready,
+                    _flag(dry_run_audit, "selected_strategygroup_dispatch_guard_checked"),
                 ),
             },
         },
@@ -363,17 +493,27 @@ def _audit_items(
                     live_cutover,
                     "operation_layer_relay",
                 ),
-                "operation_layer_evidence_relay_checked": _flag(
-                    dry_run_audit,
-                    "operation_layer_evidence_relay_checked",
+                "operation_layer_evidence_relay_checked": _prefer_current_boundary(
+                    entry_fast_boundary_ready,
+                    _flag(dry_run_audit, "operation_layer_evidence_relay_checked"),
                 ),
-                "scoped_pipeline_operation_layer_handoff_checked": _flag(
-                    dry_run_audit,
-                    "scoped_pipeline_operation_layer_handoff_checked",
+                "scoped_pipeline_operation_layer_handoff_checked": (
+                    _prefer_current_boundary(
+                        entry_fast_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "scoped_pipeline_operation_layer_handoff_checked",
+                        ),
+                    )
                 ),
-                "operation_layer_authorization_chain_guard_checked": _flag(
-                    dry_run_audit,
-                    "operation_layer_authorization_chain_guard_checked",
+                "operation_layer_authorization_chain_guard_checked": (
+                    _prefer_current_boundary(
+                        entry_fast_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "operation_layer_authorization_chain_guard_checked",
+                        ),
+                    )
                 ),
             },
         },
@@ -386,17 +526,32 @@ def _audit_items(
                     live_cutover,
                     "hard_blocker_policy",
                 ),
-                "operation_layer_hard_safety_blocker_matrix_checked": _flag(
-                    dry_run_audit,
-                    "operation_layer_hard_safety_blocker_matrix_checked",
+                "operation_layer_hard_safety_blocker_matrix_checked": (
+                    _prefer_current_boundary(
+                        live_cutover_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "operation_layer_hard_safety_blocker_matrix_checked",
+                        ),
+                    )
                 ),
-                "operation_layer_blocker_review_policy_checked": _flag(
-                    dry_run_audit,
-                    "operation_layer_blocker_review_policy_checked",
+                "operation_layer_blocker_review_policy_checked": (
+                    _prefer_current_boundary(
+                        live_cutover_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "operation_layer_blocker_review_policy_checked",
+                        ),
+                    )
                 ),
-                "expanded_watcher_scope_execution_guard_checked": _flag(
-                    dry_run_audit,
-                    "expanded_watcher_scope_execution_guard_checked",
+                "expanded_watcher_scope_execution_guard_checked": (
+                    _prefer_current_boundary(
+                        live_cutover_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "expanded_watcher_scope_execution_guard_checked",
+                        ),
+                    )
                 ),
             },
         },
@@ -429,13 +584,18 @@ def _audit_items(
                     live_cutover,
                     "exit_protection_recovery",
                 ),
-                "post_submit_exit_outcome_matrix_checked": _flag(
-                    dry_run_audit,
-                    "post_submit_exit_outcome_matrix_checked",
+                "post_submit_exit_outcome_matrix_checked": _prefer_current_boundary(
+                    exit_hardening_boundary_ready,
+                    _flag(dry_run_audit, "post_submit_exit_outcome_matrix_checked"),
                 ),
-                "reduce_only_recovery_standing_authorization_checked": _flag(
-                    dry_run_audit,
-                    "reduce_only_recovery_standing_authorization_checked",
+                "reduce_only_recovery_standing_authorization_checked": (
+                    _prefer_current_boundary(
+                        exit_hardening_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "reduce_only_recovery_standing_authorization_checked",
+                        ),
+                    )
                 ),
                 "exchange_native_protection_stage_required": (
                     "exchange_native_hard_stop_order_id" in evidence_keys
@@ -457,13 +617,23 @@ def _audit_items(
                     live_cutover,
                     "post_submit_close_loop",
                 ),
-                "post_submit_closed_loop_evidence_guard_checked": _flag(
-                    dry_run_audit,
-                    "post_submit_closed_loop_evidence_guard_checked",
+                "post_submit_closed_loop_evidence_guard_checked": (
+                    _prefer_current_boundary(
+                        live_cutover_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "post_submit_closed_loop_evidence_guard_checked",
+                        ),
+                    )
                 ),
-                "post_submit_finalize_result_identity_guard_checked": _flag(
-                    dry_run_audit,
-                    "post_submit_finalize_result_identity_guard_checked",
+                "post_submit_finalize_result_identity_guard_checked": (
+                    _prefer_current_boundary(
+                        live_cutover_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "post_submit_finalize_result_identity_guard_checked",
+                        ),
+                    )
                 ),
                 "live_closure_evidence_boundary_status": live_closure.get("status"),
                 "first_bounded_real_order_complete": completion.get(
@@ -483,9 +653,9 @@ def _audit_items(
                     live_cutover,
                     "dry_run_safety",
                 ),
-                "disabled_smoke_not_real_execution_proof": _flag(
-                    dry_run_audit,
-                    "disabled_smoke_not_real_execution_proof",
+                "disabled_smoke_not_real_execution_proof": _prefer_current_boundary(
+                    live_cutover_boundary_ready,
+                    _flag(dry_run_audit, "disabled_smoke_not_real_execution_proof"),
                 ),
                 "live_closure_contract_rejects_synthetic_signal": contract_checks.get(
                     "live_closure_contract_rejects_synthetic_signal"
@@ -652,12 +822,32 @@ def build_completion_audit_report(
         status = "not_complete_runtime_processing"
     else:
         status = "not_complete_waiting_for_market"
+    runtime_status = _completion_runtime_status(
+        status=status,
+        daily_check=daily_check,
+        goal_progress=goal_progress,
+    )
+    monitor_status = _completion_monitor_status(daily_check, goal_progress)
+    owner_decision_required = _completion_owner_decision_required(
+        daily_check=daily_check,
+        goal_progress=goal_progress,
+        non_market_gaps=non_market_gaps,
+    )
+    owner_status = _completion_owner_status(
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        owner_decision_required=owner_decision_required,
+    )
     return {
         "schema": "brc.p0_first_bounded_live_order_completion_audit.v1",
         "scope": "P0 First Bounded Live Order Closure Cutover completion audit",
         "generated_at_utc": generated_at_utc
         or datetime.now(timezone.utc).isoformat(),
         "status": status,
+        "runtime_status": runtime_status,
+        "monitor_status": monitor_status,
+        "owner_status": owner_status,
+        "owner_decision_required": owner_decision_required,
         "goal_complete": goal_complete,
         "non_market_gaps": non_market_gaps,
         "market_dependent_remaining": market_dependent_remaining,

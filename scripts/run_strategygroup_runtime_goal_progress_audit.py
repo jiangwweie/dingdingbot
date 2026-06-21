@@ -48,6 +48,8 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
     "runtime-live-closure-evidence.json"
 )
 SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
+MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
+DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
 
 P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "allocated_subaccount_profile_boundary_checked",
@@ -109,7 +111,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
-    return 0 if report["status"] in {"ready", "waiting_for_market", "processing"} else 2
+    return (
+        0
+        if report["status"]
+        in {"ready", "waiting_for_market", "processing", MONITOR_REFRESH_STATUS}
+        else 2
+    )
 
 
 def build_goal_progress_report(
@@ -161,6 +168,16 @@ def build_goal_progress_report(
     monitor_refresh_reasons = [
         str(item) for item in checks.get("monitor_refresh_reasons") or []
     ]
+    monitor_status = str(
+        daily_check.get("monitor_status")
+        or (
+            "deployment_issue"
+            if checks.get("deployment_issue") is True
+            else "needs_refresh"
+            if monitor_refresh_needed
+            else "fresh"
+        )
+    )
 
     p0 = _p0_track(
         daily_check=daily_check,
@@ -253,8 +270,10 @@ def build_goal_progress_report(
     )
     if hard_blockers:
         status = "blocked"
+    elif monitor_status == "deployment_issue":
+        status = DEPLOYMENT_ISSUE_STATUS
     elif monitor_refresh_needed and waiting_for_market and p05_ready:
-        status = "needs_refresh"
+        status = MONITOR_REFRESH_STATUS
     elif product_gaps or not p05_ready:
         status = "degraded"
     elif processing and p05_ready:
@@ -306,9 +325,26 @@ def build_goal_progress_report(
         if not hard_blockers and (product_gaps or not p05_ready):
             status = "degraded"
 
+    runtime_status = _runtime_status_for(
+        status=status,
+        waiting_for_market=waiting_for_market,
+    )
+    if status == MONITOR_REFRESH_STATUS:
+        runtime_status = "waiting_for_market"
+    elif status == DEPLOYMENT_ISSUE_STATUS:
+        runtime_status = "temporarily_unavailable"
+    owner_status = _owner_status_for(
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        owner_intervention_required=bool(hard_blockers),
+    )
+
     return {
         "schema": SCHEMA,
         "status": status,
+        "runtime_status": runtime_status,
+        "monitor_status": monitor_status,
+        "owner_status": owner_status,
         "scope": "strategygroup_runtime_goal_progress_audit",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "interaction": {
@@ -324,14 +360,14 @@ def build_goal_progress_report(
         "owner_summary": {
             "state": (
                 "等待机会"
-                if status == "waiting_for_market"
+                if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}
                 else _owner_state(status)
             ),
             "current_action": (
                 "继续等待市场机会"
                 if status == "waiting_for_market"
                 else "刷新本地 runtime monitor 缓存"
-                if status == "needs_refresh"
+                if status in {"needs_refresh", MONITOR_REFRESH_STATUS}
                 else "等待系统完成收口"
                 if status == "processing"
                 else "处理非市场收口缺口"
@@ -353,8 +389,14 @@ def build_goal_progress_report(
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
+            "runtime_status": runtime_status,
+            "monitor_status": monitor_status,
+            "owner_status": owner_status,
             "monitor_refresh_needed": monitor_refresh_needed,
             "monitor_refresh_reasons": monitor_refresh_reasons,
+            "refresh_required": monitor_refresh_needed,
+            "automation_notify": monitor_refresh_needed,
+            "owner_notify": bool(hard_blockers),
             "waiting_for_market": waiting_for_market,
             "p05_ready": p05_ready,
             "daily_check_status": daily_check.get("status"),
@@ -1254,6 +1296,10 @@ def _track(
 def _owner_state(status: str) -> str:
     if status == "blocked":
         return "暂不可用"
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "暂不可用"
+    if status == MONITOR_REFRESH_STATUS:
+        return "等待机会"
     if status == "needs_refresh":
         return "监控状态需刷新"
     if status == "degraded":
@@ -1261,6 +1307,35 @@ def _owner_state(status: str) -> str:
     if status == "processing":
         return "处理中"
     return "运行中"
+
+
+def _runtime_status_for(*, status: str, waiting_for_market: bool) -> str:
+    if waiting_for_market or status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
+        return "waiting_for_market"
+    if status == "processing":
+        return "processing"
+    if status in {"blocked", "degraded", DEPLOYMENT_ISSUE_STATUS}:
+        return "temporarily_unavailable"
+    return "running"
+
+
+def _owner_status_for(
+    *,
+    runtime_status: str,
+    monitor_status: str,
+    owner_intervention_required: bool,
+) -> str:
+    if owner_intervention_required:
+        return "needs_intervention"
+    if runtime_status == "waiting_for_market":
+        return "waiting_for_opportunity"
+    if runtime_status == "processing":
+        return "processing"
+    if runtime_status == "temporarily_unavailable":
+        return "temporarily_unavailable"
+    if monitor_status == "deployment_issue":
+        return "temporarily_unavailable"
+    return "running"
 
 
 def _owner_progress_text(report: dict[str, Any]) -> str:

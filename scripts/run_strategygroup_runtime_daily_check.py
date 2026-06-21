@@ -34,6 +34,8 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
 DAILY_CHECK_REPORT_SCHEMA_VERSION = 12
+MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
+DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
 
 ACTIVE_GOAL_STATUSES = {
     "fresh_signal_detected",
@@ -356,6 +358,16 @@ def build_daily_check_report(
         product_gaps=product_gaps,
         waiting_for_market=waiting_for_market,
     )
+    runtime_status = _runtime_status_for(
+        status=status,
+        waiting_for_market=waiting_for_market,
+    )
+    monitor_status = "fresh"
+    owner_status = _owner_status_for(
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        visibility=visibility,
+    )
     checks_report = {
         "blockers": _dedupe([*blockers, *hard_failures]),
         "warnings": _dedupe(warnings),
@@ -410,6 +422,9 @@ def build_daily_check_report(
     return {
         "schema_version": DAILY_CHECK_REPORT_SCHEMA_VERSION,
         "status": status,
+        "runtime_status": runtime_status,
+        "monitor_status": monitor_status,
+        "owner_status": owner_status,
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": {
@@ -531,12 +546,19 @@ def _notification_decision(
             "decision": "DONT_NOTIFY",
             "reason": "healthy_waiting_for_market",
             "message": "自动化正常运行，当前没有可用市场机会",
+            "refresh_required": False,
+            "automation_notify": False,
+            "owner_notify": False,
             "owner_intervention_required": False,
         }
+    refresh_required = checks.get("monitor_refresh_needed") is True
     return {
         "decision": "NOTIFY",
         "reason": _notification_reason(status=status, checks=checks, visibility=visibility),
         "message": str(visibility.get("detail") or "运行状态需要处理"),
+        "refresh_required": refresh_required,
+        "automation_notify": refresh_required,
+        "owner_notify": bool(visibility.get("owner_intervention_required")),
         "owner_intervention_required": bool(
             visibility.get("owner_intervention_required")
         ),
@@ -793,7 +815,10 @@ def _write_text_atomic(path: Path, text: str) -> None:
 def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
     return {
         "schema_version": DAILY_CHECK_REPORT_SCHEMA_VERSION,
-        "status": "needs_refresh",
+        "status": DEPLOYMENT_ISSUE_STATUS,
+        "runtime_status": "temporarily_unavailable",
+        "monitor_status": "deployment_issue",
+        "owner_status": "temporarily_unavailable",
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "interaction": annotate_interaction({
@@ -809,13 +834,13 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "places_order": False,
         }),
         "owner_summary": {
-            "state": "监控状态需刷新",
+            "state": "暂不可用",
             "current_action": "刷新本地 runtime monitor 缓存",
             "owner_intervention_required": False,
             "risk_level": "L0 local cache only",
             "visibility": {
-                "category": "monitor_refresh",
-                "label": "监控状态需刷新",
+                "category": "deployment_issue",
+                "label": "暂不可用",
                 "detail": detail,
                 "next_action": "刷新本地 runtime monitor 缓存",
                 "owner_intervention_required": False,
@@ -832,8 +857,12 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "blockers": [],
             "warnings": [],
             "product_gaps": [],
+            "deployment_issue": True,
             "monitor_refresh_needed": True,
             "monitor_refresh_reasons": [reason],
+            "refresh_required": True,
+            "automation_notify": True,
+            "owner_notify": False,
             "waiting_for_market": False,
             "runtime_ready": False,
             "watcher_ready": False,
@@ -848,6 +877,9 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "decision": "NOTIFY",
             "reason": reason,
             "message": detail,
+            "refresh_required": True,
+            "automation_notify": True,
+            "owner_notify": False,
             "owner_intervention_required": False,
         },
         "safety_invariants": {
@@ -919,7 +951,11 @@ def _is_fresh_cache_report(
     if report.get("schema_version") != DAILY_CHECK_REPORT_SCHEMA_VERSION:
         return False
     checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
-    if report.get("status") == "needs_refresh":
+    if report.get("status") in {
+        "needs_refresh",
+        MONITOR_REFRESH_STATUS,
+        DEPLOYMENT_ISSUE_STATUS,
+    }:
         return False
     if checks.get("monitor_refresh_needed") is True:
         return False
@@ -983,15 +1019,37 @@ def _gated_cache_report(
     checks["cached_blockers"] = [str(item) for item in checks.get("blockers") or []]
     checks["blockers"] = []
     checks["monitor_refresh_needed"] = True
+    checks["deployment_issue"] = False
+    checks["refresh_required"] = True
+    checks["automation_notify"] = True
+    checks["owner_notify"] = False
     checks["monitor_refresh_reasons"] = _dedupe(
         [*[str(item) for item in checks.get("monitor_refresh_reasons") or []], reason]
     )
     gated["checks"] = checks
-    gated["status"] = "needs_refresh"
+    runtime_status = _runtime_status_from_cached_report(gated)
+    monitor_status = "needs_refresh"
+    owner_status = (
+        "waiting_for_opportunity"
+        if runtime_status == "waiting_for_market"
+        else _owner_status_for(
+            runtime_status=runtime_status,
+            monitor_status=monitor_status,
+            visibility={},
+        )
+    )
+    gated["runtime_status"] = runtime_status
+    gated["monitor_status"] = monitor_status
+    gated["owner_status"] = owner_status
+    gated["status"] = (
+        MONITOR_REFRESH_STATUS
+        if runtime_status == "waiting_for_market"
+        else "temporarily_unavailable_monitor_refresh_needed"
+    )
 
     visibility = {
         "category": "monitor_refresh",
-        "label": "监控状态需刷新",
+        "label": "等待机会" if runtime_status == "waiting_for_market" else "监控状态需刷新",
         "detail": detail,
         "next_action": "刷新本地 runtime monitor 缓存",
         "owner_intervention_required": False,
@@ -1008,13 +1066,56 @@ def _gated_cache_report(
         "decision": "NOTIFY",
         "reason": reason,
         "message": detail,
+        "refresh_required": True,
+        "automation_notify": True,
+        "owner_notify": False,
         "owner_intervention_required": False,
     }
     return gated
 
 
+def _runtime_status_for(*, status: str, waiting_for_market: bool) -> str:
+    if waiting_for_market or status == "waiting_for_market":
+        return "waiting_for_market"
+    if status == "processing":
+        return "processing"
+    if status in {"blocked", "degraded"}:
+        return "temporarily_unavailable"
+    return "running"
+
+
+def _runtime_status_from_cached_report(report: dict[str, Any]) -> str:
+    explicit = _optional_text(report.get("runtime_status"))
+    if explicit:
+        return explicit
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    return _runtime_status_for(
+        status=str(report.get("status") or ""),
+        waiting_for_market=checks.get("waiting_for_market") is True,
+    )
+
+
+def _owner_status_for(
+    *,
+    runtime_status: str,
+    monitor_status: str,
+    visibility: dict[str, Any],
+) -> str:
+    if bool(visibility.get("owner_intervention_required")):
+        return "needs_intervention"
+    if runtime_status == "waiting_for_market":
+        return "waiting_for_opportunity"
+    if runtime_status == "processing":
+        return "processing"
+    if runtime_status == "temporarily_unavailable":
+        return "temporarily_unavailable"
+    if monitor_status == "deployment_issue":
+        return "temporarily_unavailable"
+    return "running"
+
+
 def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]:
-    annotated = dict(report)
+    annotated = _ensure_status_projection(dict(report))
     cached_interaction = (
         dict(annotated.get("interaction"))
         if isinstance(annotated.get("interaction"), dict)
@@ -1044,6 +1145,40 @@ def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]
     owner["risk_level"] = "L0 local cache only"
     annotated["owner_summary"] = owner
     return annotated
+
+
+def _ensure_status_projection(report: dict[str, Any]) -> dict[str, Any]:
+    if (
+        report.get("runtime_status")
+        and report.get("monitor_status")
+        and report.get("owner_status")
+    ):
+        return report
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    owner = (
+        report.get("owner_summary")
+        if isinstance(report.get("owner_summary"), dict)
+        else {}
+    )
+    visibility = (
+        owner.get("visibility") if isinstance(owner.get("visibility"), dict) else {}
+    )
+    monitor_status = (
+        "deployment_issue"
+        if checks.get("deployment_issue") is True
+        else "needs_refresh"
+        if checks.get("monitor_refresh_needed") is True
+        else "fresh"
+    )
+    runtime_status = _runtime_status_from_cached_report(report)
+    report["runtime_status"] = runtime_status
+    report["monitor_status"] = monitor_status
+    report["owner_status"] = _owner_status_for(
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        visibility=visibility,
+    )
+    return report
 
 
 def _resolve_expected_heads(args: argparse.Namespace) -> dict[str, str | None]:

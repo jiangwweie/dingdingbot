@@ -1143,10 +1143,14 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
     )
 
     assert report["status"] == "needs_non_market_repair"
-    assert report["checks"]["blockers"] == ["completion_audit:non_market_gaps"]
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["execution_blockers"] == []
     assert report["checks"]["non_market_gaps"][0]["missing_or_false"] == [
         "goal_progress:generated_before_daily_check"
     ]
+    assert report["checks"]["engineering_gaps"] == report["checks"]["non_market_gaps"]
+    assert report["checks"]["owner_decision_required"] is False
 
 
 def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
@@ -1196,9 +1200,13 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             _write_output(
                 command,
                 {
-                    "status": "needs_refresh",
+                    "status": "waiting_for_market_monitor_refresh_needed",
+                    "runtime_status": "waiting_for_market",
+                    "monitor_status": "needs_refresh",
+                    "owner_status": "waiting_for_opportunity",
                     "checks": {
                         "blockers": [],
+                        "waiting_for_market": True,
                         "monitor_refresh_needed": True,
                         "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
                     },
@@ -1221,11 +1229,16 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             _write_output(
                 command,
                 {
-                    "status": "needs_refresh",
+                    "status": "waiting_for_market_monitor_refresh_needed",
+                    "runtime_status": "waiting_for_market",
+                    "monitor_status": "needs_refresh",
+                    "owner_status": "waiting_for_opportunity",
                     "checks": {
                         "blockers": [],
                         "product_gaps": [],
+                        "waiting_for_market": True,
                         "monitor_refresh_needed": True,
+                        "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
                     },
                     "interaction": {
                         "level": "L0_local_goal_progress_audit",
@@ -1424,11 +1437,20 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         command_runner=fake_runner,
     )
 
-    assert report["status"] == "needs_refresh"
-    assert report["owner_summary"]["state"] == "监控状态需刷新"
+    assert report["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "needs_refresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
+    assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["monitor_refresh_needed"] is True
+    assert report["checks"]["monitor_refresh_reasons"] == [
+        "runtime_progress_cache_stale"
+    ]
+    assert report["checks"]["refresh_required"] is True
+    assert report["checks"]["automation_notify"] is True
+    assert report["checks"]["owner_notify"] is False
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
@@ -1668,6 +1690,7 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
     )
 
     assert report["status"] == "needs_non_market_repair"
+    assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["non_market_gaps"] == [
         {
@@ -1679,6 +1702,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             ],
         }
     ]
+    assert report["checks"]["engineering_gaps"] == report["checks"]["non_market_gaps"]
+    assert report["checks"]["owner_decision_required"] is False
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
@@ -1968,3 +1993,61 @@ def test_local_monitor_sequence_treats_low_priority_would_enter_as_waiting() -> 
     )
 
     assert status == "waiting_for_market"
+
+
+def test_local_monitor_sequence_success_allows_waiting_monitor_refresh() -> None:
+    module = _load_module()
+
+    assert module._sequence_report_is_success(
+        {
+            "status": "waiting_for_market_monitor_refresh_needed",
+            "runtime_status": "waiting_for_market",
+            "monitor_status": "needs_refresh",
+            "checks": {
+                "blockers": [],
+                "execution_blockers": [],
+                "non_market_gaps": [],
+                "engineering_gaps": [],
+                "owner_decision_required": False,
+                "monitor_refresh_gaps": ["runtime_progress_cache_stale"],
+            },
+        }
+    )
+
+
+def test_local_monitor_sequence_success_rejects_deployment_issue() -> None:
+    module = _load_module()
+
+    assert not module._sequence_report_is_success(
+        {
+            "status": "temporarily_unavailable_deployment_issue",
+            "runtime_status": "temporarily_unavailable",
+            "monitor_status": "deployment_issue",
+            "checks": {
+                "blockers": [],
+                "execution_blockers": [],
+                "non_market_gaps": [],
+                "engineering_gaps": [],
+                "owner_decision_required": False,
+            },
+        }
+    )
+
+
+def test_local_monitor_sequence_success_rejects_owner_decision() -> None:
+    module = _load_module()
+
+    assert not module._sequence_report_is_success(
+        {
+            "status": "waiting_for_market",
+            "runtime_status": "waiting_for_market",
+            "monitor_status": "fresh",
+            "checks": {
+                "blockers": [],
+                "execution_blockers": [],
+                "non_market_gaps": [],
+                "engineering_gaps": [],
+                "owner_decision_required": True,
+            },
+        }
+    )

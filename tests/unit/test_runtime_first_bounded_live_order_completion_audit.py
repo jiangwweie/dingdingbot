@@ -36,6 +36,17 @@ def _goal_progress(**overrides):
     return base
 
 
+def _goal_progress_with_current_boundaries(**overrides):
+    base = _goal_progress(
+        entry_fast_chain_boundary={"status": "ready"},
+        exit_hardening_boundary={"status": "ready"},
+        strategygroup_tier_boundary={"status": "ready"},
+        live_cutover_readiness_boundary={"status": "ready"},
+    )
+    base.update(overrides)
+    return base
+
+
 def _dry_run_audit(**overrides):
     checks = {
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
@@ -164,6 +175,10 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     )
 
     assert report["status"] == "not_complete_waiting_for_market"
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
+    assert report["owner_decision_required"] is False
     assert report["goal_complete"] is False
     assert report["non_market_gaps"] == []
     assert report["input_source_gaps"] == []
@@ -228,6 +243,49 @@ def test_completion_audit_reports_non_market_gap():
             "missing_or_false": ["operation_layer_evidence_relay_checked"],
         }
     ]
+
+
+def test_completion_audit_prefers_current_boundaries_over_legacy_dry_run_keys():
+    dry_run = _dry_run_audit()
+    stale_keys = [
+        "only_mpg_tiny_real_order_eligible_checked",
+        "allocated_subaccount_profile_boundary_checked",
+        "strategygroup_adapter_boundary_checked",
+        "fresh_signal_fast_auto_chain_checked",
+        "required_facts_readiness_checked",
+        "non_executing_prepare_auto_bridge_checked",
+        "selected_strategygroup_dispatch_guard_checked",
+        "operation_layer_evidence_relay_checked",
+        "scoped_pipeline_operation_layer_handoff_checked",
+        "operation_layer_authorization_chain_guard_checked",
+        "operation_layer_hard_safety_blocker_matrix_checked",
+        "operation_layer_blocker_review_policy_checked",
+        "expanded_watcher_scope_execution_guard_checked",
+        "post_submit_exit_outcome_matrix_checked",
+        "reduce_only_recovery_standing_authorization_checked",
+        "post_submit_closed_loop_evidence_guard_checked",
+        "post_submit_finalize_result_identity_guard_checked",
+        "disabled_smoke_not_real_execution_proof",
+    ]
+    for key in stale_keys:
+        dry_run["checks"][key] = False
+        dry_run["summary"][key] = False
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress_with_current_boundaries(),
+        dry_run_audit=dry_run,
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "not_complete_waiting_for_market"
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
+    assert report["owner_decision_required"] is False
+    assert report["non_market_gaps"] == []
+    assert report["goal_complete"] is False
 
 
 def test_completion_audit_reports_missing_input_source_schema_gap():

@@ -224,8 +224,14 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
         "message": "自动化正常运行，当前没有可用市场机会",
+        "refresh_required": False,
+        "automation_notify": False,
+        "owner_notify": False,
         "owner_intervention_required": False,
     }
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
 
 
 def test_daily_check_cache_read_reports_l0_and_preserves_cached_collection():
@@ -306,8 +312,14 @@ def test_daily_check_normalizes_no_signal_live_closure_in_progress_to_waiting():
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
         "message": "自动化正常运行，当前没有可用市场机会",
+        "refresh_required": False,
+        "automation_notify": False,
+        "owner_notify": False,
         "owner_intervention_required": False,
     }
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "waiting_for_opportunity"
 
 
 def test_daily_check_projects_post_signal_live_closure_in_progress_as_processing():
@@ -350,8 +362,14 @@ def test_daily_check_projects_post_signal_live_closure_in_progress_as_processing
         "decision": "NOTIFY",
         "reason": "processing",
         "message": "系统正在处理真实订单闭环证据",
+        "refresh_required": False,
+        "automation_notify": False,
+        "owner_notify": False,
         "owner_intervention_required": False,
     }
+    assert report["runtime_status"] == "processing"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "processing"
 
 
 def test_daily_check_preserves_fresh_signal_processing_over_stale_waiting_summary():
@@ -389,8 +407,14 @@ def test_daily_check_preserves_fresh_signal_processing_over_stale_waiting_summar
         "decision": "NOTIFY",
         "reason": "processing",
         "message": "系统正在处理真实订单闭环证据",
+        "refresh_required": False,
+        "automation_notify": False,
+        "owner_notify": False,
         "owner_intervention_required": False,
     }
+    assert report["runtime_status"] == "processing"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_status"] == "processing"
     assert report["interaction"]["calls_exchange_write"] is False
     assert report["interaction"]["places_order"] is False
 
@@ -923,17 +947,24 @@ def test_daily_check_from_cache_missing_returns_monitor_refresh_state(tmp_path, 
 
     loaded = module._build_or_read_daily_check_report(args)
 
-    assert loaded["status"] == "needs_refresh"
+    assert loaded["status"] == "temporarily_unavailable_deployment_issue"
+    assert loaded["runtime_status"] == "temporarily_unavailable"
+    assert loaded["monitor_status"] == "deployment_issue"
+    assert loaded["owner_status"] == "temporarily_unavailable"
     assert loaded["interaction"]["level"] == "L0_local_cache_read"
     assert loaded["interaction"]["remote_interaction_count"] == 0
     assert loaded["notification"]["decision"] == "NOTIFY"
     assert loaded["notification"]["reason"] == "runtime_progress_cache_missing"
     assert loaded["checks"]["blockers"] == []
+    assert loaded["checks"]["deployment_issue"] is True
     assert loaded["checks"]["monitor_refresh_needed"] is True
+    assert loaded["checks"]["refresh_required"] is True
+    assert loaded["checks"]["automation_notify"] is True
+    assert loaded["checks"]["owner_notify"] is False
     assert loaded["checks"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_missing"
     ]
-    assert loaded["owner_summary"]["state"] == "监控状态需刷新"
+    assert loaded["owner_summary"]["state"] == "暂不可用"
 
 
 def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
@@ -948,16 +979,25 @@ def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
         max_cache_age_minutes=5,
     )
 
-    assert gated["status"] == "needs_refresh"
+    assert gated["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert gated["runtime_status"] == "waiting_for_market"
+    assert gated["monitor_status"] == "needs_refresh"
+    assert gated["owner_status"] == "waiting_for_opportunity"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_stale"
+    assert gated["notification"]["refresh_required"] is True
+    assert gated["notification"]["automation_notify"] is True
+    assert gated["notification"]["owner_notify"] is False
     assert gated["checks"]["blockers"] == []
     assert gated["checks"]["monitor_refresh_needed"] is True
+    assert gated["checks"]["refresh_required"] is True
+    assert gated["checks"]["automation_notify"] is True
+    assert gated["checks"]["owner_notify"] is False
     assert gated["checks"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_stale"
     ]
     assert gated["checks"]["waiting_for_market"] is True
-    assert gated["owner_summary"]["state"] == "监控状态需刷新"
+    assert gated["owner_summary"]["state"] == "等待机会"
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
@@ -975,7 +1015,10 @@ def test_daily_check_require_fresh_cache_marks_stale_schema_for_refresh():
         max_cache_age_minutes=module.DEFAULT_MAX_CACHE_AGE_MINUTES,
     )
 
-    assert gated["status"] == "needs_refresh"
+    assert gated["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert gated["runtime_status"] == "waiting_for_market"
+    assert gated["monitor_status"] == "needs_refresh"
+    assert gated["owner_status"] == "waiting_for_opportunity"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_schema_stale"
     assert gated["checks"]["blockers"] == []
@@ -983,7 +1026,7 @@ def test_daily_check_require_fresh_cache_marks_stale_schema_for_refresh():
     assert gated["checks"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_schema_stale"
     ]
-    assert gated["owner_summary"]["state"] == "监控状态需刷新"
+    assert gated["owner_summary"]["state"] == "等待机会"
     assert gated["owner_summary"]["current_action"] == "刷新本地 runtime monitor 缓存"
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
@@ -1010,7 +1053,10 @@ def test_daily_check_require_fresh_cache_marks_runtime_head_mismatch_for_refresh
         expected_runtime_head="runtime-head-2",
     )
 
-    assert gated["status"] == "needs_refresh"
+    assert gated["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert gated["runtime_status"] == "waiting_for_market"
+    assert gated["monitor_status"] == "needs_refresh"
+    assert gated["owner_status"] == "waiting_for_opportunity"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert (
         gated["notification"]["reason"]

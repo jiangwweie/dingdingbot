@@ -185,6 +185,8 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_OWNER_PROGRESS = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.md"
 )
+MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
+DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
 
 
 CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
@@ -303,7 +305,25 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
-    return 0 if report["status"] in {"waiting_for_market", "processing", "complete"} else 2
+    return 0 if _sequence_report_is_success(report) else 2
+
+
+def _sequence_report_is_success(report: dict[str, Any]) -> bool:
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    if checks.get("blockers") or checks.get("execution_blockers"):
+        return False
+    if checks.get("engineering_gaps") or checks.get("non_market_gaps"):
+        return False
+    if checks.get("owner_decision_required") is True:
+        return False
+    if report.get("monitor_status") == "deployment_issue":
+        return False
+    status = str(report.get("status") or "")
+    runtime_status = str(report.get("runtime_status") or "")
+    return status in {"waiting_for_market", "processing", "complete"} or (
+        status == MONITOR_REFRESH_STATUS
+        and runtime_status == "waiting_for_market"
+    )
 
 
 def build_local_monitor_sequence_report(
@@ -957,7 +977,7 @@ def build_local_monitor_sequence_report(
     }
     status = _sequence_status(steps=steps, packets=packets)
     interaction = _sequence_interaction(steps)
-    blockers = [
+    execution_blockers = [
         f"{step['name']}:returncode:{step['returncode']}"
         for step in steps
         if int(step.get("returncode") or 0) not in (0,)
@@ -989,27 +1009,55 @@ def build_local_monitor_sequence_report(
         )
     if signal_coverage_gap:
         non_market_gaps.append(signal_coverage_gap)
-    if completion_non_market_gaps:
-        blockers.append("completion_audit:non_market_gaps")
+    owner_decision_required = _sequence_owner_decision_required(
+        packets=packets,
+        execution_blockers=execution_blockers,
+        engineering_gaps=non_market_gaps,
+    )
+
+    monitor_status = _sequence_monitor_status(status=status, packets=packets)
+    runtime_status = _sequence_runtime_status(status=status, packets=packets)
+    owner_status = _sequence_owner_status(
+        status=status,
+        runtime_status=runtime_status,
+        monitor_status=monitor_status,
+        owner_decision_required=owner_decision_required,
+    )
+    monitor_refresh_needed = monitor_status in {"needs_refresh", "deployment_issue"}
+    monitor_refresh_reasons = _sequence_monitor_refresh_reasons(packets)
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
         "scope": "strategygroup_runtime_local_monitor_sequence",
         "status": status,
+        "runtime_status": runtime_status,
+        "monitor_status": monitor_status,
+        "owner_status": owner_status,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "daily_check_mode": daily_check_mode,
         "owner_summary": {
             "state": _owner_state(status),
             "current_action": _owner_action(status),
-            "owner_intervention_required": status == "needs_non_market_repair",
+            "owner_intervention_required": owner_decision_required,
             "risk_level": interaction["level"],
         },
         "interaction": interaction,
         "checks": {
-            "blockers": blockers,
+            "blockers": execution_blockers,
+            "execution_blockers": execution_blockers,
             "non_market_gaps": non_market_gaps,
-            "monitor_refresh_needed": status == "needs_refresh",
-            "waiting_for_market": status == "waiting_for_market",
+            "engineering_gaps": non_market_gaps,
+            "runtime_status": runtime_status,
+            "monitor_status": monitor_status,
+            "owner_status": owner_status,
+            "monitor_refresh_needed": monitor_refresh_needed,
+            "monitor_refresh_reasons": monitor_refresh_reasons,
+            "monitor_refresh_gaps": monitor_refresh_reasons,
+            "refresh_required": monitor_refresh_needed,
+            "automation_notify": monitor_refresh_needed,
+            "owner_notify": owner_decision_required,
+            "owner_decision_required": owner_decision_required,
+            "waiting_for_market": runtime_status == "waiting_for_market",
             "goal_complete": status == "complete",
         },
         "steps": [
@@ -1159,10 +1207,19 @@ def _sequence_status(
     ]
     if failed_steps:
         return "needs_non_market_repair"
-    if _status(packets["daily_check"]) == "needs_refresh" or _status(
+    if _packet_monitor_status(packets["daily_check"]) == "deployment_issue" or (
+        _packet_monitor_status(packets["goal_progress"]) == "deployment_issue"
+    ):
+        return DEPLOYMENT_ISSUE_STATUS
+    if _packet_monitor_refresh_needed(packets["daily_check"]) or _packet_monitor_refresh_needed(
         packets["goal_progress"]
-    ) == "needs_refresh":
-        return "needs_refresh"
+    ):
+        if (
+            _packet_runtime_status(packets["daily_check"]) == "waiting_for_market"
+            or _packet_runtime_status(packets["goal_progress"]) == "waiting_for_market"
+        ):
+            return MONITOR_REFRESH_STATUS
+        return "temporarily_unavailable_monitor_refresh_needed"
 
     completion_status = _status(packets["completion_audit"])
     if completion_status in {"complete", "completed"}:
@@ -1246,7 +1303,8 @@ def _step_returncode_is_monitor_refresh(
     return (
         step["name"] in {"daily_check", "goal_progress"}
         and int(step.get("returncode") or 0) != 0
-        and _status(packets[step["name"]]) == "needs_refresh"
+        and _packet_monitor_refresh_needed(packets[step["name"]])
+        and not (packets[step["name"]].get("checks") or {}).get("blockers")
     )
 
 
@@ -1487,13 +1545,172 @@ def _sequence_interaction(steps: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _sequence_monitor_status(
+    *,
+    status: str,
+    packets: dict[str, dict[str, Any]],
+) -> str:
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "deployment_issue"
+    for name in ("daily_check", "goal_progress"):
+        packet_status = _packet_monitor_status(packets.get(name, {}))
+        if packet_status in {"deployment_issue", "needs_refresh"}:
+            return packet_status
+    if status in {"needs_refresh", "temporarily_unavailable_monitor_refresh_needed"}:
+        return "needs_refresh"
+    return "fresh"
+
+
+def _sequence_runtime_status(
+    *,
+    status: str,
+    packets: dict[str, dict[str, Any]],
+) -> str:
+    for name in ("daily_check", "goal_progress"):
+        runtime_status = _packet_runtime_status(packets.get(name, {}))
+        if runtime_status:
+            return runtime_status
+    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
+        return "waiting_for_market"
+    if status == "processing":
+        return "processing"
+    if status == "complete":
+        return "completed"
+    return "temporarily_unavailable"
+
+
+def _sequence_owner_status(
+    *,
+    status: str,
+    runtime_status: str,
+    monitor_status: str,
+    owner_decision_required: bool,
+) -> str:
+    if owner_decision_required:
+        return "needs_intervention"
+    if runtime_status == "waiting_for_market":
+        return "waiting_for_opportunity"
+    if runtime_status == "processing":
+        return "processing"
+    if runtime_status == "completed":
+        return "completed"
+    if monitor_status == "deployment_issue":
+        return "temporarily_unavailable"
+    return "temporarily_unavailable"
+
+
+def _sequence_owner_decision_required(
+    *,
+    packets: dict[str, dict[str, Any]],
+    execution_blockers: list[str],
+    engineering_gaps: list[dict[str, Any]],
+) -> bool:
+    for packet in packets.values():
+        if isinstance(packet, dict) and packet.get("owner_decision_required") is True:
+            return True
+        owner_summary = packet.get("owner_summary") if isinstance(packet, dict) else {}
+        if isinstance(owner_summary, dict) and owner_summary.get(
+            "owner_intervention_required"
+        ) is True:
+            return True
+        checks = packet.get("checks") if isinstance(packet, dict) else {}
+        if isinstance(checks, dict) and (
+            checks.get("owner_decision_required") is True
+            or checks.get("owner_intervention_required") is True
+        ):
+            return True
+    owner_tokens = (
+        "owner_policy",
+        "owner_decision",
+        "owner_intervention",
+        "capital_adjustment",
+        "pause_decision",
+        "risk_acceptance",
+    )
+    for item in [*execution_blockers, *[str(gap) for gap in engineering_gaps]]:
+        lowered = item.lower()
+        if any(token in lowered for token in owner_tokens):
+            return True
+    return False
+
+
+def _sequence_monitor_refresh_reasons(
+    packets: dict[str, dict[str, Any]],
+) -> list[str]:
+    reasons: list[str] = []
+    for name in ("daily_check", "goal_progress"):
+        checks = packets.get(name, {}).get("checks")
+        if not isinstance(checks, dict):
+            continue
+        reasons.extend(str(item) for item in checks.get("monitor_refresh_reasons") or [])
+    return list(dict.fromkeys(reasons))
+
+
+def _packet_monitor_refresh_needed(packet: dict[str, Any]) -> bool:
+    checks = packet.get("checks") if isinstance(packet, dict) else {}
+    if not isinstance(checks, dict):
+        checks = {}
+    return (
+        checks.get("monitor_refresh_needed") is True
+        or _packet_monitor_status(packet) in {"needs_refresh", "deployment_issue"}
+        or _status(packet)
+        in {
+            "needs_refresh",
+            MONITOR_REFRESH_STATUS,
+            DEPLOYMENT_ISSUE_STATUS,
+            "temporarily_unavailable_monitor_refresh_needed",
+        }
+    )
+
+
+def _packet_monitor_status(packet: dict[str, Any]) -> str:
+    if not isinstance(packet, dict):
+        return ""
+    explicit = str(packet.get("monitor_status") or "")
+    if explicit:
+        return explicit
+    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
+    if checks.get("deployment_issue") is True:
+        return "deployment_issue"
+    if checks.get("monitor_refresh_needed") is True:
+        return "needs_refresh"
+    if _status(packet) in {"needs_refresh", MONITOR_REFRESH_STATUS}:
+        return "needs_refresh"
+    if _status(packet) == DEPLOYMENT_ISSUE_STATUS:
+        return "deployment_issue"
+    return "fresh"
+
+
+def _packet_runtime_status(packet: dict[str, Any]) -> str:
+    if not isinstance(packet, dict):
+        return ""
+    explicit = str(packet.get("runtime_status") or "")
+    if explicit:
+        return explicit
+    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
+    if checks.get("waiting_for_market") is True:
+        return "waiting_for_market"
+    status = _status(packet)
+    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
+        return "waiting_for_market"
+    if status == "processing":
+        return "processing"
+    if status in {"complete", "completed"}:
+        return "completed"
+    if status in {DEPLOYMENT_ISSUE_STATUS, "blocked", "degraded"}:
+        return "temporarily_unavailable"
+    return ""
+
+
 def _owner_state(status: str) -> str:
-    if status == "waiting_for_market":
+    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
         return "等待机会"
     if status == "processing":
         return "处理中"
     if status == "complete":
         return "已完成"
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "暂不可用"
     if status == "needs_refresh":
         return "监控状态需刷新"
     return "需要修复"
@@ -1502,10 +1719,14 @@ def _owner_state(status: str) -> str:
 def _owner_action(status: str) -> str:
     if status == "waiting_for_market":
         return "继续等待市场机会"
+    if status == MONITOR_REFRESH_STATUS:
+        return "刷新本地 runtime monitor 缓存"
     if status == "processing":
         return "等待系统完成当前链路"
     if status == "complete":
         return "归档第一笔边界内真实订单闭环"
+    if status == DEPLOYMENT_ISSUE_STATUS:
+        return "刷新或修复 runtime monitor 权威状态"
     if status == "needs_refresh":
         return "刷新本地 runtime monitor 缓存"
     return "修复本地监控或非市场证据缺口"
