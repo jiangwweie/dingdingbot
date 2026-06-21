@@ -9,6 +9,7 @@ from src.domain.runtime_position_exit_plan import (
 from src.domain.runtime_reduce_only_close_authorization import (
     OWNER_REDUCE_ONLY_CLOSE_APPROVAL_ENV,
     RuntimeReduceOnlyCloseOwnerPacketStatus,
+    STANDING_REDUCE_ONLY_RECOVERY_SCOPE,
     build_runtime_reduce_only_close_owner_packet,
 )
 
@@ -36,12 +37,12 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
         "full_reduce_only_close_quantity": Decimal("1.0"),
         "full_reduce_only_close_notional_reference": Decimal("6.57"),
         "full_reduce_only_close_feasible": True,
-        "full_reduce_only_close_requires_owner_authorization": True,
+        "full_reduce_only_close_requires_owner_authorization": False,
         "market_min_qty": Decimal("1.0"),
         "market_qty_step": Decimal("1.0"),
         "tp1_quantity_feasible": False,
         "recommended_owner_decision": (
-            "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+            "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
         ),
         "warnings": ["tp1_partial_quantity_below_min_qty_or_step"],
         "created_at_ms": 1,
@@ -56,12 +57,16 @@ def test_reduce_only_close_owner_packet_ready_when_full_close_feasible():
         now_ms=123,
     )
 
-    assert packet.status == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_OWNER_AUTHORIZATION
-    assert packet.owner_approval_env == OWNER_REDUCE_ONLY_CLOSE_APPROVAL_ENV
-    assert packet.owner_approval_value == (
-        "runtime-reduce-only-close:runtime-1:AVAX/USDT:USDT:short:"
-        "qty=1.0:owner-authorized"
+    assert (
+        packet.status
+        == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
     )
+    assert packet.owner_approval_env is None
+    assert packet.owner_approval_value is None
+    assert packet.owner_approval_required is False
+    assert packet.standing_authorization_scope == STANDING_REDUCE_ONLY_RECOVERY_SCOPE
+    assert packet.operation_layer_required is True
+    assert packet.finalgate_required is True
     assert packet.close_quantity == Decimal("1.0")
     assert packet.reduce_only_side == "buy"
     assert packet.not_order is True

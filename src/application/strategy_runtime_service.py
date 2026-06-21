@@ -225,7 +225,13 @@ class StrategyRuntimeInstanceService:
             )
 
         now_ms = _now_ms()
-        boundary = proposal.boundary.model_copy(deep=True)
+        boundary = proposal.boundary.model_copy(
+            deep=True,
+            update={
+                "attempts_used": 0,
+                "budget_reserved": Decimal("0"),
+            },
+        )
         policy_snapshot = StrategyRuntimePolicySnapshot(
             risk_policy_snapshot={
                 "source": "runtime_profile_promotion_confirmation",
@@ -619,5 +625,5 @@ def _require_profile_confirmation_ready(
         raise StrategyRuntimeError("runtime profile proposal snapshot is required")
     if proposal.side == "short" and not runtime.short_side_conservative_profile_confirmed:
         raise StrategyRuntimeError(
-            "short-side runtime profile confirmation is required"
+            "Owner-selected short-side profile boundary acknowledgment is required"
         )

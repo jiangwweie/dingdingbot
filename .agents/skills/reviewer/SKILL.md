@@ -9,9 +9,10 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
-- `docs/ops/agent-current-brc-baseline.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 - Relevant task card and diff
 
 ## Review Stance

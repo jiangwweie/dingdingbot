@@ -35,6 +35,16 @@ from scripts import runtime_next_attempt_observation_monitor as monitor  # noqa:
 
 
 MAX_OBSERVATION_API_TIMEOUT_SECONDS = 60.0
+NON_ACTIONABLE_OBSERVATION_BLOCKERS = {
+    "runtime_attempts_exhausted",
+    "order_candidate_id_or_authorization_id_required",
+}
+OBSERVE_ONLY_REVIEW_BLOCKERS = {
+    "strategy_stop_reference_unavailable",
+}
+WAITING_FOR_SIGNAL_BLOCKERS = {
+    "strategy_signal_not_ready_for_shadow_candidate_prepare",
+}
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -375,6 +385,7 @@ def _build_packet(
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
         packet = builder(runtime_args)
+        packet = _downgrade_non_actionable_observation_blockers(packet)
         packet["runtime_instance_id"] = runtime_args.runtime_instance_id
         packet["output_json"] = runtime_args.output_json
         _write_json(runtime_args.output_json, packet)
@@ -385,6 +396,11 @@ def _build_packet(
     blockers: list[str] = []
     for item in summaries:
         for blocker in item["blockers"]:
+            if _is_waiting_for_signal_blocker(
+                status=str(item.get("status") or ""),
+                blocker=str(blocker),
+            ):
+                continue
             scoped = f"{item['runtime_instance_id']}:{blocker}"
             if scoped not in blockers:
                 blockers.append(scoped)
@@ -447,6 +463,78 @@ def _next_step(status: str) -> str:
     if status == "no_active_runtimes":
         return "start_or_authorize_a_runtime_before_monitoring"
     return "wait_for_next_observation_cycle"
+
+
+def _downgrade_non_actionable_observation_blockers(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    if str(packet.get("status") or "") != "blocked":
+        return packet
+    blockers = [str(blocker) for blocker in packet.get("blockers") or []]
+    if not blockers:
+        return packet
+    observation_only = _is_observe_only_review_packet(packet)
+    allowed_blockers = set(NON_ACTIONABLE_OBSERVATION_BLOCKERS)
+    if observation_only:
+        allowed_blockers.update(OBSERVE_ONLY_REVIEW_BLOCKERS)
+    if any(blocker not in allowed_blockers for blocker in blockers):
+        return packet
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    if any(
+        bool(safety.get(flag))
+        for flag in (
+            "submit_authorization_created",
+            "protection_plan_created",
+            "executable_execution_intent_created",
+            "local_registration_armed",
+            "exchange_submit_armed",
+            "execute_real_submit",
+            "exchange_write_called",
+            "order_created",
+            "order_lifecycle_called",
+            "attempt_counter_mutated",
+            "runtime_budget_mutated",
+            "position_opened",
+            "position_closed",
+            "withdrawal_or_transfer_created",
+        )
+    ):
+        return packet
+
+    downgraded = dict(packet)
+    downgraded["status"] = "waiting_for_signal"
+    downgraded["blockers"] = []
+    downgraded["warnings"] = sorted(
+        {
+            *[str(warning) for warning in packet.get("warnings") or []],
+            *[
+                f"non_actionable_observation_blocker:{blocker}"
+                for blocker in blockers
+            ],
+        }
+    )
+    plan = dict(packet.get("operator_command_plan") or {})
+    plan["next_step"] = "continue_waiting_for_strategy_signal"
+    plan["not_executed"] = True
+    plan["places_order"] = False
+    plan["calls_order_lifecycle"] = False
+    downgraded["operator_command_plan"] = plan
+    downgraded["non_actionable_observation_blockers"] = blockers
+    return downgraded
+
+
+def _is_observe_only_review_packet(packet: dict[str, Any]) -> bool:
+    summary = _signal_summary(packet)
+    return str(summary.get("required_execution_mode") or "") == "observe_only"
+
+
+def _is_waiting_for_signal_blocker(*, status: str, blocker: str) -> bool:
+    return (
+        status == "waiting_for_signal"
+        and blocker in WAITING_FOR_SIGNAL_BLOCKERS
+    )
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

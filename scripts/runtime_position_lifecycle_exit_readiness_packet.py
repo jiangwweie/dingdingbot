@@ -10,8 +10,9 @@ RTF-096 consumes existing packet artifacts only:
 
 It does not call PG, exchange, OrderLifecycle, or runtime mutation services.
 It decides whether the active runtime position should keep being monitored,
-whether a reduce-only close is ready for explicit Owner authorization, or
-whether a flat runtime can move toward closed review / next-attempt gate.
+whether a reduce-only recovery is ready for standing authorization plus the
+official Operation Layer, or whether a flat runtime can move toward closed
+review / next-attempt gate.
 """
 
 from __future__ import annotations
@@ -115,10 +116,16 @@ def _status(
         hard_stop = bool(monitor.get("hard_stop_boundary_present"))
         can_hold = bool(monitor.get("can_continue_holding"))
         full_close_ready = bool(exit_plan.get("full_reduce_only_close_feasible"))
+        standing_recovery_ready = (
+            str(followup.get("status") or "")
+            == "ready_for_standing_reduce_only_recovery"
+        )
         waiting_close_auth = (
             str(followup.get("status") or "")
             == "waiting_for_owner_close_authorization"
         )
+        if hard_stop and can_hold and full_close_ready and standing_recovery_ready:
+            return "position_lifecycle_hold_or_standing_recovery_ready"
         if hard_stop and can_hold and full_close_ready and waiting_close_auth:
             return "position_lifecycle_hold_or_owner_close_ready"
         if hard_stop and can_hold:
@@ -136,8 +143,14 @@ def _status(
 
 
 def _operator_plan(status: str, followup: dict[str, Any]) -> dict[str, Any]:
-    close_ready = status == "position_lifecycle_hold_or_owner_close_ready"
-    if status == "position_lifecycle_hold_or_owner_close_ready":
+    close_ready = status in {
+        "position_lifecycle_hold_or_standing_recovery_ready",
+        "position_lifecycle_hold_or_owner_close_ready",
+    }
+    standing_recovery_ready = status == "position_lifecycle_hold_or_standing_recovery_ready"
+    if standing_recovery_ready:
+        next_step = "continue_monitoring_or_prepare_official_reduce_only_recovery"
+    elif status == "position_lifecycle_hold_or_owner_close_ready":
         next_step = "continue_monitoring_or_explicitly_authorize_reduce_only_close"
     elif status == "position_lifecycle_hold_with_hard_stop":
         next_step = "continue_read_only_position_monitoring_until_flat_or_exit_signal"
@@ -167,13 +180,22 @@ def _operator_plan(status: str, followup: dict[str, Any]) -> dict[str, Any]:
             "position_lifecycle_ready_for_next_attempt_gate",
             "position_lifecycle_return_to_live_attempt_readiness",
         },
-        "reduce_only_close_ready_for_owner_authorization": close_ready,
+        "reduce_only_close_ready_for_owner_authorization": (
+            status == "position_lifecycle_hold_or_owner_close_ready"
+        ),
+        "reduce_only_recovery_ready_for_standing_authorization": standing_recovery_ready,
+        "requires_official_operation_layer": standing_recovery_ready,
         "execute_reduce_only_close_now": False,
         "owner_close_approval_env": followup.get("owner_close_approval_env")
         if close_ready
         else None,
         "owner_close_approval_value": followup.get("owner_close_approval_value")
         if close_ready
+        else None,
+        "standing_recovery_authorization_scope": followup.get(
+            "standing_recovery_authorization_scope"
+        )
+        if standing_recovery_ready
         else None,
         "required_steps": list(followup.get("required_steps") or []),
         "completed_steps": list(followup.get("completed_steps") or []),
@@ -300,6 +322,9 @@ def build_lifecycle_packet(
                     True,
                 )
             ),
+            "standing_recovery_authorization_scope": followup.get(
+                "standing_recovery_authorization_scope"
+            ),
             "post_close_followup_status": followup.get("status"),
         },
         "blockers": blockers,
@@ -333,6 +358,9 @@ def build_lifecycle_packet(
                 exit_plan.get("tp1_quantity_feasible")
             ),
             "owner_manual_close_is_optional_not_automatic": True,
+            "standing_reduce_only_recovery_uses_official_operation_layer": bool(
+                followup.get("standing_recovery_authorization_scope")
+            ),
             "automatic_withdrawal_assumed": False,
             "automatic_compounding_assumed": False,
         },
@@ -377,6 +405,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_json(args.output_json, packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if packet["status"] in {
+        "position_lifecycle_hold_or_standing_recovery_ready",
         "position_lifecycle_hold_or_owner_close_ready",
         "position_lifecycle_hold_with_hard_stop",
         "position_lifecycle_ready_for_closed_review",

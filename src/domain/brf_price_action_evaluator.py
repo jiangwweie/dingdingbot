@@ -188,6 +188,7 @@ class BRF001PriceActionEvaluator:
                 "runtime_confirmation_mode": "runtime_bounded_auto_attempts",
                 "owner_confirm_each_entry_required": False,
                 "conservative_short_profile_required": True,
+                "allocated_short_profile_boundary_required": True,
                 "runtime_profile_confirmation_required": True,
                 "reference": "rally_high_or_atr_reference",
             },

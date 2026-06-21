@@ -5,8 +5,11 @@ Use this command only for bounded option analysis or ADR drafting requested by C
 Read:
 - `CLAUDE.md`
 - `.claude/team/architect/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
 
 User task:
 `{{arguments}}`

@@ -410,6 +410,22 @@ async def test_service_creates_shadow_runtime_from_confirmed_profile_proposal():
         runtime_repository=runtime_repo,
         admission_repository=_ProfileAdmissionRepo(),
     )
+    proposal = build_experimental_runtime_profile_proposal(
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        symbol="BNB/USDT:USDT",
+        side="long",
+    )
+    proposal = proposal.model_copy(
+        update={
+            "boundary": proposal.boundary.model_copy(
+                update={
+                    "attempts_used": 3,
+                    "budget_reserved": Decimal("1.23"),
+                }
+            )
+        }
+    )
     confirmation = StrategyRuntimePromotionGateConfirmationRecord(
         confirmation_id="promotion-confirmation-runtime-profile-1",
         runtime_instance_id="strategy-runtime-profile-1",
@@ -417,12 +433,7 @@ async def test_service_creates_shadow_runtime_from_confirmed_profile_proposal():
         strategy_family_version_id="CPM-RO-001-v0",
         semantic_confirmations=_semantic_confirmed(),
         runtime_confirmations=_runtime_confirmed(),
-        runtime_profile_proposal_snapshot=build_experimental_runtime_profile_proposal(
-            strategy_family_id="CPM-RO-001",
-            strategy_family_version_id="CPM-RO-001-v0",
-            symbol="BNB/USDT:USDT",
-            side="long",
-        ),
+        runtime_profile_proposal_snapshot=proposal,
         reason="Owner/Codex confirms CPM 30U profile proposal.",
         created_at_ms=NOW_MS,
     )
@@ -438,6 +449,9 @@ async def test_service_creates_shadow_runtime_from_confirmed_profile_proposal():
     assert runtime.symbol == "BNB/USDT:USDT"
     assert runtime.side == "long"
     assert runtime.boundary.max_attempts == 3
+    assert runtime.boundary.attempts_used == 0
+    assert runtime.boundary.attempts_remaining == 3
+    assert runtime.boundary.budget_reserved == Decimal("0")
     assert runtime.boundary.total_budget == Decimal("9.00")
     assert runtime.boundary.max_notional_per_attempt == Decimal("10.00")
     assert runtime.boundary.max_leverage == Decimal("1")

@@ -4118,7 +4118,9 @@ def _runtime_post_close_operator_command_plan(
     def with_env_file(args: list[str]) -> list[str]:
         return [*args, "--env-file", env_file] if env_file else args
 
-    post_close_complete = str(packet.status.value) == "post_close_complete"
+    packet_status = str(packet.status.value)
+    post_close_complete = packet_status == "post_close_complete"
+    standing_recovery_ready = packet_status == "ready_for_standing_reduce_only_recovery"
     close_args = with_env_file(
         [
             "scripts/runtime_owner_reduce_only_close_flow.py",
@@ -4129,7 +4131,13 @@ def _runtime_post_close_operator_command_plan(
     return {
         "scope": "runtime_post_close_operator_command_plan",
         "not_executed": True,
-        "requires_explicit_owner_approval_before_execute": True,
+        "requires_explicit_owner_approval_before_execute": bool(
+            packet.owner_close_approval_value
+        ),
+        "requires_official_operation_layer": standing_recovery_ready,
+        "standing_recovery_authorization_scope": (
+            packet.standing_recovery_authorization_scope
+        ),
         "owner_close_approval_env": packet.owner_close_approval_env,
         "owner_close_approval_value": packet.owner_close_approval_value,
         "refresh_followup_command_args": with_env_file(
@@ -4143,8 +4151,22 @@ def _runtime_post_close_operator_command_plan(
             close_args if packet.owner_close_approval_value else []
         ),
         "owner_close_execute_command_args": (
-            [*close_args, "--execute-real-close"]
+            []
+            if standing_recovery_ready
+            else [*close_args, "--execute-real-close"]
             if packet.owner_close_approval_value
+            else []
+        ),
+        "operation_layer_reduce_only_recovery_args": (
+            [
+                "official_operation_layer",
+                "prepare_reduce_only_recovery",
+                "--runtime-instance-id",
+                runtime_instance_id,
+                "--standing-authorization-scope",
+                str(packet.standing_recovery_authorization_scope),
+            ]
+            if standing_recovery_ready
             else []
         ),
         "closed_review_facts_refresh_command_args": with_env_file(
@@ -4162,8 +4184,18 @@ def _runtime_post_close_operator_command_plan(
             if post_close_complete
             else [
                 "refresh_followup",
-                "owner_authorize_exact_reduce_only_close_value",
-                "run_owner_close_execute_command",
+                *(
+                    [
+                        "prepare_official_operation_layer_reduce_only_recovery",
+                        "run_action_time_finalgate_for_reduce_only_recovery",
+                        "execute_reduce_only_recovery_through_operation_layer",
+                    ]
+                    if standing_recovery_ready
+                    else [
+                        "owner_authorize_exact_reduce_only_close_value",
+                        "run_owner_close_execute_command",
+                    ]
+                ),
                 "refresh_followup_until_flat",
                 "run_closed_review_dry_run",
                 "run_closed_review_apply_if_ready",

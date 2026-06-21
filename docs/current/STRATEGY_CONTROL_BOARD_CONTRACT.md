@@ -2,7 +2,7 @@
 title: STRATEGY_CONTROL_BOARD_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-last_verified: 2026-06-15
+last_verified: 2026-06-20
 ---
 
 # Strategy Control Board Contract
@@ -10,6 +10,37 @@ last_verified: 2026-06-15
 The Strategy Control Board is the Owner-facing automation supervision surface.
 It must not become a packet browser, research-doc index, manual gate assembly
 tool, or operator workflow for internal execution gates.
+
+## Control Principle
+
+The board must express this authority split in product language:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+The board may ask the Owner to enable, pause, resume, promote, downshift, park,
+kill, adjust risk scope, adjust capital/profile/scope, or review an abnormal
+intervention. It must not ask the Owner to manually judge RequiredFacts, fresh
+signal validity, candidate/auth evidence, FinalGate, Operation Layer, replay
+samples, no-action rows, or ordinary in-boundary execution steps.
+
+## Source Boundaries
+
+The board may combine:
+
+| Source | Board use |
+| --- | --- |
+| StrategyGroup Registry | Explain what the strategy is, what it eats, and what risk gap matters |
+| Runtime state | Decide whether the strategy is running, waiting, processing, unavailable, or needs intervention |
+| Decision Ledger | Summarize keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block state |
+| Review Ledger | Summarize live outcome review after real action |
+
+The board must not manually compute live order authority from documents. It
+must consume runtime state for `actionable_now`.
 
 ## Required Row Fields
 
@@ -25,6 +56,39 @@ tool, or operator workflow for internal execution gates.
 | `intervention` | `无需操作` unless Owner action is required |
 | `reason` | One plain sentence when unavailable or intervention is required |
 | `review_outcome` | `保留`, `调整`, `暂停`, `停用`, or `待复盘` |
+
+## Strategy Learning Surface
+
+The main control board may summarize StrategyGroup Decision Ledger state,
+but it must not become a raw diagnostic table.
+
+| Internal source | Main Owner meaning |
+| --- | --- |
+| high-priority no-action | 有观察机会，系统正在复盘 |
+| would-enter observe-only | 有观察机会，暂不具备实盘权限 |
+| missing replay coverage that changes a decision | 样本不足，等待本地补充 |
+| classifier / facts gap that changes a decision | 策略条件待调整 |
+| parked low-priority vocabulary | 暂停观察，不影响主线 |
+
+The board should show one compact strategy-learning status only when it changes
+the Owner-relevant state. Healthy background replay, low-priority observation,
+or no-action review should stay quiet.
+
+### Review Outcome Vocabulary Mapping
+
+Backend/internal English values map to Owner-facing Chinese labels:
+
+| Backend/internal value | Owner-facing label |
+| --- | --- |
+| `promote` | `保留` |
+| `revise` | `调整` |
+| `park` | `暂停` |
+| `kill` | `停用` |
+| `pending` | `待复盘` |
+| `keep_observing` | `待复盘` |
+
+Backend/internal English values are not primary Owner UI labels. The Owner
+surface displays the Chinese vocabulary defined above.
 
 ## Main UI Language
 

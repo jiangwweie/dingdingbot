@@ -621,6 +621,49 @@ def test_pilot_status_allows_expanded_multi_strategygroup_watcher_scope():
     assert packet["control_board"]["runtime_row"]["watcher_scope"] == "expanded_scope"
 
 
+def test_pilot_status_scope_match_requires_selected_strategy_group_id():
+    intake = _intake()
+    intake["strategy_picker"][0]["supported_symbols"] = ["INTCUSDT"]
+    watcher = _watcher_waiting()
+    watcher["data"]["watcher"]["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "strategy-runtime-mpg-intc-long",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "symbol": "INTC/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+        {
+            "runtime_instance_id": "strategy-runtime-teq-intc-long",
+            "strategy_family_id": "TEQ-001",
+            "strategy_family_version_id": "TEQ-001-v0",
+            "symbol": "INTC/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+    ]
+
+    packet = build_packet(
+        intake_packet=intake,
+        live_facts_readiness=_readiness(),
+        watcher_status=watcher,
+        generated_at_ms=1,
+    )
+
+    alignment = packet["watcher_scope_alignment"]
+    assert alignment["status"] == "expanded_scope"
+    assert alignment["selected_strategy_group_id"] == "MPG-001"
+    assert alignment["matched_runtime_signal_summary_count"] == 1
+    assert alignment["matched_runtime_signal_summaries"][0]["runtime_instance_id"] == (
+        "strategy-runtime-mpg-intc-long"
+    )
+    assert alignment["out_of_scope_runtime_signal_summary_count"] == 1
+    assert alignment["out_of_scope_runtime_signal_summaries"][0][
+        "runtime_instance_id"
+    ] == "strategy-runtime-teq-intc-long"
+
+
 def test_pilot_status_hard_stops_on_forbidden_watcher_effect():
     watcher = _watcher_waiting()
     watcher["data"]["safety_invariants"]["exchange_write_called"] = True

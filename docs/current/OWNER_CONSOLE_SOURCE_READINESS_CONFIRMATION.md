@@ -37,7 +37,7 @@ StrategyGroup product design.
 | Runtime admission/binding | `ready` | `strategygroup-runtime-pilot-status.json` reports `runtime_bridge=configured`; current control board counts: `total=5`, `observing=4`, `observe_only_ready=1`, `selected=1`. | StrategyGroup rows may show running/waiting states when readmodel is reachable. Admission unavailability should degrade row status only. |
 | Watcher status | `ready` | `brc-runtime-signal-watcher.timer` is `active/enabled`; latest service run exited `SUCCESS`; latest `post-signal-resume-pack.json` reports `status=waiting_for_market`. | System freshness can be shown as running/waiting. Current user-facing state is `等待机会` / `无需操作`. |
 | Live facts readiness | `ready` | `strategy-group-live-facts-readiness.json` reports `strategy_group_live_facts_ready_for_armed_observation`, `blockers=[]`, `observe_ready=5`, `armed_candidate_prepare_ready=4`. | Funds/orders/positions/protection health can be displayed as current. Fresh signal is still required before candidate/action path. |
-| Account funds | `ready` | `strategy-group-live-facts-input.json` reports `account.status=fresh`, `available_balance_present=true`, `available_balance_positive=true`, and budget coverage for tiny notional. | Show sanitized fund pool status. Do not show API keys, account ids, raw secrets, or full wallet detail. |
+| Account funds | `ready` | `strategy-group-live-facts-input.json` reports `account.status=fresh`, `available_balance_present=true`, `available_balance_positive=true`, and budget coverage for the Owner-allocated subaccount/profile boundary. | Show sanitized fund pool status. Do not show API keys, account ids, raw secrets, or full wallet detail. |
 | Local orders | `ready_empty` | `strategy-group-live-facts-input.json` reports `open_orders.open_order_count=0`, `status=no_open_orders`; no exchange write was called. | Show `暂无订单`, not `订单状态暂不可用`. |
 | Local positions | `ready_empty` | `strategy-group-live-facts-input.json` reports `active_position.active_count=0`, `status=no_active_position`. | Show `暂无持仓`, not `持仓状态暂不可用`. |
 | Protection state | `ready` | `strategy-group-live-facts-input.json` reports `protection.status=ready_for_candidate_specific_plan`; handoff risk defaults define stop-loss and exit plan. | Show `保护正常` for observation state; candidate-specific protection is created only when a fresh candidate exists. |
@@ -154,4 +154,3 @@ These changes belong in:
 | Protection | `保护正常` |
 | Reconciliation detail | `对账详情暂不可用` |
 | Operation audit detail | `审计详情暂不可用` |
-

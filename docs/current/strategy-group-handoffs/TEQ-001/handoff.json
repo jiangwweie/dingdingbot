@@ -36,7 +36,7 @@
     "freshness_window_seconds": 120,
     "timeframe": "1h",
     "closed_candle_only": true,
-    "confidence_min": "0.70",
+    "confidence_min": "0.58",
     "side": "long",
     "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
     "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"

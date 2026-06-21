@@ -13,7 +13,8 @@ Diagnose issues and produce evidence-backed findings. Do not modify production c
 ## Required Context
 
 - `CLAUDE.md`
-- `docs/ops/live-safe-v1-program.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
 - Relevant task card or bug report
 
 ## Method

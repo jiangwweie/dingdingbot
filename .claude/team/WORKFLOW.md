@@ -1,7 +1,7 @@
 # Agent Workflow
 
-Version: live-safe-v1
-Last updated: 2026-04-29
+Version: strategygroup-runtime-governance
+Last updated: 2026-06-16
 
 ## Model
 
@@ -13,16 +13,16 @@ Claude Code executes bounded task cards and tests. Claude does not own global di
 
 ## Active Planning Files
 
-Use program-scoped plan-with-files:
+Use current authority files:
 
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/ops/live-safe-v1-progress.md`
-- `docs/ops/agent-working-rules.md`
-- `docs/adr/`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
 
-Do not use old `docs/planning/*` as active state unless the user explicitly asks.
+Do not recreate removed `docs/ops/*`, `docs/canon/*`, or `docs/planning/*` files as active state.
 
 ## Memory MCP
 
@@ -89,7 +89,7 @@ Product Manager:
 
 Architect:
 - Provides options and trade-offs for architecture-level decisions.
-- Uses `docs/adr/` for accepted decisions.
+- Uses current tracked code, `docs/current/*`, and accepted Owner decisions.
 - Does not force OpenAPI or product-contract artifacts unless the task needs them.
 
 Project Manager:

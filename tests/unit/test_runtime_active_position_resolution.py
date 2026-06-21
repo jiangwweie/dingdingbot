@@ -95,12 +95,12 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
         "full_reduce_only_close_quantity": Decimal("0.01"),
         "full_reduce_only_close_notional_reference": Decimal("6.05"),
         "full_reduce_only_close_feasible": True,
-        "full_reduce_only_close_requires_owner_authorization": True,
+        "full_reduce_only_close_requires_owner_authorization": False,
         "market_min_qty": Decimal("0.01"),
         "market_qty_step": Decimal("0.01"),
         "tp1_quantity_feasible": False,
         "recommended_owner_decision": (
-            "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+            "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
         ),
         "blockers": [],
         "warnings": ["tp1_partial_quantity_below_min_qty_or_step"],
@@ -113,28 +113,29 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
 def _followup(**overrides) -> RuntimePostCloseFollowupPacket:
     values = {
         "packet_id": "followup-1",
-        "status": RuntimePostCloseFollowupStatus.WAITING_FOR_OWNER_CLOSE_AUTHORIZATION,
+        "status": RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY,
         "runtime_instance_id": "runtime-1",
         "symbol": "BNB/USDT:USDT",
         "active_position_present": True,
         "source_monitor_id": "monitor-1",
-        "owner_close_packet_status": "ready_for_owner_authorization",
-        "owner_close_approval_env": "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE",
-        "owner_close_approval_value": (
-            "runtime-reduce-only-close:runtime-1:BNB/USDT:USDT:long:"
-            "qty=0.01:owner-authorized"
+        "owner_close_packet_status": "ready_for_standing_recovery_authorization",
+        "owner_close_approval_env": None,
+        "owner_close_approval_value": None,
+        "standing_recovery_authorization_scope": (
+            "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
         ),
         "closed_review_facts_status": "waiting_for_close",
         "closed_review_recorded": False,
         "required_steps": [
-            "owner_authorize_exact_reduce_only_close_value",
-            "execute_runtime_owner_reduce_only_close_flow",
+            "prepare_official_operation_layer_reduce_only_recovery",
+            "run_action_time_finalgate_for_reduce_only_recovery",
+            "execute_reduce_only_recovery_through_operation_layer",
             "verify_runtime_live_position_monitor_flat",
             "record_runtime_closed_trade_review",
             "verify_next_attempt_gate",
         ],
         "completed_steps": ["fresh_monitor_read", "owner_close_packet_built"],
-        "recommended_next_action": "owner_authorize_reduce_only_close_or_continue_holding",
+        "recommended_next_action": "prepare_official_reduce_only_recovery_or_continue_holding",
         "blockers": [],
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
         "created_at_ms": NOW_MS,
@@ -155,8 +156,11 @@ def test_resolution_holds_protected_position_and_blocks_new_attempts():
     assert packet.can_continue_holding is True
     assert packet.next_attempt_blocked_by_active_position is True
     assert packet.full_reduce_only_close_feasible is True
-    assert packet.owner_close_approval_value.endswith("qty=0.01:owner-authorized")
-    assert "optional_owner_authorize_exact_reduce_only_close" in packet.required_steps
+    assert packet.owner_close_approval_value is None
+    assert packet.standing_recovery_authorization_scope == (
+        "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
+    )
+    assert "optional_prepare_official_reduce_only_recovery" in packet.required_steps
     assert packet.exchange_order_submitted is False
     assert packet.order_lifecycle_called is False
     assert packet.position_closed is False

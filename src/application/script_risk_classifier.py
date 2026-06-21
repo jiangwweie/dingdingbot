@@ -84,7 +84,7 @@ _PATTERNS: tuple[_RiskPattern, ...] = (
         re.compile(
             r"\b(create_order|place_order|submit_order|cancel_order|cancel_all_orders|close_position|"
             r"force_exchange_flat|execute-controlled-entry)\b|"
-            r"\.delete\([^)]*/fapi/v1/order|\.post\([^)]*/fapi/v1/order|"
+            r"\.delete\([^)]*/fapi/v[0-9]/order|\.post\([^)]*/fapi/v[0-9]/order|"
             r"\bExecutionOrchestrator\b|\bOrderLifecycleService\b",
             re.IGNORECASE,
         ),

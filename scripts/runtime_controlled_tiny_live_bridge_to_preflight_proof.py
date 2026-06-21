@@ -118,13 +118,13 @@ def build_proof_report(
 def _waiting_refresh_packet() -> dict[str, Any]:
     return {
         "scope": "runtime_live_continuation_refresh_flow",
-        "status": "continuation_refresh_monitor_position_or_owner_close",
+        "status": "continuation_refresh_monitor_position_or_standing_recovery",
         "readiness_status": "live_attempt_blocked_by_runtime_or_signal_gate",
-        "selector_status": "continuation_monitor_position_or_owner_close",
+        "selector_status": "continuation_monitor_position_or_standing_recovery",
         "active_runtime_count": 3,
         "selected_continuation": {
             "runtime_instance_id": "strategy-runtime-e6138ad7c88f",
-            "selected_action": "monitor_position_or_owner_authorize_reduce_only_close",
+            "selected_action": "monitor_position_or_prepare_official_reduce_only_recovery",
             "symbol": "BNB/USDT:USDT",
             "side": "long",
             "strategy_family_id": "CPM-001",

@@ -50,6 +50,7 @@ class ReferencePriceActionConfig:
     boundary_band_pct: Decimal = Decimal("0.35")
     compression_window: int = 6
     compression_ratio: Decimal = Decimal("0.60")
+    volume_expansion_ratio: Decimal = Decimal("1.20")
 
 
 @dataclass(frozen=True)
@@ -262,7 +263,7 @@ class _ReferencePriceActionEvaluator:
 
 class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
     family_id = BTPC_FAMILY_ID
-    logic_version = "btpc-001-price-action-v0"
+    logic_version = "btpc-001-price-action-v1"
 
     def _evaluate(
         self,
@@ -279,12 +280,34 @@ class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
         pullback_pct = _pct(pullback_high - pullback_low, pullback_low)
         htf_net_pct = _pct(four_hour[-1].close - four_hour[0].close, four_hour[0].close)
         trend_down = htf_net_pct <= Decimal("-1.0")
+        strong_uptrend = htf_net_pct >= Decimal("1.0")
         structure_loss = latest.close < previous.low and latest.close < latest.open
+        entry_states = {
+            "bear_trend_context": trend_down,
+            "weak_rally_or_pullback_depth": pullback_pct >= self._config.min_pullback_pct,
+            "pullback_structure_loss": structure_loss,
+            "regime_trend_down_state": trend_down,
+        }
+        disable_states = {
+            "strong_uptrend_disable_state": strong_uptrend,
+            "short_squeeze_disable_state": False,
+            "stale_signal": signal_input.freshness != "fresh",
+        }
         evidence = {
             "market_state": "TREND_DOWN" if trend_down else "UNCERTAIN",
             "htf_context": "trend_down" if trend_down else "mixed",
             "entry_pattern": "bear_trend_pullback_continuation" if structure_loss else "none",
             "latest_1h_open_time_ms": latest.open_time_ms,
+            "classifier_revision": {
+                "status": "local_classifier_revision_executed",
+                "target_classifier": "btpc_strong_uptrend_and_freshness_disable_rule",
+                "blocks_l2_promotion": True,
+                "not_execution_authority": True,
+                "not_l2_promotion_authority": True,
+                "not_l4_scope_change": True,
+            },
+            "entry_states": entry_states,
+            "disable_states": disable_states,
             "price_action_structure": {
                 "bear_trend_pullback_continuation": trend_down
                 and structure_loss
@@ -307,6 +330,22 @@ class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
             ],
         }
         confirmed = evidence["price_action_structure"]["bear_trend_pullback_continuation"]
+        if disable_states["stale_signal"]:
+            return self._no_action(
+                signal_input,
+                ["btpc_disable_stale_signal_before_l2_review"],
+                "BTPC v1 rejects stale shadow signals before any L2 promotion review.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.PULLBACK_CONTINUATION,
+            )
+        if disable_states["strong_uptrend_disable_state"]:
+            return self._no_action(
+                signal_input,
+                ["btpc_disable_strong_uptrend_conflict"],
+                "BTPC v1 disables short continuation review during strong-uptrend conflict.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.PULLBACK_CONTINUATION,
+            )
         if not confirmed:
             return self._no_action(
                 signal_input,
@@ -337,7 +376,7 @@ class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
 
 class LSR001PriceActionEvaluator(_ReferencePriceActionEvaluator):
     family_id = LSR_FAMILY_ID
-    logic_version = "lsr-001-price-action-v0"
+    logic_version = "lsr-001-price-action-v1"
 
     def _evaluate(
         self,
@@ -354,24 +393,52 @@ class LSR001PriceActionEvaluator(_ReferencePriceActionEvaluator):
         range_mid = (range_high + range_low) / Decimal("2")
         swept_low = latest.low < range_low and latest.close > range_low and latest.close > latest.open
         swept_high = latest.high > range_high and latest.close < range_high and latest.close < latest.open
-        side = SignalSide.LONG if swept_low else SignalSide.SHORT if swept_high else SignalSide.NONE
-        sweep_extreme = latest.low if side == SignalSide.LONG else latest.high
+        short_revival_confirmed = swept_high
+        sweep_extreme = latest.high if short_revival_confirmed else latest.low
+        disable_states = {
+            "current_broader_preview_side_long_conflicts_with_short_revival_lead": swept_low,
+            "range_context_missing": False,
+            "sweep_reclaim_missing": not short_revival_confirmed,
+            "stale_signal": signal_input.freshness != "fresh",
+        }
+        entry_states = {
+            "upper_range_liquidity_sweep_detected": swept_high,
+            "reclaim_failure_or_rejection_confirmed": (
+                latest.close < range_high and latest.close < latest.open
+            ),
+            "short_revival_confirmation_present": short_revival_confirmed,
+            "lookahead_proxy_absent": True,
+        }
         evidence = {
             "market_state": "RANGE",
-            "entry_pattern": "liquidity_sweep_reversal" if side != SignalSide.NONE else "none",
+            "entry_pattern": (
+                "side_specific_short_revival"
+                if short_revival_confirmed
+                else "none"
+            ),
             "latest_1h_open_time_ms": latest.open_time_ms,
+            "classifier_revision": {
+                "status": "local_classifier_revision_executed",
+                "target_classifier": "side_specific_short_revival_classifier",
+                "blocks_l2_promotion": True,
+                "not_execution_authority": True,
+                "not_l2_promotion_authority": True,
+                "not_l4_scope_change": True,
+            },
             "range_structure": {
                 "range_high_reference": _s(range_high),
                 "range_low_reference": _s(range_low),
                 "range_mid_reference": _s(range_mid),
             },
             "price_action_structure": {
-                "liquidity_sweep_reversal": side != SignalSide.NONE,
-                "sweep_direction": "down" if side == SignalSide.LONG else "up" if side == SignalSide.SHORT else "none",
+                "liquidity_sweep_reversal": short_revival_confirmed,
+                "sweep_direction": "up" if short_revival_confirmed else "none",
                 "sweep_extreme_reference": _s(sweep_extreme),
                 "range_mid_reference": _s(range_mid),
                 "latest_close": _s(latest.close),
             },
+            "entry_states": entry_states,
+            "disable_states": disable_states,
             "invalidation_conditions": [
                 {
                     "condition_type": "close_beyond_sweep_extreme",
@@ -383,26 +450,38 @@ class LSR001PriceActionEvaluator(_ReferencePriceActionEvaluator):
                 },
             ],
         }
-        if side == SignalSide.NONE:
+        if swept_low:
             return self._no_action(
                 signal_input,
-                ["lsr_no_action_no_sweep_reclaim"],
-                "LSR v0 did not confirm a liquidity sweep and reclaim/rejection.",
+                ["lsr_disable_long_preview_conflicts_with_short_revival_lead"],
+                "LSR v1 disables the old long sweep preview until the short-revival rewrite passes review.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.UNKNOWN,
+            )
+        if not short_revival_confirmed:
+            return self._no_action(
+                signal_input,
+                ["lsr_no_action_short_revival_not_confirmed"],
+                "LSR v1 did not confirm a side-specific upper-range short revival.",
                 evidence,
                 expected_risk_shape=ExpectedRiskShape.UNKNOWN,
             )
         evidence["candidate_semantics"] = build_lsr_candidate_semantics(
             strategy_family_version_id=signal_input.strategy_family_version_id,
             timeframe=signal_input.primary_timeframe,
-            side=side.value,
+            side=SignalSide.SHORT.value,
             evidence=evidence,
         ).model_dump(mode="json")
         return self._would_enter(
             signal_input,
-            side=side,
-            confidence=Decimal("0.58"),
-            reason_codes=["lsr_sweep_extreme", "lsr_reclaim_or_rejection_confirmed"],
-            human_summary="LSR v0 liquidity sweep reversal detected for review.",
+            side=SignalSide.SHORT,
+            confidence=Decimal("0.61"),
+            reason_codes=[
+                "lsr_upper_range_liquidity_sweep_detected",
+                "lsr_short_revival_confirmation_present",
+                "lsr_lookahead_proxy_absent",
+            ],
+            human_summary="LSR v1 side-specific short revival detected for review.",
             evidence_payload=evidence,
             expected_risk_shape=ExpectedRiskShape.UNKNOWN,
         )
@@ -490,7 +569,7 @@ class RBR001PriceActionEvaluator(_ReferencePriceActionEvaluator):
 
 class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
     family_id = VCB_FAMILY_ID
-    logic_version = "vcb-001-price-action-v0"
+    logic_version = "vcb-001-price-action-v1"
 
     def _evaluate(
         self,
@@ -509,24 +588,69 @@ class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
         compression_range = compression_high - compression_low
         prior_avg_range = _avg_range(prior_window)
         recent_avg_range = _avg_range(compression_window)
+        compression_avg_volume = _avg_volume(compression_window)
         compression_confirmed = (
             prior_avg_range > Decimal("0")
             and recent_avg_range <= prior_avg_range * cfg.compression_ratio
         )
-        breakout_up = compression_confirmed and latest.close > compression_high and latest.close > latest.open
-        breakout_down = compression_confirmed and latest.close < compression_low and latest.close < latest.open
+        volume_expansion_confirmed = (
+            compression_avg_volume > Decimal("0")
+            and latest.volume >= compression_avg_volume * cfg.volume_expansion_ratio
+        )
+        wick_breakout_up = compression_confirmed and latest.high > compression_high
+        wick_breakout_down = compression_confirmed and latest.low < compression_low
+        false_breakout_reversal_detected = (
+            (wick_breakout_up and latest.close <= compression_high)
+            or (wick_breakout_down and latest.close >= compression_low)
+        )
+        breakout_up = (
+            compression_confirmed
+            and volume_expansion_confirmed
+            and latest.close > compression_high
+            and latest.close > latest.open
+        )
+        breakout_down = (
+            compression_confirmed
+            and volume_expansion_confirmed
+            and latest.close < compression_low
+            and latest.close < latest.open
+        )
         side = SignalSide.LONG if breakout_up else SignalSide.SHORT if breakout_down else SignalSide.NONE
         stop_reference = compression_low if side == SignalSide.LONG else compression_high
         breakout_boundary = compression_high if side == SignalSide.LONG else compression_low
+        entry_states = {
+            "compression_window_present": compression_confirmed,
+            "breakout_close_confirmed": side != SignalSide.NONE,
+            "volume_expansion_confirmed": volume_expansion_confirmed,
+            "post_entry_edge_proxy_reproducible_without_lookahead": side != SignalSide.NONE
+            and not false_breakout_reversal_detected,
+        }
+        disable_states = {
+            "false_breakout_reversal_detected": false_breakout_reversal_detected,
+            "compression_context_missing": not compression_confirmed,
+            "slot_m2m_ruin_state_triggered": False,
+            "stale_signal": signal_input.freshness != "fresh",
+        }
         evidence = {
             "market_state": "UNCERTAIN",
             "entry_pattern": "volatility_compression_breakout" if side != SignalSide.NONE else "none",
             "latest_1h_open_time_ms": latest.open_time_ms,
+            "classifier_revision": {
+                "status": "local_classifier_revision_executed",
+                "target_classifier": "true_breakout_pre_entry_classifier",
+                "blocks_l2_promotion": True,
+                "not_execution_authority": True,
+                "not_l2_promotion_authority": True,
+                "not_l4_scope_change": True,
+            },
             "volatility_state": {
                 "compression_confirmed": compression_confirmed,
                 "recent_avg_range": _s(_q(recent_avg_range)),
                 "prior_avg_range": _s(_q(prior_avg_range)),
                 "compression_range_pct": _s(_q(_pct(compression_range, compression_low))),
+                "compression_avg_volume": _s(_q(compression_avg_volume)),
+                "latest_volume": _s(_q(latest.volume)),
+                "volume_expansion_confirmed": volume_expansion_confirmed,
             },
             "price_action_structure": {
                 "volatility_compression_breakout": side != SignalSide.NONE,
@@ -536,6 +660,8 @@ class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
                 "compression_range_pct": _s(_q(_pct(compression_range, compression_low))),
                 "latest_close": _s(latest.close),
             },
+            "entry_states": entry_states,
+            "disable_states": disable_states,
             "invalidation_conditions": [
                 {
                     "condition_type": "close_back_inside_compression_range",
@@ -547,11 +673,27 @@ class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
                 },
             ],
         }
+        if false_breakout_reversal_detected:
+            return self._no_action(
+                signal_input,
+                ["vcb_disable_false_breakout_reversal_detected"],
+                "VCB v1 disables wick-only compression breakouts before L2 review.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.VOLATILITY_EXPANSION,
+            )
+        if compression_confirmed and not volume_expansion_confirmed:
+            return self._no_action(
+                signal_input,
+                ["vcb_no_action_volume_expansion_missing"],
+                "VCB v1 requires volume expansion before true-breakout review.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.VOLATILITY_EXPANSION,
+            )
         if side == SignalSide.NONE:
             return self._no_action(
                 signal_input,
                 ["vcb_no_action_no_compression_breakout"],
-                "VCB v0 did not confirm volatility compression breakout.",
+                "VCB v1 did not confirm volatility compression breakout.",
                 evidence,
                 expected_risk_shape=ExpectedRiskShape.VOLATILITY_EXPANSION,
             )
@@ -565,8 +707,13 @@ class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
             signal_input,
             side=side,
             confidence=Decimal("0.60"),
-            reason_codes=["vcb_compression_confirmed", "vcb_breakout_close_confirmed"],
-            human_summary="VCB v0 volatility compression breakout detected for review.",
+            reason_codes=[
+                "vcb_compression_window_present",
+                "vcb_breakout_close_confirmed",
+                "vcb_volume_expansion_confirmed",
+                "vcb_post_entry_edge_proxy_without_lookahead",
+            ],
+            human_summary="VCB v1 true compression breakout detected for review.",
             evidence_payload=evidence,
             expected_risk_shape=ExpectedRiskShape.VOLATILITY_EXPANSION,
         )
@@ -881,6 +1028,14 @@ def _avg_range(candles: list[_Candle]) -> Decimal:
     if not candles:
         return Decimal("0")
     return sum((candle.high - candle.low for candle in candles), Decimal("0")) / Decimal(
+        len(candles)
+    )
+
+
+def _avg_volume(candles: list[_Candle]) -> Decimal:
+    if not candles:
+        return Decimal("0")
+    return sum((candle.volume for candle in candles), Decimal("0")) / Decimal(
         len(candles)
     )
 

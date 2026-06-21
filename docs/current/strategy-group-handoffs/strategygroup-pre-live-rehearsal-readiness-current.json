@@ -1,0 +1,126 @@
+{
+  "capability_unlocked": "Standard local sequence can regenerate pre_live_rehearsal_ready without claiming live submit authority.",
+  "closed_engineering_problem": "Quality Wave governance is now connected to monitor sequence, explicit handoff boundaries, BTPC revise guards, lifecycle rehearsal, and one pre-live readiness checkpoint.",
+  "decision": {
+    "actionable_now": false,
+    "default_next_step": "stage_worthy_local_checkpoint_ready_for_owner_deploy_decision",
+    "deploy_worthy_local_checkpoint": true,
+    "live_outcome_calibrated": false,
+    "live_submit_ready": false,
+    "pre_live_rehearsal_ready": true,
+    "real_order_authority": false
+  },
+  "input_rows": [
+    {
+      "expected_status": "quality_wave_ready",
+      "input": "quality_wave",
+      "ready": true,
+      "status": "quality_wave_ready"
+    },
+    {
+      "expected_status": "handoff_boundary_closure_ready",
+      "input": "handoff_boundary_closure",
+      "ready": true,
+      "status": "handoff_boundary_closure_ready"
+    },
+    {
+      "expected_status": "btpc_fact_classifier_guard_ready",
+      "input": "btpc_fact_classifier_guard",
+      "ready": true,
+      "status": "btpc_fact_classifier_guard_ready"
+    },
+    {
+      "expected_status": "lifecycle_rehearsal_ready",
+      "input": "lifecycle_rehearsal",
+      "ready": true,
+      "status": "lifecycle_rehearsal_ready"
+    }
+  ],
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_pre_live_rehearsal_readiness",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "next_engineering_bottleneck": "live_submit dependencies: fresh selected signal, action-time live RequiredFacts, candidate/auth evidence, FinalGate, Operation Layer, protection/account/exchange facts; then live_outcome_calibration from real fill, slippage, protection, settlement, and realized PnL.",
+  "remaining_live_outcome_calibration_dependencies": [
+    "real_exchange_accept_or_reject",
+    "actual_fill_or_partial_fill_behavior",
+    "actual_slippage_fee_funding",
+    "actual_protection_acceptance",
+    "actual_reconciliation_settlement",
+    "realized_pnl_review"
+  ],
+  "remaining_live_submit_dependencies": [
+    "fresh_selected_strategygroup_signal",
+    "action_time_live_required_facts",
+    "candidate_and_authorization_evidence",
+    "action_time_finalgate_pass",
+    "official_operation_layer_submit_path",
+    "protection_account_and_exchange_facts"
+  ],
+  "safety_invariants": {
+    "actionable_now": false,
+    "exchange_write_called": false,
+    "final_gate_called": false,
+    "live_outcome_calibrated": false,
+    "live_profile_changed": false,
+    "live_submit_ready": false,
+    "local_readiness_only": true,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_defaults_changed": false,
+    "real_order_authority": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.strategygroup_pre_live_rehearsal_readiness.v1",
+  "scope": "strategygroup_pre_live_rehearsal_readiness",
+  "status": "pre_live_rehearsal_ready",
+  "strategygroup_decision_impact": [
+    {
+      "actionable_now": false,
+      "current_decision": "revise",
+      "current_tier": "L2",
+      "decision_impact": "revise lane guarded; L2 shadow may continue; no L4/live authority",
+      "real_order_authority": false,
+      "strategy_group_id": "BTPC-001"
+    },
+    {
+      "actionable_now": false,
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
+      "real_order_authority": false,
+      "strategy_group_id": "VCB-001"
+    },
+    {
+      "actionable_now": false,
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
+      "real_order_authority": false,
+      "strategy_group_id": "LSR-001"
+    },
+    {
+      "actionable_now": false,
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
+      "real_order_authority": false,
+      "strategy_group_id": "BRF-001"
+    },
+    {
+      "actionable_now": false,
+      "current_decision": "park",
+      "current_tier": "L1",
+      "decision_impact": "park decision retained until material new edge evidence",
+      "real_order_authority": false,
+      "strategy_group_id": "RBR-001"
+    }
+  ],
+  "validation_errors": []
+}

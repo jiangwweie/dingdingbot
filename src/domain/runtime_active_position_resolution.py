@@ -38,6 +38,9 @@ class RuntimeActivePositionResolutionStatus(str, Enum):
     BLOCKED = "blocked"
     HOLD_WITH_HARD_STOP = "hold_with_hard_stop"
     WAITING_FOR_OWNER_CLOSE_AUTHORIZATION = "waiting_for_owner_close_authorization"
+    READY_FOR_STANDING_REDUCE_ONLY_RECOVERY = (
+        "ready_for_standing_reduce_only_recovery"
+    )
     READY_FOR_CLOSED_REVIEW = "ready_for_closed_review"
     READY_FOR_NEXT_ATTEMPT_GATE = "ready_for_next_attempt_gate"
 
@@ -60,9 +63,12 @@ class RuntimeActivePositionResolutionPacket(BaseModel):
     next_attempt_blocked_by_active_position: bool
     full_reduce_only_close_feasible: bool = False
     full_reduce_only_close_quantity: Decimal | None = Field(default=None, ge=Decimal("0"))
-    full_reduce_only_close_requires_owner_authorization: bool = True
+    full_reduce_only_close_requires_owner_authorization: bool = False
     owner_close_approval_env: str | None = None
     owner_close_approval_value: str | None = None
+    standing_recovery_authorization_scope: str | None = None
+    operation_layer_required: bool = True
+    finalgate_required: bool = True
     closed_review_recorded: bool = False
     recommended_next_action: str
     required_steps: list[str] = Field(default_factory=list)
@@ -131,10 +137,16 @@ def build_runtime_active_position_resolution_packet(
     elif monitor.active_position_present:
         if monitor.can_continue_holding and monitor.hard_stop_boundary_present:
             status = RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP
-            recommended = "continue_holding_with_hard_stop_or_owner_authorize_reduce_only_close"
+            recommended = "continue_holding_with_hard_stop_or_prepare_official_reduce_only_recovery"
             required_steps = ["continue_live_monitoring", "verify_next_attempt_gate_after_flat"]
             if _full_close_feasible(exit_plan):
-                required_steps.append("optional_owner_authorize_exact_reduce_only_close")
+                required_steps.append("optional_prepare_official_reduce_only_recovery")
+        elif post_close_followup is not None and post_close_followup.status == (
+            RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY
+        ):
+            status = RuntimeActivePositionResolutionStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY
+            recommended = "prepare_official_reduce_only_recovery"
+            required_steps = list(post_close_followup.required_steps)
         elif post_close_followup is not None and post_close_followup.status == (
             RuntimePostCloseFollowupStatus.WAITING_FOR_OWNER_CLOSE_AUTHORIZATION
         ):
@@ -199,7 +211,7 @@ def build_runtime_active_position_resolution_packet(
         full_reduce_only_close_requires_owner_authorization=(
             exit_plan.full_reduce_only_close_requires_owner_authorization
             if exit_plan is not None
-            else True
+            else False
         ),
         owner_close_approval_env=(
             post_close_followup.owner_close_approval_env
@@ -210,6 +222,21 @@ def build_runtime_active_position_resolution_packet(
             post_close_followup.owner_close_approval_value
             if post_close_followup is not None
             else None
+        ),
+        standing_recovery_authorization_scope=(
+            post_close_followup.standing_recovery_authorization_scope
+            if post_close_followup is not None
+            else None
+        ),
+        operation_layer_required=(
+            post_close_followup.operation_layer_required
+            if post_close_followup is not None
+            else True
+        ),
+        finalgate_required=(
+            post_close_followup.finalgate_required
+            if post_close_followup is not None
+            else True
         ),
         closed_review_recorded=(
             post_close_followup.closed_review_recorded

@@ -24,10 +24,11 @@ license: MIT
 **必须读取的项目文件**:
 ```
 1. AGENTS.md - 项目核心约束
-2. docs/ops/live-safe-v1-program.md - 当前 program 目标和禁令
-3. docs/ops/agent-working-rules.md - Codex/Claude 协作规则
-4. .claude/team/backend-dev/SKILL.md - 后端执行边界
-5. .claude/team/frontend-dev/SKILL.md - 前端规范
+2. CLAUDE.md - Claude 执行边界
+3. docs/current/OWNER_RUNTIME_OPERATING_MODEL.md - 当前 Owner 运行模型
+4. docs/current/AI_AGENT_CONSTRAINTS.md - 当前 agent 约束
+5. .claude/team/backend-dev/SKILL.md - 后端执行边界
+6. .claude/team/frontend-dev/SKILL.md - 前端规范
 ```
 
 ### 阶段 2: 需求分析
@@ -287,4 +288,4 @@ PM 在分配任务前，自动调用 PUA 升级提示词。
 
 **版本**: v1.0
 **创建日期**: 2026-04-04
-**适用项目**: BRC 策略运行治理系统（历史版本：盯盘狗量化交易系统 v3.0）
+**适用项目**: BRC 策略运行治理系统

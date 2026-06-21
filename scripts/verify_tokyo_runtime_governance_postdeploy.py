@@ -77,6 +77,12 @@ def build_postdeploy_report(
     current_path = f"{root}/app/current"
     quoted_current_path = _quote_remote_path(current_path)
 
+    release_identity = _remote_release_identity(
+        host,
+        quoted_current_path=quoted_current_path,
+        connect_timeout_seconds=connect_timeout_seconds,
+        runner=command_runner,
+    )
     facts = {
         "host": _ssh_text(
             host,
@@ -90,12 +96,9 @@ def build_postdeploy_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
-        "release_identity": _remote_release_identity(
-            host,
-            quoted_current_path=quoted_current_path,
-            connect_timeout_seconds=connect_timeout_seconds,
-            runner=command_runner,
-        ),
+        "release_identity": release_identity,
+        "release_identity_source": release_identity["source"],
+        "current_head": release_identity["head"],
         "migration_count": _ssh_text(
             host,
             (

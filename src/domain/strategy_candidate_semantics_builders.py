@@ -203,7 +203,7 @@ def build_brf_short_candidate_semantics(
             "protection_clarity": "rally high can anchor a mandatory hard stop",
         },
         warnings=[
-            "short_side_conservative_profile_required"
+            "short_side_allocated_profile_boundary_required"
             if squeeze.get("conservative_short_profile_required")
             else ""
         ],
@@ -317,7 +317,7 @@ def build_btpc_short_candidate_semantics(
                 "context_alignment": "higher-timeframe context supports bear-trend continuation",
                 "protection_clarity": "pullback high can anchor a mandatory hard stop",
             },
-            warnings=["short_side_conservative_profile_required"],
+            warnings=["short_side_allocated_profile_boundary_required"],
         ),
     )
 

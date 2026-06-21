@@ -214,16 +214,12 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["checks"]["implementation_blockers"] == []
     assert report["checks"]["staged_submit_chain_available"] is True
     assert report["checks"]["live_enablement_blockers"] == [
-        "promotion_gate_first_real_submit_deployment_readiness_evidence_id_missing",
-        "promotion_gate_first_real_submit_local_registration_enablement_decision_id_missing",
         "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",
         "promotion_gate_not_ready_for_first_real_submit",
     ]
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is False
     assert report["promotion_gate"]["status"] == "blocked"
     assert {
-        "first_real_submit_deployment_readiness_evidence_id_missing",
-        "first_real_submit_local_registration_enablement_decision_id_missing",
         "first_real_submit_owner_real_submit_authorization_id_missing",
     }.issubset(set(report["promotion_gate"]["blockers"]))
     assert "first_real_submit_attempt_outcome_policy_id_missing" not in (

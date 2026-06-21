@@ -201,6 +201,16 @@ def test_bridge_to_local_cycle_cli_stdout_is_json_only(
     monkeypatch,
 ):
     monkeypatch.setattr(
+        script.rtf101,
+        "build_proof_report",
+        lambda _path: _bridge_report(),
+    )
+    monkeypatch.setattr(
+        script.rtf091,
+        "build_proof_report",
+        lambda _path: _cycle_report(),
+    )
+    monkeypatch.setattr(
         script.sys,
         "argv",
         [

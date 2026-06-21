@@ -227,7 +227,18 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
     assert plan.full_reduce_only_close_quantity == Decimal("1.0")
     assert plan.full_reduce_only_close_feasible is True
     assert plan.full_reduce_only_close_notional_reference == Decimal("6.62844777")
-    assert plan.full_reduce_only_close_requires_owner_authorization is True
+    assert plan.full_reduce_only_close_requires_owner_authorization is False
+    assert plan.runner_primary_exit_rule == "structure_invalidation_first"
+    assert plan.runner_secondary_exit_rules == [
+        "atr_trailing_review_only",
+        "time_stop_review_only",
+    ]
+    assert plan.runner_exit_automation == "review_packet_only_first_stage"
+    assert plan.runner_stop_update_authority == "none_in_first_stage"
+    assert plan.runner_exit_review_required is True
+    assert plan.metadata["runner_primary_exit_rule"] == (
+        "structure_invalidation_first"
+    )
     assert plan.not_order is True
     assert plan.not_execution_intent is True
     assert plan.exchange_order_submitted is False
@@ -263,7 +274,7 @@ def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
     assert plan.tp1_quantity_feasible is False
     assert plan.runner_quantity_reference == Decimal("1")
     assert plan.recommended_owner_decision == (
-        "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+        "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
     )
     assert plan.full_reduce_only_close_quantity == Decimal("1")
     assert plan.full_reduce_only_close_feasible is True
@@ -288,6 +299,53 @@ def test_active_position_without_hard_stop_requires_owner_action():
     assert packet.can_continue_holding is False
     assert packet.owner_action_required is True
     assert "active_position_missing_hard_stop" in packet.blockers
+
+
+def test_active_position_with_local_sl_only_still_requires_exchange_native_stop():
+    packet = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[],
+        reconciliation_result=None,
+        now_ms=NOW_MS,
+        exchange_facts_available=True,
+    )
+
+    assert packet.status == RuntimeLivePositionMonitorStatus.ACTIVE_UNPROTECTED
+    assert packet.protection_status == RuntimeLiveProtectionStatus.HARD_STOP_MISSING
+    assert packet.hard_stop_boundary_present is False
+    assert packet.can_continue_holding is False
+    assert packet.owner_action_required is True
+    assert "active_position_missing_hard_stop" in packet.blockers
+    assert "local_sl_record_present_but_exchange_native_stop_missing" in packet.warnings
+    assert packet.metadata["local_sl_record_present"] is True
+    assert packet.metadata["exchange_native_hard_stop_present"] is False
+
+
+def test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload():
+    order = _exchange_sl_order()
+    order.pop("reduceOnly")
+    order["info"]["reduceOnly"] = True
+
+    packet = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[order],
+        reconciliation_result=None,
+        now_ms=NOW_MS,
+        exchange_facts_available=True,
+    )
+
+    assert packet.status == RuntimeLivePositionMonitorStatus.ACTIVE_PROTECTION_WARNING
+    assert packet.hard_stop_boundary_present is True
+    assert packet.sl_protection_present is True
+    assert packet.can_continue_holding is True
+    assert packet.metadata["exchange_native_hard_stop_present"] is True
+    assert "active_position_missing_hard_stop" not in packet.blockers
 
 
 def test_flat_after_attempt_requires_review_before_next_attempt():

@@ -26,7 +26,11 @@ class _FakeClient:
         candidate_reusable: bool | None = True,
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
+        evidence_warnings: list[str] | None = None,
+        reservation_warnings: list[str] | None = None,
         shadow_plan_blockers: list[str] | None = None,
+        local_result_status: str = "registered_created_local_orders",
+        local_result_blockers: list[str] | None = None,
         handoff_http_status: int = 200,
         handoff_blockers: list[str] | None = None,
         disabled_action_http_status: int = 200,
@@ -39,7 +43,11 @@ class _FakeClient:
         self.candidate_reusable = candidate_reusable
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
+        self.evidence_warnings = evidence_warnings or []
+        self.reservation_warnings = reservation_warnings or []
         self.shadow_plan_blockers = shadow_plan_blockers or []
+        self.local_result_status = local_result_status
+        self.local_result_blockers = local_result_blockers or []
         self.handoff_http_status = handoff_http_status
         self.handoff_blockers = handoff_blockers or []
         self.disabled_action_http_status = disabled_action_http_status
@@ -173,10 +181,18 @@ class _FakeClient:
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ]
                     + self.evidence_blockers,
+                    "warnings": self.evidence_warnings,
                 },
             }
         if "runtime-execution-attempt-reservations" in path:
-            return {"http_status": 200, "body": {"reservation_id": "reserve-1", "status": "pending_runtime_mutation"}}
+            return {
+                "http_status": 200,
+                "body": {
+                    "reservation_id": "reserve-1",
+                    "status": "pending_runtime_mutation",
+                    "warnings": self.reservation_warnings,
+                },
+            }
         if "runtime-execution-attempt-mutations" in path:
             return {"http_status": 200, "body": {"mutation_id": "mutation-1", "status": "applied"}}
         if "runtime-execution-attempt-outcome-policies" in path:
@@ -200,7 +216,14 @@ class _FakeClient:
         if "runtime-execution-local-registration-enablements" in path:
             return {"http_status": 200, "body": {"decision_id": "local-enable-1", "status": "ready_for_local_registration_action"}}
         if "runtime-execution-order-lifecycle-adapter-results" in path:
-            return {"http_status": 200, "body": {"adapter_result_id": "local-result-1", "status": "registered_created_local_orders"}}
+            return {
+                "http_status": 200,
+                "body": {
+                    "adapter_result_id": "local-result-1",
+                    "status": self.local_result_status,
+                    "blockers": self.local_result_blockers,
+                },
+            }
         if "runtime-execution-exchange-gateway-readiness" in path:
             return {"http_status": 200, "body": {"readiness_id": "gateway-ready-1", "status": "ready_for_manual_gateway_binding"}}
         if "runtime-execution-exchange-submit-action-authorizations" in path:
@@ -628,6 +651,123 @@ def test_arm_standing_authorized_scoped_evidence_prep_records_operation_layer_id
     assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
 
 
+def test_arm_standing_prep_stops_before_attempt_mutation_when_evidence_not_live_ready():
+    client = _FakeClient(
+        evidence_warnings=[
+            "runtime_execution_enabled_false_current_shadow_boundary",
+            "runtime_shadow_mode_current_boundary",
+            "trusted_submit_fact_snapshot_not_fresh_enough",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "runtime_execution_enabled_false_current_shadow_boundary"
+    ) in report["blockers"]
+    assert (
+        "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary"
+        in report["blockers"]
+    )
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "trusted_submit_fact_snapshot_not_fresh_enough"
+    ) in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-first-real-submit-evidence-preparations" in path for path in paths)
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
+    assert report["safety"]["runtime_budget_mutated"] is False
+
+
+def test_arm_standing_prep_stops_before_mutation_on_reservation_shadow_warning():
+    client = _FakeClient(
+        reservation_warnings=[
+            "runtime_execution_enabled_false_current_shadow_boundary",
+            "runtime_shadow_mode_current_boundary",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "runtime_execution_enabled_false_current_shadow_boundary"
+    ) in report["blockers"]
+    assert (
+        "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary"
+        in report["blockers"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-attempt-outcome-policies" in path for path in paths)
+    assert not any(
+        "runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths
+    )
+    assert report["safety"]["attempt_counter_mutated"] is False
+    assert report["safety"]["runtime_budget_mutated"] is False
+
+
+def test_arm_stops_before_exchange_evidence_when_local_registration_is_blocked():
+    client = _FakeClient(
+        local_result_status="blocked",
+        local_result_blockers=[
+            "trusted_submit_fact_snapshot_not_fresh_enough",
+            "persistent_duplicate_submit_lock_required",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "local_registration_result_not_ready_for_exchange_submit" in report["blockers"]
+    assert "trusted_submit_fact_snapshot_not_fresh_enough" in report["blockers"]
+    assert "persistent_duplicate_submit_lock_required" in report["blockers"]
+    assert report["ids"]["local_registration_adapter_result_id"] == "local-result-1"
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any(
+        "runtime-execution-exchange-submit-action-authorizations" in path
+        for path in paths
+    )
+    assert not any("runtime-execution-exchange-submit-enablements" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
+
+
 def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit():
     client = _FakeClient()
     flow = FirstRealSubmitApiFlow(
@@ -861,6 +1001,59 @@ def test_execute_requires_exact_env_confirmation(monkeypatch):
     assert not any("attempt-mutations" in path for path in paths)
     assert not any("exchange-submit-action-authorizations" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
+
+
+def test_execute_standing_authorized_submit_does_not_require_env_confirmation(
+    monkeypatch,
+):
+    monkeypatch.delenv(APPROVAL_ENV, raising=False)
+    client = _FakeClient()
+    reconciliation_calls = []
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="execute",
+            authorization_id="auth-1",
+            execute_real_submit=True,
+            standing_authorized_first_real_submit=True,
+            next_attempt_symbol="AVAX/USDT:USDT",
+            trusted_submit_fact_snapshot_id="facts-1",
+            submit_idempotency_policy_id="idem-1",
+            attempt_outcome_policy_id="policy-1",
+            protection_creation_failure_policy_id="protect-fail-1",
+            local_registration_enablement_decision_id="local-enable-1",
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+            exchange_submit_adapter_enablement_id="exchange-adapter-enable-1",
+            exchange_submit_action_authorization_id="exchange-action-1",
+            deployment_readiness_evidence_id="gateway-ready-1",
+            exchange_submit_adapter_result_id="exchange-adapter-1",
+        ),
+        post_submit_reconciliation_runner=lambda symbol: reconciliation_calls.append(
+            symbol
+        )
+        or {
+            "exit_code": 0,
+            "body": {"status": "recorded", "results": [{"is_consistent": True}]},
+            "blockers": [],
+            "warnings": [],
+        },
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["execution_result_id"] == "exec-1"
+    assert APPROVAL_ENV not in os.environ
+    assert reconciliation_calls == ["AVAX/USDT:USDT"]
+    assert report["safety"]["real_submit_requires_env_confirmation"] is False
+    assert (
+        report["safety"]["real_submit_guard_satisfied_by_standing_authorization"]
+        is True
+    )
+    paths = [call["path"] for call in client.calls]
+    assert any("first-real-submit-actions" in path for path in paths)
 
 
 def test_execute_blocks_without_prearmed_exchange_submit_evidence(monkeypatch):

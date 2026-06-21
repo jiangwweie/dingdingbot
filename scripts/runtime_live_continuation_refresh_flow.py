@@ -86,6 +86,8 @@ def _status(selector_packet: dict[str, Any], effects: dict[str, bool]) -> str:
     if any(effects.values()):
         return "continuation_refresh_blocked_forbidden_effect"
     selector_status = str(selector_packet.get("status") or "")
+    if selector_status == "continuation_monitor_position_or_standing_recovery":
+        return "continuation_refresh_monitor_position_or_standing_recovery"
     if selector_status == "continuation_monitor_position_or_owner_close":
         return "continuation_refresh_monitor_position_or_owner_close"
     if selector_status == "continuation_ready_for_final_gate_review":
@@ -245,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_json(args.output_json, refresh_packet)
     print(json.dumps(refresh_packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if refresh_packet["status"] in {
+        "continuation_refresh_monitor_position_or_standing_recovery",
         "continuation_refresh_monitor_position_or_owner_close",
         "continuation_refresh_ready_for_final_gate_review",
         "continuation_refresh_ready_for_prepare",

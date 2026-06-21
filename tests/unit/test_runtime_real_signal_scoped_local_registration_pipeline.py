@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts import runtime_real_signal_scoped_local_registration_pipeline as script
 
 
@@ -51,6 +53,37 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
     assert report["safety_invariants"]["local_registration_attempted"] is False
     assert report["safety_invariants"]["first_real_submit_action_called"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    progress = report["execution_chain_progress"]
+    assert progress["status"] == "local_registration_proof_dry_run_ready"
+    assert progress["owner_state"] == "工程演练已到本地登记前"
+    assert progress["next_step"] == (
+        "execute_scoped_local_registration_proof_under_standing_authorization"
+    )
+    assert progress["stage_statuses"] == {
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "ready_for_scoped_local_registration_proof_dry_run"
+        ),
+    }
+    assert progress["post_local_registration_gate"] is None
+    assert progress["ready_for_real_order"] is False
+    assert progress["official_operation_layer_reached"] is False
+    assert progress["action_time_finalgate_rerun_after_local_registration"] is False
+    assert progress["disabled_smoke_is_real_execution_proof"] is False
+    assert progress["exchange_write_called"] is False
+    assert progress["order_created"] is False
+    assert progress["withdrawal_or_transfer_created"] is False
+    assert set(progress["known_non_executing_probe_findings"]) == {
+        "evidence_chain:preview_disabled_first_real_submit_action_http_404",
+        (
+            "evidence_chain:disabled_first_real_submit_action_prerequisite_missing:"
+            "RuntimeExecutionOrderLifecycleAdapterResult not found"
+        ),
+    }
+    assert progress["non_executing_first_real_submit_action_probe_called"] is True
+    assert progress["real_first_real_submit_action_called"] is False
     paths = [call["path"] for call in client.calls]
     assert any("strategy-signal-intent-draft-sources" in path for path in paths)
     assert any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -85,6 +118,12 @@ def test_pipeline_auto_readiness_blocks_with_missing_trusted_facts(tmp_path):
     ) in report["blockers"]
     assert report["safety_invariants"]["sample_rehearsal_used"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "blocked_before_operation_layer"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "repair_readiness_evidence_resolution"
+    )
     paths = [call["path"] for call in client.calls]
     assert any("strategy-signal-intent-draft-sources" in path for path in paths)
     assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -118,6 +157,15 @@ def test_pipeline_auto_readiness_reaches_scoped_local_registration(tmp_path):
     assert written["trusted_submit_fact_snapshot_id"] == "facts-auto-rtf020"
     assert report["safety_invariants"]["first_real_submit_action_called"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "local_registration_proof_dry_run_ready"
+    )
+    assert report["execution_chain_progress"]["post_local_registration_gate"] is None
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert (
+        report["execution_chain_progress"]["official_operation_layer_reached"]
+        is False
+    )
 
 
 def test_pipeline_collector_blocks_before_readiness_when_report_facts_missing(tmp_path):
@@ -142,6 +190,12 @@ def test_pipeline_collector_blocks_before_readiness_when_report_facts_missing(tm
     }
     assert "early_readiness_fact_collection:trusted_submit_fact_snapshot_id_missing" in (
         report["blockers"]
+    )
+    assert report["execution_chain_progress"]["status"] == (
+        "blocked_before_operation_layer"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "repair_early_readiness_fact_collection"
     )
     paths = [call["path"] for call in client.calls]
     assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -234,6 +288,179 @@ def test_pipeline_collector_can_feed_auto_readiness_path(tmp_path):
     evidence_path = tmp_path / "artifacts" / "02-collected-readiness-evidence.json"
     assert evidence_path.exists()
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "local_registration_proof_dry_run_ready"
+    )
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert report["execution_chain_progress"]["post_local_registration_gate"] is None
+
+
+def test_pipeline_can_record_scoped_local_registration_with_fake_client(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(
+            tmp_path,
+            readiness_evidence_json=str(_write_evidence(tmp_path)),
+            source_kind="scoped_local_registration_proof",
+            allow_scoped_local_registration_proof=True,
+            execute_scoped_local_registration_proof=True,
+        ),
+        client=client,
+    )
+
+    assert report["status"] == "scoped_local_registration_proof_recorded"
+    assert report["blocked_stage"] is None
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "readiness": "ready_for_executable_submit",
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "scoped_local_registration_proof_recorded"
+        ),
+    }
+    assert report["execution_chain_progress"]["status"] == (
+        "scoped_local_registration_recorded"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "rerun_action_time_finalgate_then_continue_official_operation_layer"
+    )
+    assert report["execution_chain_progress"]["post_local_registration_gate"] == {
+        "status": "awaiting_action_time_finalgate_rerun",
+        "required_before_operation_layer_submit": [
+            "action_time_finalgate_pass",
+            "operation_layer_evidence_ready",
+            "operation_layer_submit_preconditions_pass",
+        ],
+        "operation_layer_evidence_ready": False,
+        "operation_layer_evidence_missing_ids": [
+            "owner_real_submit_authorization_id"
+        ],
+        "operation_layer_submit_allowed": False,
+        "ready_for_real_order": False,
+    }
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert report["execution_chain_progress"]["official_operation_layer_reached"] is False
+    assert (
+        report["execution_chain_progress"][
+            "non_executing_first_real_submit_action_probe_called"
+        ]
+        is True
+    )
+    assert (
+        report["execution_chain_progress"]["real_first_real_submit_action_called"]
+        is False
+    )
+    assert report["safety_invariants"]["local_registration_attempted"] is True
+    assert report["safety_invariants"]["local_registration_recorded"] is True
+    assert report["safety_invariants"]["first_real_submit_action_called"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit" in path for path in paths)
+    first_real_submit_action_calls = [
+        call for call in client.calls
+        if "runtime-execution-first-real-submit-actions" in call["path"]
+    ]
+    assert first_real_submit_action_calls
+    assert all(call["method"] == "POST" for call in first_real_submit_action_calls)
+    assert all(
+        call["query"].get("owner_confirmed_for_first_real_submit_action") is False
+        for call in first_real_submit_action_calls
+    )
+
+
+def test_pipeline_outputs_dispatcher_ready_operation_layer_evidence_after_registration(
+    tmp_path,
+):
+    client = _Client()
+
+    readiness_evidence = _write_evidence(
+        tmp_path,
+        owner_real_submit_authorization_id="auth-rtf020",
+    )
+    report = script._build_report(
+        _args(
+            tmp_path,
+            readiness_evidence_json=str(readiness_evidence),
+            allow_scoped_local_registration_proof=True,
+            execute_scoped_local_registration_proof=True,
+        ),
+        client=client,
+    )
+
+    operation_layer_evidence = report[
+        "operation_layer_evidence_after_local_registration"
+    ]
+    operation_layer_meta = operation_layer_evidence[
+        "operation_layer_evidence_after_local_registration"
+    ]
+    assert operation_layer_meta == {
+        "status": "ready",
+        "local_registration_adapter_result_id": "local-result-rtf020",
+        "missing_evidence_ids": [],
+        "ready_for_action_time_finalgate_rerun": True,
+        "ready_for_operation_layer_readiness_check": True,
+        "places_order": False,
+        "exchange_write_called": False,
+    }
+    assert report["execution_chain_progress"]["post_local_registration_gate"] == {
+        "status": "awaiting_action_time_finalgate_rerun",
+        "required_before_operation_layer_submit": [
+            "action_time_finalgate_pass",
+            "operation_layer_evidence_ready",
+            "operation_layer_submit_preconditions_pass",
+        ],
+        "operation_layer_evidence_ready": True,
+        "operation_layer_evidence_missing_ids": [],
+        "operation_layer_submit_allowed": False,
+        "ready_for_real_order": False,
+    }
+    dispatch_packet = dispatcher.build_dispatch_packet(
+        resume_pack=_finalgate_ready_resume_pack("auth-rtf020"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        operation_layer_evidence_report=operation_layer_evidence,
+        operation_layer_evidence_report_path=report[
+            "operation_layer_evidence_after_local_registration_path"
+        ],
+        execute_preflight=False,
+    )
+
+    assert dispatch_packet["status"] == "operation_layer_ready"
+    assert dispatch_packet["dispatch_status"] == (
+        "official_operation_layer_evidence_ready"
+    )
+    assert dispatch_packet["operation_layer_readiness"][
+        "ready_for_official_operation_layer_submit"
+    ] is True
+    assert dispatch_packet["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert dispatch_packet["safety_invariants"][
+        "official_operation_layer_submit_called"
+    ] is False
+    assert dispatch_packet["safety_invariants"]["places_order"] is False
+    assert dispatch_packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_pipeline_cli_exposes_scoped_local_registration_flags():
+    args = script._parse_args(
+        [
+            "--runtime-instance-id",
+            "runtime-cli",
+            "--signal-input-json",
+            "signal.json",
+            "--source-kind",
+            "scoped_local_registration_proof",
+            "--allow-scoped-local-registration-proof",
+            "--execute-scoped-local-registration-proof",
+        ]
+    )
+
+    assert args.source_kind == "scoped_local_registration_proof"
+    assert args.allow_scoped_local_registration_proof is True
+    assert args.allow_sample_local_registration is False
+    assert args.execute_scoped_local_registration_proof is True
 
 
 class _Client:
@@ -358,6 +585,83 @@ class _Client:
                     ],
                 },
             }
+        if "runtime-execution-controlled-submit-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "execution_intent_id": "intent-rtf020",
+                    "runtime_execution_intent_draft_id": "draft-rtf020",
+                    "source_id": "candidate-rtf020",
+                    "semantic_ids": {
+                        "order_candidate_id": "candidate-rtf020",
+                        "runtime_instance_id": "runtime-rtf020",
+                        "signal_evaluation_id": "signal-rtf020",
+                    },
+                    "status": "ready_for_controlled_submit_adapter",
+                },
+            }
+        if "runtime-execution-protection-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "protection_plan_id": "protection-plan-rtf020",
+                    "status": "ready_for_submit_adapter",
+                },
+            }
+        if "runtime-execution-attempt-reservations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "reservation_id": "reservation-rtf020",
+                    "status": "pending_runtime_mutation",
+                },
+            }
+        if "runtime-execution-attempt-mutations" in path:
+            return {
+                "http_status": 200,
+                "body": {"mutation_id": "mutation-rtf020", "status": "applied"},
+            }
+        if "runtime-execution-attempt-outcome-policies" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "policy_id": "policy-rtf020",
+                    "status": "ready_for_attempt_budget_outcome_accounting",
+                },
+            }
+        if "runtime-execution-order-lifecycle-handoff-drafts" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "handoff_draft_id": "handoff-rtf020",
+                    "status": "ready_for_order_lifecycle_adapter",
+                    "blockers": [],
+                },
+            }
+        if "runtime-execution-local-registration-action-authorizations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "action_authorization_id": "local-action-rtf020",
+                    "status": "approved_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-local-registration-enablements" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "decision_id": "local-enable-rtf020",
+                    "status": "ready_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-order-lifecycle-adapter-results" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "adapter_result_id": "local-result-rtf020",
+                    "status": "registered_created_local_orders",
+                },
+            }
         raise AssertionError(f"unexpected path {path}")
 
 
@@ -377,33 +681,86 @@ def _write_signal(tmp_path):
     return path
 
 
-def _write_evidence(tmp_path):
+def _write_evidence(tmp_path, **overrides):
     path = tmp_path / "readiness-evidence.json"
+    payload = {
+        "final_gate_preview_id": "final-gate-rtf020",
+        "final_gate_passed": True,
+        "runtime_grant_authorization_id": "runtime-grant-rtf020",
+        "trusted_submit_fact_snapshot_id": "facts-rtf020",
+        "submit_idempotency_policy_id": "idem-rtf020",
+        "attempt_outcome_policy_id": "attempt-policy-rtf020",
+        "protection_creation_failure_policy_id": "protect-rtf020",
+        "local_registration_enablement_decision_id": "local-enable-rtf020",
+        "exchange_submit_enablement_decision_id": "exchange-enable-rtf020",
+        "exchange_submit_action_authorization_id": "exchange-action-rtf020",
+        "order_lifecycle_submit_enablement_id": "ol-enable-rtf020",
+        "exchange_submit_adapter_enablement_id": "exchange-adapter-rtf020",
+        "deployment_readiness_evidence_id": "deploy-ready-rtf020",
+        "protection_required_and_ready": True,
+        "active_position_source_trusted": True,
+        "account_facts_fresh": True,
+        "duplicate_submit_guard_ready": True,
+    }
+    payload.update(overrides)
     path.write_text(
-        json.dumps(
-            {
-                "final_gate_preview_id": "final-gate-rtf020",
-                "final_gate_passed": True,
-                "runtime_grant_authorization_id": "runtime-grant-rtf020",
-                "trusted_submit_fact_snapshot_id": "facts-rtf020",
-                "submit_idempotency_policy_id": "idem-rtf020",
-                "attempt_outcome_policy_id": "attempt-policy-rtf020",
-                "protection_creation_failure_policy_id": "protect-rtf020",
-                "local_registration_enablement_decision_id": "local-enable-rtf020",
-                "exchange_submit_enablement_decision_id": "exchange-enable-rtf020",
-                "exchange_submit_action_authorization_id": "exchange-action-rtf020",
-                "order_lifecycle_submit_enablement_id": "ol-enable-rtf020",
-                "exchange_submit_adapter_enablement_id": "exchange-adapter-rtf020",
-                "deployment_readiness_evidence_id": "deploy-ready-rtf020",
-                "protection_required_and_ready": True,
-                "active_position_source_trusted": True,
-                "account_facts_fresh": True,
-                "duplicate_submit_guard_ready": True,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
     return path
+
+
+def _finalgate_ready_resume_pack(authorization_id):
+    return {
+        "scope": "runtime_signal_watcher_post_signal_resume_pack",
+        "status": "finalgate_ready",
+        "can_continue_steps_5_8": True,
+        "selected_runtime_instance_ids": ["runtime-rtf020"],
+        "signal_input_json": "/tmp/signal-input.json",
+        "shadow_candidate_id": "candidate-rtf020",
+        "prepared_authorization_id": authorization_id,
+        "action_time_resume": {
+            "status": "ready_for_action_time_final_gate",
+            "next_step": "prepare_official_operation_layer_submit",
+            "signal_input_json": "/tmp/signal-input.json",
+            "shadow_candidate_id": "candidate-rtf020",
+            "prepared_authorization_id": authorization_id,
+            "allowed_auto_actions": [
+                "prepare_official_operation_layer_submit",
+            ],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+            "requires_fresh_action_time_facts": True,
+        },
+        "owner_state": {"status": "finalgate_ready", "blocker_class": "none"},
+        "operation_layer_command_plan": dispatcher._operation_layer_command_plan(
+            authorization_id=authorization_id,
+        ),
+        "finalgate_preflight_result": {
+            "called": True,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "blockers": [],
+                "warnings": [],
+            },
+        },
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "official_operation_layer_submit_called": False,
+            "forbidden_effect_flags": [],
+        },
+        "blockers": [],
+        "warnings": [],
+    }
 
 
 def _write_pipeline_final_gate(tmp_path):
@@ -517,6 +874,9 @@ def _args(tmp_path, **overrides):
         "expires_at_ms": None,
         "active_positions_count": 0,
         "metadata_json": None,
+        "source_kind": "current_live_signal",
+        "allow_scoped_local_registration_proof": False,
+        "allow_sample_local_registration": False,
         "execute_scoped_local_registration_proof": False,
         "owner_operator_id": "owner",
         "owner_confirmation_reference": "owner-authorized-rtf020",

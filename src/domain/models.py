@@ -643,7 +643,7 @@ class AttemptDeleteResponse(BaseModel):
 
 
 # ============================================================
-# Backtest Models (for Backtester layer)
+# Backtest models
 # ============================================================
 class BacktestRequest(BaseModel):
     """Request model for backtest endpoint"""
@@ -1390,7 +1390,7 @@ class PositionCloseEvent(FinancialModel):
     用于精确归因和时间序列分析。
 
     设计考量:
-    - close_pnl = gross_pnl - fee（与 matching_engine net_pnl 语义一致）
+    - close_pnl = gross_pnl - fee
     - event_type 使用字符串（支持未来扩展，不限制枚举）
     - close_qty = actual_filled（实际成交量，非请求成交量）
     - 部分字段为 Optional：为 trailing stop 未来扩展预留 NULL 能力

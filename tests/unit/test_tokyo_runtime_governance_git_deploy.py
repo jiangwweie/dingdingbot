@@ -90,7 +90,7 @@ def _ready_git_plan():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -203,7 +203,7 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -257,7 +257,7 @@ def test_git_deploy_plan_classifies_remote_probe_network_failure():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -330,7 +330,7 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     )
     assert report["inputs"]["remote_migration_revision"] == "081"
     assert report["inputs"]["target_migration_revision"] == "084"
-    assert report["inputs"]["migration_gap_revision_count"] == 3
+    assert report["inputs"]["migration_gap_revision_count"] == 8
     phases = {phase["phase"]: phase for phase in report["plan_phases"]}
     assert phases["2_owner_authorized_git_fetch_and_export"]["remote_mutation"] is True
     assert all(
@@ -356,13 +356,103 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "git fetch --prune origin" in all_commands
     assert "git archive" in all_commands
     assert ".brc-release-manifest.json" in all_commands
+    assert "tokyo-deploy-channel-status.json" in all_commands
+    assert "tokyo_runtime_governance_deploy_channel_status" in all_commands
+    assert '"status": "postdeploy_accepted"' in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
     assert "--expected-min-migrations 84" in all_commands
-    assert "--base-revision 081 --head-revision 084 --expected-revision-count 3" in all_commands
+    assert "--base-revision 081 --head-revision 084 --expected-revision-count 8" in all_commands
     assert "--expected-migration-count 84" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
+
+
+def test_git_deploy_plan_batches_tokyo_ssh_commands_to_reduce_server_interactions():
+    report = _ready_git_plan()
+
+    ssh_commands = [
+        command
+        for phase in report["plan_phases"]
+        for command in phase["commands"]
+        if command.startswith("ssh tokyo ")
+    ]
+
+    assert len(ssh_commands) == 4
+    assert any(
+        "systemctl stop brc-owner-console-backend.service" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "pg_dump" in command and "alembic upgrade head" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "systemctl start brc-owner-console-backend.service" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "tokyo-deploy-channel-status.json" in command
+        for command in ssh_commands
+    )
+
+
+def test_git_deploy_plan_allows_dirty_worktree_for_remote_git_export():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    module._tracked_dirty = lambda repo_root: True
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"{head}\trefs/heads/{branch}",
+                }
+            ],
+        )
+    )
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="https://github.com/example/dingdingbot.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python=(
+            "/home/ubuntu/brc-deploy/venvs/"
+            "brc-bnb-prelive-20260601/bin/python"
+        ),
+        api_base="http://127.0.0.1:18080",
+        previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=76,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["status"] == "ready_for_owner_authorized_remote_git_deploy_plan"
+    assert "tracked_worktree_dirty" not in report["checks"]["blockers"]
+    assert (
+        "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        in report["checks"]["warnings"]
+    )
+    all_commands = "\n".join(
+        command
+        for phase in report["plan_phases"]
+        for command in phase["commands"]
+    )
+    assert "--allow-tracked-dirty-for-remote-git-export" in all_commands
+    assert "git archive" in all_commands
+    assert "scp " not in all_commands
 
 
 def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_check():
@@ -401,7 +491,7 @@ def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_chec
         api_base="http://127.0.0.1:18080",
         previous_release="current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=81,
+        expected_remote_migration_count=76,
         expected_remote_latest_migration=(
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
@@ -421,6 +511,23 @@ def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_chec
         "test $(readlink -f /home/ubuntu/brc-deploy/app/current) = "
         "/home/ubuntu/brc-deploy/releases/current-baseline"
     ) in command
+
+
+def test_git_deploy_plan_health_wait_does_not_skip_post_health_steps():
+    plan = _ready_git_plan()
+    switch_phase = next(
+        phase
+        for phase in plan["plan_phases"]
+        if phase["phase"] == "4_switch_start_and_smoke"
+    )
+    command = switch_phase["commands"][0]
+
+    assert 'curl -fsS "$HEALTH_URL" 2>/dev/null && exit 0' not in command
+    assert "HEALTH_READY=1; break" in command
+    assert "systemctl daemon-reload" in command
+    assert command.index("HEALTH_READY=1; break") < command.index(
+        "systemctl daemon-reload"
+    )
 
 
 def test_git_deploy_executor_dry_run_does_not_execute_commands():
@@ -446,6 +553,14 @@ def test_git_deploy_executor_dry_run_does_not_execute_commands():
     assert calls == []
     assert report["effects"]["remote_files_modified"] is False
     assert report["effects"]["migrations_run"] is False
+    assert report["interaction"]["level"] == "L1_deploy_plan_only"
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["frontend_static_site"] == "not_included"
+    assert report["owner_summary"]["postdeploy_snapshot_recommended"] is False
 
 
 def test_git_deploy_executor_applies_with_standing_authorization_without_owner_packet():
@@ -519,6 +634,19 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert report["effects"]["migrations_run"] is True
     assert report["effects"]["order_created"] is False
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["interaction"]["level"] == "L3_bounded_deploy_apply"
+    assert report["interaction"]["remote_interaction_count"] == 7
+    assert report["interaction"]["mutates_remote_files"] is True
+    assert report["interaction"]["approaches_real_order"] is False
+    assert report["interaction"]["calls_operation_layer"] is False
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["owner_summary"]["state"] == "部署完成"
+    assert report["owner_summary"]["changed"]["remote_files"] is True
+    assert report["owner_summary"]["changed"]["services_restarted"] is True
+    assert report["owner_summary"]["not_changed"]["exchange_orders"] is True
+    assert report["owner_summary"]["frontend_static_site"] == "not_included"
+    assert report["owner_summary"]["postdeploy_snapshot_recommended"] is True
+    assert report["owner_summary"]["safety"]["order_created"] is False
 
 
 def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit():
@@ -624,6 +752,78 @@ def test_git_owner_deploy_packet_can_skip_pre_live_packet_for_deploy_only():
     assert packet["checks"]["pre_live_packet_skipped"] is True
     assert packet["checks"]["first_real_submit_still_blocked"] is True
     assert "pre_live_packet_skipped_for_deploy_only" in packet["checks"]["warnings"]
+
+
+def test_git_owner_deploy_packet_surfaces_tokyo_connectivity_blocker():
+    module = _load_packet_module()
+    plan, deploy_dry_run, release_report, _tokyo_probe = (
+        _owner_deploy_packet_inputs()
+    )
+    connectivity_probe = {
+        "status": "blocked",
+        "checks": {
+            "dns_resolved": True,
+            "tcp_ports_reachable": False,
+            "blockers": ["tokyo_tcp_22_unreachable"],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+    tokyo_probe = {
+        "status": "blocked",
+        "checks": {
+            "ready_for_controlled_deploy_preflight": False,
+            "blockers": [
+                "tokyo_readonly_probe_error",
+                "tokyo_tcp_22_unreachable",
+            ],
+            "warnings": [],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+
+    packet = module.build_git_owner_deploy_packet(
+        release_report=release_report,
+        deploy_plan=plan,
+        deploy_dry_run=deploy_dry_run,
+        tokyo_probe=tokyo_probe,
+        pre_live_packet=None,
+        connectivity_probe=connectivity_probe,
+    )
+
+    assert packet["status"] == "blocked"
+    assert "tokyo_readonly_probe_not_ready" in packet["checks"]["blockers"]
+    assert (
+        "tokyo_probe:tokyo_readonly_probe_error" in packet["checks"]["blockers"]
+    )
+    assert (
+        "tokyo_connectivity:tokyo_tcp_22_unreachable"
+        in packet["checks"]["blockers"]
+    )
+    assert packet["checks"]["tokyo_connectivity_probe_ready"] is False
+    assert packet["checks"]["tokyo_connectivity_blockers"] == [
+        "tokyo_tcp_22_unreachable"
+    ]
+    assert packet["safety_invariants"]["deploy_apply_requested"] is False
 
 
 def test_git_deploy_executor_allows_deploy_only_packet_when_pre_live_skipped():

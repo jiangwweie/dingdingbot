@@ -50,6 +50,15 @@ ARM_ATTEMPT_CONSUMPTION_BLOCKER = (
 ARM_ATTEMPT_CONSUMPTION_WARNING = (
     "operation_layer_arm_must_not_mutate_runtime_attempt_budget"
 )
+PRE_ATTEMPT_BLOCKING_WARNING_FRAGMENTS = (
+    "trusted_submit_fact_snapshot_not_ready",
+    "trusted_submit_fact_snapshot_not_fresh_enough",
+    "runtime_execution_enabled_false_current_shadow_boundary",
+    "runtime_shadow_mode_current_boundary",
+    "deployment_readiness_evidence_id_missing",
+    "gateway_not_injected_by_readiness_evidence",
+    "not_live_action_authorization",
+)
 
 
 class ApiClient(Protocol):
@@ -91,6 +100,7 @@ class FlowConfig:
     record_gateway_readiness: bool = True
     preview_disabled_first_real_submit_action: bool = False
     execute_real_submit: bool = False
+    standing_authorized_first_real_submit: bool = False
     record_attempt_consumption: bool = False
     standing_authorized_scoped_evidence_preparation: bool = False
     record_post_submit_accounting: bool = True
@@ -621,6 +631,7 @@ class FirstRealSubmitApiFlow:
         )
         reservation_body = _body(reservation)
         self.state.remember("reservation_id", reservation_body.get("reservation_id"))
+        self.state.add_blockers(_pre_attempt_warning_blockers(reservation_body))
         if self.state.blockers:
             return
 
@@ -682,8 +693,6 @@ class FirstRealSubmitApiFlow:
             return
         evidence_body = self._record_evidence_preparation(collect_body_blockers=False)
         self.state.add_blockers(_pre_adapter_evidence_blockers(evidence_body))
-        if any(blocker.endswith("_http_404") for blocker in self.state.blockers):
-            return
         if self.state.blockers:
             return
         if (
@@ -793,6 +802,15 @@ class FirstRealSubmitApiFlow:
             "local_registration_adapter_result_id",
             _body(local_result).get("adapter_result_id"),
         )
+        local_result_body = _body(local_result)
+        if (
+            local_result_body.get("status") != "registered_created_local_orders"
+            or local_result_body.get("blockers")
+        ):
+            self.state.add_blockers(
+                ["local_registration_result_not_ready_for_exchange_submit"]
+            )
+            return
         if not self._config.arm_exchange_submit_adapter:
             return
         if (
@@ -1219,6 +1237,8 @@ class FirstRealSubmitApiFlow:
         if not self._config.execute_real_submit:
             self.state.add_blockers(["execute_real_submit_cli_flag_missing"])
             return
+        if self._config.standing_authorized_first_real_submit:
+            return
         expected = _approval_value(authorization_id)
         actual = os.environ.get(APPROVAL_ENV, "").strip()
         if actual != expected:
@@ -1274,7 +1294,18 @@ class FirstRealSubmitApiFlow:
                 "uses_official_trading_console_api": True,
                 "owner_authorization_required_for_real_submit": True,
                 "real_submit_requires_cli_flag": True,
-                "real_submit_requires_env_confirmation": True,
+                "owner_chat_confirmation_required_for_real_submit": False,
+                "standing_authorized_first_real_submit": (
+                    self._config.standing_authorized_first_real_submit
+                ),
+                "real_submit_guard_satisfied_by_standing_authorization": (
+                    self._config.mode == "execute"
+                    and self._config.execute_real_submit
+                    and self._config.standing_authorized_first_real_submit
+                ),
+                "real_submit_requires_env_confirmation": (
+                    not self._config.standing_authorized_first_real_submit
+                ),
                 "env_confirmation_name": APPROVAL_ENV,
                 "local_registration_requires_env_confirmation": True,
                 "local_registration_env_confirmation_name": (
@@ -1285,6 +1316,19 @@ class FirstRealSubmitApiFlow:
                 "standing_authorized_scoped_evidence_preparation": (
                     self._config.standing_authorized_scoped_evidence_preparation
                 ),
+                "attempt_counter_mutated": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-attempt-mutations",
+                ),
+                "runtime_budget_mutated": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-attempt-mutations",
+                ),
+                "exchange_order_submitted": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-first-real-submit-actions",
+                )
+                and self._config.execute_real_submit,
                 "no_withdrawal_or_transfer": True,
             },
         }
@@ -1325,6 +1369,10 @@ def _id_summary(value: Any) -> dict[str, Any]:
     return {key: value.get(key) for key in keys if value.get(key)}
 
 
+def _report_has_step_path(steps: list[dict[str, Any]], fragment: str) -> bool:
+    return any(fragment in str(step.get("path") or "") for step in steps)
+
+
 def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
     data = body.get("data")
     if isinstance(data, dict):
@@ -1342,10 +1390,11 @@ def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
-    """Block arm on submit facts while tolerating the expected missing adapter result."""
+    """Block arm before attempt mutation unless live submit evidence is ready."""
     tolerated_fragments = (
         "runtimeexecutionorderlifecycleadapterresult_not_found",
         "runtime_execution_order_lifecycle_adapter_result_not_found",
+        "preview_disabled_first_real_submit_action_http_404",
     )
     blockers = body.get("blockers") if isinstance(body, dict) else None
     result: list[str] = []
@@ -1354,6 +1403,17 @@ def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
         if any(fragment in text for fragment in tolerated_fragments):
             continue
         result.append(text)
+    result.extend(_pre_attempt_warning_blockers(body))
+    return result
+
+
+def _pre_attempt_warning_blockers(body: dict[str, Any]) -> list[str]:
+    warnings = body.get("warnings") if isinstance(body, dict) else None
+    result: list[str] = []
+    for warning in warnings or []:
+        text = str(warning)
+        if any(fragment in text for fragment in PRE_ATTEMPT_BLOCKING_WARNING_FRAGMENTS):
+            result.append(f"pre_attempt_evidence_not_ready:{text}")
     return result
 
 
@@ -1557,6 +1617,16 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         ),
     )
     parser.add_argument("--execute-real-submit", action="store_true")
+    parser.add_argument(
+        "--standing-authorized-first-real-submit",
+        action="store_true",
+        help=(
+            "Treat the current Owner standing authorization as the first-real-submit "
+            "execution guard. The real submit still requires --execute-real-submit, "
+            "all prearmed evidence ids, action-time FinalGate, and the official "
+            "Operation Layer endpoint."
+        ),
+    )
     parser.add_argument("--skip-post-submit-accounting", action="store_true")
     parser.add_argument(
         "--skip-post-submit-reconciliation",
@@ -1629,6 +1699,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
             args.preview_disabled_first_real_submit_action
         ),
         execute_real_submit=args.execute_real_submit,
+        standing_authorized_first_real_submit=(
+            args.standing_authorized_first_real_submit
+        ),
         record_attempt_consumption=(
             args.record_attempt_consumption or args.mode == "execute"
         ),

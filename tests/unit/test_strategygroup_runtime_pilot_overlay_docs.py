@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 
@@ -99,3 +101,60 @@ def test_current_gate_classes_are_documented():
         "review_only_warning",
     ]:
         assert recovery_class in text
+
+
+def test_runtime_pilot_goal_audit_does_not_freeze_moving_branch_head():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+
+    assert "Latest pushed branch head" not in text
+    assert "moving git ref" in text
+    assert "Latest deployed runtime head" in text
+
+
+def test_runtime_pilot_goal_audit_deployed_head_matches_monitor_baseline():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+    baseline = json.loads(
+        (
+            REPO_ROOT
+            / "docs"
+            / "current"
+            / "RUNTIME_MONITOR_BASELINE.json"
+        ).read_text(encoding="utf-8")
+    )
+    match = re.search(r"\| Latest deployed runtime head \| `([0-9a-f]{40})` \|", text)
+
+    assert match is not None
+    if baseline["expected_runtime_head"] not in {"LOCAL_GIT_HEAD", "__LOCAL_GIT_HEAD__"}:
+        assert match.group(1) == baseline["expected_runtime_head"]
+
+
+def test_runtime_pilot_goal_audit_keeps_completion_boundary_explicit():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+
+    for phrase in [
+        "The goal is not complete yet",
+        "real fresh selected StrategyGroup",
+        "first bounded real order",
+        "Healthy waiting for market is not a blocker",
+        "mock signal treated as real signal",
+        "disabled smoke treated as real execution proof",
+    ]:
+        assert phrase in text
+
+    assert "| real exchange submit |" in text
+    assert "Market-dependent" in text

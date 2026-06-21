@@ -91,6 +91,50 @@ DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-live-facts-input.json"
 )
+DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "runtime-dry-run-audit-chain.json"
+)
+DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "strategygroup-runtime-goal-status.json"
+)
+DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "tokyo-deploy-channel-status.json"
+)
+DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "tokyo-readonly-probe-current.json"
+)
+OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
+    "required_scenarios_present",
+    "all_scenarios_passed",
+    "dangerous_effects_absent",
+    "disabled_smoke_not_real_execution_proof",
+    "operation_layer_evidence_relay_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
+    "fresh_signal_fast_auto_chain_checked",
+    "legacy_local_registration_probe_tolerance_checked",
+    "mock_operation_layer_closed_loop_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
+    "expanded_watcher_scope_execution_guard_checked",
+    "operation_layer_authorization_chain_guard_checked",
+    "post_submit_closed_loop_evidence_guard_checked",
+    "operation_layer_submit_result_identity_guard_checked",
+    "post_submit_finalize_result_identity_guard_checked",
+    "non_executing_prepare_auto_bridge_checked",
+    "shared_runtime_pipeline_checked",
+    "common_execution_chain_reuse_checked",
+    "strategygroup_adapter_boundary_checked",
+    "strategy_handoff_no_execution_pipeline_fields_checked",
+    "runtime_tier_policy_checked",
+    "only_mpg_tiny_real_order_eligible_checked",
+    "new_strategygroups_default_observe_only_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+}
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
@@ -2026,6 +2070,53 @@ class TradingConsoleReadModelService:
             if live_facts_path_value
             else {}
         )
+        report_dir = Path(
+            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
+        ).expanduser()
+        dry_run_audit_path = Path(
+            os.environ.get(
+                "BRC_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH",
+                str(report_dir / "runtime-dry-run-audit-chain.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH,
+            )
+        ).expanduser()
+        dry_run_audit = _read_json_file(dry_run_audit_path)
+        runtime_goal_status_path = Path(
+            os.environ.get(
+                "BRC_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH",
+                str(report_dir / "strategygroup-runtime-goal-status.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH,
+            )
+        ).expanduser()
+        runtime_goal_status = _read_json_file(runtime_goal_status_path)
+        deploy_channel_path = Path(
+            os.environ.get(
+                "BRC_TOKYO_DEPLOY_CHANNEL_STATUS_PATH",
+                str(report_dir / "tokyo-deploy-channel-status.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH,
+            )
+        ).expanduser()
+        deploy_channel = _read_json_file(deploy_channel_path)
+        readonly_probe_path = Path(
+            os.environ.get(
+                "BRC_TOKYO_READONLY_PROBE_STATUS_PATH",
+                str(report_dir / "tokyo-readonly-probe-current.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH,
+            )
+        ).expanduser()
+        readonly_probe = _read_json_file(readonly_probe_path)
+        effective_deploy_channel, effective_deploy_channel_path = (
+            _owner_console_effective_deploy_channel_packet(
+                deploy_channel=deploy_channel,
+                deploy_channel_path=str(deploy_channel_path),
+                readonly_probe=readonly_probe,
+                readonly_probe_path=str(readonly_probe_path),
+            )
+        )
         packet = _owner_console_source_readiness_packet(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
@@ -2034,6 +2125,13 @@ class TradingConsoleReadModelService:
             runtime_response=runtime_response,
             live_facts=live_facts,
             live_facts_path=str(live_facts_path_value or ""),
+            dry_run_audit=dry_run_audit,
+            dry_run_audit_path=str(dry_run_audit_path),
+            runtime_goal_status=runtime_goal_status,
+            runtime_goal_status_path=str(runtime_goal_status_path),
+            deploy_channel=effective_deploy_channel,
+            deploy_channel_path=effective_deploy_channel_path,
+            readonly_probe_path=str(readonly_probe_path),
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
@@ -7068,6 +7166,13 @@ def _owner_console_source_readiness_packet(
     runtime_response: TradingConsoleReadModelResponse,
     live_facts: dict[str, Any],
     live_facts_path: str,
+    dry_run_audit: dict[str, Any],
+    dry_run_audit_path: str,
+    runtime_goal_status: dict[str, Any],
+    runtime_goal_status_path: str,
+    deploy_channel: dict[str, Any],
+    deploy_channel_path: str,
+    readonly_probe_path: str,
     selected_strategy_group_id: str | None,
     max_symbols: int,
     stale_after_seconds: int,
@@ -7146,6 +7251,14 @@ def _owner_console_source_readiness_packet(
         runtime=runtime,
         watcher=watcher,
     )
+    dry_run_audit_source = _owner_console_dry_run_audit_source(dry_run_audit)
+    runtime_goal_status_source = _owner_console_runtime_goal_status_source(
+        runtime_goal_status
+    )
+    real_order_readiness = _owner_console_real_order_readiness(
+        runtime_goal_status
+    )
+    deploy_channel_source = _owner_console_deploy_channel_source(deploy_channel)
     source_health = {
         "strategy_catalog": _owner_console_detail_source(
             status=catalog_status,
@@ -7173,6 +7286,10 @@ def _owner_console_source_readiness_packet(
         "protection": protection_source,
         "reconciliation": reconciliation_source,
         "operation_audit": operation_audit_source,
+        "runtime_dry_run_audit": dry_run_audit_source,
+        "strategygroup_runtime_goal_status": runtime_goal_status_source,
+        "real_order_readiness": real_order_readiness["source_health"],
+        "deploy_channel": deploy_channel_source,
     }
     critical_unavailable = [
         name
@@ -7183,6 +7300,10 @@ def _owner_console_source_readiness_packet(
         critical_unavailable=critical_unavailable,
         watcher=watcher,
         runtime=runtime,
+    )
+    owner_state = _owner_console_apply_runtime_goal_status_overlay(
+        owner_state=owner_state,
+        runtime_goal_status=runtime_goal_status,
     )
     return {
         "scope": "owner_console_source_readiness",
@@ -7195,6 +7316,10 @@ def _owner_console_source_readiness_packet(
         },
         "source_paths": {
             "live_facts_path": live_facts_path,
+            "runtime_dry_run_audit_chain_path": dry_run_audit_path,
+            "strategygroup_runtime_goal_status_path": runtime_goal_status_path,
+            "tokyo_deploy_channel_status_path": deploy_channel_path,
+            "tokyo_readonly_probe_status_path": readonly_probe_path,
             "watcher_report_dir": str(
                 os.environ.get(
                     "BRC_SIGNAL_WATCHER_REPORT_DIR",
@@ -7213,9 +7338,15 @@ def _owner_console_source_readiness_packet(
             "protection": protection_source["owner_label"],
             "reconciliation": reconciliation_source["owner_label"],
             "operation_audit": operation_audit_source["owner_label"],
+            "runtime_dry_run_audit": dry_run_audit_source["owner_label"],
+            "runtime_goal_status": runtime_goal_status_source["owner_label"],
+            "real_order_readiness": real_order_readiness["owner_label"],
+            "deploy_channel": deploy_channel_source["owner_label"],
         },
+        "runtime_interaction": _owner_console_runtime_interaction_summary(),
         "strategy_groups": rows,
         "source_health": source_health,
+        "real_order_readiness": real_order_readiness,
         "critical_unavailable_sources": critical_unavailable,
         "frontend_contract": {
             "single_api_source": True,
@@ -7228,6 +7359,37 @@ def _owner_console_source_readiness_packet(
             "runtime_pilot_status": runtime.get("status"),
             "watcher_status": (watcher.get("watcher") or {}).get("status"),
             "live_facts_readiness_status": live_readiness.get("status"),
+            "runtime_dry_run_audit_status": dry_run_audit.get("status"),
+            "strategygroup_runtime_goal_status": runtime_goal_status.get("status"),
+            "strategygroup_runtime_goal_blockers": list(
+                runtime_goal_status.get("blockers") or []
+            )[:20],
+            "strategygroup_runtime_goal_real_order_ready": (
+                (runtime_goal_status.get("real_order_boundary") or {}).get(
+                    "ready_for_real_order_action"
+                )
+                if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+                else None
+            ),
+            "tokyo_deploy_channel_status": deploy_channel.get("status"),
+            "tokyo_deploy_channel_blockers": list(
+                (deploy_channel.get("checks") or {}).get("blockers") or []
+            )[:20]
+            if isinstance(deploy_channel.get("checks"), dict)
+            else [],
+            "tokyo_deploy_channel_connectivity_blockers": list(
+                (deploy_channel.get("checks") or {}).get(
+                    "tokyo_connectivity_blockers"
+                )
+                or []
+            )[:20]
+            if isinstance(deploy_channel.get("checks"), dict)
+            else [],
+            "strategygroup_runtime_goal_readiness_matrix_count": len(
+                runtime_goal_status.get("real_order_readiness_matrix") or []
+            )
+            if isinstance(runtime_goal_status.get("real_order_readiness_matrix"), list)
+            else 0,
         },
         "safety_invariants": {
             "read_model_only": True,
@@ -7285,7 +7447,13 @@ def _owner_console_strategy_rows(
 def _owner_console_strategy_owner_label(item: dict[str, Any]) -> str:
     signal_state = str(item.get("signal_state") or "")
     runtime_state = str(item.get("runtime_state") or "")
-    if signal_state in {"no_signal", "waiting_for_fresh_signal"}:
+    blocked_reason = str(item.get("blocked_reason") or item.get("reason") or "")
+    if (
+        signal_state in {"no_signal", "waiting_for_fresh_signal", "waiting_for_market"}
+        or runtime_state in {"waiting_for_market", "waiting_for_signal"}
+        or blocked_reason == "no_fresh_strategy_signal"
+        or "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocked_reason
+    ):
         return "等待机会"
     if runtime_state in {"observing", "armed_observation"}:
         return "运行中"
@@ -7508,6 +7676,587 @@ def _owner_console_operation_audit_source(
     )
 
 
+def _owner_console_effective_deploy_channel_packet(
+    *,
+    deploy_channel: dict[str, Any],
+    deploy_channel_path: str,
+    readonly_probe: dict[str, Any],
+    readonly_probe_path: str,
+) -> tuple[dict[str, Any], str]:
+    if deploy_channel:
+        return deploy_channel, deploy_channel_path
+    if readonly_probe.get("scope") == "tokyo_runtime_governance_readonly_probe":
+        return {
+            **readonly_probe,
+            "scope": "tokyo_runtime_governance_deploy_channel_status",
+            "source_scope": readonly_probe.get("scope"),
+            "source_path": readonly_probe_path,
+        }, readonly_probe_path
+    return {}, deploy_channel_path
+
+
+def _owner_console_deploy_channel_source(
+    deploy_channel: dict[str, Any],
+) -> dict[str, Any]:
+    if not deploy_channel:
+        return {
+            **_owner_console_detail_source(
+                status="ready_empty",
+                owner_label="部署通道未检查",
+                reason="tokyo_deploy_channel_status_missing",
+            ),
+            "summary": {
+                "checked": False,
+                "connectivity_ready": None,
+                "blockers": [],
+            },
+        }
+
+    checks = (
+        deploy_channel.get("checks")
+        if isinstance(deploy_channel.get("checks"), dict)
+        else {}
+    )
+    blocker_values: list[str] = []
+    for key in (
+        "blockers",
+        "tokyo_probe_blockers",
+        "tokyo_connectivity_blockers",
+    ):
+        value = checks.get(key)
+        if isinstance(value, list):
+            blocker_values.extend(str(item) for item in value if str(item))
+    blockers = sorted(set(blocker_values))
+    connectivity_ready = checks.get("tokyo_connectivity_probe_ready")
+    status = str(deploy_channel.get("status") or "")
+
+    if blockers or connectivity_ready is False or status == "blocked":
+        return {
+            **_owner_console_detail_source(
+                status="degraded",
+                owner_label="部署通道暂不可用",
+                reason=",".join(blockers) if blockers else status or "tokyo_deploy_channel_blocked",
+            ),
+            "summary": {
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": blockers[:20],
+            },
+        }
+
+    if status in {
+        "ready",
+        "ready_for_owner_git_deploy_decision",
+        "ready_for_deploy_apply",
+        "postdeploy_accepted",
+    } or connectivity_ready is True:
+        return {
+            **_owner_console_detail_source(
+                status="ready",
+                owner_label="部署通道正常",
+                reason=status or "tokyo_deploy_channel_ready",
+            ),
+            "summary": {
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": [],
+            },
+        }
+
+    return {
+        **_owner_console_detail_source(
+            status="degraded",
+            owner_label="部署通道需检查",
+            reason=status or "tokyo_deploy_channel_status_unknown",
+        ),
+        "summary": {
+            "checked": True,
+            "connectivity_ready": connectivity_ready,
+            "blockers": blockers[:20],
+        },
+    }
+
+
+def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[str, Any]:
+    if not dry_run_audit:
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="审计演练暂不可用",
+            reason="runtime_dry_run_audit_chain_missing",
+        )
+    checks = dry_run_audit.get("checks") if isinstance(dry_run_audit.get("checks"), dict) else {}
+    safety = (
+        dry_run_audit.get("safety_invariants")
+        if isinstance(dry_run_audit.get("safety_invariants"), dict)
+        else {}
+    )
+    dangerous_effects = safety.get("dangerous_effects")
+    dangerous_effects_absent = (
+        checks.get("dangerous_effects_absent") is True
+        and (not isinstance(dangerous_effects, list) or len(dangerous_effects) == 0)
+    )
+    scenario_count = _optional_int_value(checks.get("scenario_count"))
+    missing_required_checks = sorted(
+        name
+        for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
+        if checks.get(name) is not True
+    )
+    passed = (
+        dry_run_audit.get("status") == "passed"
+        and not missing_required_checks
+        and checks.get("all_scenarios_passed") is True
+        and checks.get("required_scenarios_present") is True
+        and dangerous_effects_absent
+        and safety.get("exchange_write_called") is False
+        and safety.get("order_created") is False
+        and safety.get("order_lifecycle_called") is False
+        and safety.get("withdrawal_or_transfer_created") is False
+        and safety.get("disabled_smoke_is_real_execution_proof") is False
+    )
+    if passed:
+        required_checks = {
+            name: checks.get(name)
+            for name in sorted(OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS)
+        }
+        return {
+            **_owner_console_detail_source(
+                status="ready",
+                owner_label="审计演练正常",
+                reason="runtime_dry_run_audit_chain_passed",
+            ),
+            "summary": {
+                "scenario_count": scenario_count,
+                "dangerous_effects_absent": True,
+                "disabled_smoke_is_real_execution_proof": False,
+                "required_checks_present": True,
+                "shared_runtime_pipeline_checked": (
+                    checks.get("shared_runtime_pipeline_checked") is True
+                ),
+                "common_execution_chain_reuse_checked": (
+                    checks.get("common_execution_chain_reuse_checked") is True
+                ),
+                "strategygroup_adapter_boundary_checked": (
+                    checks.get("strategygroup_adapter_boundary_checked") is True
+                ),
+                "strategy_handoff_no_execution_pipeline_fields_checked": (
+                    checks.get(
+                        "strategy_handoff_no_execution_pipeline_fields_checked"
+                    )
+                    is True
+                ),
+                "runtime_tier_policy_checked": (
+                    checks.get("runtime_tier_policy_checked") is True
+                ),
+                "only_mpg_tiny_real_order_eligible_checked": (
+                    checks.get("only_mpg_tiny_real_order_eligible_checked")
+                    is True
+                ),
+                "new_strategygroups_default_observe_only_checked": (
+                    checks.get(
+                        "new_strategygroups_default_observe_only_checked"
+                    )
+                    is True
+                ),
+                "selected_strategygroup_dispatch_guard_checked": (
+                    checks.get("selected_strategygroup_dispatch_guard_checked")
+                    is True
+                ),
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
+                    checks.get(
+                        "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+                    )
+                    is True
+                ),
+                "operation_layer_hard_safety_blocker_matrix_checked": (
+                    checks.get("operation_layer_hard_safety_blocker_matrix_checked")
+                    is True
+                ),
+                "expanded_watcher_scope_execution_guard_checked": (
+                    checks.get("expanded_watcher_scope_execution_guard_checked")
+                    is True
+                ),
+                "operation_layer_authorization_chain_guard_checked": (
+                    checks.get("operation_layer_authorization_chain_guard_checked")
+                    is True
+                ),
+                "post_submit_closed_loop_evidence_guard_checked": (
+                    checks.get("post_submit_closed_loop_evidence_guard_checked")
+                    is True
+                ),
+                "operation_layer_submit_result_identity_guard_checked": (
+                    checks.get(
+                        "operation_layer_submit_result_identity_guard_checked"
+                    )
+                    is True
+                ),
+                "post_submit_finalize_result_identity_guard_checked": (
+                    checks.get(
+                        "post_submit_finalize_result_identity_guard_checked"
+                    )
+                    is True
+                ),
+                "non_executing_prepare_auto_bridge_checked": (
+                    checks.get("non_executing_prepare_auto_bridge_checked") is True
+                ),
+                "required_checks": required_checks,
+            },
+        }
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="审计演练需检查",
+        reason=(
+            "runtime_dry_run_missing_required_check:"
+            + ",".join(missing_required_checks)
+            if missing_required_checks
+            else str(dry_run_audit.get("status") or "runtime_dry_run_audit_chain_not_passed")
+        ),
+    )
+
+
+def _owner_console_runtime_goal_status_source(
+    runtime_goal_status: dict[str, Any],
+) -> dict[str, Any]:
+    if not runtime_goal_status:
+        return _owner_console_detail_source(
+            status="unavailable",
+            owner_label="目标状态暂不可用",
+            reason="strategygroup_runtime_goal_status_missing",
+        )
+    status = str(runtime_goal_status.get("status") or "")
+    if status in {"waiting_for_signal", "waiting_for_market", "watching_no_signal"}:
+        return _owner_console_detail_source(
+            status="ready_empty",
+            owner_label="等待机会",
+            reason=status,
+        )
+    if status in {
+        "ready_for_action_time_final_gate",
+        "action_time_finalgate_ready",
+        "operation_layer_ready",
+        "fresh_signal_processing",
+        "fresh_signal_detected",
+    }:
+        return _owner_console_detail_source(
+            status="ready_nonempty",
+            owner_label="处理中",
+            reason=status,
+        )
+    if status in {
+        "runtime_liveness_degraded",
+        "hard_safety_stop",
+        "active_position_resolution",
+        "duplicate_submit_risk",
+    }:
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="需要介入",
+            reason=status,
+        )
+    if status in {
+        "deployment_issue",
+        "missing_fact",
+        "source_readiness_degraded",
+        "dry_run_audit_degraded",
+    }:
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="暂不可用",
+            reason=status,
+        )
+    if status in {"ready", "completed"}:
+        return _owner_console_detail_source(
+            status="ready",
+            owner_label="运行中",
+            reason=status,
+        )
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="暂不可用",
+        reason=status or "strategygroup_runtime_goal_status_unknown",
+    )
+
+
+def _owner_console_real_order_readiness(
+    runtime_goal_status: dict[str, Any],
+) -> dict[str, Any]:
+    if not runtime_goal_status:
+        return {
+            "status": "unavailable",
+            "owner_label": "实盘边界暂不可用",
+            "owner_detail": "目标状态源不可用",
+            "ready_for_real_order_action": False,
+            "pass_count": 0,
+            "waiting_count": 0,
+            "blocked_count": 0,
+            "submit_blocking_keys": [],
+            "submit_blocker_review": {
+                "required": False,
+                "allowed": False,
+                "project_progress_allowed": False,
+                "continue_observation_allowed": False,
+                "real_submit_allowed": False,
+                "next_safe_checkpoint": "refresh_runtime_goal_status",
+                "blocker_keys": [],
+            },
+            "next_safe_checkpoint": "refresh_runtime_goal_status",
+            "matrix": [],
+            "source_health": _owner_console_detail_source(
+                status="unavailable",
+                owner_label="实盘边界暂不可用",
+                reason="strategygroup_runtime_goal_status_missing",
+            ),
+        }
+
+    matrix = runtime_goal_status.get("real_order_readiness_matrix")
+    matrix_rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
+    ready_for_real_order = (
+        _owner_console_goal_status_ready_for_real_order_action(runtime_goal_status)
+        is True
+    )
+    owner_state = (
+        runtime_goal_status.get("owner_state")
+        if isinstance(runtime_goal_status.get("owner_state"), dict)
+        else {}
+    )
+    next_checkpoint = str(
+        runtime_goal_status.get("next_safe_checkpoint")
+        or owner_state.get("next_safe_checkpoint")
+        or owner_state.get("next_action")
+        or "review_runtime_goal_status"
+    )
+    submit_blocking_keys = [
+        str(item.get("key"))
+        for item in matrix_rows
+        if item.get("blocks_real_submit") is True
+    ]
+    submit_blocker_review = _owner_console_submit_blocker_review(
+        runtime_goal_status=runtime_goal_status,
+        next_checkpoint=next_checkpoint,
+        ready_for_real_order=ready_for_real_order,
+    )
+    blocked_count = sum(1 for item in matrix_rows if item.get("status") == "blocked")
+    waiting_count = sum(
+        1
+        for item in matrix_rows
+        if str(item.get("status") or "").startswith("waiting")
+    )
+    pass_count = sum(1 for item in matrix_rows if item.get("status") == "pass")
+    if ready_for_real_order:
+        status = "ready"
+        owner_label = "实盘边界通过"
+        owner_detail = "官方链路已到达实盘动作边界"
+        source_status = "ready_nonempty"
+    elif not matrix_rows:
+        status = "degraded"
+        owner_label = "实盘边界待刷新"
+        owner_detail = "readiness matrix 尚未生成"
+        source_status = "degraded"
+    elif submit_blocking_keys == ["fresh_signal"] or (
+        "fresh_signal" in submit_blocking_keys
+        and not blocked_count
+        and str(runtime_goal_status.get("status") or "")
+        in {"waiting_for_signal", "waiting_for_market", "watching_no_signal"}
+    ):
+        status = "waiting_for_market"
+        owner_label = "等待机会"
+        owner_detail = "实盘边界健康，等待 fresh signal"
+        source_status = "ready_empty"
+    elif blocked_count:
+        status = "blocked"
+        owner_label = "暂不可用"
+        owner_detail = "存在提交前阻断项"
+        source_status = "degraded"
+    else:
+        status = "waiting_for_chain"
+        owner_label = "处理中"
+        owner_detail = "实盘边界尚未完成自动链路"
+        source_status = "ready_nonempty"
+
+    return {
+        "status": status,
+        "owner_label": owner_label,
+        "owner_detail": owner_detail,
+        "ready_for_real_order_action": ready_for_real_order,
+        "pass_count": pass_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "submit_blocking_keys": submit_blocking_keys,
+        "submit_blocker_review": submit_blocker_review,
+        "next_safe_checkpoint": next_checkpoint,
+        "matrix": matrix_rows,
+        "source_health": _owner_console_detail_source(
+            status=source_status,
+            owner_label=owner_label,
+            reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
+        ),
+    }
+
+
+def _owner_console_submit_blocker_review(
+    *,
+    runtime_goal_status: dict[str, Any],
+    next_checkpoint: str,
+    ready_for_real_order: bool,
+) -> dict[str, Any]:
+    evidence = (
+        runtime_goal_status.get("evidence")
+        if isinstance(runtime_goal_status.get("evidence"), dict)
+        else {}
+    )
+    review = (
+        evidence.get("submit_blocker_review")
+        if isinstance(evidence.get("submit_blocker_review"), dict)
+        else {}
+    )
+    boundary = (
+        runtime_goal_status.get("real_order_boundary")
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else {}
+    )
+    blocker_keys = review.get("blocker_keys")
+    if not isinstance(blocker_keys, list):
+        blocker_keys = boundary.get("submit_blocker_keys")
+    if not isinstance(blocker_keys, list):
+        blocker_keys = []
+    required = review.get("required")
+    if not isinstance(required, bool):
+        required = boundary.get("submit_blocker_review_required") is True
+    allowed = review.get("allowed")
+    if not isinstance(allowed, bool):
+        allowed = boundary.get("submit_blocker_review_allowed") is True
+    project_progress_allowed = review.get("project_progress_allowed")
+    if not isinstance(project_progress_allowed, bool):
+        project_progress_allowed = boundary.get("project_progress_allowed") is True
+    continue_observation_allowed = review.get("continue_observation_allowed")
+    if not isinstance(continue_observation_allowed, bool):
+        continue_observation_allowed = (
+            boundary.get("continue_observation_allowed") is True
+        )
+    real_submit_allowed = review.get("real_submit_allowed")
+    if not isinstance(real_submit_allowed, bool):
+        real_submit_allowed = (
+            boundary.get("real_submit_allowed")
+            if isinstance(boundary.get("real_submit_allowed"), bool)
+            else ready_for_real_order
+        )
+    return {
+        "required": required,
+        "allowed": allowed,
+        "project_progress_allowed": project_progress_allowed,
+        "continue_observation_allowed": continue_observation_allowed,
+        "real_submit_allowed": real_submit_allowed,
+        "next_safe_checkpoint": str(
+            review.get("next_safe_checkpoint") or next_checkpoint
+        ),
+        "blocker_keys": [str(item) for item in blocker_keys if str(item)],
+    }
+
+
+def _owner_console_goal_status_ready_for_real_order_action(
+    runtime_goal_status: dict[str, Any],
+) -> bool:
+    ready_value = runtime_goal_status.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    checks = (
+        runtime_goal_status.get("checks")
+        if isinstance(runtime_goal_status.get("checks"), dict)
+        else {}
+    )
+    ready_value = checks.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    boundary = (
+        runtime_goal_status.get("real_order_boundary")
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else {}
+    )
+    return boundary.get("ready_for_real_order_action") is True
+
+
+def _owner_console_apply_runtime_goal_status_overlay(
+    *,
+    owner_state: dict[str, Any],
+    runtime_goal_status: dict[str, Any],
+) -> dict[str, Any]:
+    if not runtime_goal_status:
+        return owner_state
+    status = str(runtime_goal_status.get("status") or "")
+    if status in {"waiting_for_signal", "waiting_for_market", "watching_no_signal", ""}:
+        return owner_state
+    goal_owner = (
+        runtime_goal_status.get("owner_state")
+        if isinstance(runtime_goal_status.get("owner_state"), dict)
+        else {}
+    )
+    detail = str(
+        goal_owner.get("detail")
+        or goal_owner.get("blocked_reason")
+        or goal_owner.get("reason")
+        or status
+    )
+    next_checkpoint = str(
+        goal_owner.get("next_safe_checkpoint")
+        or goal_owner.get("next_action")
+        or goal_owner.get("automatic_recovery_action")
+        or "review_runtime_goal_status"
+    )
+    if status in {
+        "runtime_liveness_degraded",
+        "hard_safety_stop",
+        "active_position_resolution",
+        "duplicate_submit_risk",
+    }:
+        return {
+            **owner_state,
+            "status": "needs_intervention",
+            "label": "需要介入",
+            "reason": detail,
+            "next_action": next_checkpoint,
+            "needs_owner_action": status in {
+                "hard_safety_stop",
+                "active_position_resolution",
+                "duplicate_submit_risk",
+            },
+            "runtime_goal_status": status,
+        }
+    if status in {
+        "deployment_issue",
+        "missing_fact",
+        "source_readiness_degraded",
+        "dry_run_audit_degraded",
+    }:
+        return {
+            **owner_state,
+            "status": "temporarily_unavailable",
+            "label": "暂不可用",
+            "reason": detail,
+            "next_action": next_checkpoint,
+            "needs_owner_action": False,
+            "runtime_goal_status": status,
+        }
+    if status in {
+        "ready_for_action_time_final_gate",
+        "action_time_finalgate_ready",
+        "operation_layer_ready",
+        "fresh_signal_processing",
+        "fresh_signal_detected",
+    }:
+        return {
+            **owner_state,
+            "status": "processing",
+            "label": "处理中",
+            "reason": detail,
+            "next_action": next_checkpoint,
+            "needs_owner_action": False,
+            "runtime_goal_status": status,
+        }
+    return {
+        **owner_state,
+        "runtime_goal_status": status,
+    }
+
+
 def _owner_console_forbidden_effect_detected(
     live_facts: dict[str, Any],
     watcher: dict[str, Any],
@@ -7552,6 +8301,21 @@ def _owner_console_detail_source(
     }
 
 
+def _owner_console_runtime_interaction_summary() -> dict[str, Any]:
+    return {
+        "level": "L1_daily_check_from_snapshot",
+        "owner_label": "只读低交互",
+        "detail": "一次快照归纳状态",
+        "remote_interaction_count": 1,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
+
+
 def _owner_console_owner_state(
     *,
     critical_unavailable: list[str],
@@ -7573,7 +8337,13 @@ def _owner_console_owner_state(
         or watcher_owner.get("blocked_reason")
         or "none"
     )
-    if blocked_reason == "no_fresh_strategy_signal":
+    if _owner_console_waiting_for_market(
+        blocked_reason=blocked_reason,
+        runtime_owner=runtime_owner,
+        watcher_owner=watcher_owner,
+        runtime=runtime,
+        watcher=watcher,
+    ):
         return {
             "status": "waiting_for_opportunity",
             "label": "等待机会",
@@ -7600,6 +8370,42 @@ def _owner_console_owner_state(
         ),
         "needs_owner_action": False,
     }
+
+
+def _owner_console_waiting_for_market(
+    *,
+    blocked_reason: str,
+    runtime_owner: dict[str, Any],
+    watcher_owner: dict[str, Any],
+    runtime: dict[str, Any],
+    watcher: dict[str, Any],
+) -> bool:
+    if blocked_reason == "no_fresh_strategy_signal":
+        return True
+    waiting_classes = {"waiting_for_market"}
+    if str(runtime_owner.get("blocker_class") or "") in waiting_classes:
+        return True
+    if str(watcher_owner.get("blocker_class") or "") in waiting_classes:
+        return True
+    waiting_statuses = {
+        "waiting_for_market",
+        "waiting_for_signal",
+        "watching_no_signal",
+    }
+    status_values = {
+        str(runtime.get("status") or ""),
+        str(watcher.get("status") or ""),
+        str((watcher.get("watcher") or {}).get("status") or "")
+        if isinstance(watcher.get("watcher"), dict)
+        else "",
+    }
+    if status_values & waiting_statuses:
+        return True
+    blocker_text = ",".join(
+        str(item)
+        for item in list(runtime.get("blockers") or []) + list(watcher.get("blockers") or [])
+    )
+    return "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocker_text
 
 
 def _mapping_value(mapping: dict[str, Any], *keys: str) -> Optional[str]:

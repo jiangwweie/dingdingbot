@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from tests.unit.test_runtime_live_position_monitor import _order, _position, _runtime
+from tests.unit.test_runtime_live_position_monitor import (
+    _exchange_position,
+    _exchange_sl_order,
+    _order,
+    _position,
+    _runtime,
+)
 
 from src.domain.models import OrderRole, OrderStatus
 from src.domain.runtime_closed_trade_review_facts import (
@@ -25,21 +31,21 @@ def _active_monitor():
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
-        exchange_positions=[],
-        exchange_open_stop_orders=[],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[_exchange_sl_order()],
         reconciliation_result=None,
         now_ms=1,
         exchange_facts_available=True,
     )
 
 
-def test_post_close_followup_waits_for_owner_close_when_position_active():
+def test_post_close_followup_prepares_standing_recovery_when_position_active():
     monitor = _active_monitor()
     exit_plan = build_runtime_position_exit_plan(
         runtime=_runtime(),
         monitor=monitor,
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
-        exchange_open_stop_orders=[],
+        exchange_open_stop_orders=[_exchange_sl_order()],
         market_rule={"min_quantity": Decimal("1"), "step_size": Decimal("1")},
         now_ms=1,
     )
@@ -54,9 +60,18 @@ def test_post_close_followup_waits_for_owner_close_when_position_active():
         now_ms=3,
     )
 
-    assert packet.status == RuntimePostCloseFollowupStatus.WAITING_FOR_OWNER_CLOSE_AUTHORIZATION
-    assert packet.owner_close_approval_value == owner_packet.owner_approval_value
-    assert "execute_runtime_owner_reduce_only_close_flow" in packet.required_steps
+    assert (
+        packet.status
+        == RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY
+    )
+    assert packet.owner_close_approval_value is None
+    assert packet.standing_recovery_authorization_scope == (
+        owner_packet.standing_authorization_scope
+    )
+    assert "prepare_official_operation_layer_reduce_only_recovery" in packet.required_steps
+    assert "run_action_time_finalgate_for_reduce_only_recovery" in packet.required_steps
+    assert "execute_reduce_only_recovery_through_operation_layer" in packet.required_steps
+    assert "execute_runtime_owner_reduce_only_close_flow" not in packet.required_steps
     assert "record_runtime_closed_trade_review" in packet.required_steps
     assert packet.exchange_order_submitted is False
     assert packet.position_closed is False

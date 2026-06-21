@@ -14,22 +14,14 @@ from src.application.llm_advisory_plane import (
     format_feishu_advisory_message,
 )
 from src.application.llm_advisory_cards import build_feishu_advisory_card
-from src.application.llm_advisory_eval import run_llm_advisory_eval_cases
-from src.application.llm_advisory_eval import build_default_llm_advisory_golden_cases
 from src.application.llm_advisory_safety import evaluate_llm_advisory_output_safety
 from src.application.llm_context_packet_builder import (
     build_llm_context_packet,
     build_trade_review_context_packet,
 )
-from src.application.llm_event_autopublisher import (
-    LlmEventAutoPublishRequest,
-    LlmEventAutoPublisher,
-    build_auto_advisory_event,
-)
 from src.domain.llm_advisory import (
     LlmAdvisoryAllowedAction,
     LlmAdvisoryDeliveryChannel,
-    LlmAdvisoryEvalCase,
     LlmAdvisoryRecommendation,
     LlmAdvisoryRecommendationType,
     LlmAdvisoryStatus,
@@ -449,165 +441,3 @@ async def test_llm_advisory_inbox_summary_counts_status_and_push_failures():
     assert inbox.pending_push_failure_count == 1
     assert inbox.status_counts["push_failed"] == 1
     assert inbox.items[0].live_ready is False
-
-
-@pytest.mark.asyncio
-async def test_llm_advisory_eval_harness_runs_fake_provider_cases():
-    good_event = _event()
-    unsafe_event = _event()
-    unsafe_event = unsafe_event.model_copy(
-        update={"event_id": "llm-event-unsafe", "source_id": "candidate-unsafe"}
-    )
-
-    summary = await run_llm_advisory_eval_cases(
-        [
-            LlmAdvisoryEvalCase(
-                case_id="registered-push",
-                event=good_event,
-                provider_payload={
-                    "recommendation_type": "strategy_family_candidate",
-                    "summary": "Review BRF.",
-                    "recommended_strategy_family_ids": ["BRF-001"],
-                },
-                expect_status=LlmAdvisoryStatus.PUSHED,
-                expect_push=True,
-            ),
-            LlmAdvisoryEvalCase(
-                case_id="unsafe-block",
-                event=unsafe_event,
-                provider_payload={
-                    "summary": "Submit now",
-                    "recommended_strategy_family_ids": ["BRF-001"],
-                    "order_submit_requested": True,
-                },
-                expect_status=LlmAdvisoryStatus.BLOCKED,
-                expect_push=False,
-                expected_reason_codes=[
-                    "llm_output_forbidden_key:order_submit_requested"
-                ],
-            ),
-        ]
-    )
-
-    assert summary.status == "passed"
-    assert summary.case_count == 2
-    assert summary.failed_count == 0
-    assert all(result.live_ready is False for result in summary.results)
-
-
-def test_llm_auto_publisher_builds_final_gate_blocked_event_without_authority():
-    event = build_auto_advisory_event(
-        LlmEventAutoPublishRequest(
-            event_type=LlmConsumableEventType.FINAL_GATE_BLOCKED,
-            source_type="runtime_final_gate",
-            source_id="candidate-blocked",
-            now_ms=123,
-            severity="warning",
-            symbol="BNB/USDT:USDT",
-            strategy_family_ids=["BRF-001"],
-            audit={"final_gate_blockers": ["active_positions_count_missing"]},
-        )
-    )
-
-    assert event.event_type == LlmConsumableEventType.FINAL_GATE_BLOCKED
-    assert event.allowed_llm_actions == [
-        LlmAdvisoryAllowedAction.EXPLAIN_BLOCKER,
-        LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT,
-    ]
-    assert event.context_packet.audit["auto_published_to_llm_advisory"] is True
-    assert event.not_execution_authority is True
-    assert event.execution_intent_created is False
-    assert event.order_created is False
-    assert event.exchange_called is False
-
-
-@pytest.mark.asyncio
-async def test_llm_auto_publisher_submits_strategy_candidate_to_advisory_service_only():
-    push = FakePush()
-    service = LlmAdvisoryPlaneService(
-        repository=InMemoryLlmAdvisoryRepo(),
-        provider=FakeProvider(
-            {
-                "recommendation_type": "strategy_family_candidate",
-                "summary": "Observe BRF candidate.",
-                "recommended_strategy_family_ids": ["BRF-001"],
-            }
-        ),
-        push_service=push,
-    )
-    publisher = LlmEventAutoPublisher(service=service)
-
-    result = await publisher.publish_strategy_candidate_observed(
-        source_id="candidate-auto-1",
-        now_ms=123,
-        symbol="BNB/USDT:USDT",
-        timeframe="1h",
-        strategy_family_ids=["BRF-001"],
-        market={"regime": "trend_down"},
-        runtime={"real_submit_authorized": False},
-        push_to_feishu=True,
-    )
-
-    assert result.event.source_type == "strategy_signal_path"
-    assert result.recommendation.status == LlmAdvisoryStatus.PUSHED
-    assert len(push.calls) == 1
-    assert result.recommendation.owner_action_enabled is False
-    assert result.recommendation.execution_intent_created is False
-    assert result.recommendation.order_created is False
-    assert result.recommendation.exchange_called is False
-
-
-@pytest.mark.asyncio
-async def test_llm_advisory_default_golden_cases_pass():
-    summary = await run_llm_advisory_eval_cases(
-        build_default_llm_advisory_golden_cases()
-    )
-
-    assert summary.status == "passed"
-    assert summary.case_count == 4
-    assert summary.failed_count == 0
-
-
-@pytest.mark.asyncio
-async def test_llm_advisory_eval_harness_captures_provider_error_and_push_failure():
-    provider_error_event = _event()
-    provider_error_event = provider_error_event.model_copy(
-        update={"event_id": "llm-provider-error", "source_id": "provider-error"}
-    )
-    push_failure_event = _event()
-    push_failure_event = push_failure_event.model_copy(
-        update={"event_id": "llm-push-failure", "source_id": "push-failure"}
-    )
-
-    provider_error_summary = await run_llm_advisory_eval_cases(
-        [
-            LlmAdvisoryEvalCase(
-                case_id="provider-timeout",
-                event=provider_error_event,
-                provider_payload={},
-                expect_status=LlmAdvisoryStatus.BLOCKED,
-                expected_reason_codes=["llm_advisory_generation_blocked"],
-            )
-        ],
-        provider_errors_by_event_id={
-            "llm-provider-error": TimeoutError("provider timeout")
-        },
-    )
-    push_failure_summary = await run_llm_advisory_eval_cases(
-        [
-            LlmAdvisoryEvalCase(
-                case_id="push-failure",
-                event=push_failure_event,
-                provider_payload={
-                    "summary": "Push should fail in harness.",
-                    "recommended_strategy_family_ids": ["BRF-001"],
-                },
-                expect_status=LlmAdvisoryStatus.PUSH_FAILED,
-                expect_push=False,
-            )
-        ],
-        push_delivered=False,
-    )
-
-    assert provider_error_summary.status == "passed"
-    assert push_failure_summary.status == "passed"

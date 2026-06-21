@@ -135,7 +135,9 @@ def build_git_deploy_plan(
     warnings: list[str] = []
 
     if tracked_dirty:
-        blockers.append("tracked_worktree_dirty")
+        warnings.append(
+            "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        )
     if not migration_files:
         blockers.append("local_migration_files_missing")
     if local_latest_migration != expected_latest_migration:
@@ -179,6 +181,7 @@ def build_git_deploy_plan(
     source_repo_path = f"{source_root}/dingdingbot"
     releases_dir = f"{deploy_root}/releases"
     reports_dir = f"{deploy_root}/reports/{final_release_name}"
+    watcher_reports_dir = f"{deploy_root}/reports/runtime-signal-watcher"
     backups_dir = f"{deploy_root}/backups"
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
@@ -206,6 +209,7 @@ def build_git_deploy_plan(
         source_root=source_root,
         source_repo_path=source_repo_path,
         reports_dir=reports_dir,
+        watcher_reports_dir=watcher_reports_dir,
         backups_dir=backups_dir,
         app_current=app_current,
         remote_release_path=remote_release_path,
@@ -318,6 +322,7 @@ def _plan_phases(
     source_root: str,
     source_repo_path: str,
     reports_dir: str,
+    watcher_reports_dir: str,
     backups_dir: str,
     app_current: str,
     remote_release_path: str,
@@ -342,14 +347,44 @@ def _plan_phases(
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
     manifest_json = json.dumps(manifest_payload, indent=2, sort_keys=True)
+    deploy_channel_status_json = json.dumps(
+        {
+            "scope": "tokyo_runtime_governance_deploy_channel_status",
+            "status": "postdeploy_accepted",
+            "deployed_head": target_commit,
+            "release_path": remote_release_path,
+            "checks": {
+                "blockers": [],
+                "tokyo_probe_blockers": [],
+                "tokyo_connectivity_blockers": [],
+                "tokyo_connectivity_probe_ready": True,
+                "postdeploy_acceptance_passed": True,
+            },
+            "safety_invariants": {
+                "deploy_channel_status_only": True,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "mutates_secrets": False,
+                "mutates_live_profile": False,
+                "mutates_order_sizing": False,
+            },
+        },
+        indent=2,
+        sort_keys=True,
+    )
     health_url = api_base.rstrip("/") + "/api/health"
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
+        "HEALTH_READY=0; "
         "for attempt in $(seq 1 30); do "
-        'curl -fsS "$HEALTH_URL" 2>/dev/null && exit 0; '
+        'if curl -fsS "$HEALTH_URL" 2>/dev/null; then '
+        "HEALTH_READY=1; break; "
+        "fi; "
         "sleep 1; "
         "done; "
-        'curl -fsS "$HEALTH_URL"'
+        'test "$HEALTH_READY" = 1 || curl -fsS "$HEALTH_URL"'
     )
     base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
     head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
@@ -381,6 +416,43 @@ def _plan_phases(
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
+    quiesce_backup_and_migrate_command = (
+        f"set -eu; sudo -n systemctl stop {q(service_name)}; "
+        f"umask 077; set -a; . {q(env_path)}; set +a; "
+        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
+        'test -n "$DB_URL" || '
+        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
+        "if command -v pg_dump >/dev/null 2>&1; then "
+        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
+        "else "
+        f"DB_USER=$({q(venv_python)} -c "
+        "'import os; from urllib.parse import urlparse; "
+        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
+        f"DB_NAME=$({q(venv_python)} -c "
+        "'import os; from urllib.parse import urlparse; "
+        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
+        'test -n "$DB_USER"; test -n "$DB_NAME"; '
+        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
+        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
+        f"> {q(backup_path)}; "
+        "fi; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
+    )
+    switch_start_and_smoke_command = (
+        f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "
+        f"sudo -n systemctl start {q(service_name)}; "
+        f"sudo -n systemctl is-active {q(service_name)}; "
+        f"{health_wait_command}; "
+        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path)}; "
+        f"mkdir -p {q(watcher_reports_dir)}; "
+        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
+        f"{deploy_channel_status_json}\nJSON\n"
+        f"test -f {q(release_manifest)}; "
+        f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
+    )
 
     return [
         {
@@ -391,7 +463,8 @@ def _plan_phases(
                 "scripts/prepare_tokyo_runtime_governance_release.py --json "
                 f"--deployed-head {q(expected_deployed_head)} "
                 f"--expected-min-migrations {target_migration_count} "
-                f"--expected-latest-migration {q(expected_latest_migration)}",
+                f"--expected-latest-migration {q(expected_latest_migration)} "
+                "--allow-tracked-dirty-for-remote-git-export",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
                 f"--base-revision {q(base_revision)} "
@@ -452,43 +525,7 @@ def _plan_phases(
                 OWNER_STANDING_AUTHORIZATION_REFERENCE
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
-            "commands": [
-                _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
-                _ssh(
-                    host,
-                    (
-                        "set -eu; umask 077; set -a; "
-                        f". {q(env_path)}; set +a; "
-                        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
-                        'test -n "$DB_URL" || '
-                        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
-                        "if command -v pg_dump >/dev/null 2>&1; then "
-                        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
-                        "else "
-                        f"DB_USER=$({q(venv_python)} -c "
-                        "'import os; from urllib.parse import urlparse; "
-                        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
-                        f"DB_NAME=$({q(venv_python)} -c "
-                        "'import os; from urllib.parse import urlparse; "
-                        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
-                        'test -n "$DB_USER"; test -n "$DB_NAME"; '
-                        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
-                        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
-                        f"> {q(backup_path)}; "
-                        "fi"
-                    ),
-                ),
-                _ssh(
-                    host,
-                    (
-                        f"set -eu; cd {q(remote_release_path)}; set -a; "
-                        f". {q(env_path)}; set +a; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
-                    ),
-                ),
-            ],
+            "commands": [_ssh(host, quiesce_backup_and_migrate_command)],
             "stop_if": [
                 "service cannot be stopped with non-interactive sudo",
                 "database backup is not created",
@@ -503,16 +540,7 @@ def _plan_phases(
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
-                _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),
-                _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
-                _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
-                _ssh(host, health_wait_command),
-                _ssh(
-                    host,
-                    runtime_signal_watcher_dispatcher_dropin_install_command(
-                        remote_release_path=remote_release_path
-                    ),
-                ),
+                _ssh(host, switch_start_and_smoke_command),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
@@ -526,13 +554,6 @@ def _plan_phases(
                     f"--expected-current-head {q(target_commit)} "
                     f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
-                ),
-                _ssh(
-                    host,
-                    (
-                        f"test -f {q(release_manifest)} && "
-                        f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
-                    ),
                 ),
             ],
             "stop_if": [

@@ -12,7 +12,7 @@ v3.0 Phase 4: 订单编排核心组件
 职责边界声明:
 - OrderManager: 负责订单编排逻辑（订单链生成、OCO 逻辑）
 - OrderLifecycleService: 负责订单状态管理（所有状态转换）
-- DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
+- Risk policy state: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
 """
 from decimal import Decimal
 from typing import List, Dict, Optional, Callable, Awaitable, Any
@@ -46,7 +46,7 @@ class OrderManager:
     职责边界声明:
     - OrderManager: 负责订单编排逻辑（订单链生成、OCO 逻辑）
     - OrderLifecycleService: 负责订单状态管理（所有状态转换）
-    - DynamicRiskManager: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
+    - Risk policy state: 负责 SL 订单的 trigger_price 调整 (Breakeven/Trailing)
     """
 
     def __init__(

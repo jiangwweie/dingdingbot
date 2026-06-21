@@ -31,6 +31,11 @@ MAINLINE_ARTIFACTS = (
     "scripts/runtime_official_post_submit_finalize_proof.py",
 )
 
+STANDING_RECOVERY_PROOF_ARTIFACTS = (
+    "scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py",
+    "scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py",
+)
+
 LEGACY_COMPATIBILITY_ARTIFACTS = (
     {
         "path": "scripts/verify_runtime_submit_rehearsal_pre_live_packet.py",
@@ -110,6 +115,16 @@ FORBIDDEN_PRIMARY_GATE_TERMS = (
     "ready_for_first_real_submit",
 )
 
+FORBIDDEN_STANDING_RECOVERY_PROOF_TERMS = (
+    "monitor_position_or_owner_authorize_reduce_only_close",
+    "continuation_refresh_monitor_position_or_owner_close",
+    "continuation_monitor_position_or_owner_close",
+    "position_lifecycle_hold_or_owner_close_ready",
+    "waiting_for_owner_close_authorization",
+    "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE",
+    "runtime_owner_reduce_only_close_flow",
+)
+
 ALLOWED_HISTORICAL_HELPER_TERMS = (
     "scripts/runtime_official_prepare_api_flow.py:runtime_first_real_submit_api_flow",
     "scripts/runtime_official_prepare_api_flow.py:FirstRealSubmitApiFlow",
@@ -120,11 +135,25 @@ ALLOWED_HISTORICAL_HELPER_TERMS = (
 def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     mainline = [_scan_mainline_artifact(repo_root, item) for item in MAINLINE_ARTIFACTS]
+    standing_recovery_proofs = [
+        _scan_standing_recovery_proof_artifact(repo_root, item)
+        for item in STANDING_RECOVERY_PROOF_ARTIFACTS
+    ]
     legacy = [_scan_legacy_artifact(repo_root, item) for item in LEGACY_COMPATIBILITY_ARTIFACTS]
-    blockers = _blockers(mainline=mainline, legacy=legacy)
+    blockers = _blockers(
+        mainline=mainline,
+        legacy=legacy,
+        standing_recovery_proofs=standing_recovery_proofs,
+    )
     warnings = _warnings(mainline=mainline, legacy=legacy)
     checks = {
         "mainline_artifacts_present": all(item["exists"] for item in mainline),
+        "standing_recovery_proof_artifacts_present": all(
+            item["exists"] for item in standing_recovery_proofs
+        ),
+        "standing_recovery_proofs_have_no_legacy_owner_close_terms": not any(
+            item["forbidden_owner_close_terms"] for item in standing_recovery_proofs
+        ),
         "legacy_artifacts_classified": all(item["exists"] for item in legacy),
         "legacy_artifacts_archived_to_replay_recovery_history": all(
             item["history_exists"] for item in legacy
@@ -158,6 +187,7 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
         "blockers": blockers,
         "warnings": warnings,
         "mainline_artifacts": mainline,
+        "standing_recovery_proof_artifacts": standing_recovery_proofs,
         "legacy_compatibility_artifacts": legacy,
         "cleanup_policy": {
             "primary_runtime_mainline": (
@@ -215,6 +245,28 @@ def _scan_mainline_artifact(repo_root: Path, rel_path: str) -> dict[str, Any]:
     }
 
 
+def _scan_standing_recovery_proof_artifact(
+    repo_root: Path,
+    rel_path: str,
+) -> dict[str, Any]:
+    path = repo_root / rel_path
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    forbidden = [
+        term for term in FORBIDDEN_STANDING_RECOVERY_PROOF_TERMS if term in text
+    ]
+    return {
+        "path": rel_path,
+        "exists": path.exists(),
+        "forbidden_owner_close_terms": forbidden,
+        "required_primary_action": (
+            "monitor_position_or_prepare_official_reduce_only_recovery"
+        ),
+        "primary_action_present": (
+            "monitor_position_or_prepare_official_reduce_only_recovery" in text
+        ),
+    }
+
+
 def _scan_legacy_artifact(repo_root: Path, item: dict[str, str]) -> dict[str, Any]:
     wrapper_path = repo_root / item["path"]
     history_path = repo_root / item["history_path"]
@@ -244,6 +296,7 @@ def _blockers(
     *,
     mainline: list[dict[str, Any]],
     legacy: list[dict[str, Any]],
+    standing_recovery_proofs: list[dict[str, Any]],
 ) -> list[str]:
     blockers: list[str] = []
     missing_mainline = [item["path"] for item in mainline if not item["exists"]]
@@ -256,6 +309,24 @@ def _blockers(
     ]
     if forbidden_refs:
         blockers.append("mainline_uses_legacy_primary_gate_terms:" + "|".join(forbidden_refs))
+    missing_standing_proofs = [
+        item["path"] for item in standing_recovery_proofs if not item["exists"]
+    ]
+    if missing_standing_proofs:
+        blockers.append(
+            "standing_recovery_proof_artifact_missing:"
+            + ",".join(missing_standing_proofs)
+        )
+    forbidden_owner_close_refs = [
+        f"{item['path']}:{','.join(item['forbidden_owner_close_terms'])}"
+        for item in standing_recovery_proofs
+        if item["forbidden_owner_close_terms"]
+    ]
+    if forbidden_owner_close_refs:
+        blockers.append(
+            "standing_recovery_proof_uses_legacy_owner_close_terms:"
+            + "|".join(forbidden_owner_close_refs)
+        )
     missing_legacy = [
         f"{item['path']}|{item['history_path']}"
         for item in legacy

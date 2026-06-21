@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.application.production_strategy_family_admission import (
@@ -940,14 +941,23 @@ def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
     payload = response.json()
     packet = payload["packet"]
     plan = payload["operator_command_plan"]
-    assert payload["status"] == "waiting_for_owner_close_authorization"
-    assert packet["owner_close_approval_env"] == "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE"
+    assert payload["status"] == "ready_for_standing_reduce_only_recovery"
+    assert packet["owner_close_approval_env"] is None
+    assert packet["owner_close_approval_value"] is None
+    assert packet["standing_recovery_authorization_scope"] == (
+        "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
+    )
     assert packet["closed_review_facts_status"] == "waiting_for_close"
     assert packet["closed_review_entry_order_id"] == "entry-1"
     assert packet["closed_review_exit_order_id"] is None
     assert plan["not_executed"] is True
-    assert plan["requires_explicit_owner_approval_before_execute"] is True
-    assert plan["owner_close_execute_command_args"][-1] == "--execute-real-close"
+    assert plan["requires_explicit_owner_approval_before_execute"] is False
+    assert plan["requires_official_operation_layer"] is True
+    assert plan["owner_close_execute_command_args"] == []
+    assert plan["operation_layer_reduce_only_recovery_args"][:2] == [
+        "official_operation_layer",
+        "prepare_reduce_only_recovery",
+    ]
     assert plan["safety_invariants"]["exchange_write_called"] is False
     assert payload["safety_invariants"]["api_read_only"] is True
     assert payload["safety_invariants"]["review_record_created"] is False
@@ -1177,7 +1187,11 @@ def test_trading_console_scheduled_observation_rejects_shadow_candidate_without_
 
 
 def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
-    server_source = Path("trading-console/server.ts").read_text()
+    server_path = Path("trading-console/server.ts")
+    if not server_path.exists():
+        pytest.skip("legacy trading console frontend has been removed")
+
+    server_source = server_path.read_text()
 
     assert "STRATEGY_RUNTIME_LIVE_ENABLEMENT_MUTATION_PATH" in server_source
     assert "BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH" in server_source
@@ -5908,6 +5922,156 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "downgrade_mode": "observe_only",
             },
         },
+        "runtime-dry-run-audit-chain.json": {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "checks": {
+                "scenario_count": 14,
+                "required_scenarios_present": True,
+                "all_scenarios_passed": True,
+                "dangerous_effects_absent": True,
+                "disabled_smoke_not_real_execution_proof": True,
+                "fresh_signal_fast_auto_chain_checked": True,
+                "legacy_local_registration_probe_tolerance_checked": True,
+                "mock_operation_layer_closed_loop_checked": True,
+                "operation_layer_blocker_review_policy_checked": True,
+                "operation_layer_hard_safety_blocker_matrix_checked": True,
+                "expanded_watcher_scope_execution_guard_checked": True,
+                "operation_layer_authorization_chain_guard_checked": True,
+                "post_submit_closed_loop_evidence_guard_checked": True,
+                "operation_layer_submit_result_identity_guard_checked": True,
+                "post_submit_finalize_result_identity_guard_checked": True,
+                "non_executing_prepare_auto_bridge_checked": True,
+                "operation_layer_evidence_relay_checked": True,
+                "scoped_pipeline_operation_layer_handoff_checked": True,
+                "selected_strategygroup_dispatch_guard_checked": True,
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+                "shared_runtime_pipeline_checked": True,
+                "common_execution_chain_reuse_checked": True,
+                "strategygroup_adapter_boundary_checked": True,
+                "strategy_handoff_no_execution_pipeline_fields_checked": True,
+                "runtime_tier_policy_checked": True,
+                "only_mpg_tiny_real_order_eligible_checked": True,
+                "new_strategygroups_default_observe_only_checked": True,
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+                "disabled_smoke_is_real_execution_proof": False,
+                "dangerous_effects": [],
+            },
+        },
+        "strategygroup-runtime-goal-status.json": {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "waiting_for_signal",
+            "owner_state": {
+                "label": "等待机会",
+                "detail": "系统健康，当前等待市场机会",
+                "next_safe_checkpoint": "continue_watcher_observation",
+            },
+            "blockers": [],
+            "checks": {
+                "fresh_signal_present": False,
+                "live_facts_ready": True,
+                "selected_strategygroup_scope_ready": True,
+            },
+            "real_order_boundary": {
+                "ready_for_real_order_action": False,
+            },
+            "real_order_readiness_matrix": [
+                {
+                    "key": "selected_strategygroup_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "fresh_signal",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "required_facts",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "candidate_authorization",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "action_time_finalgate",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "active_position_open_order",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "protection",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "budget",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "duplicate_submit",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "symbol_side_notional_leverage_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "hard_safety",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+            ],
+        },
+        "tokyo-readonly-probe-current.json": {
+            "scope": "tokyo_runtime_governance_readonly_probe",
+            "status": "blocked",
+            "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
+            "facts": {"probe_error": "Permission denied (publickey)."},
+            "safety_invariants": {
+                "remote_files_modified": False,
+                "env_files_read": False,
+                "secrets_read": False,
+                "migrations_run": False,
+                "services_restarted": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_called": False,
+            },
+        },
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
@@ -5932,10 +6096,122 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["protection"] == "保护正常"
     assert payload["data"]["owner_summary"]["reconciliation"] == "对账正常"
     assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
+    assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
+    assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
+    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道暂不可用"
+    assert payload["data"]["runtime_interaction"] == {
+        "level": "L1_daily_check_from_snapshot",
+        "owner_label": "只读低交互",
+        "detail": "一次快照归纳状态",
+        "remote_interaction_count": 1,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "degraded"
+    assert payload["data"]["source_health"]["deploy_channel"]["reason"] == (
+        "tokyo_ssh_publickey_denied"
+    )
+    assert payload["data"]["source_health"]["deploy_channel"]["summary"][
+        "blockers"
+    ] == ["tokyo_ssh_publickey_denied"]
+    assert payload["data"]["source_paths"]["tokyo_readonly_probe_status_path"] == (
+        str(report_dir / "tokyo-readonly-probe-current.json")
+    )
+    dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
+        "summary"
+    ]
+    assert dry_run_summary["scenario_count"] == 14
+    assert dry_run_summary["required_checks_present"] is True
+    assert dry_run_summary["shared_runtime_pipeline_checked"] is True
+    assert dry_run_summary["common_execution_chain_reuse_checked"] is True
+    assert dry_run_summary["strategygroup_adapter_boundary_checked"] is True
+    assert (
+        dry_run_summary["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
+    assert dry_run_summary["runtime_tier_policy_checked"] is True
+    assert dry_run_summary["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert (
+        dry_run_summary["new_strategygroups_default_observe_only_checked"]
+        is True
+    )
+    assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
+    assert (
+        dry_run_summary[
+            "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+        ]
+        is True
+    )
+    assert (
+        dry_run_summary["operation_layer_hard_safety_blocker_matrix_checked"]
+        is True
+    )
+    assert dry_run_summary["expanded_watcher_scope_execution_guard_checked"] is True
+    assert (
+        dry_run_summary["operation_layer_authorization_chain_guard_checked"]
+        is True
+    )
+    assert dry_run_summary["post_submit_closed_loop_evidence_guard_checked"] is True
+    assert (
+        dry_run_summary["operation_layer_submit_result_identity_guard_checked"]
+        is True
+    )
+    assert (
+        dry_run_summary["post_submit_finalize_result_identity_guard_checked"]
+        is True
+    )
+    assert dry_run_summary["non_executing_prepare_auto_bridge_checked"] is True
+    assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
+    assert set(dry_run_summary["required_checks"]) == {
+        "required_scenarios_present",
+        "all_scenarios_passed",
+        "dangerous_effects_absent",
+        "disabled_smoke_not_real_execution_proof",
+        "operation_layer_evidence_relay_checked",
+        "scoped_pipeline_operation_layer_handoff_checked",
+        "fresh_signal_fast_auto_chain_checked",
+        "legacy_local_registration_probe_tolerance_checked",
+        "mock_operation_layer_closed_loop_checked",
+        "operation_layer_blocker_review_policy_checked",
+        "operation_layer_hard_safety_blocker_matrix_checked",
+        "expanded_watcher_scope_execution_guard_checked",
+        "operation_layer_authorization_chain_guard_checked",
+        "post_submit_closed_loop_evidence_guard_checked",
+        "operation_layer_submit_result_identity_guard_checked",
+        "post_submit_finalize_result_identity_guard_checked",
+        "non_executing_prepare_auto_bridge_checked",
+        "shared_runtime_pipeline_checked",
+        "common_execution_chain_reuse_checked",
+        "strategygroup_adapter_boundary_checked",
+        "strategy_handoff_no_execution_pipeline_fields_checked",
+        "runtime_tier_policy_checked",
+        "only_mpg_tiny_real_order_eligible_checked",
+        "new_strategygroups_default_observe_only_checked",
+        "selected_strategygroup_dispatch_guard_checked",
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    }
+    assert payload["data"]["source_health"]["real_order_readiness"]["status"] == "ready_empty"
+    assert payload["data"]["real_order_readiness"]["status"] == "waiting_for_market"
+    assert payload["data"]["real_order_readiness"]["ready_for_real_order_action"] is False
+    assert payload["data"]["real_order_readiness"]["pass_count"] == 8
+    assert payload["data"]["real_order_readiness"]["waiting_count"] == 4
+    assert payload["data"]["real_order_readiness"]["blocked_count"] == 0
+    assert payload["data"]["real_order_readiness"]["submit_blocking_keys"] == [
+        "fresh_signal",
+        "candidate_authorization",
+        "action_time_finalgate",
+        "official_operation_layer",
+    ]
+    assert len(payload["data"]["real_order_readiness"]["matrix"]) == 12
     assert len(payload["data"]["strategy_groups"]) == 5
     assert payload["data"]["frontend_contract"] == {
         "single_api_source": True,
@@ -5945,6 +6221,473 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     }
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+
+    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "strategygroup_runtime_goal_status",
+                "status": "runtime_liveness_degraded",
+                "owner_state": {
+                    "label": "需要介入",
+                    "detail": (
+                        "watcher 已报告 runtime attempt 或 scope 接力异常，"
+                        "先修复自动观察链路"
+                    ),
+                    "next_safe_checkpoint": "repair_runtime_attempt_renewal_or_scope",
+                },
+                "blockers": [
+                    "watcher_tick:loop_command_failed:2",
+                    "strategy-runtime-1:runtime_attempts_exhausted",
+                ],
+                "checks": {"watcher_liveness_healthy": False},
+                "real_order_boundary": {
+                    "ready_for_real_order_action": False,
+                },
+                "real_order_readiness_matrix": [
+                    {
+                        "key": "hard_safety",
+                        "status": "pass",
+                        "blocker_class": "none",
+                        "blocks_real_submit": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-console-source-readiness")
+        assert response.status_code == 200
+        degraded_payload = response.json()
+
+    assert degraded_payload["data"]["status"] == "ready"
+    assert degraded_payload["data"]["owner_state"]["status"] == "needs_intervention"
+    assert degraded_payload["data"]["owner_state"]["label"] == "需要介入"
+    assert degraded_payload["data"]["owner_state"]["needs_owner_action"] is False
+    assert degraded_payload["data"]["owner_summary"]["market_opportunity"] == "需要介入"
+    assert (
+        degraded_payload["data"]["source_health"]["strategygroup_runtime_goal_status"][
+            "status"
+        ]
+        == "degraded"
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_status"
+        ]
+        == "runtime_liveness_degraded"
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_real_order_ready"
+        ]
+        is False
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_readiness_matrix_count"
+        ]
+        == 1
+    )
+
+    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "strategygroup_runtime_goal_status",
+                "status": "missing_fact",
+                "owner_state": {
+                    "label": "需要介入",
+                    "detail": "live facts 尚未 ready，不能进入实盘动作边界",
+                    "next_safe_checkpoint": "refresh_strategy_group_live_facts_readiness",
+                },
+                "blockers": ["live_facts_not_ready"],
+                "real_order_boundary": {
+                    "ready_for_real_order_action": False,
+                },
+                "real_order_readiness_matrix": [
+                    {
+                        "key": "required_facts",
+                        "status": "blocked",
+                        "blocker_class": "missing_fact",
+                        "blocks_real_submit": True,
+                    },
+                    {
+                        "key": "active_position_open_order",
+                        "status": "pass",
+                        "blocker_class": "none",
+                        "blocks_real_submit": False,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-console-source-readiness")
+        assert response.status_code == 200
+        facts_blocked_payload = response.json()
+
+    assert (
+        facts_blocked_payload["data"]["real_order_readiness"][
+            "submit_blocking_keys"
+        ]
+        == ["required_facts"]
+    )
+    assert (
+        "active_position_open_order"
+        not in facts_blocked_payload["data"]["real_order_readiness"][
+            "submit_blocking_keys"
+        ]
+    )
+
+
+def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+    )
+
+    source = _owner_console_deploy_channel_source(
+        {
+            "status": "blocked",
+            "checks": {
+                "tokyo_connectivity_probe_ready": False,
+                "tokyo_connectivity_blockers": ["tokyo_tcp_22_unreachable"],
+                "tokyo_probe_blockers": ["tokyo_readonly_probe_error"],
+                "blockers": [
+                    "tokyo_probe:tokyo_readonly_probe_error",
+                    "tokyo_connectivity:tokyo_tcp_22_unreachable",
+                ],
+            },
+        }
+    )
+
+    assert source["status"] == "degraded"
+    assert source["owner_label"] == "部署通道暂不可用"
+    assert source["summary"]["connectivity_ready"] is False
+    assert "tokyo_tcp_22_unreachable" in source["reason"]
+    assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
+
+
+def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "operation_layer_ready",
+            "ready_for_real_order_action": True,
+            "next_safe_checkpoint": "call_official_operation_layer_submit",
+            "checks": {"ready_for_real_order_action": False},
+            "owner_state": {"next_safe_checkpoint": "legacy_owner_checkpoint"},
+            "real_order_boundary": {"ready_for_real_order_action": False},
+            "real_order_readiness_matrix": [
+                {
+                    "key": "selected_strategygroup_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "ready"
+    assert readiness["ready_for_real_order_action"] is True
+    assert readiness["next_safe_checkpoint"] == "call_official_operation_layer_submit"
+    assert readiness["pass_count"] == 2
+    assert readiness["submit_blocking_keys"] == []
+    assert readiness["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": True,
+        "next_safe_checkpoint": "call_official_operation_layer_submit",
+        "blocker_keys": [],
+    }
+
+
+def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_processing():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "fresh_signal_processing",
+            "ready_for_real_order_action": False,
+            "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+            "real_order_readiness_matrix": [
+                {
+                    "key": "fresh_signal",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "candidate_authorization",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "action_time_finalgate",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "waiting_for_chain"
+    assert readiness["owner_label"] == "处理中"
+    assert readiness["source_health"]["status"] == "ready_nonempty"
+    assert readiness["blocked_count"] == 0
+    assert readiness["waiting_count"] == 3
+    assert readiness["ready_for_real_order_action"] is False
+    assert readiness["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+        "blocker_keys": [],
+    }
+
+
+def test_owner_console_real_order_readiness_projects_submit_blocker_review():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "missing_fact",
+            "ready_for_real_order_action": False,
+            "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+            "evidence": {
+                "submit_blocker_review": {
+                    "required": True,
+                    "allowed": True,
+                    "project_progress_allowed": True,
+                    "continue_observation_allowed": True,
+                    "real_submit_allowed": False,
+                    "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+                    "blocker_keys": ["protection", "budget"],
+                }
+            },
+            "real_order_boundary": {
+                "submit_blocker_review_required": True,
+                "submit_blocker_review_allowed": True,
+                "project_progress_allowed": True,
+                "continue_observation_allowed": True,
+                "real_submit_allowed": False,
+                "submit_blocker_keys": ["protection", "budget"],
+            },
+            "real_order_readiness_matrix": [
+                {
+                    "key": "protection",
+                    "status": "blocked",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "budget",
+                    "status": "blocked",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "blocked"
+    assert readiness["owner_label"] == "暂不可用"
+    assert readiness["ready_for_real_order_action"] is False
+    assert readiness["submit_blocking_keys"] == ["protection", "budget"]
+    assert readiness["submit_blocker_review"] == {
+        "required": True,
+        "allowed": True,
+        "project_progress_allowed": True,
+        "continue_observation_allowed": True,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+        "blocker_keys": ["protection", "budget"],
+    }
+
+
+def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+        _owner_console_effective_deploy_channel_packet,
+    )
+
+    packet, path = _owner_console_effective_deploy_channel_packet(
+        deploy_channel={},
+        deploy_channel_path="/reports/tokyo-deploy-channel-status.json",
+        readonly_probe={
+            "scope": "tokyo_runtime_governance_readonly_probe",
+            "status": "blocked",
+            "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
+            "facts": {"probe_error": "Permission denied (publickey)."},
+        },
+        readonly_probe_path="/reports/tokyo-readonly-probe-current.json",
+    )
+    source = _owner_console_deploy_channel_source(packet)
+
+    assert path == "/reports/tokyo-readonly-probe-current.json"
+    assert packet["scope"] == "tokyo_runtime_governance_deploy_channel_status"
+    assert packet["source_scope"] == "tokyo_runtime_governance_readonly_probe"
+    assert source["status"] == "degraded"
+    assert source["owner_label"] == "部署通道暂不可用"
+    assert source["reason"] == "tokyo_ssh_publickey_denied"
+    assert source["summary"] == {
+        "checked": True,
+        "connectivity_ready": None,
+        "blockers": ["tokyo_ssh_publickey_denied"],
+    }
+
+
+def test_owner_console_deploy_channel_source_surfaces_postdeploy_ready():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+    )
+
+    source = _owner_console_deploy_channel_source(
+        {
+            "status": "postdeploy_accepted",
+            "checks": {
+                "blockers": [],
+                "tokyo_connectivity_blockers": [],
+                "tokyo_connectivity_probe_ready": True,
+                "postdeploy_acceptance_passed": True,
+            },
+        }
+    )
+
+    assert source["status"] == "ready"
+    assert source["owner_label"] == "部署通道正常"
+    assert source["reason"] == "postdeploy_accepted"
+    assert source["summary"] == {
+        "checked": True,
+        "connectivity_ready": True,
+        "blockers": [],
+    }
+
+
+def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
+    from src.application.readmodels.trading_console import (
+        OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS,
+        _owner_console_dry_run_audit_source,
+    )
+
+    checks = {name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS}
+    checks["scenario_count"] = 14
+    packet = {
+        "status": "passed",
+        "checks": checks,
+        "safety_invariants": {
+            "dangerous_effects": [],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "disabled_smoke_is_real_execution_proof": False,
+        },
+    }
+
+    ready = _owner_console_dry_run_audit_source(packet)
+
+    assert ready["status"] == "ready"
+    assert ready["owner_label"] == "审计演练正常"
+    assert ready["summary"]["scenario_count"] == 14
+    assert ready["summary"]["required_checks_present"] is True
+    assert ready["summary"]["shared_runtime_pipeline_checked"] is True
+    assert ready["summary"]["common_execution_chain_reuse_checked"] is True
+    assert ready["summary"]["strategygroup_adapter_boundary_checked"] is True
+    assert (
+        ready["summary"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
+    assert ready["summary"]["runtime_tier_policy_checked"] is True
+    assert ready["summary"]["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert (
+        ready["summary"]["new_strategygroups_default_observe_only_checked"]
+        is True
+    )
+    assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
+    assert (
+        ready["summary"][
+            "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+        ]
+        is True
+    )
+    assert (
+        ready["summary"]["operation_layer_hard_safety_blocker_matrix_checked"]
+        is True
+    )
+    assert ready["summary"]["expanded_watcher_scope_execution_guard_checked"] is True
+    assert (
+        ready["summary"]["operation_layer_authorization_chain_guard_checked"]
+        is True
+    )
+    assert ready["summary"]["post_submit_closed_loop_evidence_guard_checked"] is True
+    assert (
+        ready["summary"]["operation_layer_submit_result_identity_guard_checked"]
+        is True
+    )
+    assert (
+        ready["summary"]["post_submit_finalize_result_identity_guard_checked"]
+        is True
+    )
+    assert ready["summary"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert ready["summary"]["required_checks"] == {
+        name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
+    }
+
+    packet["checks"] = {
+        key: value
+        for key, value in checks.items()
+        if key != "shared_runtime_pipeline_checked"
+        and key != "common_execution_chain_reuse_checked"
+        and key != "strategygroup_adapter_boundary_checked"
+        and key != "strategy_handoff_no_execution_pipeline_fields_checked"
+        and key != "runtime_tier_policy_checked"
+        and key != "only_mpg_tiny_real_order_eligible_checked"
+        and key != "new_strategygroups_default_observe_only_checked"
+    }
+
+    degraded = _owner_console_dry_run_audit_source(packet)
+
+    assert degraded["status"] == "degraded"
+    assert degraded["owner_label"] == "审计演练需检查"
+    assert degraded["reason"].startswith("runtime_dry_run_missing_required_check:")
+    assert "common_execution_chain_reuse_checked" in degraded["reason"]
+    assert "shared_runtime_pipeline_checked" in degraded["reason"]
+    assert "strategygroup_adapter_boundary_checked" in degraded["reason"]
+    assert "strategy_handoff_no_execution_pipeline_fields_checked" in degraded["reason"]
+    assert "runtime_tier_policy_checked" in degraded["reason"]
+    assert "only_mpg_tiny_real_order_eligible_checked" in degraded["reason"]
+    assert "new_strategygroups_default_observe_only_checked" in degraded["reason"]
 
 
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(

@@ -33,7 +33,7 @@
     "freshness_window_seconds": 120,
     "timeframe": "1h",
     "closed_candle_only": true,
-    "confidence_min": "0.70",
+    "confidence_min": "0.58",
     "side": "long",
     "must_include": [
       "direction",

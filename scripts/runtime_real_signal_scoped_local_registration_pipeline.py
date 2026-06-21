@@ -32,6 +32,23 @@ from scripts import runtime_strategy_signal_intent_draft_source_api_flow  # noqa
 
 
 API_BASE_ENV = "RUNTIME_REAL_SIGNAL_SCOPED_LOCAL_REGISTRATION_PIPELINE_API_BASE"
+OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
+    "trusted_submit_fact_snapshot_id",
+    "submit_idempotency_policy_id",
+    "attempt_outcome_policy_id",
+    "protection_creation_failure_policy_id",
+    "local_registration_enablement_decision_id",
+    "owner_real_submit_authorization_id",
+    "order_lifecycle_submit_enablement_id",
+    "exchange_submit_adapter_enablement_id",
+    "exchange_submit_action_authorization_id",
+    "deployment_readiness_evidence_id",
+)
+LOCAL_REGISTRATION_SATISFIED_PROBE_BLOCKER_FRAGMENTS = (
+    "runtimeexecutionorderlifecycleadapterresult_not_found",
+    "runtime_execution_order_lifecycle_adapter_result_not_found",
+    "preview_disabled_first_real_submit_action_http_404",
+)
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -63,6 +80,131 @@ def _blockers(value: dict[str, Any] | None) -> list[str]:
     if not isinstance(value, dict):
         return []
     return [str(item) for item in value.get("blockers") or []]
+
+
+def _is_local_registration_satisfied_probe_blocker(value: str) -> bool:
+    text = value.lower()
+    return any(
+        fragment in text
+        for fragment in LOCAL_REGISTRATION_SATISFIED_PROBE_BLOCKER_FRAGMENTS
+    )
+
+
+def _read_json_object(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _nonempty(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _relay_readiness_evidence_ids(
+    evidence: dict[str, Any],
+    *,
+    readiness_evidence_json: str | None,
+) -> dict[str, Any]:
+    readiness_evidence = _read_json_object(readiness_evidence_json)
+    if not readiness_evidence:
+        return evidence
+
+    ids = dict(evidence.get("ids") if isinstance(evidence.get("ids"), dict) else {})
+    copied: list[str] = []
+    for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
+        if _nonempty(ids.get(name)):
+            continue
+        value = readiness_evidence.get(name)
+        if _nonempty(value):
+            ids[name] = str(value)
+            copied.append(name)
+
+    missing = [name for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS if not ids.get(name)]
+    warnings = list(evidence.get("warnings") or [])
+    if copied:
+        warnings.append("operation_layer_required_ids_relayed_from_readiness_evidence")
+    return {
+        **evidence,
+        "ids": ids,
+        "warnings": _dedupe([str(item) for item in warnings]),
+        "operation_layer_evidence_relay": {
+            "source_readiness_evidence_json": readiness_evidence_json,
+            "copied_evidence_ids": copied,
+            "missing_evidence_ids_after_relay": missing,
+            "ready_for_operation_layer_evidence_handoff": not missing,
+            "does_not_create_evidence_ids": True,
+        },
+    }
+
+
+def _operation_layer_evidence_after_local_registration(
+    reports: dict[str, dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    evidence = reports.get("evidence_chain")
+    scoped = reports.get("scoped_local_registration_proof")
+    if not isinstance(evidence, dict) or not isinstance(scoped, dict):
+        return None
+    if _status(scoped) != "scoped_local_registration_proof_recorded":
+        return None
+
+    ids = dict(evidence.get("ids") if isinstance(evidence.get("ids"), dict) else {})
+    flow_report = scoped.get("flow_report") if isinstance(scoped, dict) else {}
+    flow_ids = (
+        flow_report.get("ids")
+        if isinstance(flow_report, dict) and isinstance(flow_report.get("ids"), dict)
+        else {}
+    )
+    adapter_result_id = scoped.get("local_registration_adapter_result_id") or flow_ids.get(
+        "local_registration_adapter_result_id"
+    )
+    if _nonempty(adapter_result_id):
+        ids["local_registration_adapter_result_id"] = str(adapter_result_id)
+
+    missing = [name for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS if not ids.get(name)]
+    steps = list(evidence.get("steps") or [])
+    if _nonempty(adapter_result_id):
+        steps.append(
+            {
+                "name": "record_local_order_registration_result",
+                "id_summary": {
+                    "adapter_result_id": str(adapter_result_id),
+                    "authorization_id": ids.get("authorization_id"),
+                },
+                "blockers": [],
+                "warnings": [],
+                "places_order": False,
+                "exchange_write_called": False,
+                "order_lifecycle_called": False,
+            }
+        )
+    return {
+        **evidence,
+        "ids": ids,
+        "steps": steps,
+        "operation_layer_evidence_after_local_registration": {
+            "status": "ready" if not missing else "missing_evidence",
+            "local_registration_adapter_result_id": adapter_result_id,
+            "missing_evidence_ids": missing,
+            "ready_for_action_time_finalgate_rerun": not missing,
+            "ready_for_operation_layer_readiness_check": not missing,
+            "places_order": False,
+            "exchange_write_called": False,
+        },
+        "safety": {
+            **(
+                evidence.get("safety")
+                if isinstance(evidence.get("safety"), dict)
+                else {}
+            ),
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "exchange_order_submitted": False,
+        },
+    }
 
 
 def _fresh_id_hint(readiness_report: dict[str, Any]) -> str:
@@ -455,6 +597,10 @@ def _build_report(
             _evidence_args(args, binding_path=binding_path),
             client=api_client,
         )
+        evidence = _relay_readiness_evidence_ids(
+            evidence,
+            readiness_evidence_json=str(readiness_evidence_json),
+        )
         reports["evidence_chain"] = evidence
         evidence_path = artifact_root / "06-evidence-chain.json"
         _write_json(evidence_path, evidence)
@@ -530,6 +676,22 @@ def _final_report(
             )
             or []
         )
+    if (
+        _status(reports.get("scoped_local_registration_proof"))
+        == "scoped_local_registration_proof_recorded"
+    ):
+        satisfied_probe_blockers = [
+            item for item in blockers if _is_local_registration_satisfied_probe_blocker(item)
+        ]
+        blockers = [
+            item
+            for item in blockers
+            if not _is_local_registration_satisfied_probe_blocker(item)
+        ]
+        warnings.extend(
+            f"local_registration_satisfied_probe_blocker:{item}"
+            for item in satisfied_probe_blockers
+        )
     result = {
         "scope": "runtime_real_signal_scoped_local_registration_pipeline",
         "status": status,
@@ -546,9 +708,147 @@ def _final_report(
         "warnings": _dedupe(warnings),
         "safety_invariants": _safety(reports),
     }
+    result["execution_chain_progress"] = _execution_chain_progress(
+        status=status,
+        blocked_stage=blocked_stage,
+        reports=reports,
+        blockers=result["blockers"],
+    )
+    operation_layer_evidence = _operation_layer_evidence_after_local_registration(
+        reports
+    )
+    if operation_layer_evidence is not None:
+        operation_layer_evidence_path = (
+            artifact_root / "08-operation-layer-evidence-after-local-registration.json"
+        )
+        _write_json(operation_layer_evidence_path, operation_layer_evidence)
+        result["operation_layer_evidence_after_local_registration"] = (
+            operation_layer_evidence
+        )
+        result["operation_layer_evidence_after_local_registration_path"] = str(
+            operation_layer_evidence_path
+        )
     if args.output:
         _write_json(Path(args.output).expanduser(), result)
     return result
+
+
+def _execution_chain_progress(
+    *,
+    status: str,
+    blocked_stage: str | None,
+    reports: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+) -> dict[str, Any]:
+    scoped = reports.get("scoped_local_registration_proof") or {}
+    evidence = reports.get("evidence_chain") or {}
+    handoff = reports.get("handoff") or {}
+    binding = reports.get("binding") or {}
+    scoped_status = _status(scoped)
+    evidence_status = _status(evidence)
+    handoff_status = _status(handoff)
+    binding_status = _status(binding)
+
+    probe_sources = list(blockers)
+    for name, report in (
+        ("evidence_chain", evidence),
+        ("scoped_local_registration_proof", scoped),
+    ):
+        if isinstance(report, dict):
+            probe_sources.extend(f"{name}:{item}" for item in _blockers(report))
+            probe_sources.extend(
+                f"{name}:{item}" for item in report.get("warnings") or []
+            )
+
+    known_non_executing_probe_findings = [
+        item
+        for item in _dedupe([str(value) for value in probe_sources])
+        if "runtimeexecutionorderlifecycleadapterresult_not_found" in item.lower()
+        or "runtimeexecutionorderlifecycleadapterresult not found" in item.lower()
+        or "preview_disabled_first_real_submit_action_http_404" in item.lower()
+    ]
+
+    if scoped_status == "scoped_local_registration_proof_recorded":
+        operation_layer_evidence = _operation_layer_evidence_after_local_registration(
+            reports
+        )
+        operation_layer_evidence_meta = (
+            operation_layer_evidence.get(
+                "operation_layer_evidence_after_local_registration"
+            )
+            if isinstance(operation_layer_evidence, dict)
+            else {}
+        )
+        operation_layer_evidence_missing_ids = list(
+            operation_layer_evidence_meta.get("missing_evidence_ids") or []
+        )
+        operation_layer_evidence_ready = (
+            operation_layer_evidence_meta.get(
+                "ready_for_operation_layer_readiness_check"
+            )
+            is True
+        )
+        progress_status = "scoped_local_registration_recorded"
+        owner_state = "需要重新运行行动时检查"
+        next_step = (
+            "rerun_action_time_finalgate_then_continue_official_operation_layer"
+        )
+        post_local_registration_gate = {
+            "status": "awaiting_action_time_finalgate_rerun",
+            "required_before_operation_layer_submit": [
+                "action_time_finalgate_pass",
+                "operation_layer_evidence_ready",
+                "operation_layer_submit_preconditions_pass",
+            ],
+            "operation_layer_evidence_ready": operation_layer_evidence_ready,
+            "operation_layer_evidence_missing_ids": (
+                operation_layer_evidence_missing_ids
+            ),
+            "operation_layer_submit_allowed": False,
+            "ready_for_real_order": False,
+        }
+    elif scoped_status == "ready_for_scoped_local_registration_proof_dry_run":
+        progress_status = "local_registration_proof_dry_run_ready"
+        owner_state = "工程演练已到本地登记前"
+        next_step = (
+            "execute_scoped_local_registration_proof_under_standing_authorization"
+        )
+        post_local_registration_gate = None
+    elif status.startswith("blocked_") or blocked_stage:
+        progress_status = "blocked_before_operation_layer"
+        owner_state = "工程链路阻断"
+        next_step = f"repair_{blocked_stage or 'pipeline'}"
+        post_local_registration_gate = None
+    else:
+        progress_status = "pipeline_preview_only"
+        owner_state = "工程链路预览"
+        next_step = "continue_non_executing_chain_rehearsal"
+        post_local_registration_gate = None
+
+    return {
+        "status": progress_status,
+        "owner_state": owner_state,
+        "next_step": next_step,
+        "post_local_registration_gate": post_local_registration_gate,
+        "stage_statuses": {
+            "handoff": handoff_status,
+            "binding": binding_status,
+            "evidence_chain": evidence_status,
+            "scoped_local_registration_proof": scoped_status,
+        },
+        "known_non_executing_probe_findings": known_non_executing_probe_findings,
+        "non_executing_first_real_submit_action_probe_called": bool(
+            known_non_executing_probe_findings
+        ),
+        "real_first_real_submit_action_called": False,
+        "ready_for_real_order": False,
+        "official_operation_layer_reached": False,
+        "action_time_finalgate_rerun_after_local_registration": False,
+        "disabled_smoke_is_real_execution_proof": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "withdrawal_or_transfer_created": False,
+    }
 
 
 def _safety(reports: dict[str, dict[str, Any] | None]) -> dict[str, bool]:
@@ -636,6 +936,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--expires-at-ms", type=int)
     parser.add_argument("--active-positions-count", type=int)
     parser.add_argument("--metadata-json")
+    parser.add_argument(
+        "--source-kind",
+        choices=[
+            "sample_rehearsal",
+            "current_live_signal",
+            "scoped_local_registration_proof",
+        ],
+        default="current_live_signal",
+    )
+    parser.add_argument("--allow-scoped-local-registration-proof", action="store_true")
+    parser.add_argument("--allow-sample-local-registration", action="store_true")
     parser.add_argument("--execute-scoped-local-registration-proof", action="store_true")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(

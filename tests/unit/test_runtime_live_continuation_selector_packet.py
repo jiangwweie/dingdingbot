@@ -72,18 +72,18 @@ def _readiness_packet(*rows: dict, exchange_write_called: bool = False) -> dict:
 def _lifecycle_packet(**overrides) -> dict:
     packet = {
         "scope": "runtime_position_lifecycle_exit_readiness_packet",
-        "status": "position_lifecycle_hold_or_owner_close_ready",
+        "status": "position_lifecycle_hold_or_standing_recovery_ready",
         "runtime_instance_id": "runtime-bnb",
         "symbol": "BNB/USDT:USDT",
         "side": "long",
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
         "operator_command_plan": {
-            "next_step": "continue_monitoring_or_explicitly_authorize_reduce_only_close",
+            "next_step": "continue_monitoring_or_prepare_official_reduce_only_recovery",
             "allows_new_attempt_now": False,
-            "reduce_only_close_ready_for_owner_authorization": True,
-            "owner_close_approval_value": (
-                "runtime-reduce-only-close:runtime-bnb:BNB/USDT:USDT:long:"
-                "qty=0.01:owner-authorized"
+            "reduce_only_close_ready_for_owner_authorization": False,
+            "reduce_only_recovery_ready_for_standing_authorization": True,
+            "standing_recovery_authorization_scope": (
+                "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
             ),
         },
         "safety_invariants": {
@@ -129,13 +129,14 @@ def test_selector_prioritizes_position_lifecycle_over_waiting_signals():
         lifecycle_packets=[_lifecycle_packet()],
     )
 
-    assert packet["status"] == "continuation_monitor_position_or_owner_close"
+    assert packet["status"] == "continuation_monitor_position_or_standing_recovery"
     selected = packet["selected_continuation"]
     assert selected["runtime_instance_id"] == "runtime-bnb"
     assert selected["selected_action"] == (
-        "monitor_position_or_owner_authorize_reduce_only_close"
+        "monitor_position_or_prepare_official_reduce_only_recovery"
     )
-    assert selected["reduce_only_close_ready_for_owner_authorization"] is True
+    assert selected["reduce_only_close_ready_for_owner_authorization"] is False
+    assert selected["reduce_only_recovery_ready_for_standing_authorization"] is True
     assert packet["operator_command_plan"]["execute_reduce_only_close_now"] is False
     assert packet["operator_command_plan"]["execute_tiny_live_attempt_now"] is False
     assert packet["safety_invariants"]["no_forbidden_live_side_effects"] is True
@@ -262,5 +263,5 @@ def test_selector_cli_outputs_json(tmp_path, capsys):
 
     stdout_packet = json.loads(capsys.readouterr().out)
     file_packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert stdout_packet["status"] == "continuation_monitor_position_or_owner_close"
+    assert stdout_packet["status"] == "continuation_monitor_position_or_standing_recovery"
     assert file_packet["deployment_context"]["deployed_head"] == "182c4b71"

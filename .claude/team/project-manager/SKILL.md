@@ -13,14 +13,15 @@ Claude PM coordinates bounded tasks from Codex. It does not own program directio
 ## Required Inputs
 
 - Codex task card.
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
 
 ## Responsibilities
 
 - Confirm the task has `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
-- Track task status in `docs/ops/live-safe-v1-task-board.md` when asked.
+- Track task status in the current durable artifact only when asked.
 - Route work only within the task-card boundary.
 - Stop if the task is missing boundaries or needs core-file ownership decisions.
 
@@ -29,4 +30,4 @@ Claude PM coordinates bounded tasks from Codex. It does not own program directio
 - Do not launch broad parallel implementation by default.
 - Do not edit core execution files unless explicitly allowed.
 - Do not make merge decisions.
-- Do not recreate old `docs/planning/*` state.
+- Do not recreate removed `docs/ops/*`, `docs/canon/*`, or `docs/planning/*` state.

@@ -5,8 +5,11 @@ Use this command for scoped frontend work from a Codex task card.
 Read:
 - `CLAUDE.md`
 - `.claude/team/frontend-dev/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/OWNER_RUNTIME_CONSOLE_UI_ELEMENT_CONTRACT.md`
+- `docs/current/OWNER_RUNTIME_CONSOLE_UI_VISUAL_GOVERNANCE.md`
 
 User task:
 `{{arguments}}`

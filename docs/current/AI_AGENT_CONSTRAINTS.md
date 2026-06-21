@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-15
+last_verified: 2026-06-20
 ---
 
 # AI Agent Constraints
@@ -25,6 +25,191 @@ Owner enables a StrategyGroup
 
 The Owner should not need to read raw evidence packets to operate the system.
 Evidence packets are audit artifacts under the Owner-facing control board.
+
+The global business objective is profitability through a small-capital
+right-tail StrategyGroup experimentation system. During the current stage,
+profit is not the engineering acceptance test. Engineering work is valuable
+only when it improves opportunity discovery, runtime capture, execution
+quality, risk-capital governance, or the review loop.
+
+The project is aggressive inside explicit constraints. The Owner-provided
+subaccount allocation is already the risk-control result and may be treated as
+loss-capable experiment capital. Agents must not add hidden conservatism on top
+of that allocation by lowering leverage, reducing exposure, shrinking notional,
+or slowing eligible submits merely because the trade is risky. Risk is not the
+first-order blocker in this project; missed right-tail opportunity is also a
+core failure mode.
+
+The hard boundaries are operational and authority boundaries, not a mandate to
+be cautious. They prevent wrong-account actions, stale-fact execution,
+duplicate submits, missing protection, conflicting active exposure, Operation
+Layer bypass, FinalGate bypass, withdrawals, transfers, credential mutation,
+and live-profile or sizing-default mutation outside explicit Owner direction.
+Inside the selected StrategyGroup, selected symbol/side universe, allocated
+subaccount capital, and configured leverage/notional profile, the system should
+prefer fast opportunity capture over additional discretionary de-risking.
+
+## Global Authority Model
+
+Agents must preserve this split:
+
+```text
+Owner controls policy.
+System executes process.
+Runtime decides actionability.
+Review updates strategy governance.
+```
+
+Owner policy includes StrategyGroup enable/pause/resume, promote/downshift,
+park/kill, scoped risk acceptance, capital/profile/scope changes, and
+production-stage transition.
+
+System process includes observation, RequiredFacts mapping, fresh signal
+detection, candidate/auth evidence, action-time FinalGate, official Operation
+Layer, protection, reconciliation, settlement, and review capture.
+
+Owner scoped risk acceptance may advance `trial_eligible` or tier eligibility.
+It must not set `actionable_now=true` and must not bypass execution safety or
+authority hard stops.
+
+Do not convert StrategyGroup governance into Owner manual operation. Do not ask
+the Owner to manually judge RequiredFacts, fresh signal, candidate/auth,
+FinalGate, Operation Layer, replay samples, no-action rows, or ordinary
+in-boundary execution steps.
+
+If the remaining gap is engineering work, fact mapping, classifier repair,
+replay coverage, monitor integration, or runtime readiness, continue the
+engineering path. Escalate only for Owner policy, tier, capital/profile/scope,
+pause/resume, promote/downshift/park/kill, production transition, or abnormal
+intervention.
+
+## Capability-Closure Discipline
+
+Goal-mode tasks must not stop at explanation. Each task must close one
+engineering problem class, unlock one concrete capability, and expose the next
+engineering bottleneck.
+
+Required Evidence Packet fields for non-trivial work:
+
+- `closed_engineering_problem`;
+- `capability_unlocked`;
+- `next_engineering_bottleneck`;
+- validation proving the capability works or the bottleneck is
+  machine-checkable.
+
+Do not mark a task complete when it only says a capability is missing. Convert
+the missing capability into code, tests, generated checks, monitor integration,
+or a precise next bottleneck. Use `partial` if the task only produced a packet,
+summary, or diagnosis.
+
+Small-capital execution frictions are engineering lifecycle branches before
+they are live blockers. Implement coarse cost estimates, submit/reject/partial/
+timeout handling, protection failure handling, reconciliation shape, and Review
+Ledger feedback paths locally where possible. Live outcomes calibrate these
+branches; they should not be used as generic reasons to stop engineering.
+
+## Phased Gate Discipline
+
+Gate checks must identify which surface they block:
+
+| Surface | Blocks | Must not block |
+| --- | --- | --- |
+| `rehearsal` | Broken local proof, fixture inconsistency, unsafe simulated lifecycle | Non-executing dry-run, simulation, packet generation, cost estimate, or recovery modeling because no live signal exists |
+| `shadow` | Misleading candidate/readiness evidence or tier state | Read-only observation, replay, classifier repair, RequiredFacts mapping, or monitor integration |
+| `live_submit` | Real exchange write when FinalGate, Operation Layer, protection, scope, account, or exchange facts fail | Non-executing engineering closure that keeps `actionable_now=false` |
+| `review` | Claims that lack supporting evidence | Negative evidence, simulated outcomes, and rough cost/PnL as non-authority review input |
+
+Do not require live signal, live fill, or live PnL before closing pre-live
+engineering branches. Dry-run, simulation, paper Operation Layer, and
+post-submit lifecycle rehearsal should be used to close submit/reject/partial/
+timeout/protection/reconciliation/review shapes before live validation.
+
+The boundary is authority, not progress. Rehearsal may unlock the next
+engineering bottleneck, but it must not set `actionable_now=true`, fabricate
+live RequiredFacts, bypass FinalGate or Operation Layer, or create exchange
+writes.
+
+When the system is healthy but waiting for market opportunity, agents should
+not treat `waiting_for_market` as a blocker. Non-market-dependent progress
+should happen through replay, synthetic signal fixtures, paper/simulator
+operation-layer lifecycle tests, post-submit simulation, and cost/slippage
+review inputs. Synthetic and replay signals must never be represented as live
+market signals and must never feed a real Operation Layer submit.
+
+After the P0 runtime path is live-ready, the main non-market work is
+StrategyGroup learning, not report decoration. Agents should turn high-priority
+no-action and would-enter observations into replay-to-review decisions:
+
+```text
+observation
+-> reason codes
+-> replay coverage
+-> classifier / facts / freshness / cost / tier gap
+-> StrategyGroup keep / revise / promote / park / kill / go-live boundary decision
+```
+
+Use `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` as the current
+compatibility path for the minimal StrategyGroup Decision Ledger. It is
+local/read-only decision support and must keep real-order authority false. It
+is not a full opportunity log: records enter the main control layer only when
+they change one of these decisions: `go_live`, `do_not_go_live`,
+`keep_observing`, `revise`, `park`, `kill`, `promote`, or
+`block_for_safety`.
+
+## Global Source Discipline
+
+Agents must follow `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` when
+choosing sources. In short:
+
+```text
+Docs explain.
+Registry defines strategy assets.
+Policy records Owner-authorized control.
+Runtime stores current system state.
+Generated views summarize.
+Archives preserve provenance.
+```
+
+StrategyGroup semantics belong in reviewed handoff packs and the registry
+contract. Dynamic actionability belongs to runtime state. Owner risk acceptance
+belongs to explicit Owner policy or current scoped decisions. Generated monitor,
+replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
+into authority.
+
+Goal-mode work must follow `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`.
+Architecture direction should enter execution as one bounded Goal Packet, and
+execution must return an Evidence Packet before the next architectural verdict.
+
+## P0 / P0.5 Execution Discipline
+
+P0 has priority over P0.5. P0.5 is an accelerator for opportunity discovery and
+strategy quality; it is not a substitute for the first `MPG-001`
+allocated-subaccount live closure.
+
+Agents must obey these constraints:
+
+| Constraint | Required behavior |
+| --- | --- |
+| Fresh signal preempts local work | If a real fresh selected StrategyGroup signal appears, pause P0.5 work and return to RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer |
+| Local/deployed/planned split | Every status summary must distinguish deployed Tokyo capability, local committed capability, and planned work |
+| Decision-ledger requirement | P0.5 artifacts are useful only if they change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
+| Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
+| Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity decision loop, or opportunity ledger producer over adding permanent standalone scripts |
+
+New P0.5 scripts or artifacts must satisfy at least one of:
+
+- produce or consume minimal StrategyGroup Decision Ledger rows;
+- feed the local monitor sequence;
+- replace and reduce older entry points;
+- create a bounded one-time migration or validation artifact with no long-term
+  mainline role.
+
+Testnet is not a mainline value layer for this project. If used at all, it is a
+temporary API-shape diagnostic tool. Meaningful execution-quality evidence comes
+from the official live path with selected StrategyGroup, allocated subaccount
+risk budget, fresh signal, RequiredFacts, candidate/authorization evidence,
+action-time FinalGate, and official Operation Layer all passing.
 
 ## Owner Supervisor Constraint
 
@@ -97,6 +282,20 @@ transfers, credential changes, live-profile expansion, order-sizing default
 expansion, stale-fact execution, missing protection, duplicate-submit risk, or
 conflicting active position/open order execution.
 
+This also does not authorize agents to reinterpret the Owner's allocated
+subaccount budget as needing additional risk cuts. If a live profile, leverage,
+notional, exposure, or sizing default is already selected by the Owner or by the
+current official profile, agents should preserve and use it rather than reduce
+it for caution. Changes to those defaults still require explicit Owner
+direction because they are authority changes, not routine safety fixes.
+
+Do not deploy to Tokyo for every small local change. Routine status review
+should use local cache or local goal-progress artifacts first, then at most one
+L1 read-only Tokyo snapshot when cache is missing, stale, or schema-stale.
+Bounded Tokyo deploy apply should be reserved for a stage-worthy fix,
+deployable milestone, fresh-signal unblock, safety regression repair, or
+explicit Owner request.
+
 ## StrategyGroup Runtime Bootstrap
 
 `scripts/bootstrap_strategygroup_runtime_pilot.py` is the current bounded bridge
@@ -120,6 +319,7 @@ Every blocker must classify itself as one of:
 | `waiting_for_market` | No fresh signal exists |
 | `missing_fact` | Required fact or evidence is absent or stale |
 | `deployment_issue` | Tokyo or local deployment is behind current code |
+| `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
 | `active_position_resolution` | Position, open order, or protection state needs resolution |
 | `hard_safety_stop` | Execution would violate the safety boundary |
 | `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
@@ -127,16 +327,32 @@ Every blocker must classify itself as one of:
 Gates exist to preserve bounded real-funds safety. They must not become opaque
 all-AND project blockers.
 
+Gate scope must be explicit. A live-submit gate may block only real exchange
+write or live actionability. It must not block local dry-run, simulation,
+paper/simulator Operation Layer, post-submit lifecycle rehearsal, rough
+cost/PnL estimation, or monitor/review shape work when those artifacts remain
+non-executing and non-authoritative.
+
+Monitor cache freshness is not a live-trading safety blocker. Cache missing,
+stale cache age, stale cache schema, or runtime-head mismatch must be classified
+as `monitor_refresh_needed`. These states may emit `NOTIFY` to trigger a local
+or one-shot L1 refresh, but they must not populate `checks.blockers`, must not
+be reported as `hard_safety_stop`, and must not flip P0 from
+`waiting_for_market` to blocked when the runtime chain itself remains ready.
+
 Gate classes are internal safety classifications. The main Owner UI should map
 them to one terse product sentence, for example:
 
 | Internal condition | Owner-facing sentence |
 | --- | --- |
 | stale or missing facts | 事实不可用，暂不能使用 |
+| monitor cache missing/stale/schema/head stale | 监控状态需刷新 |
 | open order conflict | 有订单处理中，暂不能使用 |
 | active position conflict | 有持仓处理中，暂不能使用 |
 | missing protection | 保护未就绪，暂不能使用 |
 | reconciliation mismatch | 订单结果不一致，等待系统处理 |
+| `hard_safety_stop` | `需要介入` |
+| `review_only_warning` | `运行中` (audit/detail available, not an Owner blocker) |
 
 ## Watch Branch Intake
 

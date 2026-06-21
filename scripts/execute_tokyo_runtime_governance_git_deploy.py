@@ -290,11 +290,25 @@ def _execution_report(
         for phase in plan.get("plan_phases", [])
         for command in phase.get("commands") or []
     ]
+    effects = _effects_from_command_results(
+        apply=apply,
+        command_results=command_results,
+    )
+    interaction = _interaction_summary(apply=apply, effects=effects)
+    owner_summary = _owner_deploy_summary(
+        status=status,
+        apply=apply,
+        blockers=blockers,
+        commands=commands,
+        effects=effects,
+    )
     return {
         "status": status,
         "scope": "tokyo_runtime_governance_git_deploy_execution",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "apply_requested": apply,
+        "interaction": interaction,
+        "owner_summary": owner_summary,
         "release": plan.get("release", {}),
         "checks": {
             "blockers": blockers,
@@ -315,18 +329,91 @@ def _execution_report(
         },
         "planned_commands": commands if not apply else [],
         "command_results": command_results,
-        "effects": _effects_from_command_results(
-            apply=apply,
-            command_results=command_results,
-        ),
+        "effects": effects,
     }
+
+
+def _interaction_summary(
+    *,
+    apply: bool,
+    effects: dict[str, bool],
+) -> dict[str, bool | str]:
+    return {
+        "level": "L3_bounded_deploy_apply" if apply else "L1_deploy_plan_only",
+        "remote_interaction_count": _remote_interaction_count(effects),
+        "mutates_remote_files": bool(effects.get("remote_files_modified")),
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+        "requires_owner_chat_confirmation": False,
+    }
+
+
+def _remote_interaction_count(effects: dict[str, Any]) -> int:
+    if not effects.get("apply_requested"):
+        return 0
+    return int(effects.get("remote_interaction_count") or 0)
+
+
+def _owner_deploy_summary(
+    *,
+    status: str,
+    apply: bool,
+    blockers: list[str],
+    commands: list[dict[str, Any]],
+    effects: dict[str, bool],
+) -> dict[str, Any]:
+    frontend_static_site = _frontend_static_site_status(commands)
+    return {
+        "state": "部署完成" if status == "applied" else "部署规划完成",
+        "result": status,
+        "interaction_level": (
+            "L3_bounded_deploy_apply" if apply else "L1_deploy_plan_only"
+        ),
+        "owner_intervention_required": bool(blockers),
+        "blockers": blockers,
+        "changed": {
+            "remote_files": bool(effects.get("remote_files_modified")),
+            "database_backup": bool(effects.get("database_backup_created")),
+            "migrations": bool(effects.get("migrations_run")),
+            "services_restarted": bool(effects.get("services_restarted")),
+        },
+        "not_changed": {
+            "secrets": True,
+            "credentials": True,
+            "live_profile": True,
+            "order_sizing_defaults": True,
+            "withdrawals_or_transfers": True,
+            "exchange_orders": True,
+        },
+        "frontend_static_site": frontend_static_site,
+        "postdeploy_snapshot_recommended": bool(apply and not blockers),
+        "safety": {
+            "finalgate_bypassed": False,
+            "operation_layer_bypassed": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        },
+    }
+
+
+def _frontend_static_site_status(commands: list[dict[str, Any]]) -> str:
+    command_text = "\n".join(str(command.get("command") or "") for command in commands)
+    if "/var/www/brc-owner-console" not in command_text:
+        return "not_included"
+    if "frontend-release.json" not in command_text:
+        return "static_files_without_release_marker"
+    return "included"
 
 
 def _effects_from_command_results(
     *,
     apply: bool,
     command_results: list[dict[str, Any]],
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     successful_commands = [
         str(result.get("command") or "")
         for result in command_results
@@ -337,7 +424,12 @@ def _effects_from_command_results(
         for result in command_results
         if result.get("returncode") == 0
     }
+    remote_interaction_count = sum(
+        1 for command in successful_commands if _command_touches_tokyo(command)
+    )
     return {
+        "apply_requested": bool(apply),
+        "remote_interaction_count": remote_interaction_count,
         "remote_files_modified": bool(
             apply
             and (
@@ -362,6 +454,15 @@ def _effects_from_command_results(
         "exchange_called": False,
         "secrets_read_by_codex": False,
     }
+
+
+def _command_touches_tokyo(command: str) -> bool:
+    markers = (
+        "ssh ",
+        "probe_tokyo_runtime_governance_readonly.py",
+        "verify_tokyo_runtime_governance_postdeploy.py",
+    )
+    return any(marker in command for marker in markers)
 
 
 def _run_shell(command: str) -> ShellResult:

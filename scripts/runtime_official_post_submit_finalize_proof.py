@@ -324,8 +324,21 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "submit_outcome_review_id": (packet["ids"] or {}).get(
             "submit_outcome_review_id"
         ),
+        "post_submit_reconciliation_evidence_id": (packet["ids"] or {}).get(
+            "post_submit_reconciliation_evidence_id"
+        ),
         "post_submit_budget_settlement_id": (packet["ids"] or {}).get(
             "post_submit_budget_settlement_id"
+        ),
+        "post_submit_finalize_complete": packet.get(
+            "post_submit_finalize_complete"
+        ),
+        "post_submit_reconciliation_matched": packet.get(
+            "post_submit_reconciliation_matched"
+        ),
+        "post_submit_budget_settled": packet.get("post_submit_budget_settled"),
+        "submit_outcome_review_recorded": packet.get(
+            "submit_outcome_review_recorded"
         ),
         "post_submit_finalize_packet": post_submit_finalize,
         "post_submit_finalize_proof_packet": packet,
@@ -564,6 +577,9 @@ def _post_submit_finalize_proof_packet(
             "submit_outcome_review_id": finalize_body.get(
                 "submit_outcome_review_id"
             ),
+            "post_submit_reconciliation_evidence_id": finalize_body.get(
+                "post_submit_reconciliation_evidence_id"
+            ),
             "post_submit_budget_settlement_id": finalize_body.get(
                 "post_submit_budget_settlement_id"
             ),
@@ -582,6 +598,18 @@ def _post_submit_finalize_proof_packet(
                 "post_submit_budget_settlement_status"
             ),
         },
+        "post_submit_finalize_complete": (
+            finalize_body.get("post_submit_finalize_complete") is True
+        ),
+        "post_submit_reconciliation_matched": (
+            finalize_body.get("post_submit_reconciliation_matched") is True
+        ),
+        "post_submit_budget_settled": (
+            finalize_body.get("post_submit_budget_settled") is True
+        ),
+        "submit_outcome_review_recorded": (
+            finalize_body.get("submit_outcome_review_recorded") is True
+        ),
         "post_submit_finalize": {
             "http_status": post_submit_finalize.get("http_status"),
             "packet_id": finalize_body.get("packet_id"),

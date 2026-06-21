@@ -12,10 +12,6 @@ from src.application.readmodels.runtime_orders import RuntimeOrdersReadModel
 from src.application.readmodels.runtime_portfolio import RuntimePortfolioReadModel
 from src.application.readmodels.runtime_positions import RuntimePositionsReadModel
 from src.application.reconciliation import ReconciliationService
-from src.application.runtime_symbol_isolation_audit import (
-    SymbolIsolationStatus,
-    build_phase5c_symbol_isolation_audit,
-)
 from src.domain.execution_intent import ExecutionIntentStatus
 from src.domain.models import (
     Direction,
@@ -286,17 +282,3 @@ async def test_runtime_portfolio_remains_account_level_for_two_symbols():
     assert {position.symbol for position in response.positions} == {ETH, BTC}
     assert response.total_exposure == 200.0
     assert response.total_equity == 1015.0
-
-
-def test_phase5c_symbol_isolation_audit_marks_synthetic_proof_passed():
-    report = build_phase5c_symbol_isolation_audit()
-    statuses = {check.check_id: check.status for check in report.checks}
-
-    assert report.audit_version == "phase5c_two_symbol_fixture_audit_v1"
-    assert statuses["P5C-SYM-003"] == SymbolIsolationStatus.PASS
-    assert statuses["P5C-SYM-004"] == SymbolIsolationStatus.PASS
-    assert statuses["P5C-SYM-005"] == SymbolIsolationStatus.BLOCKED
-    assert report.verdict == (
-        "two_symbol_synthetic_fixture_passed / "
-        "multi_symbol_runtime_still_blocked"
-    )

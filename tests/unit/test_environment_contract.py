@@ -96,6 +96,7 @@ def test_production_template_is_conservative_and_non_secret():
 
     assert "TRADING_ENV=live" in text
     assert "BRC_EXECUTION_PERMISSION_MAX=order_allowed" in text
+    assert "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED=true" in text
     assert "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false" in text
     assert "RUNTIME_CONTROL_API_ENABLED=false" in text
     assert "RUNTIME_PROFILE=" not in text
@@ -123,3 +124,16 @@ def test_legacy_tiny_live_template_is_read_only_by_default():
     assert "BRC_EXECUTION_PERMISSION_MAX=read_only" in text
     assert "RUNTIME_CONTROL_API_ENABLED=false" in text
     assert "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false" in text
+
+
+def test_tokyo_experimental_live_order_capable_overlay_is_explicit_and_non_secret():
+    text = (REPO_ROOT / ".env.tokyo.experimental-live-order-capable.example").read_text()
+
+    assert "TRADING_ENV=live" in text
+    assert "EXCHANGE_TESTNET=false" in text
+    assert "BRC_EXECUTION_PERMISSION_MAX=order_allowed" in text
+    assert "RUNTIME_CONTROL_API_ENABLED=false" in text
+    assert "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false" in text
+    assert "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED=true" in text
+    assert "EXCHANGE_API_KEY=" not in text
+    assert "EXCHANGE_API_SECRET=" not in text

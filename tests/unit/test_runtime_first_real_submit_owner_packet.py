@@ -157,8 +157,6 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
     assert packet["remaining_gates"]["owner_decision_items"] == []
     assert packet["remaining_gates"]["implementation_blockers"] == []
     assert packet["remaining_gates"]["non_owner_live_enablement_blockers"] == [
-        "promotion_gate_first_real_submit_deployment_readiness_evidence_id_missing",
-        "promotion_gate_first_real_submit_local_registration_enablement_decision_id_missing",
         "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",
         "promotion_gate_not_ready_for_first_real_submit",
     ]

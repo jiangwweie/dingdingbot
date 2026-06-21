@@ -66,9 +66,6 @@ _SHELF_REPORT = "reports/directional-opportunity-broad-smoke-20260529/strategy_g
 _TRIAL_CANDIDATES = "reports/directional-opportunity-broad-smoke-20260529/trial_candidate_with_known_risks_v2.md"
 _CPM_OOS = "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md"
 _CPM_CONTEXT = "docs/ops/cpm-1-readonly-feature-context-extraction-report.md"
-_RUNNER = "src/application/brc_live_read_only_detection_runner.py"
-
-
 def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityResponse:
     """Return the Owner-reviewable strategy group shelf.
 
@@ -117,7 +114,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
                 "strategy self-elevation",
             ],
             evidence_reviewability="reviewable_with_known_risks",
-            live_readonly_observation_readiness="live_readonly_observation_v1_evaluator_ready_requires_runner_binding",
+            live_readonly_observation_readiness="live_readonly_observation_v1_ready_runner_retired",
             bounded_trial_readiness="SOL chain sample has bounded-trial metadata; BNB remains review-only after coverage repair",
             main_blockers=[
                 "MI read-only evaluator glue is wired, but live observation runner/sink is not bound or scheduled",
@@ -167,7 +164,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             next_recommended_action="Keep as special read-only observation; do not promote to runtime eligibility.",
             not_allowed_now=["runtime eligibility by default", "trial start", "execution wiring", "alpha claim"],
             evidence_reviewability="reviewable_with_negative_oos_disclosure",
-            live_readonly_observation_readiness="live_readonly_observation_v1_evaluator_ready_requires_runner_binding",
+            live_readonly_observation_readiness="live_readonly_observation_v1_ready_runner_retired",
             bounded_trial_readiness="not_runtime_eligible_by_default",
             main_blockers=[
                 "negative OOS disclosure",
@@ -384,17 +381,16 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
         secondary_groups=secondary_groups,
         candidate_evidence=candidate_evidence,
         observation_chain_summary={
-            "existing_runner": "brc_live_read_only_detection_runner",
-            "existing_runner_source": _RUNNER,
             "can_record_metadata_and_evidence_without_orders": True,
             "active_live_readonly_observation": False,
             "strategy_specific_signal_evaluator_glue_wired": True,
+            "legacy_runner_retired": True,
             "observation_sink_wired_for_strategy_specific_events": False,
             "observation_v1_endpoint": "/api/brc/strategy-groups/live-readonly-observation/v1",
             "observation_v1_candidates": [
                 candidate.model_dump(mode="json") for candidate in observation_v1.candidates
             ],
-            "readiness_status": "evaluator_ready_requires_runner_binding",
+            "readiness_status": "observation_v1_ready_runner_retired",
             "execution_intent_created": False,
             "order_created": False,
             "runtime_started": False,
@@ -407,5 +403,5 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
             "no_automatic_strategy_routing": True,
             "no_symbol_side_leverage_expansion": True,
         },
-        source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _SHELF_REPORT, _TRIAL_CANDIDATES, _CPM_OOS, _RUNNER],
+        source_refs=[_BNB_SOL_REVIEW, _COST_BASELINE, _SHELF_REPORT, _TRIAL_CANDIDATES, _CPM_OOS],
     )

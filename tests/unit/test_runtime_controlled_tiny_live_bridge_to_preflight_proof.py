@@ -84,6 +84,11 @@ def test_bridge_to_preflight_passes_with_ready_bridge_and_official_report(tmp_pa
     assert checks["exchange_called"] is False
     assert checks["runtime_state_mutated"] is False
     assert checks["withdrawal_or_transfer_created"] is False
+    waiting = report["bridge_to_official_preflight_packet"]["waiting_path"]
+    assert waiting["selected_action"] == (
+        "monitor_position_or_prepare_official_reduce_only_recovery"
+    )
+    assert "owner_authorize" not in waiting["selected_action"]
 
 
 def test_bridge_to_preflight_outputs_expected_artifacts(tmp_path):
@@ -113,6 +118,9 @@ def test_bridge_to_preflight_outputs_expected_artifacts(tmp_path):
     assert packet["waiting_path"]["bridge_status"] == (
         "controlled_tiny_live_bridge_waiting_for_ready_selector"
     )
+    assert packet["waiting_path"]["selected_action"] == (
+        "monitor_position_or_prepare_official_reduce_only_recovery"
+    )
     assert packet["ready_path"]["bridge_status"] == (
         "controlled_tiny_live_bridge_ready_for_official_prepare"
     )
@@ -135,6 +143,11 @@ def test_bridge_to_preflight_blocks_when_official_route_fails(tmp_path):
 
 
 def test_bridge_to_preflight_cli_stdout_is_json_only(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        script.rtf092,
+        "build_proof_report",
+        lambda _path: _official_report(),
+    )
     monkeypatch.setattr(
         script.sys,
         "argv",

@@ -367,6 +367,7 @@ def _watcher_scope(group: dict[str, Any] | None) -> dict[str, Any]:
 
 def _watcher_scope_alignment(
     *,
+    selected_strategy_group_id: str | None,
     selected_universe: list[str],
     selected_side: str,
     watcher: dict[str, Any],
@@ -380,10 +381,12 @@ def _watcher_scope_alignment(
     selected_sides = {
         _normalize_side(selected_side),
     } - {""}
+    selected_group = str(selected_strategy_group_id or "").strip()
 
     matched: list[dict[str, Any]] = []
     out_of_scope: list[dict[str, Any]] = []
     for summary in summaries:
+        strategy_group_id = str(summary.get("strategy_family_id") or "").strip()
         symbol = _normalize_symbol(summary.get("symbol"))
         side = _normalize_side(summary.get("side"))
         row = {
@@ -394,7 +397,11 @@ def _watcher_scope_alignment(
             "side": summary.get("side"),
             "status": summary.get("status"),
         }
-        if symbol in selected_symbols and (not selected_sides or side in selected_sides):
+        if (
+            strategy_group_id == selected_group
+            and symbol in selected_symbols
+            and (not selected_sides or side in selected_sides)
+        ):
             matched.append(row)
         else:
             out_of_scope.append(row)
@@ -414,6 +421,7 @@ def _watcher_scope_alignment(
 
     return {
         "status": status,
+        "selected_strategy_group_id": selected_group or None,
         "selected_symbols": sorted(selected_symbols),
         "selected_side": sorted(selected_sides)[0] if selected_sides else None,
         "runtime_signal_summary_count": len(summaries),
@@ -1252,6 +1260,7 @@ def build_packet(
     selected_side = supported_sides[0] if supported_sides else "unknown"
     runtime_bridge = _runtime_bridge(group)
     watcher_scope_alignment = _watcher_scope_alignment(
+        selected_strategy_group_id=group_id,
         selected_universe=selected_universe,
         selected_side=selected_side,
         watcher=watcher,

@@ -14,19 +14,18 @@ Assist Codex with architecture option analysis and ADR drafting. Codex and the u
 
 Primary (always read first):
 
-- `docs/canon/PROJECT_BASELINE_CURRENT.md`
-- `docs/canon/BRC_TARGET_SEMANTICS.md`
-- `docs/canon/AGENT_WORKSPACE_RULES.md`
-- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
-- `docs/canon/TECH_DEBT_BASELINE.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
 Additional context:
 
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
-- Relevant ADRs
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- Relevant files under `docs/current/strategy-group-handoffs/`
 
-Note: `docs/gpt/` is historical reference only, not current required context.
+Note: historical archive material is recovery/provenance only, not current required context.
 
 ## Output
 

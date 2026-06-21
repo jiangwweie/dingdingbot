@@ -84,7 +84,7 @@ def _ready_plan(tmp_path: Path) -> dict:
             "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
-        expected_remote_migration_count=84,
+        expected_remote_migration_count=79,
         expected_remote_latest_migration=(
             "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
         ),

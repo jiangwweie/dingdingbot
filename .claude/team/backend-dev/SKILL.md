@@ -24,8 +24,8 @@ Implement scoped backend work from a Codex-issued task card.
 ## Before Editing
 
 - Read `CLAUDE.md`.
-- Read `docs/ops/live-safe-v1-program.md`.
-- Read `docs/ops/agent-working-rules.md`.
+- Read `AGENTS.md`.
+- Read `docs/current/AI_AGENT_CONSTRAINTS.md`.
 - Confirm all files to edit are inside `Allowed files`.
 
 ## Stop Conditions

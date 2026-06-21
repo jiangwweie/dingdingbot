@@ -41,6 +41,8 @@ async def main() -> int:
             "TRADING_ENV": "live",
             "EXCHANGE_TESTNET": "false",
             "EXCHANGE_NAME": "binance",
+            "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+            "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
             "EXCHANGE_API_KEY": "set",
             "EXCHANGE_API_SECRET": "set",
             "RUNTIME_CONTROL_API_ENABLED": "false",

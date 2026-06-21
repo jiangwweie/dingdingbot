@@ -10,7 +10,7 @@ license: Proprietary
 
 Clarify requirements and acceptance criteria when Codex asks for product framing.
 
-During Live-safe v1, do not generate broad PRDs by default. The active program scope is `docs/ops/live-safe-v1-program.md`.
+During the StrategyGroup runtime-governance pilot, do not generate broad PRDs by default. The active product scope is `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` plus `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`.
 
 ## Output
 
