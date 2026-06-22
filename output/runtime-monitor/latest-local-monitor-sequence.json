@@ -18,11 +18,16 @@
     "owner_notify": false,
     "owner_status": "waiting_for_opportunity",
     "refresh_required": true,
+    "research_intake_candidates": [
+      "BRF2-001",
+      "RBR2-001"
+    ],
+    "research_intake_review_active": true,
     "runtime_status": "waiting_for_market",
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-22T11:57:04.351415+00:00",
+  "generated_at_utc": "2026-06-22T15:07:02.917912+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -39,7 +44,20 @@
     "current_action": "刷新本地 runtime monitor 缓存",
     "owner_intervention_required": false,
     "risk_level": "L0_local_monitor_sequence",
-    "state": "等待机会"
+    "state": "等待机会",
+    "strategy_research_intake": {
+      "actionable_now": false,
+      "active": true,
+      "candidate_count": 2,
+      "live_permission_change": false,
+      "paper_observation_admission_candidate_count": 1,
+      "role_only_intake_candidate_count": 1,
+      "status": "research_intake_review_ready",
+      "strategy_group_ids": [
+        "BRF2-001",
+        "RBR2-001"
+      ]
+    }
   },
   "runtime_status": "waiting_for_market",
   "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -73,7 +91,8 @@
     "strategygroup_live_submit_readiness_bridge_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-submit-readiness-bridge.json",
     "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
     "strategygroup_pre_live_rehearsal_readiness_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
-    "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
+    "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
+    "strategygroup_research_intake_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json"
   },
   "status": "waiting_for_market_monitor_refresh_needed",
   "steps": [
@@ -150,6 +169,22 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json",
       "returncode": 0,
       "status": "capital_trial_readiness_bridge_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_research_intake_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_research_intake_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
+      "returncode": 0,
+      "status": "research_intake_review_ready"
     },
     {
       "interaction": {
@@ -529,5 +564,18 @@
       "returncode": 0,
       "status": "live_submit_standby_waiting_for_market"
     }
-  ]
+  ],
+  "strategy_research_intake": {
+    "actionable_now": false,
+    "active": true,
+    "candidate_count": 2,
+    "live_permission_change": false,
+    "paper_observation_admission_candidate_count": 1,
+    "role_only_intake_candidate_count": 1,
+    "status": "research_intake_review_ready",
+    "strategy_group_ids": [
+      "BRF2-001",
+      "RBR2-001"
+    ]
+  }
 }

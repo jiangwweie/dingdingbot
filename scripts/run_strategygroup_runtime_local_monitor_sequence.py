@@ -202,6 +202,12 @@ DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON = (
 DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.md"
 )
+DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.json"
+)
+DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -334,6 +340,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_capital_trial_packet_md=Path(
             args.strategygroup_capital_trial_packet_md
+        ),
+        strategygroup_research_intake_review_json=Path(
+            args.strategygroup_research_intake_review_json
+        ),
+        strategygroup_research_intake_review_md=Path(
+            args.strategygroup_research_intake_review_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -491,6 +503,12 @@ def build_local_monitor_sequence_report(
     strategygroup_capital_trial_packet_md: Path = (
         DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD
     ),
+    strategygroup_research_intake_review_json: Path = (
+        DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON
+    ),
+    strategygroup_research_intake_review_md: Path = (
+        DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -578,6 +596,23 @@ def build_local_monitor_sequence_report(
             "strategygroup_capital_trial_readiness_bridge",
             strategygroup_capital_trial_readiness_bridge_command,
             strategygroup_capital_trial_readiness_bridge_json,
+            runner,
+        )
+    )
+
+    strategygroup_research_intake_review_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_research_intake_review.py"),
+        "--output-json",
+        str(strategygroup_research_intake_review_json),
+        "--output-owner-progress",
+        str(strategygroup_research_intake_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_research_intake_review",
+            strategygroup_research_intake_review_command,
+            strategygroup_research_intake_review_json,
             runner,
         )
     )
@@ -939,6 +974,8 @@ def build_local_monitor_sequence_report(
         str(opportunity_decision_loop_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
+        "--research-intake-review-json",
+        str(strategygroup_research_intake_review_json),
         "--output-json",
         str(strategygroup_decision_ledger_json),
         "--output-owner-progress",
@@ -1136,6 +1173,9 @@ def build_local_monitor_sequence_report(
     )
     monitor_refresh_needed = monitor_status in {"needs_refresh", "deployment_issue"}
     monitor_refresh_reasons = _sequence_monitor_refresh_reasons(packets)
+    research_intake_summary = _sequence_research_intake_summary(
+        packets.get("strategygroup_research_intake_review", {})
+    )
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -1151,13 +1191,19 @@ def build_local_monitor_sequence_report(
             "current_action": _owner_action(status),
             "owner_intervention_required": owner_decision_required,
             "risk_level": interaction["level"],
+            "strategy_research_intake": research_intake_summary,
         },
         "interaction": interaction,
+        "strategy_research_intake": research_intake_summary,
         "checks": {
             "blockers": execution_blockers,
             "execution_blockers": execution_blockers,
             "non_market_gaps": non_market_gaps,
             "engineering_gaps": non_market_gaps,
+            "research_intake_review_active": research_intake_summary["active"],
+            "research_intake_candidates": research_intake_summary[
+                "strategy_group_ids"
+            ],
             "runtime_status": runtime_status,
             "monitor_status": monitor_status,
             "owner_status": owner_status,
@@ -1238,6 +1284,9 @@ def build_local_monitor_sequence_report(
             ),
             "strategygroup_capital_trial_packet_json": str(
                 strategygroup_capital_trial_packet_json
+            ),
+            "strategygroup_research_intake_review_json": str(
+                strategygroup_research_intake_review_json
             ),
         },
     }
@@ -1795,6 +1844,34 @@ def _sequence_monitor_refresh_reasons(
     return list(dict.fromkeys(reasons))
 
 
+def _sequence_research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
+    rows = (
+        packet.get("candidate_rows")
+        if isinstance(packet.get("candidate_rows"), list)
+        else []
+    )
+    strategy_group_ids = [
+        str(row.get("strategy_group_id"))
+        for row in rows
+        if isinstance(row, dict) and row.get("strategy_group_id")
+    ]
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "research_intake_review_ready",
+        "candidate_count": _int(summary.get("candidate_count")),
+        "paper_observation_admission_candidate_count": _int(
+            summary.get("paper_observation_admission_candidate_count")
+        ),
+        "role_only_intake_candidate_count": _int(
+            summary.get("role_only_intake_candidate_count")
+        ),
+        "strategy_group_ids": strategy_group_ids,
+        "live_permission_change": False,
+        "actionable_now": False,
+    }
+
+
 def _packet_monitor_refresh_needed(packet: dict[str, Any]) -> bool:
     checks = packet.get("checks") if isinstance(packet, dict) else {}
     if not isinstance(checks, dict):
@@ -1885,6 +1962,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     owner = report["owner_summary"]
     interaction = report["interaction"]
     checks = report["checks"]
+    research_intake = report.get("strategy_research_intake") or {}
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
         "",
@@ -1897,6 +1975,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 远端交互次数: {interaction['remote_interaction_count']}",
         f"- 服务器修改: {_yes_no(bool(interaction['mutates_remote_files']))}",
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
+        f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
+        f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
         "",
         "## Steps",
         "",
@@ -2196,6 +2276,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-capital-trial-packet-md",
         default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-research-intake-review-json",
+        default=str(DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-research-intake-review-md",
+        default=str(DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

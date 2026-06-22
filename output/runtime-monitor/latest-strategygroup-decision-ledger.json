@@ -26,12 +26,13 @@
   },
   "counts": {
     "capture_gap_audit_group_count": 10,
-    "current_row_count": 10,
+    "current_row_count": 12,
     "forbidden_effect_count": 0,
     "high_priority_no_action_group_count": 4,
     "l4_scope_change_recommended_count": 0,
     "real_order_authorized_count": 0,
-    "strategy_group_count": 10
+    "research_intake_group_count": 2,
+    "strategy_group_count": 12
   },
   "decision": {
     "capture_gap_audit_is_decision_support_only": true,
@@ -42,12 +43,13 @@
     "raw_replay_samples_duplicated": false,
     "real_order_scope_change_recommended": false,
     "replay_decision_bridge_is_field_input_only": true,
+    "research_intake_review_is_decision_support_only": true,
     "single_main_product": true
   },
   "decision_counts": {
-    "keep_observing": 4,
+    "keep_observing": 5,
     "park": 1,
-    "promote": 1,
+    "promote": 2,
     "revise": 4
   },
   "interaction": {
@@ -70,6 +72,16 @@
       "required_next_evidence": "promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review",
       "strategy_group_id": "BRF-001",
       "tier": "L1"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=research_intake_review; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_tier_policy_change; no_live_profile_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "promote",
+      "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
+      "opportunity_type": "research_intake",
+      "reason": "research_intake_review:research_intake:paper_observation_admission_candidate; direction:bear_rally_failure_right_tail_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; source=final_main_control_adapter",
+      "required_next_evidence": "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping",
+      "strategy_group_id": "BRF2-001",
+      "tier": "unknown"
     },
     {
       "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
@@ -142,6 +154,16 @@
       "tier": "L1"
     },
     {
+      "authority_boundary": "local_decision_support_only; source=research_intake_review; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_tier_policy_change; no_live_profile_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "keep_observing",
+      "next_checkpoint": "RBR2-001_role_only_range_detector_classifier_merge_note",
+      "opportunity_type": "research_intake",
+      "reason": "research_intake_review:research_intake:role_only_intake_candidate; direction:range_upper_boundary_mean_reversion_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; source=final_main_control_adapter",
+      "required_next_evidence": "range_detector_facts_and_failed_upside_expansion_classifier_merge_review",
+      "strategy_group_id": "RBR2-001",
+      "tier": "unknown"
+    },
+    {
       "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
       "decision": "keep_observing",
       "next_checkpoint": "SOR-001_no_action_visibility_and_routing_audit",
@@ -172,6 +194,17 @@
     "authority_boundary",
     "next_checkpoint"
   ],
+  "research_intake_review": {
+    "authority_boundary": "research_intake_review_is_review_input_only; tiny_live_ready=false; actionable_now=false; no_tier_policy_change; no_live_profile_change; no_real_order_authority",
+    "candidate_count": 2,
+    "integrated": true,
+    "live_permission_change_recommended_now": false,
+    "owner_decision_required_now": false,
+    "paper_observation_admission_candidate_count": 1,
+    "role_only_intake_candidate_count": 1,
+    "schema": "brc.strategygroup_research_intake_review.v1",
+    "status": "research_intake_review_ready"
+  },
   "safety_invariants": {
     "exchange_write_called": false,
     "execution_intent_created": false,
@@ -196,15 +229,16 @@
   "source_status": {
     "capture_gap_audit": "strategy_capture_gap_audit_ready",
     "opportunity_decision_loop": "decision_loop_ready",
+    "research_intake_review": "research_intake_review_ready",
     "signal_coverage": "mainline_no_signal_low_priority_broader_would_enter"
   },
   "status": "decision_ledger_ready",
   "tier_review": {
     "basis": "decision_ledger_only",
     "counts": {
-      "keep_current_tier": 4,
+      "keep_current_tier": 5,
       "park": 1,
-      "promote_candidate_for_review": 1,
+      "promote_candidate_for_review": 2,
       "revise_before_tier_change": 4
     },
     "rows": [
@@ -215,6 +249,15 @@
         "real_order_authority": false,
         "strategy_group_id": "BRF-001",
         "tier": "L1",
+        "tier_review_decision": "promote_candidate_for_review"
+      },
+      {
+        "basis_decision": "promote",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
+        "real_order_authority": false,
+        "strategy_group_id": "BRF2-001",
+        "tier": "unknown",
         "tier_review_decision": "promote_candidate_for_review"
       },
       {
@@ -279,6 +322,15 @@
         "strategy_group_id": "RBR-001",
         "tier": "L1",
         "tier_review_decision": "park"
+      },
+      {
+        "basis_decision": "keep_observing",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "RBR2-001_role_only_range_detector_classifier_merge_note",
+        "real_order_authority": false,
+        "strategy_group_id": "RBR2-001",
+        "tier": "unknown",
+        "tier_review_decision": "keep_current_tier"
       },
       {
         "basis_decision": "keep_observing",

@@ -639,6 +639,87 @@ def _write_ready_capital_trial_bridge(command: list[str]) -> None:
     )
 
 
+def _write_ready_strategygroup_research_intake_review(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "research_intake_review_ready",
+            "summary": {
+                "candidate_count": 2,
+                "paper_observation_admission_candidate_count": 1,
+                "role_only_intake_candidate_count": 1,
+                "tiny_live_ready_count": 0,
+                "actionable_now_count": 0,
+                "real_order_authority_count": 0,
+            },
+            "candidate_rows": [
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "main_control_intake_position": (
+                        "paper_observation_admission_candidate"
+                    ),
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                },
+                {
+                    "strategy_group_id": "RBR2-001",
+                    "main_control_intake_position": "role_only_intake_candidate",
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                },
+            ],
+            "decision_ledger_rows": [
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "tier": "unknown",
+                    "opportunity_type": "research_intake",
+                    "decision": "promote",
+                    "required_next_evidence": "paper_observation_packet_shape",
+                    "authority_boundary": (
+                        "research_intake_review_only; real_order_authority=false"
+                    ),
+                    "next_checkpoint": (
+                        "BRF2-001_paper_observation_admission_packet"
+                    ),
+                },
+                {
+                    "strategy_group_id": "RBR2-001",
+                    "tier": "unknown",
+                    "opportunity_type": "research_intake",
+                    "decision": "keep_observing",
+                    "required_next_evidence": "range_detector_facts",
+                    "authority_boundary": (
+                        "research_intake_review_only; real_order_authority=false"
+                    ),
+                    "next_checkpoint": (
+                        "RBR2-001_role_only_range_detector_classifier_merge_note"
+                    ),
+                },
+            ],
+            "interaction": {
+                "level": "L0_local_research_intake_review",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "tier_policy_changed": False,
+                "live_profile_changed": False,
+            },
+        },
+    )
+
+
 def _write_passed_runtime_dry_run_audit_chain(command: list[str]) -> None:
     _write_output(
         command,
@@ -700,6 +781,9 @@ def _maybe_write_strategygroup_closure_step(
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_capital_trial_readiness_bridge.py":
         _write_ready_capital_trial_bridge(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_research_intake_review.py":
+        _write_ready_strategygroup_research_intake_review(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     return None
 
@@ -956,6 +1040,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "capital-trial-bridge.md",
         strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
         strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
+        strategygroup_research_intake_review_json=tmp_path
+        / "research-intake-review.json",
+        strategygroup_research_intake_review_md=tmp_path
+        / "research-intake-review.md",
         command_runner=fake_runner,
     )
 
@@ -965,6 +1053,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "runtime_live_cutover_readiness.py",
         "build_strategygroup_portfolio_board.py",
         "build_strategygroup_capital_trial_readiness_bridge.py",
+        "build_strategygroup_research_intake_review.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",
@@ -1002,6 +1091,17 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
+    assert report["strategy_research_intake"]["active"] is True
+    assert report["strategy_research_intake"]["strategy_group_ids"] == [
+        "BRF2-001",
+        "RBR2-001",
+    ]
+    assert report["checks"]["research_intake_review_active"] is True
+    assert report["checks"]["research_intake_candidates"] == [
+        "BRF2-001",
+        "RBR2-001",
+    ]
+    assert report["checks"]["non_market_gaps"] == []
 
 
 def test_local_monitor_sequence_artifact_daily_check_uses_report_json_path(
@@ -1263,6 +1363,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "capital-trial-bridge.md",
         strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
         strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
+        strategygroup_research_intake_review_json=tmp_path
+        / "research-intake-review.json",
+        strategygroup_research_intake_review_md=tmp_path
+        / "research-intake-review.md",
         command_runner=fake_runner,
     )
 
@@ -1567,6 +1671,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "capital-trial-bridge.md",
         strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
         strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
+        strategygroup_research_intake_review_json=tmp_path
+        / "research-intake-review.json",
+        strategygroup_research_intake_review_md=tmp_path
+        / "research-intake-review.md",
         command_runner=fake_runner,
     )
 
@@ -1828,6 +1936,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "capital-trial-bridge.md",
         strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
         strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
+        strategygroup_research_intake_review_json=tmp_path
+        / "research-intake-review.json",
+        strategygroup_research_intake_review_md=tmp_path
+        / "research-intake-review.md",
         command_runner=fake_runner,
     )
 
@@ -2077,6 +2189,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "capital-trial-bridge.md",
         strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
         strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
+        strategygroup_research_intake_review_json=tmp_path
+        / "research-intake-review.json",
+        strategygroup_research_intake_review_md=tmp_path
+        / "research-intake-review.md",
         command_runner=fake_runner,
     )
 

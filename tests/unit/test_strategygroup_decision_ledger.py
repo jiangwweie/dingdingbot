@@ -314,6 +314,80 @@ def _capture_gap_audit() -> dict:
     }
 
 
+def _research_intake_review() -> dict:
+    return {
+        "schema": "brc.strategygroup_research_intake_review.v1",
+        "status": "research_intake_review_ready",
+        "summary": {
+            "candidate_count": 2,
+            "paper_observation_admission_candidate_count": 1,
+            "role_only_intake_candidate_count": 1,
+            "actionable_now_count": 0,
+            "real_order_authority_count": 0,
+        },
+        "decision_ledger_rows": [
+            {
+                "strategy_group_id": "BRF2-001",
+                "tier": "unknown",
+                "opportunity_type": "research_intake",
+                "decision": "promote",
+                "reason": (
+                    "research_intake:paper_observation_admission_candidate; "
+                    "main_control_absorbs_asset_not_execution_authority"
+                ),
+                "required_next_evidence": (
+                    "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping"
+                ),
+                "authority_boundary": (
+                    "main_control_research_intake_review_only; "
+                    "real_order_authority=false"
+                ),
+                "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
+            },
+            {
+                "strategy_group_id": "RBR2-001",
+                "tier": "unknown",
+                "opportunity_type": "research_intake",
+                "decision": "keep_observing",
+                "reason": (
+                    "research_intake:role_only_intake_candidate; "
+                    "main_control_absorbs_asset_not_execution_authority"
+                ),
+                "required_next_evidence": (
+                    "range_detector_facts_and_failed_upside_expansion_classifier_merge_review"
+                ),
+                "authority_boundary": (
+                    "main_control_research_intake_review_only; "
+                    "real_order_authority=false"
+                ),
+                "next_checkpoint": (
+                    "RBR2-001_role_only_range_detector_classifier_merge_note"
+                ),
+            },
+        ],
+        "interaction": {
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "server_files_mutated": False,
+            "final_gate_called": False,
+            "operation_layer_called": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "tier_policy_changed": False,
+            "live_profile_changed": False,
+            "actionable_now": False,
+            "real_order_authority": False,
+        },
+    }
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -457,6 +531,47 @@ def test_decision_ledger_integrates_capture_gap_audit_as_review_input_only():
     assert packet["safety_invariants"]["order_created"] is False
 
 
+def test_decision_ledger_integrates_research_intake_review_as_review_input_only():
+    module = _load_module()
+
+    packet = module.build_strategygroup_decision_ledger(
+        opportunity_decision_loop_packet=_opportunity_decision_loop(),
+        signal_coverage_packet=_signal_coverage(),
+        tier_policy=_tier_policy(),
+        research_intake_review_packet=_research_intake_review(),
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
+    assert rows["BRF2-001"]["decision"] == "promote"
+    assert rows["BRF2-001"]["opportunity_type"] == "research_intake"
+    assert rows["BRF2-001"]["required_next_evidence"] == (
+        "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping"
+    )
+    assert "tiny_live_ready=false" in rows["BRF2-001"]["authority_boundary"]
+    assert rows["RBR2-001"]["decision"] == "keep_observing"
+    assert rows["RBR2-001"]["next_checkpoint"] == (
+        "RBR2-001_role_only_range_detector_classifier_merge_note"
+    )
+    assert packet["counts"]["research_intake_group_count"] == 2
+    assert packet["research_intake_review"]["integrated"] is True
+    assert packet["research_intake_review"]["owner_decision_required_now"] is False
+    assert (
+        packet["research_intake_review"][
+            "live_permission_change_recommended_now"
+        ]
+        is False
+    )
+    assert packet["decision"][
+        "research_intake_review_is_decision_support_only"
+    ] is True
+    assert packet["decision"]["real_order_scope_change_recommended"] is False
+    assert packet["decision"]["l4_promotion_recommended"] is False
+    assert packet["interaction"]["calls_finalgate"] is False
+    assert packet["interaction"]["calls_operation_layer"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
 def test_decision_ledger_cli_writes_outputs(tmp_path, capsys):
     module = _load_module()
     opportunity_path = tmp_path / "opportunity.json"
@@ -478,6 +593,8 @@ def test_decision_ledger_cli_writes_outputs(tmp_path, capsys):
             str(policy_path),
             "--capture-gap-audit-json",
             str(tmp_path / "missing-capture-gap.json"),
+            "--research-intake-review-json",
+            str(tmp_path / "missing-research-intake-review.json"),
             "--output-json",
             str(out_path),
             "--output-owner-progress",

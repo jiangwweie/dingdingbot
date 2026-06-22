@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-22T11:57:04.351415+00:00
+- 报告时间: 2026-06-22T15:07:02.917912+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -9,6 +9,8 @@
 - 远端交互次数: 0
 - 服务器修改: 否
 - 接近真实订单: 否
+- 策略 intake 状态: `research_intake_review_ready`
+- 策略 intake 候选: `BRF2-001, RBR2-001`
 
 ## Steps
 
@@ -19,6 +21,7 @@
 | live_cutover_readiness | live_cutover_waiting_for_fresh_signal | 0 |
 | strategygroup_portfolio_board | portfolio_board_ready | 0 |
 | strategygroup_capital_trial_readiness_bridge | capital_trial_readiness_bridge_ready | 0 |
+| strategygroup_research_intake_review | research_intake_review_ready | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |
