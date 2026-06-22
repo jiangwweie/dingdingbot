@@ -47,6 +47,10 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
     / "output/strategygroup-runtime-pilot/live-closure-evidence/"
     "runtime-live-closure-evidence.json"
 )
+DEFAULT_STRATEGYGROUP_REVIEW_ONLY_EVIDENCE_CLOSURE_WAVE_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json"
+)
 SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
 MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
 DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
@@ -94,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
         tier_policy=_read_json(Path(args.tier_policy_json)),
         live_cutover_readiness=live_cutover_readiness,
         live_closure_evidence_verification=live_closure_evidence_verification,
+        strategy_review_evidence_closure_wave=_read_optional_json(
+            Path(args.strategy_review_evidence_closure_wave_json)
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -126,6 +133,7 @@ def build_goal_progress_report(
     tier_policy: dict[str, Any] | None = None,
     live_cutover_readiness: dict[str, Any] | None = None,
     live_closure_evidence_verification: dict[str, Any] | None = None,
+    strategy_review_evidence_closure_wave: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -197,6 +205,15 @@ def build_goal_progress_report(
             owner=owner,
             visibility=visibility,
             notification=notification,
+        ),
+        *(
+            [
+                _strategy_review_evidence_closure_track(
+                    strategy_review_evidence_closure_wave
+                )
+            ]
+            if strategy_review_evidence_closure_wave
+            else []
         ),
         _safety_invariants_track(safety=safety),
     ]
@@ -385,6 +402,11 @@ def build_goal_progress_report(
         "strategygroup_tier_boundary": strategygroup_tier_boundary,
         "live_cutover_readiness_boundary": live_cutover_readiness_boundary,
         "live_closure_evidence_boundary": live_closure_evidence_boundary,
+        "strategy_review_evidence_closure_boundary": (
+            _strategy_review_evidence_closure_boundary(
+                strategy_review_evidence_closure_wave
+            )
+        ),
         "p0_completion_audit_boundary": p0_completion_audit_boundary,
         "checks": {
             "blockers": hard_blockers,
@@ -412,6 +434,9 @@ def build_goal_progress_report(
                 DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON
             ),
             "live_closure_evidence_json": str(DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON),
+            "strategy_review_evidence_closure_wave_json": str(
+                DEFAULT_STRATEGYGROUP_REVIEW_ONLY_EVIDENCE_CLOSURE_WAVE_JSON
+            ),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
@@ -1263,6 +1288,113 @@ def _owner_visibility_track(
     )
 
 
+def _strategy_review_evidence_closure_track(packet: dict[str, Any]) -> dict[str, Any]:
+    boundary = _strategy_review_evidence_closure_boundary(packet)
+    blockers = [
+        f"strategy_review_evidence_closure:{item}"
+        for item in boundary["reject_reasons"]
+    ]
+    evidence = [
+        f"status={boundary['status']}",
+        f"phase_1={boundary['phase_1_status']}",
+        f"phase_2={boundary['phase_2_status']}",
+        f"phase_3={boundary['phase_3_status']}",
+        f"evidence_packet_count={boundary['evidence_packet_count']}",
+        f"next_owner_decision_count={boundary['next_owner_decision_count']}",
+        "owner_policy_confirmation_required_now="
+        + str(boundary["owner_policy_confirmation_required_now"]),
+        "runtime_owner_intervention_required="
+        + str(boundary["runtime_owner_intervention_required"]),
+    ]
+    return {
+        "id": "p05_strategy_review_evidence_closure",
+        "label": "P0.5 Strategy Review Evidence Closure",
+        "status": "blocked" if blockers else "ready",
+        "owner_state": "策略政策待确认" if not blockers else "需处理",
+        "next_action": (
+            "等待 Owner 策略政策确认，不改变实盘权限"
+            if not blockers
+            else "修复策略复核证据闭合包"
+        ),
+        "evidence": evidence,
+        "blockers": blockers,
+    }
+
+
+def _strategy_review_evidence_closure_boundary(
+    packet: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not packet:
+        return {
+            "status": "not_generated",
+            "phase_1_status": "not_generated",
+            "phase_2_status": "not_generated",
+            "phase_3_status": "not_generated",
+            "evidence_packet_count": 0,
+            "next_owner_decision_count": 0,
+            "owner_policy_confirmation_required_now": False,
+            "runtime_owner_intervention_required": False,
+            "real_order_authority": False,
+            "reject_reasons": [],
+        }
+    phase_status = packet.get("phase_status")
+    if not isinstance(phase_status, dict):
+        phase_status = {}
+    next_package = packet.get("next_owner_decision_package")
+    if not isinstance(next_package, dict):
+        next_package = {}
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    interaction = packet.get("interaction")
+    if not isinstance(interaction, dict):
+        interaction = {}
+    reject_reasons: list[str] = []
+    if packet.get("status") != "review_only_evidence_closure_wave_ready":
+        reject_reasons.append("packet_not_ready")
+    for key in (
+        "real_order_authority",
+        "exchange_write_called",
+        "final_gate_called",
+        "operation_layer_called",
+        "order_created",
+        "registry_authority_changed",
+        "tier_policy_changed",
+        "live_profile_changed",
+        "mpg_member_live_scope_expanded",
+    ):
+        if safety.get(key) is True:
+            reject_reasons.append(f"forbidden_effect:{key}")
+    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
+        reject_reasons.append("remote_interaction_not_zero")
+    return {
+        "status": str(packet.get("status") or "unknown"),
+        "phase_1_status": str(
+            phase_status.get("phase_1_owner_perception_projection") or "unknown"
+        ),
+        "phase_2_status": str(
+            phase_status.get("phase_2_evidence_closure_queue") or "unknown"
+        ),
+        "phase_3_status": str(
+            phase_status.get("phase_3_next_owner_decision_package") or "unknown"
+        ),
+        "evidence_packet_count": len(
+            packet.get("evidence_closure_packets")
+            if isinstance(packet.get("evidence_closure_packets"), list)
+            else []
+        ),
+        "next_owner_decision_count": int(next_package.get("decision_count") or 0),
+        "owner_policy_confirmation_required_now": (
+            next_package.get("owner_policy_confirmation_required_now") is True
+        ),
+        "runtime_owner_intervention_required": (
+            next_package.get("runtime_owner_intervention_required") is True
+        ),
+        "real_order_authority": safety.get("real_order_authority") is True,
+        "reject_reasons": reject_reasons,
+    }
+
+
 def _safety_invariants_track(*, safety: dict[str, Any]) -> dict[str, Any]:
     forbidden_true = [
         key for key, value in safety.items()
@@ -1366,6 +1498,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     tier_boundary = report["strategygroup_tier_boundary"]
     live_cutover = report["live_cutover_readiness_boundary"]
     live_closure = report["live_closure_evidence_boundary"]
+    strategy_review = report["strategy_review_evidence_closure_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -1519,6 +1652,27 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "- Reject reasons: "
         + _list_or_none([str(item) for item in live_closure["reject_reasons"]]),
         "",
+        "## Strategy Review Evidence Closure Boundary",
+        "",
+        f"- Status: {strategy_review['status']}",
+        f"- Phase 1 Owner perception: {strategy_review['phase_1_status']}",
+        f"- Phase 2 evidence closure: {strategy_review['phase_2_status']}",
+        f"- Phase 3 next Owner decision package: {strategy_review['phase_3_status']}",
+        "- Evidence packet count: "
+        + str(strategy_review["evidence_packet_count"]),
+        "- Next Owner decision count: "
+        + str(strategy_review["next_owner_decision_count"]),
+        "- Owner policy confirmation required now: "
+        + _yes_no(bool(strategy_review["owner_policy_confirmation_required_now"])),
+        "- Runtime Owner intervention required: "
+        + _yes_no(bool(strategy_review["runtime_owner_intervention_required"])),
+        "- Real order authority: "
+        + _yes_no(bool(strategy_review["real_order_authority"])),
+        "- Reject reasons: "
+        + _list_or_none(
+            [str(item) for item in strategy_review["reject_reasons"]]
+        ),
+        "",
         "## Tracks",
         "",
         "| Track | Status | Owner state | Next action | Blockers |",
@@ -1632,6 +1786,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--live-closure-evidence-json",
         default=str(DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON),
+    )
+    parser.add_argument(
+        "--strategy-review-evidence-closure-wave-json",
+        default=str(DEFAULT_STRATEGYGROUP_REVIEW_ONLY_EVIDENCE_CLOSURE_WAVE_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",
