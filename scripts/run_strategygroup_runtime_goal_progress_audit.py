@@ -55,6 +55,9 @@ DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json"
 )
+DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
+)
 SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
 MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
 DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
@@ -108,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         strategy_review_deep_dive_wave=_read_optional_json(
             Path(args.strategy_review_deep_dive_wave_json)
         ),
+        strategygroup_portfolio_board=_read_optional_json(
+            Path(args.strategygroup_portfolio_board_json)
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -142,6 +148,7 @@ def build_goal_progress_report(
     live_closure_evidence_verification: dict[str, Any] | None = None,
     strategy_review_evidence_closure_wave: dict[str, Any] | None = None,
     strategy_review_deep_dive_wave: dict[str, Any] | None = None,
+    strategygroup_portfolio_board: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -226,6 +233,11 @@ def build_goal_progress_report(
         *(
             [_strategy_review_deep_dive_track(strategy_review_deep_dive_wave)]
             if strategy_review_deep_dive_wave
+            else []
+        ),
+        *(
+            [_strategygroup_portfolio_board_track(strategygroup_portfolio_board)]
+            if strategygroup_portfolio_board
             else []
         ),
         _safety_invariants_track(safety=safety),
@@ -408,6 +420,15 @@ def build_goal_progress_report(
             "risk_level": "L0 local audit",
             "p0": p0["status"],
             "p05": "ready" if p05_ready else "needs_work",
+            "p05_strategy_portfolio": (
+                "portfolio_screening_active"
+                if strategygroup_portfolio_board
+                and _strategygroup_portfolio_board_boundary(
+                    strategygroup_portfolio_board
+                )["status"]
+                == "portfolio_board_ready"
+                else "not_generated"
+            ),
         },
         "completion_boundary": completion_boundary,
         "entry_fast_chain_boundary": entry_fast_chain_boundary,
@@ -422,6 +443,9 @@ def build_goal_progress_report(
         ),
         "strategy_review_deep_dive_boundary": (
             _strategy_review_deep_dive_boundary(strategy_review_deep_dive_wave)
+        ),
+        "strategygroup_portfolio_board_boundary": (
+            _strategygroup_portfolio_board_boundary(strategygroup_portfolio_board)
         ),
         "p0_completion_audit_boundary": p0_completion_audit_boundary,
         "checks": {
@@ -455,6 +479,9 @@ def build_goal_progress_report(
             ),
             "strategy_review_deep_dive_wave_json": str(
                 DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON
+            ),
+            "strategygroup_portfolio_board_json": str(
+                DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON
             ),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
@@ -1522,6 +1549,122 @@ def _strategy_review_deep_dive_boundary(
     }
 
 
+def _strategygroup_portfolio_board_track(packet: dict[str, Any]) -> dict[str, Any]:
+    boundary = _strategygroup_portfolio_board_boundary(packet)
+    blockers = [
+        f"strategygroup_portfolio_board:{item}"
+        for item in boundary["reject_reasons"]
+    ]
+    evidence = [
+        f"status={boundary['status']}",
+        f"portfolio_row_count={boundary['portfolio_row_count']}",
+        f"trial_candidate_count={boundary['trial_candidate_count']}",
+        f"engineering_continuation_count={boundary['engineering_continuation_count']}",
+        f"owner_policy_decision_count={boundary['owner_policy_decision_count']}",
+        f"actionable_now_count={boundary['actionable_now_count']}",
+        f"live_permission_change_count={boundary['live_permission_change_count']}",
+        "runtime_owner_intervention_required="
+        + str(boundary["runtime_owner_intervention_required"]),
+    ]
+    return {
+        "id": "p05_strategygroup_portfolio_board",
+        "label": "P0.5 StrategyGroup Portfolio Board",
+        "status": "blocked" if blockers else "ready",
+        "owner_state": "策略组合筛选中" if not blockers else "需处理",
+        "next_action": (
+            "继续工程补证队列和 review-only 小资金候选池治理，不改变实盘权限"
+            if not blockers
+            else "修复 StrategyGroup Portfolio Board 证据或安全边界"
+        ),
+        "evidence": evidence,
+        "blockers": blockers,
+    }
+
+
+def _strategygroup_portfolio_board_boundary(
+    packet: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not packet:
+        return {
+            "status": "not_generated",
+            "portfolio_row_count": 0,
+            "trial_candidate_count": 0,
+            "engineering_continuation_count": 0,
+            "owner_policy_decision_count": 0,
+            "actionable_now_count": 0,
+            "live_permission_change_count": 0,
+            "runtime_owner_intervention_required": False,
+            "real_order_authority": False,
+            "reject_reasons": [],
+        }
+    summary = packet.get("portfolio_summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    trial_pool = packet.get("trial_candidate_pool")
+    if not isinstance(trial_pool, dict):
+        trial_pool = {}
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    interaction = packet.get("interaction")
+    if not isinstance(interaction, dict):
+        interaction = {}
+    owner_projection = packet.get("owner_progress_projection")
+    if not isinstance(owner_projection, dict):
+        owner_projection = {}
+    reject_reasons: list[str] = []
+    if packet.get("status") != "portfolio_board_ready":
+        reject_reasons.append("packet_not_ready")
+    if int(summary.get("portfolio_row_count") or 0) < 10:
+        reject_reasons.append("portfolio_row_count_below_10")
+    if int(trial_pool.get("actionable_now_count") or 0) != 0:
+        reject_reasons.append("trial_pool_actionable_now_not_zero")
+    if int(trial_pool.get("live_permission_change_count") or 0) != 0:
+        reject_reasons.append("trial_pool_live_permission_change_not_zero")
+    for key in (
+        "real_order_authority",
+        "exchange_write_called",
+        "calls_exchange_write",
+        "final_gate_called",
+        "calls_finalgate",
+        "operation_layer_called",
+        "calls_operation_layer",
+        "order_created",
+        "places_order",
+        "registry_authority_changed",
+        "tier_policy_changed",
+        "live_profile_changed",
+        "order_sizing_changed",
+        "mpg_member_live_scope_expanded",
+        "l4_real_order_scope_expanded",
+        "preview_or_replay_treated_as_live_signal",
+    ):
+        if safety.get(key) is True:
+            reject_reasons.append(f"forbidden_effect:{key}")
+    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
+        reject_reasons.append("remote_interaction_not_zero")
+    return {
+        "status": str(packet.get("status") or "unknown"),
+        "portfolio_row_count": int(summary.get("portfolio_row_count") or 0),
+        "trial_candidate_count": int(trial_pool.get("candidate_count") or 0),
+        "engineering_continuation_count": int(
+            summary.get("engineering_continuation_count") or 0
+        ),
+        "owner_policy_decision_count": int(
+            summary.get("owner_policy_decision_count") or 0
+        ),
+        "actionable_now_count": int(trial_pool.get("actionable_now_count") or 0),
+        "live_permission_change_count": int(
+            trial_pool.get("live_permission_change_count") or 0
+        ),
+        "runtime_owner_intervention_required": (
+            owner_projection.get("owner_intervention_required") is True
+        ),
+        "real_order_authority": safety.get("real_order_authority") is True,
+        "reject_reasons": reject_reasons,
+    }
+
+
 def _safety_invariants_track(*, safety: dict[str, Any]) -> dict[str, Any]:
     forbidden_true = [
         key for key, value in safety.items()
@@ -1627,6 +1770,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     live_closure = report["live_closure_evidence_boundary"]
     strategy_review = report["strategy_review_evidence_closure_boundary"]
     strategy_deep_dive = report["strategy_review_deep_dive_boundary"]
+    portfolio_board = report["strategygroup_portfolio_board_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -1822,6 +1966,30 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
             [str(item) for item in strategy_deep_dive["reject_reasons"]]
         ),
         "",
+        "## StrategyGroup Portfolio Board Boundary",
+        "",
+        f"- Status: {portfolio_board['status']}",
+        "- Portfolio row count: "
+        + str(portfolio_board["portfolio_row_count"]),
+        "- Trial candidate count: "
+        + str(portfolio_board["trial_candidate_count"]),
+        "- Engineering continuation count: "
+        + str(portfolio_board["engineering_continuation_count"]),
+        "- Owner policy decision count: "
+        + str(portfolio_board["owner_policy_decision_count"]),
+        "- Actionable now count: "
+        + str(portfolio_board["actionable_now_count"]),
+        "- Live permission change count: "
+        + str(portfolio_board["live_permission_change_count"]),
+        "- Runtime Owner intervention required: "
+        + _yes_no(bool(portfolio_board["runtime_owner_intervention_required"])),
+        "- Real order authority: "
+        + _yes_no(bool(portfolio_board["real_order_authority"])),
+        "- Reject reasons: "
+        + _list_or_none(
+            [str(item) for item in portfolio_board["reject_reasons"]]
+        ),
+        "",
         "## Tracks",
         "",
         "| Track | Status | Owner state | Next action | Blockers |",
@@ -1943,6 +2111,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategy-review-deep-dive-wave-json",
         default=str(DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-portfolio-board-json",
+        default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",
