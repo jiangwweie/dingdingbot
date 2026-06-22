@@ -69,6 +69,38 @@ FORBIDDEN_CONTEXT_KEYS = {
     "webhook_url",
 }
 
+FORBIDDEN_CONTEXT_KEY_NORMALIZED = {
+    "apikey",
+    "authorization",
+    "clientorderid",
+    "direction",
+    "entryprice",
+    "exchangeorderid",
+    "leverage",
+    "notional",
+    "orderid",
+    "qty",
+    "quantity",
+    "secret",
+    "side",
+    "signature",
+    "size",
+    "stoploss",
+    "takeprofit",
+    "token",
+    "webhook",
+    "webhooksecret",
+    "webhookurl",
+}
+
+SENSITIVE_CONTEXT_KEY_SUBSTRINGS = (
+    "authorization",
+    "secret",
+    "signature",
+    "token",
+    "webhook",
+)
+
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -474,13 +506,26 @@ def _safe_fragment(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, nested in value.items():
             key_text = str(key)
-            if key_text.lower() in FORBIDDEN_CONTEXT_KEYS:
+            if _is_forbidden_context_key(key_text):
                 continue
             result[key_text] = _safe_fragment(nested)
         return result
     if isinstance(value, list):
         return [_safe_fragment(item) for item in value]
     return value
+
+
+def _is_forbidden_context_key(key: str) -> bool:
+    normalized = _normalize_context_key(key)
+    if key.lower() in FORBIDDEN_CONTEXT_KEYS:
+        return True
+    if normalized in FORBIDDEN_CONTEXT_KEY_NORMALIZED:
+        return True
+    return any(item in normalized for item in SENSITIVE_CONTEXT_KEY_SUBSTRINGS)
+
+
+def _normalize_context_key(key: str) -> str:
+    return "".join(character.lower() for character in key if character.isalnum())
 
 
 def _pick(value: dict[str, Any], keys: list[str]) -> dict[str, Any]:
