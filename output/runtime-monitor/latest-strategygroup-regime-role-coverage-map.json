@@ -1,0 +1,884 @@
+{
+  "active_review_group_contract": {
+    "active_review_strategy_groups": [
+      "MPG-001",
+      "BRF-001",
+      "BTPC-001",
+      "LSR-001",
+      "MI-001",
+      "CPM-RO-001",
+      "FBS-001",
+      "SOR-001",
+      "VCB-001",
+      "RBR-001"
+    ],
+    "contract_status": "aligned",
+    "extra_in_specs": [],
+    "fallback_used": false,
+    "known_active_groups": [
+      "MPG-001",
+      "BRF-001",
+      "BTPC-001",
+      "LSR-001",
+      "MI-001",
+      "CPM-RO-001",
+      "FBS-001",
+      "SOR-001",
+      "VCB-001",
+      "RBR-001"
+    ],
+    "missing_in_specs": [],
+    "source": "portfolio_board.portfolio_summary.active_review_strategy_groups",
+    "strategy_role_spec_groups": [
+      "MPG-001",
+      "MI-001",
+      "BRF-001",
+      "BTPC-001",
+      "LSR-001",
+      "RBR-001",
+      "VCB-001",
+      "FBS-001",
+      "SOR-001",
+      "CPM-RO-001"
+    ]
+  },
+  "gap_summary": {
+    "by_gap_class": {
+      "classifier_gap": [
+        "BTPC-001",
+        "CPM-RO-001",
+        "LSR-001",
+        "VCB-001"
+      ],
+      "fact_source_gap": [
+        "BRF-001",
+        "BTPC-001",
+        "FBS-001"
+      ],
+      "identity_gap": [
+        "CPM-RO-001",
+        "MI-001"
+      ],
+      "maturity_gap": [
+        "BRF-001",
+        "LSR-001",
+        "MPG-001",
+        "RBR-001",
+        "SOR-001",
+        "VCB-001"
+      ],
+      "true_research_gap": [
+        "RBR-001"
+      ],
+      "visibility_gap": [
+        "FBS-001",
+        "MPG-001",
+        "SOR-001"
+      ]
+    },
+    "classifier_gap_count": 4,
+    "fact_source_gap_count": 3,
+    "identity_gap_count": 2,
+    "maturity_gap_count": 6,
+    "summary": "Short, range, derivatives, and weak-market roles are not absent, but most are not trial-ready. The most material true research gap is active range-reversion quality after RBR is parked; the most material final engineering gaps are BTPC facts/stale gate, FBS derivatives facts, and MI/CPM identity.",
+    "true_missing_role_buckets": [],
+    "true_research_gap_count": 1,
+    "visibility_gap_count": 3
+  },
+  "generated_at_utc": "2026-06-22T12:18:41.393435Z",
+  "market_regime_assessment": {
+    "active_review_group_contract_status": "aligned",
+    "active_review_strategy_groups": [
+      "MPG-001",
+      "BRF-001",
+      "BTPC-001",
+      "LSR-001",
+      "MI-001",
+      "CPM-RO-001",
+      "FBS-001",
+      "SOR-001",
+      "VCB-001",
+      "RBR-001"
+    ],
+    "assessment_source": "local_current_artifacts_only",
+    "external_market_data_refreshed": false,
+    "interpretation": "The latest local artifacts show no P0 executable fresh signal, but P0.5 strategy observation is active. Recent opportunity evidence is concentrated in MI and CPM long/rebound structures, while short, range, and derivatives-stress roles are covered mainly by immature or fact/classifier-blocked StrategyGroups.",
+    "limitation": "This task did not refresh public Binance klines/funding/OI; it uses the current committed/generated artifacts as the review authority.",
+    "official_audit_time_utc": "2026-06-22T04:56:16.166000+00:00",
+    "p0_5_state": "review_needed",
+    "p0_state": "waiting_for_market",
+    "strategy_capture_gap": true,
+    "strategy_capture_gap_evidence_field": "audit_conclusion.strategy_capture_gap_supported"
+  },
+  "registry_only_notes": [
+    {
+      "default_tier": "L1",
+      "note": "Registry-only in this wave: precious-metal overlay remains L1 observe-only and is not part of the active Portfolio Board / Trial Candidate Pool.",
+      "owner_label": "贵金属制度覆盖",
+      "strategy_group_id": "PMR-001"
+    },
+    {
+      "default_tier": "L2",
+      "note": "Registry-only in this wave: equity-like momentum is L2 shadow-capable, but this task focuses on active review board gaps, not broad long-theme expansion.",
+      "owner_label": "类股权永续动量",
+      "strategy_group_id": "TEQ-001"
+    }
+  ],
+  "research_escalation_recommendations": [
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Keep MPG P0 standby; close CPM identity and no-action visibility before adding long-trend trial scope.",
+      "meaning": "多头趋势 / 动量延续",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "trend_long"
+    },
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Resolve MI identity, overlap, concentration, and tier unknown status inside final.",
+      "meaning": "短期动量冲击 / 反弹动量",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "momentum_impulse"
+    },
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Complete BRF forward outcome, squeeze classifier, and RequiredFacts review.",
+      "meaning": "熊市反弹失败做空",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "bear_rally_failure_short"
+    },
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Attach BTPC fact sources and close LSR side-specific range-context rewrite.",
+      "meaning": "熊市回抽延续做空",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "bear_pullback_continuation_short"
+    },
+    {
+      "decision": "bounded_research_recommended",
+      "final_before_research": "Keep RBR parked unless new edge evidence appears; define active range-quality evidence standard.",
+      "meaning": "区间边界回归",
+      "reason": "RBR exists but is parked; a trial-quality weak-range lane needs bounded research evidence.",
+      "role_bucket": "range_reversion"
+    },
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Complete LSR range-context facts and side-specific rewrite quality review.",
+      "meaning": "扫盘 / reclaim / rejection",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "liquidity_sweep_reversal"
+    },
+    {
+      "decision": "bounded_research_recommended",
+      "final_before_research": "Review VCB compression/false-breakout classifier and cost sensitivity.",
+      "meaning": "假突破 / 压缩失败",
+      "reason": "VCB exists but classifier quality is not enough; bounded research can test failure/rejection variants.",
+      "role_bucket": "false_breakout_or_compression_failure"
+    },
+    {
+      "decision": "research_required_before_trial",
+      "final_before_research": "Attach funding, basis, OI, and squeeze-risk fact sources before promotion.",
+      "meaning": "funding / OI / basis / squeeze risk",
+      "reason": "FBS requires derivatives facts and stress semantics before trial; research should stay bounded and fact-first.",
+      "role_bucket": "derivatives_stress"
+    },
+    {
+      "decision": "bounded_research_recommended",
+      "final_before_research": "Expose SOR no-action/session attribution and session-window readiness.",
+      "meaning": "session range / 开盘结构",
+      "reason": "SOR exists but is narrow and visibility-poor; bounded research can expand session structures after final visibility is fixed.",
+      "role_bucket": "session_structure"
+    },
+    {
+      "decision": "no_research_needed",
+      "final_before_research": "Resolve registry identity before runtime or trial interpretation.",
+      "meaning": "身份未定",
+      "reason": "Current final assets cover the role enough for engineering closure before new research.",
+      "role_bucket": "unclear_or_identity_review"
+    }
+  ],
+  "role_buckets": [
+    {
+      "bucket": "trend_long",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Keep MPG P0 standby; close CPM identity and no-action visibility before adding long-trend trial scope.",
+      "meaning": "多头趋势 / 动量延续",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "identity_gap",
+        "maturity_gap",
+        "visibility_gap"
+      ],
+      "strategy_groups": [
+        "MPG-001",
+        "CPM-RO-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    },
+    {
+      "bucket": "momentum_impulse",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Resolve MI identity, overlap, concentration, and tier unknown status inside final.",
+      "meaning": "短期动量冲击 / 反弹动量",
+      "primary_gap_classes": [
+        "identity_gap"
+      ],
+      "strategy_groups": [
+        "MI-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    },
+    {
+      "bucket": "bear_rally_failure_short",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Complete BRF forward outcome, squeeze classifier, and RequiredFacts review.",
+      "meaning": "熊市反弹失败做空",
+      "primary_gap_classes": [
+        "fact_source_gap",
+        "maturity_gap"
+      ],
+      "strategy_groups": [
+        "BRF-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    },
+    {
+      "bucket": "bear_pullback_continuation_short",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Attach BTPC fact sources and close LSR side-specific range-context rewrite.",
+      "meaning": "熊市回抽延续做空",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "fact_source_gap",
+        "maturity_gap"
+      ],
+      "strategy_groups": [
+        "BTPC-001",
+        "LSR-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    },
+    {
+      "bucket": "range_reversion",
+      "coverage_status": "covered_parked_or_weak",
+      "final_engineering_need": "Keep RBR parked unless new edge evidence appears; define active range-quality evidence standard.",
+      "meaning": "区间边界回归",
+      "primary_gap_classes": [
+        "maturity_gap",
+        "true_research_gap"
+      ],
+      "strategy_groups": [
+        "RBR-001"
+      ],
+      "strategy_research_need": "bounded_research_recommended"
+    },
+    {
+      "bucket": "liquidity_sweep_reversal",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Complete LSR range-context facts and side-specific rewrite quality review.",
+      "meaning": "扫盘 / reclaim / rejection",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "maturity_gap"
+      ],
+      "strategy_groups": [
+        "LSR-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    },
+    {
+      "bucket": "false_breakout_or_compression_failure",
+      "coverage_status": "covered_low_maturity",
+      "final_engineering_need": "Review VCB compression/false-breakout classifier and cost sensitivity.",
+      "meaning": "假突破 / 压缩失败",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "maturity_gap"
+      ],
+      "strategy_groups": [
+        "VCB-001"
+      ],
+      "strategy_research_need": "bounded_research_recommended"
+    },
+    {
+      "bucket": "derivatives_stress",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Attach funding, basis, OI, and squeeze-risk fact sources before promotion.",
+      "meaning": "funding / OI / basis / squeeze risk",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "fact_source_gap",
+        "visibility_gap"
+      ],
+      "strategy_groups": [
+        "BTPC-001",
+        "FBS-001"
+      ],
+      "strategy_research_need": "research_required_before_trial"
+    },
+    {
+      "bucket": "session_structure",
+      "coverage_status": "covered_but_not_trial_ready",
+      "final_engineering_need": "Expose SOR no-action/session attribution and session-window readiness.",
+      "meaning": "session range / 开盘结构",
+      "primary_gap_classes": [
+        "maturity_gap",
+        "visibility_gap"
+      ],
+      "strategy_groups": [
+        "SOR-001"
+      ],
+      "strategy_research_need": "bounded_research_recommended"
+    },
+    {
+      "bucket": "unclear_or_identity_review",
+      "coverage_status": "covered_in_trial_review",
+      "final_engineering_need": "Resolve registry identity before runtime or trial interpretation.",
+      "meaning": "身份未定",
+      "primary_gap_classes": [
+        "classifier_gap",
+        "identity_gap"
+      ],
+      "strategy_groups": [
+        "MI-001",
+        "CPM-RO-001"
+      ],
+      "strategy_research_need": "no_research_needed"
+    }
+  ],
+  "safety_invariants": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_created": false,
+    "real_order_authority": false,
+    "registry_authority_changed": false,
+    "server_files_mutated": false,
+    "strategy_parameters_changed": false,
+    "tier_policy_changed": false
+  },
+  "schema": "brc.strategygroup_regime_role_coverage_map.v1",
+  "scope": "local_review_only",
+  "source_status": {
+    "optional_inputs": {
+      "decision_ledger_json_status": "decision_ledger_ready",
+      "goal_progress_json_status": "waiting_for_market_monitor_refresh_needed",
+      "local_monitor_sequence_json_status": "waiting_for_market_monitor_refresh_needed"
+    },
+    "required_inputs": {
+      "capture_gap_audit_json": {
+        "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+        "status": "strategy_capture_gap_audit_ready"
+      },
+      "git_log_oneline_8": [
+        "f826a490 feat(strategygroup): add capital trial readiness bridge",
+        "50cecb33 feat(strategygroup): add portfolio board trial pool",
+        "ac978aeb feat(strategygroup): deepen review-only policy decisions",
+        "c0c1f288 feat(strategygroup): project review-only evidence closure",
+        "858d1e24 feat(strategygroup): record review-only policy confirmation",
+        "869a05c1 feat(strategygroup): add owner decision package",
+        "1c920478 feat(strategygroup): harden quality closure waves",
+        "7ebf0a2f feat(strategygroup): add quality closure wave packet"
+      ],
+      "git_status_short": {
+        "dirty_count": 418,
+        "full_status_omitted": true,
+        "omitted_count": 414,
+        "task_related_count": 4,
+        "task_related_paths": [
+          {
+            "path": "output/runtime-monitor/latest-strategygroup-regime-role-coverage-map.json",
+            "status": "??"
+          },
+          {
+            "path": "output/runtime-monitor/latest-strategygroup-regime-role-coverage-map.md",
+            "status": "??"
+          },
+          {
+            "path": "scripts/build_strategygroup_regime_role_coverage_map.py",
+            "status": "??"
+          },
+          {
+            "path": "tests/unit/test_strategygroup_regime_role_coverage_map.py",
+            "status": "??"
+          }
+        ]
+      },
+      "portfolio_board_json": {
+        "active_review_group_contract": {
+          "active_review_strategy_groups": [
+            "MPG-001",
+            "BRF-001",
+            "BTPC-001",
+            "LSR-001",
+            "MI-001",
+            "CPM-RO-001",
+            "FBS-001",
+            "SOR-001",
+            "VCB-001",
+            "RBR-001"
+          ],
+          "contract_status": "aligned",
+          "extra_in_specs": [],
+          "fallback_used": false,
+          "known_active_groups": [
+            "MPG-001",
+            "BRF-001",
+            "BTPC-001",
+            "LSR-001",
+            "MI-001",
+            "CPM-RO-001",
+            "FBS-001",
+            "SOR-001",
+            "VCB-001",
+            "RBR-001"
+          ],
+          "missing_in_specs": [],
+          "source": "portfolio_board.portfolio_summary.active_review_strategy_groups",
+          "strategy_role_spec_groups": [
+            "MPG-001",
+            "MI-001",
+            "BRF-001",
+            "BTPC-001",
+            "LSR-001",
+            "RBR-001",
+            "VCB-001",
+            "FBS-001",
+            "SOR-001",
+            "CPM-RO-001"
+          ]
+        },
+        "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+        "status": "portfolio_board_ready"
+      },
+      "registry_baseline_json": {
+        "path": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json",
+        "status": "current_pilot_baseline"
+      },
+      "required_facts_map_md": {
+        "mentions_btpc": true,
+        "mentions_derivatives": true,
+        "path": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/main-control-required-facts-map.md",
+        "read": true
+      },
+      "tier_policy_json": {
+        "path": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json",
+        "status": "current_pilot_supplement"
+      },
+      "trial_candidate_pool_md": {
+        "candidate_lines": [
+          "| `MPG-001` | `selected_live_lane_waiting_for_market` | `L4` | `trial_waiting` | 是 | 否 | `MPG-001_no_action_visibility_and_routing_audit` |",
+          "| `BRF-001` | `promote_review_candidate` | `L1` | `promote_review` | 否 | 否 | `BRF-001_forward_outcome_and_requiredfacts_review` |",
+          "| `LSR-001` | `rewrite_candidate_after_revision` | `L1` | `revise` | 否 | 否 | `LSR-001_classifier_fact_source_revision_review` |",
+          "| `MI-001` | `identity_candidate_review` | `unknown` | `identity_review` | 否 | 否 | `MI-001_registry_identity_review` |",
+          "| `CPM-RO-001` | `identity_candidate_review` | `unknown` | `identity_review` | 否 | 否 | `CPM-RO-001_registry_identity_review` |"
+        ],
+        "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md",
+        "read": true
+      }
+    }
+  },
+  "status": "regime_role_coverage_map_ready",
+  "strategy_group_rows": [
+    {
+      "actionable_now": false,
+      "current_next_action": "MPG-001_no_action_visibility_and_routing_audit",
+      "dominant_blocker": "none_recorded",
+      "dominant_blocker_classes": [],
+      "evidence_stage": "trial_waiting",
+      "execution_tier": "L4",
+      "gap_classes": [
+        "visibility_gap",
+        "maturity_gap"
+      ],
+      "gap_reason": "L4 lane exists, but current board shows no fresh executable signal and still needs no-action visibility plus member exit-decay review.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 0,
+      "owner_label": "动量延续",
+      "portfolio_role": "selected long momentum trial lane",
+      "recent_opportunity_count": 0,
+      "regime_fit": "clean 1h directional persistence; not a bear/range hedge",
+      "research_escalation": "no_research_needed",
+      "research_reason": "The role is covered in final; next work is runtime visibility and member-risk evidence, not a new research lane.",
+      "role_buckets": [
+        "trend_long"
+      ],
+      "side_semantics": "long momentum continuation",
+      "strategy_group_id": "MPG-001",
+      "tradable_forward_count": 0,
+      "trial_eligible": true,
+      "trial_pool_status": "trial_waiting"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "BRF-001_forward_outcome_and_requiredfacts_review",
+      "dominant_blocker": "market_structure_not_confirmed",
+      "dominant_blocker_classes": [
+        {
+          "count": 85,
+          "key": "market_structure_not_confirmed"
+        },
+        {
+          "count": 63,
+          "key": "no_action_other"
+        },
+        {
+          "count": 20,
+          "key": "classifier_threshold_not_met"
+        },
+        {
+          "count": 1,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "promote_review",
+      "execution_tier": "L1",
+      "gap_classes": [
+        "maturity_gap",
+        "fact_source_gap"
+      ],
+      "gap_reason": "The role exists, but forward outcome and squeeze/RequiredFacts review remain incomplete before any promotion.",
+      "high_priority_no_action_count": 168,
+      "live_permission_change": false,
+      "no_action_count": 168,
+      "owner_label": "熊市反弹失败",
+      "portfolio_role": "bear rally failure promote-review lane",
+      "recent_opportunity_count": 1,
+      "regime_fit": "bear rally failure, rejection, structure extreme",
+      "research_escalation": "no_research_needed",
+      "research_reason": "Final already has a BRF lane; close promote-review evidence first before asking strategy research for more variants.",
+      "role_buckets": [
+        "bear_rally_failure_short"
+      ],
+      "side_semantics": "short after weak rally rejection",
+      "strategy_group_id": "BRF-001",
+      "tradable_forward_count": 0,
+      "trial_eligible": false,
+      "trial_pool_status": "promote_review"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "BTPC-001_classifier_fact_source_revision_review",
+      "dominant_blocker": "stale_data_or_signal",
+      "dominant_blocker_classes": [
+        {
+          "count": 169,
+          "key": "stale_data_or_signal"
+        }
+      ],
+      "evidence_stage": "revise",
+      "execution_tier": "L2",
+      "gap_classes": [
+        "classifier_gap",
+        "fact_source_gap"
+      ],
+      "gap_reason": "Capture audit shows stale/fact-source blocking dominates; gate relaxation is not justified until live fact sources are attached.",
+      "high_priority_no_action_count": 169,
+      "live_permission_change": false,
+      "no_action_count": 169,
+      "owner_label": "熊市回抽延续",
+      "portfolio_role": "bear pullback continuation L2 shadow lane",
+      "recent_opportunity_count": 0,
+      "regime_fit": "downtrend continuation excluding strong upside reclaim",
+      "research_escalation": "no_research_needed",
+      "research_reason": "This is a final engineering closure problem first: fact-source mapping, classifier attribution, and stale-gate diagnosis.",
+      "role_buckets": [
+        "bear_pullback_continuation_short",
+        "derivatives_stress"
+      ],
+      "side_semantics": "short continuation after weak rally or pullback",
+      "strategy_group_id": "BTPC-001",
+      "tradable_forward_count": 0,
+      "trial_eligible": false,
+      "trial_pool_status": "revise"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "LSR-001_classifier_fact_source_revision_review",
+      "dominant_blocker": "no_action_other",
+      "dominant_blocker_classes": [
+        {
+          "count": 167,
+          "key": "no_action_other"
+        },
+        {
+          "count": 2,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "revise",
+      "execution_tier": "L1",
+      "gap_classes": [
+        "classifier_gap",
+        "maturity_gap"
+      ],
+      "gap_reason": "Observed samples are positive, but the side-specific rewrite and range-context RequiredFacts are not complete.",
+      "high_priority_no_action_count": 167,
+      "live_permission_change": false,
+      "no_action_count": 167,
+      "owner_label": "流动性扫盘/短线复活",
+      "portfolio_role": "liquidity sweep and short-revival rewrite lane",
+      "recent_opportunity_count": 2,
+      "regime_fit": "sweep, reclaim, rejection, and short revival with range context",
+      "research_escalation": "no_research_needed",
+      "research_reason": "The existing rewrite lane should be closed in final before opening a new research lane.",
+      "role_buckets": [
+        "liquidity_sweep_reversal",
+        "bear_pullback_continuation_short"
+      ],
+      "side_semantics": "long observe plus short-revival review",
+      "strategy_group_id": "LSR-001",
+      "tradable_forward_count": 2,
+      "trial_eligible": false,
+      "trial_pool_status": "revise"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "MI-001_registry_identity_review",
+      "dominant_blocker": "no_action_other",
+      "dominant_blocker_classes": [
+        {
+          "count": 315,
+          "key": "no_action_other"
+        },
+        {
+          "count": 23,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "identity_review",
+      "execution_tier": "unknown",
+      "gap_classes": [
+        "identity_gap"
+      ],
+      "gap_reason": "Recent outcomes are strong, but MI is not yet a registry/tier asset and overlap with MPG or theme momentum is unresolved.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 315,
+      "owner_label": "动量冲击",
+      "portfolio_role": "high-signal momentum-impulse identity candidate",
+      "recent_opportunity_count": 23,
+      "regime_fit": "short-window impulse and rebound acceleration after ignition",
+      "research_escalation": "no_research_needed",
+      "research_reason": "The immediate blocker is final-side identity, overlap, concentration, and registry hygiene; bounded research is only needed if identity review splits MI into a new family.",
+      "role_buckets": [
+        "momentum_impulse",
+        "unclear_or_identity_review"
+      ],
+      "side_semantics": "long or rebound impulse; registry identity unresolved",
+      "strategy_group_id": "MI-001",
+      "tradable_forward_count": 22,
+      "trial_eligible": false,
+      "trial_pool_status": "identity_review"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "CPM-RO-001_registry_identity_review",
+      "dominant_blocker": "no_action_other",
+      "dominant_blocker_classes": [
+        {
+          "count": 87,
+          "key": "no_action_other"
+        },
+        {
+          "count": 64,
+          "key": "classifier_threshold_not_met"
+        },
+        {
+          "count": 18,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "identity_review",
+      "execution_tier": "unknown",
+      "gap_classes": [
+        "identity_gap",
+        "classifier_gap"
+      ],
+      "gap_reason": "CPM produced repeated would-enter evidence but remains outside registry/tier identity; overlap with MPG/BTPC/RBR/MI is unresolved.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 151,
+      "owner_label": "CPM 回补观察",
+      "portfolio_role": "mild-trend pullback observation asset",
+      "recent_opportunity_count": 18,
+      "regime_fit": "controlled pullback inside mild trend, then reclaim or bounce-loss confirmation",
+      "research_escalation": "no_research_needed",
+      "research_reason": "Immediate work is final-side merge/identity review. Research is useful only after final decides whether CPM is a standalone family.",
+      "role_buckets": [
+        "trend_long",
+        "unclear_or_identity_review"
+      ],
+      "side_semantics": "trend pullback entry; capture a resumed segment, identity unresolved",
+      "strategy_group_id": "CPM-RO-001",
+      "tradable_forward_count": 13,
+      "trial_eligible": false,
+      "trial_pool_status": "identity_review"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "FBS-001_no_action_visibility_and_routing_audit",
+      "dominant_blocker": "none_recorded",
+      "dominant_blocker_classes": [],
+      "evidence_stage": "coverage_visibility_review",
+      "execution_tier": "L3",
+      "gap_classes": [
+        "fact_source_gap",
+        "visibility_gap"
+      ],
+      "gap_reason": "The role exists at L3, but derivatives RequiredFacts and no-action visibility must be attached before promotion.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 0,
+      "owner_label": "资金费率/基差压力",
+      "portfolio_role": "derivatives-stress armed observation lane",
+      "recent_opportunity_count": 0,
+      "regime_fit": "funding, basis, premium, OI, crowding, squeeze-risk regimes",
+      "research_escalation": "research_required_before_trial",
+      "research_reason": "Derivative-stress coverage needs better fact source design and possibly bounded research for funding/OI/squeeze variants before trial use.",
+      "role_buckets": [
+        "derivatives_stress"
+      ],
+      "side_semantics": "funding/basis stress; long and short-disable/redesign semantics",
+      "strategy_group_id": "FBS-001",
+      "tradable_forward_count": 0,
+      "trial_eligible": false,
+      "trial_pool_status": "not_in_trial_pool"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "SOR-001_no_action_visibility_and_routing_audit",
+      "dominant_blocker": "none_recorded",
+      "dominant_blocker_classes": [],
+      "evidence_stage": "coverage_visibility_review",
+      "execution_tier": "L3",
+      "gap_classes": [
+        "visibility_gap",
+        "maturity_gap"
+      ],
+      "gap_reason": "The role exists but recent board does not show useful opportunity evidence; no-action visibility and session attribution need closure.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 0,
+      "owner_label": "开盘区间结构",
+      "portfolio_role": "session-structure armed observation lane",
+      "recent_opportunity_count": 0,
+      "regime_fit": "session open, range, trigger-bar, post-open decay",
+      "research_escalation": "bounded_research_recommended",
+      "research_reason": "Final should expose no-action/session attribution; research can extend session structures if current SOR remains too narrow.",
+      "role_buckets": [
+        "session_structure"
+      ],
+      "side_semantics": "session short plus long-revival-only conditions",
+      "strategy_group_id": "SOR-001",
+      "tradable_forward_count": 0,
+      "trial_eligible": false,
+      "trial_pool_status": "not_in_trial_pool"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "VCB-001_continue_observe_only",
+      "dominant_blocker": "classifier_threshold_not_met",
+      "dominant_blocker_classes": [
+        {
+          "count": 162,
+          "key": "classifier_threshold_not_met"
+        },
+        {
+          "count": 5,
+          "key": "no_action_other"
+        },
+        {
+          "count": 2,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "observe",
+      "execution_tier": "L1",
+      "gap_classes": [
+        "classifier_gap",
+        "maturity_gap"
+      ],
+      "gap_reason": "The role is present but still classifier-heavy; current board keeps it observe-only.",
+      "high_priority_no_action_count": 167,
+      "live_permission_change": false,
+      "no_action_count": 167,
+      "owner_label": "波动压缩突破",
+      "portfolio_role": "volatility compression breakout observe lane",
+      "recent_opportunity_count": 2,
+      "regime_fit": "compression breakout and failure/rejection regimes",
+      "research_escalation": "bounded_research_recommended",
+      "research_reason": "Final should keep classifier review; research can separately test false-breakout/compression-failure variants if the classifier remains weak.",
+      "role_buckets": [
+        "false_breakout_or_compression_failure"
+      ],
+      "side_semantics": "long breakout; false-breakout classifier required",
+      "strategy_group_id": "VCB-001",
+      "tradable_forward_count": 2,
+      "trial_eligible": false,
+      "trial_pool_status": "not_in_trial_pool"
+    },
+    {
+      "actionable_now": false,
+      "current_next_action": "park_until_material_new_edge_evidence",
+      "dominant_blocker": "no_action_other",
+      "dominant_blocker_classes": [
+        {
+          "count": 163,
+          "key": "no_action_other"
+        },
+        {
+          "count": 6,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "evidence_stage": "park",
+      "execution_tier": "L1",
+      "gap_classes": [
+        "maturity_gap",
+        "true_research_gap"
+      ],
+      "gap_reason": "A range bucket exists, but current decision is park; active trial-quality range evidence is missing.",
+      "high_priority_no_action_count": 0,
+      "live_permission_change": false,
+      "no_action_count": 163,
+      "owner_label": "区间边界回归",
+      "portfolio_role": "parked range-boundary vocabulary",
+      "recent_opportunity_count": 6,
+      "regime_fit": "calm range boundary rejection, currently weak or parked",
+      "research_escalation": "bounded_research_recommended",
+      "research_reason": "Final can keep RBR parked, while strategy research should explore a bounded range/reversion lane if weak-range coverage is strategically required.",
+      "role_buckets": [
+        "range_reversion"
+      ],
+      "side_semantics": "range reversion; currently short-review vocabulary",
+      "strategy_group_id": "RBR-001",
+      "tradable_forward_count": 6,
+      "trial_eligible": false,
+      "trial_pool_status": "not_in_trial_pool"
+    }
+  ],
+  "trial_pool_implications": {
+    "actionable_now_count": 0,
+    "current_bias_risk": "The current trial pool is useful, but opportunity evidence is skewed toward MI/CPM and MPG-style long or rebound momentum. Weak-market and range roles should remain visible as review lanes so the system does not overfit the next trial pool to recent long-side brightness.",
+    "new_candidate_trigger_conditions": [
+      "RBR replacement or revision shows repeatable positive range-reversion outcomes after costs",
+      "FBS derivatives RequiredFacts are attached and produce reviewable stress/squeeze packets",
+      "BTPC stale/fact-source blockers are resolved and false-negative review remains positive",
+      "BRF forward outcome plus squeeze classifier supports L2 review without live scope expansion"
+    ],
+    "no_new_trial_candidate_now": true,
+    "short_range_derivatives_groups_to_keep_visible": [
+      "BRF-001",
+      "BTPC-001",
+      "FBS-001",
+      "LSR-001",
+      "RBR-001",
+      "VCB-001"
+    ],
+    "trial_candidate_count": 5,
+    "trial_eligible_count": 1
+  }
+}
