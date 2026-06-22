@@ -318,6 +318,62 @@ def _strategy_review_deep_dive_wave(**overrides):
     return base
 
 
+def _strategygroup_portfolio_board(**overrides):
+    base = {
+        "status": "portfolio_board_ready",
+        "portfolio_summary": {
+            "portfolio_row_count": 10,
+            "trial_candidate_count": 5,
+            "engineering_continuation_count": 9,
+            "owner_policy_decision_count": 4,
+        },
+        "trial_candidate_pool": {
+            "candidate_count": 5,
+            "eligible_now_count": 1,
+            "actionable_now_count": 0,
+            "live_permission_change_count": 0,
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "actionable_now": False,
+                    "live_permission_change": False,
+                }
+            ],
+        },
+        "owner_progress_projection": {
+            "p0_state": "waiting_for_market",
+            "p0_5_state": "portfolio_screening_active",
+            "owner_intervention_required": False,
+            "owner_policy_decision_required_later": True,
+            "no_live_permission": True,
+        },
+        "interaction": {
+            "level": "L0_local_strategygroup_portfolio_board",
+            "remote_interaction_count": 0,
+        },
+        "safety_invariants": {
+            "real_order_authority": False,
+            "exchange_write_called": False,
+            "calls_exchange_write": False,
+            "final_gate_called": False,
+            "calls_finalgate": False,
+            "operation_layer_called": False,
+            "calls_operation_layer": False,
+            "order_created": False,
+            "places_order": False,
+            "registry_authority_changed": False,
+            "tier_policy_changed": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "mpg_member_live_scope_expanded": False,
+            "l4_real_order_scope_expanded": False,
+            "preview_or_replay_treated_as_live_signal": False,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def test_goal_progress_waiting_for_market_with_p05_ready():
     module = _load_module()
 
@@ -519,6 +575,50 @@ def test_goal_progress_projects_strategy_review_deep_dive_without_runtime_interv
     text = module._owner_progress_text(report)
     assert "## Strategy Review Deep Dive Boundary" in text
     assert "- Owner policy confirmation required now: 是" in text
+    assert "- Runtime Owner intervention required: 否" in text
+    assert "- Real order authority: 否" in text
+
+
+def test_goal_progress_projects_portfolio_board_without_runtime_intervention():
+    module = _load_module()
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_portfolio_board=_strategygroup_portfolio_board(),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["p05_strategy_portfolio"] == (
+        "portfolio_screening_active"
+    )
+    assert report["checks"]["p05_ready"] is True
+    assert report["checks"]["product_gaps"] == []
+    boundary = report["strategygroup_portfolio_board_boundary"]
+    assert boundary["status"] == "portfolio_board_ready"
+    assert boundary["portfolio_row_count"] == 10
+    assert boundary["trial_candidate_count"] == 5
+    assert boundary["engineering_continuation_count"] == 9
+    assert boundary["owner_policy_decision_count"] == 4
+    assert boundary["actionable_now_count"] == 0
+    assert boundary["live_permission_change_count"] == 0
+    assert boundary["runtime_owner_intervention_required"] is False
+    assert boundary["real_order_authority"] is False
+    assert boundary["reject_reasons"] == []
+
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p05_strategygroup_portfolio_board"]["status"] == "ready"
+    assert tracks["p05_strategygroup_portfolio_board"]["owner_state"] == (
+        "策略组合筛选中"
+    )
+    text = module._owner_progress_text(report)
+    assert "## StrategyGroup Portfolio Board Boundary" in text
+    assert "- Portfolio row count: 10" in text
+    assert "- Trial candidate count: 5" in text
+    assert "- Actionable now count: 0" in text
+    assert "- Live permission change count: 0" in text
     assert "- Runtime Owner intervention required: 否" in text
     assert "- Real order authority: 否" in text
 
