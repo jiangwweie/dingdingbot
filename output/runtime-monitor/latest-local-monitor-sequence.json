@@ -28,10 +28,13 @@
     ],
     "research_intake_review_active": true,
     "runtime_status": "waiting_for_market",
+    "short_experiment_candidate_promotion_scope": "intake_only",
+    "short_experiment_candidate_selected_strategy_group_id": "BRF2-001",
+    "short_experiment_candidate_tiny_live_ready": false,
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-22T15:23:06.056336+00:00",
+  "generated_at_utc": "2026-06-22T15:58:12.885000+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -52,8 +55,13 @@
     "strategy_candidate_trade": {
       "actionable_now": false,
       "active": true,
+      "decision": "promote",
       "live_permission_change": false,
+      "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+      "promotion_scope": "intake_only",
+      "promotion_target": "paper_observation_or_candidate_trade_packet",
       "real_order_authority": false,
+      "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
       "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
       "selected_short_strategy_group_id": "BRF2-001",
       "selected_strategy_group_id": "BRF2-001",
@@ -62,6 +70,28 @@
         "short"
       ],
       "status": "capital_trial_readiness_bridge_ready",
+      "tiny_live_ready": false,
+      "trial_packet_generated": true
+    },
+    "strategy_experiment_candidate": {
+      "actionable_now": false,
+      "active": true,
+      "decision": "promote",
+      "live_permission_change": false,
+      "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+      "promotion_scope": "intake_only",
+      "promotion_target": "paper_observation_or_candidate_trade_packet",
+      "real_order_authority": false,
+      "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
+      "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+      "selected_short_strategy_group_id": "BRF2-001",
+      "selected_strategy_group_id": "BRF2-001",
+      "short_candidate_trade_count": 1,
+      "side_scope": [
+        "short"
+      ],
+      "status": "capital_trial_readiness_bridge_ready",
+      "tiny_live_ready": false,
       "trial_packet_generated": true
     },
     "strategy_research_intake": {
@@ -587,8 +617,13 @@
   "strategy_candidate_trade": {
     "actionable_now": false,
     "active": true,
+    "decision": "promote",
     "live_permission_change": false,
+    "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+    "promotion_scope": "intake_only",
+    "promotion_target": "paper_observation_or_candidate_trade_packet",
     "real_order_authority": false,
+    "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
     "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
     "selected_short_strategy_group_id": "BRF2-001",
     "selected_strategy_group_id": "BRF2-001",
@@ -597,6 +632,28 @@
       "short"
     ],
     "status": "capital_trial_readiness_bridge_ready",
+    "tiny_live_ready": false,
+    "trial_packet_generated": true
+  },
+  "strategy_experiment_candidate": {
+    "actionable_now": false,
+    "active": true,
+    "decision": "promote",
+    "live_permission_change": false,
+    "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+    "promotion_scope": "intake_only",
+    "promotion_target": "paper_observation_or_candidate_trade_packet",
+    "real_order_authority": false,
+    "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
+    "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+    "selected_short_strategy_group_id": "BRF2-001",
+    "selected_strategy_group_id": "BRF2-001",
+    "short_candidate_trade_count": 1,
+    "side_scope": [
+      "short"
+    ],
+    "status": "capital_trial_readiness_bridge_ready",
+    "tiny_live_ready": false,
     "trial_packet_generated": true
   },
   "strategy_research_intake": {

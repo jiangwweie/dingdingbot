@@ -1749,6 +1749,12 @@ def _strategygroup_capital_trial_readiness_bridge_boundary(
             "non_mpg_trial_candidate_count": 0,
             "selected_non_mpg_strategy_group_id": None,
             "selected_candidate_status": "not_generated",
+            "decision": "not_generated",
+            "reason": "",
+            "promotion_scope": "not_applicable",
+            "promotion_target": "not_applicable",
+            "tiny_live_ready": False,
+            "next_checkpoint": "",
             "trial_packet_generated": False,
             "actionable_now_count": 0,
             "live_permission_change_count": 0,
@@ -1797,6 +1803,18 @@ def _strategygroup_capital_trial_readiness_bridge_boundary(
         reject_reasons.append("trial_packet_live_permission_change_not_false")
     if trial_packet.get("real_order_authority") is not False:
         reject_reasons.append("trial_packet_real_order_authority_not_false")
+    if trial_packet.get("decision") == "promote":
+        if trial_packet.get("promotion_scope") != "intake_only":
+            reject_reasons.append("unscoped_promote_forbidden")
+        authority_boundary = trial_packet.get("authority_boundary")
+        if not isinstance(authority_boundary, dict):
+            authority_boundary = {}
+        if authority_boundary.get("promotion_scope") != "intake_only":
+            reject_reasons.append("authority_boundary_promotion_scope_missing")
+        if authority_boundary.get("unscoped_promote") is not False:
+            reject_reasons.append("authority_boundary_unscoped_promote_not_false")
+        if trial_packet.get("tiny_live_ready") is not False:
+            reject_reasons.append("trial_packet_tiny_live_ready_not_false")
     for key in (
         "actionable_now",
         "real_order_authority",
@@ -1834,6 +1852,16 @@ def _strategygroup_capital_trial_readiness_bridge_boundary(
         "selected_candidate_status": str(
             summary.get("selected_candidate_status") or "unknown"
         ),
+        "decision": str(trial_packet.get("decision") or "pending"),
+        "reason": str(trial_packet.get("reason") or ""),
+        "promotion_scope": str(
+            trial_packet.get("promotion_scope") or "not_applicable"
+        ),
+        "promotion_target": str(
+            trial_packet.get("promotion_target") or "not_applicable"
+        ),
+        "tiny_live_ready": trial_packet.get("tiny_live_ready") is True,
+        "next_checkpoint": str(trial_packet.get("next_checkpoint") or ""),
         "trial_packet_generated": summary.get("trial_packet_generated") is True,
         "actionable_now_count": int(summary.get("actionable_now_count") or 0),
         "live_permission_change_count": int(
@@ -2190,6 +2218,18 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + str(capital_trial["selected_non_mpg_strategy_group_id"] or "none"),
         "- Selected candidate status: "
         + str(capital_trial["selected_candidate_status"]),
+        "- Decision: "
+        + str(capital_trial["decision"]),
+        "- Reason: "
+        + str(capital_trial["reason"]),
+        "- Promotion scope: "
+        + str(capital_trial["promotion_scope"]),
+        "- Promotion target: "
+        + str(capital_trial["promotion_target"]),
+        "- Tiny live ready: "
+        + _yes_no(bool(capital_trial["tiny_live_ready"])),
+        "- Next checkpoint: "
+        + str(capital_trial["next_checkpoint"] or "none"),
         "- Trial packet generated: "
         + _yes_no(bool(capital_trial["trial_packet_generated"])),
         "- Actionable now count: "

@@ -91,6 +91,18 @@ OWNER_POLICY_FIELDS = (
     "trial_identity",
 )
 
+BRF2_PROMOTION_SCOPE = "intake_only"
+BRF2_PROMOTION_TARGET = "paper_observation_or_candidate_trade_packet"
+BRF2_PROMOTION_REASON = "promote_to_tiny_live_intake_candidate_not_live_ready"
+BRF2_NEXT_CHECKPOINT = "BRF2-001_tiny_live_intake_candidate_packet"
+BRF2_REQUIRED_NEXT_EVIDENCE = (
+    "owner_policy_scope",
+    "paper_observation_packet",
+    "RequiredFacts draft",
+    "disable facts",
+    "path-risk review",
+)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -281,12 +293,15 @@ def build_capital_trial_readiness_bridge(
         "engineering_continuation_queue": continuation_queue,
         "goal_progress_projection": {
             "p05_capital_trial": selected.get("candidate_status"),
+            "promotion_scope": selected.get("promotion_scope") or "not_applicable",
+            "tiny_live_ready": selected.get("tiny_live_ready") is True,
             "owner_intervention_required": False,
             "owner_policy_decision_required_later": True,
             "no_live_permission": True,
             "summary": (
-                "First non-MPG capital-trial prepare candidate selected from "
-                "review-only evidence; this is not live execution permission."
+                "First non-MPG short experiment candidate selected from "
+                "review-only evidence; promotion scope is intake-only and "
+                "this is not live execution permission."
             ),
         },
         "reject_reasons": reject_reasons,
@@ -366,6 +381,10 @@ def _research_intake_eligibility_row(
         strategy_group_id=strategy_group_id,
         research_row=research_row,
     )
+    promotion = _research_promotion_semantics(
+        strategy_group_id=strategy_group_id,
+        recommendation=recommendation,
+    )
     ranking_score = _research_ranking_score(
         strategy_group_id=strategy_group_id,
         opportunity_count=opportunity_count,
@@ -400,6 +419,7 @@ def _research_intake_eligibility_row(
         "trial_blockers": blockers,
         "ranking_score": ranking_score,
         "trial_recommendation": recommendation,
+        **promotion,
         "owner_policy_required": recommendation.startswith(
             "candidate_trade_prepare"
         ),
@@ -487,6 +507,17 @@ def _eligibility_row(
         "trial_blockers": blockers,
         "ranking_score": ranking_score,
         "trial_recommendation": recommendation,
+        "decision": "pending",
+        "reason": recommendation,
+        "promotion_scope": "not_applicable",
+        "promotion_target": "not_applicable",
+        "tiny_live_ready": False,
+        "next_checkpoint": f"{strategy_group_id}_capital_trial_review",
+        "required_next_evidence": [],
+        "authority_boundary_summary": (
+            "promotion_scope=not_applicable; tiny_live_ready=false; "
+            "actionable_now=false; real_order_authority=false"
+        ),
         "owner_policy_required": owner_policy_required,
         "owner_policy_required_now": False,
         "engineering_continue": recommendation != "not_a_trial_candidate_now",
@@ -508,6 +539,14 @@ def _trial_packet_v0(
         "packet_id": f"trial-packet-v0:{strategy_group_id}:20260622",
         "generated_at_utc": generated_at,
         "strategy_group_id": strategy_group_id,
+        "decision": selected.get("decision") or "pending",
+        "reason": selected.get("reason") or selected.get("trial_recommendation"),
+        "promotion_scope": selected.get("promotion_scope") or "not_applicable",
+        "promotion_target": selected.get("promotion_target") or "not_applicable",
+        "tiny_live_ready": selected.get("tiny_live_ready") is True,
+        "next_checkpoint": selected.get("next_checkpoint")
+        or f"{strategy_group_id}_capital_trial_review",
+        "required_next_evidence": selected.get("required_next_evidence") or [],
         "candidate_status": selected.get("candidate_status")
         or "trial_prepare_candidate_pending_owner_policy",
         "hypothesis": (
@@ -597,6 +636,13 @@ def _trial_packet_v0(
         ],
         "authority_boundary": {
             "pre_registered_review_only": True,
+            "promotion_scope": selected.get("promotion_scope") or "not_applicable",
+            "promotion_scope_is_intake_only": (
+                selected.get("promotion_scope") == BRF2_PROMOTION_SCOPE
+            ),
+            "tiny_live_ready": selected.get("tiny_live_ready") is True,
+            "unscoped_promote": False,
+            "actionability_source": "runtime_only",
             "actionable_now": False,
             "live_permission_change": False,
             "real_order_authority": False,
@@ -741,6 +787,43 @@ def _research_trial_recommendation(
     return "research_intake_review_before_trial_prepare", "research_intake_review"
 
 
+def _research_promotion_semantics(
+    *,
+    strategy_group_id: str,
+    recommendation: str,
+) -> dict[str, Any]:
+    if (
+        strategy_group_id == "BRF2-001"
+        and recommendation == "candidate_trade_prepare_pending_owner_policy"
+    ):
+        return {
+            "decision": "promote",
+            "reason": BRF2_PROMOTION_REASON,
+            "promotion_scope": BRF2_PROMOTION_SCOPE,
+            "promotion_target": BRF2_PROMOTION_TARGET,
+            "tiny_live_ready": False,
+            "next_checkpoint": BRF2_NEXT_CHECKPOINT,
+            "required_next_evidence": list(BRF2_REQUIRED_NEXT_EVIDENCE),
+            "authority_boundary_summary": (
+                "promotion_scope=intake_only; tiny_live_ready=false; "
+                "actionable_now=false; real_order_authority=false"
+            ),
+        }
+    return {
+        "decision": "keep_observing",
+        "reason": recommendation,
+        "promotion_scope": "not_applicable",
+        "promotion_target": "not_applicable",
+        "tiny_live_ready": False,
+        "next_checkpoint": f"{strategy_group_id}_research_intake_review",
+        "required_next_evidence": [],
+        "authority_boundary_summary": (
+            "promotion_scope=not_applicable; tiny_live_ready=false; "
+            "actionable_now=false; real_order_authority=false"
+        ),
+    }
+
+
 def _ranking_score(
     *,
     strategy_group_id: str,
@@ -830,6 +913,18 @@ def _bridge_reject_reasons(
         reasons.append("trial_packet_live_permission_change_not_false")
     if trial_packet.get("real_order_authority") is not False:
         reasons.append("trial_packet_real_order_authority_not_false")
+    if trial_packet.get("decision") == "promote":
+        if trial_packet.get("promotion_scope") != BRF2_PROMOTION_SCOPE:
+            reasons.append("unscoped_promote_forbidden")
+        boundary = trial_packet.get("authority_boundary")
+        if not isinstance(boundary, dict):
+            boundary = {}
+        if boundary.get("promotion_scope") != BRF2_PROMOTION_SCOPE:
+            reasons.append("authority_boundary_promotion_scope_missing")
+        if boundary.get("unscoped_promote") is not False:
+            reasons.append("authority_boundary_unscoped_promote_not_false")
+        if trial_packet.get("tiny_live_ready") is not False:
+            reasons.append("trial_packet_tiny_live_ready_not_false")
     for key, value in safety.items():
         if key in FORBIDDEN_EFFECTS and value is True:
             reasons.append(f"forbidden_effect:{key}")
@@ -1056,6 +1151,12 @@ def _bridge_markdown(packet: dict[str, Any], output_json: Path, trial_json: Path
         f"| Forward positive | {selected.get('would_enter_forward_positive_count')} |",
         f"| Symbol scope | {_list_or_none(selected.get('symbol_scope') or [])} |",
         f"| Side scope | {_list_or_none(selected.get('side_scope') or [])} |",
+        f"| Decision | {selected.get('decision')} |",
+        f"| Reason | {selected.get('reason')} |",
+        f"| Promotion scope | {selected.get('promotion_scope')} |",
+        f"| Promotion target | {selected.get('promotion_target')} |",
+        f"| Tiny live ready | {_yes_no(selected.get('tiny_live_ready') is True)} |",
+        f"| Next checkpoint | {selected.get('next_checkpoint')} |",
         f"| Recommendation | {selected.get('trial_recommendation')} |",
         "",
         "## Ranking",
@@ -1088,6 +1189,12 @@ def _trial_packet_markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Packet ID: {packet['packet_id']}",
         f"- StrategyGroup: {packet['strategy_group_id']}",
         f"- Candidate status: {packet['candidate_status']}",
+        f"- Decision: {packet['decision']}",
+        f"- Reason: {packet['reason']}",
+        f"- Promotion scope: {packet['promotion_scope']}",
+        f"- Promotion target: {packet['promotion_target']}",
+        f"- Tiny live ready: {_yes_no(packet['tiny_live_ready'] is True)}",
+        f"- Next checkpoint: {packet['next_checkpoint']}",
         f"- Output JSON: {output_json}",
         f"- Actionable now: {_yes_no(bool(packet['actionable_now']))}",
         f"- Live permission change: {_yes_no(bool(packet['live_permission_change']))}",

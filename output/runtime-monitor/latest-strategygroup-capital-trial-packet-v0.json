@@ -1,6 +1,7 @@
 {
   "actionable_now": false,
   "authority_boundary": {
+    "actionability_source": "runtime_only",
     "actionable_now": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
@@ -12,11 +13,16 @@
     "places_order": false,
     "pre_registered_review_only": true,
     "preview_or_replay_treated_as_live_signal": false,
+    "promotion_scope": "intake_only",
+    "promotion_scope_is_intake_only": true,
     "real_order_authority": false,
     "registry_admission": false,
-    "tier_policy_change": false
+    "tier_policy_change": false,
+    "tiny_live_ready": false,
+    "unscoped_promote": false
   },
   "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+  "decision": "promote",
   "disable_or_review_facts_draft": [
     "disable_strong_reclaim_proxy",
     "disable_low_structure_loss_atr_lt_0_15",
@@ -31,7 +37,7 @@
     "tradable_forward_count": 8,
     "would_enter_forward_positive_count": 8
   },
-  "generated_at_utc": "2026-06-22T15:23:00.479244+00:00",
+  "generated_at_utc": "2026-06-22T15:58:09.910172+00:00",
   "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as a non-executing candidate-trade packet, pending Owner policy scope and future official live gates.",
   "kill_conditions": [
     "owner_policy_not_accepted",
@@ -47,6 +53,7 @@
     "reconciliation_or_settlement_unavailable"
   ],
   "live_permission_change": false,
+  "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
   "packet_id": "trial-packet-v0:BRF2-001:20260622",
   "paper_observation_packet_shape": {
     "disable_or_review_facts_draft": [
@@ -92,7 +99,10 @@
     "sample_event_count": 112,
     "stop_hit_count": 3
   },
+  "promotion_scope": "intake_only",
+  "promotion_target": "paper_observation_or_candidate_trade_packet",
   "real_order_authority": false,
+  "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
   "required_facts_draft": [
     "closed_1h_ohlcv",
     "closed_4h_trend",
@@ -100,6 +110,13 @@
     "ema_48",
     "rally_depth_24h",
     "squeeze_risk_state"
+  ],
+  "required_next_evidence": [
+    "owner_policy_scope",
+    "paper_observation_packet",
+    "RequiredFacts draft",
+    "disable facts",
+    "path-risk review"
   ],
   "requires_finalgate": true,
   "requires_fresh_signal": true,
@@ -144,6 +161,7 @@
   "symbol_scope": [
     "owner_policy_required"
   ],
+  "tiny_live_ready": false,
   "trial_boundary": {
     "action_time_finalgate_required": true,
     "candidate_authorization_required": true,

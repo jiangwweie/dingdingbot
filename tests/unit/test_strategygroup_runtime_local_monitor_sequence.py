@@ -611,6 +611,12 @@ def _write_ready_capital_trial_bridge(command: list[str]) -> None:
             "trial_packet_v0": {
                 "schema": "brc.strategygroup_capital_trial_packet.v0",
                 "strategy_group_id": "BRF2-001",
+                "decision": "promote",
+                "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
+                "promotion_scope": "intake_only",
+                "promotion_target": "paper_observation_or_candidate_trade_packet",
+                "tiny_live_ready": False,
+                "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
                 "side_scope": ["short"],
                 "actionable_now": False,
                 "live_permission_change": False,
@@ -618,6 +624,12 @@ def _write_ready_capital_trial_bridge(command: list[str]) -> None:
             },
             "selected_non_mpg_trial_candidate": {
                 "strategy_group_id": "BRF2-001",
+                "decision": "promote",
+                "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
+                "promotion_scope": "intake_only",
+                "promotion_target": "paper_observation_or_candidate_trade_packet",
+                "tiny_live_ready": False,
+                "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
                 "side_scope": ["short"],
             },
             "owner_policy_checkpoint": {
@@ -1117,9 +1129,19 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["strategy_candidate_trade"]["selected_short_strategy_group_id"] == (
         "BRF2-001"
     )
+    assert report["strategy_experiment_candidate"]["selected_strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["strategy_experiment_candidate"]["decision"] == "promote"
+    assert report["strategy_experiment_candidate"]["promotion_scope"] == "intake_only"
+    assert report["strategy_experiment_candidate"]["tiny_live_ready"] is False
     assert report["checks"]["candidate_trade_selected_strategy_group_id"] == (
         "BRF2-001"
     )
+    assert report["checks"]["short_experiment_candidate_promotion_scope"] == (
+        "intake_only"
+    )
+    assert report["checks"]["short_experiment_candidate_tiny_live_ready"] is False
     assert report["checks"]["candidate_trade_real_order_authority"] is False
     assert report["checks"]["non_market_gaps"] == []
 

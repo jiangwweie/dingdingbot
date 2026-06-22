@@ -1198,10 +1198,12 @@ def build_local_monitor_sequence_report(
             "risk_level": interaction["level"],
             "strategy_research_intake": research_intake_summary,
             "strategy_candidate_trade": capital_trial_summary,
+            "strategy_experiment_candidate": capital_trial_summary,
         },
         "interaction": interaction,
         "strategy_research_intake": research_intake_summary,
         "strategy_candidate_trade": capital_trial_summary,
+        "strategy_experiment_candidate": capital_trial_summary,
         "checks": {
             "blockers": execution_blockers,
             "execution_blockers": execution_blockers,
@@ -1219,6 +1221,15 @@ def build_local_monitor_sequence_report(
             ),
             "candidate_trade_actionable_now": False,
             "candidate_trade_real_order_authority": False,
+            "short_experiment_candidate_selected_strategy_group_id": (
+                capital_trial_summary["selected_strategy_group_id"]
+            ),
+            "short_experiment_candidate_promotion_scope": (
+                capital_trial_summary["promotion_scope"]
+            ),
+            "short_experiment_candidate_tiny_live_ready": (
+                capital_trial_summary["tiny_live_ready"]
+            ),
             "runtime_status": runtime_status,
             "monitor_status": monitor_status,
             "owner_status": owner_status,
@@ -1906,6 +1917,14 @@ def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "selected_candidate_status": str(
             summary.get("selected_candidate_status") or "missing"
         ),
+        "decision": str(selected.get("decision") or "pending"),
+        "reason": str(selected.get("reason") or ""),
+        "promotion_scope": str(selected.get("promotion_scope") or "not_applicable"),
+        "promotion_target": str(
+            selected.get("promotion_target") or "not_applicable"
+        ),
+        "tiny_live_ready": selected.get("tiny_live_ready") is True,
+        "next_checkpoint": str(selected.get("next_checkpoint") or ""),
         "side_scope": [
             str(item) for item in selected.get("side_scope") or [] if str(item)
         ],
@@ -2010,7 +2029,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     interaction = report["interaction"]
     checks = report["checks"]
     research_intake = report.get("strategy_research_intake") or {}
-    candidate_trade = report.get("strategy_candidate_trade") or {}
+    experiment_candidate = report.get("strategy_experiment_candidate") or {}
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
         "",
@@ -2025,9 +2044,11 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
-        f"- 候选交易状态: `{candidate_trade.get('status', 'missing')}`",
-        f"- 候选交易策略组: `{candidate_trade.get('selected_strategy_group_id') or 'none'}`",
-        f"- 做空候选策略组: `{candidate_trade.get('selected_short_strategy_group_id') or 'none'}`",
+        f"- 小资金试验候选状态: `{experiment_candidate.get('status', 'missing')}`",
+        f"- 小资金试验候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
+        f"- 做空试验候选策略组: `{experiment_candidate.get('selected_short_strategy_group_id') or 'none'}`",
+        f"- 晋级范围: `{experiment_candidate.get('promotion_scope') or 'not_applicable'}`",
+        f"- tiny-live ready: `{_yes_no(experiment_candidate.get('tiny_live_ready') is True)}`",
         "",
         "## Steps",
         "",

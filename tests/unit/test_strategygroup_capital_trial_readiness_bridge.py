@@ -266,6 +266,12 @@ def test_capital_trial_bridge_prefers_brf2_short_candidate_from_research_intake(
     assert selected["candidate_status"] == (
         "short_candidate_trade_packet_pending_owner_policy"
     )
+    assert selected["decision"] == "promote"
+    assert selected["reason"] == "promote_to_tiny_live_intake_candidate_not_live_ready"
+    assert selected["promotion_scope"] == "intake_only"
+    assert selected["promotion_target"] == "paper_observation_or_candidate_trade_packet"
+    assert selected["tiny_live_ready"] is False
+    assert selected["next_checkpoint"] == "BRF2-001_tiny_live_intake_candidate_packet"
     assert selected["side_scope"] == ["short"]
     assert "source_tiny_live_ready_false" in selected["trial_blockers"]
 
@@ -273,6 +279,18 @@ def test_capital_trial_bridge_prefers_brf2_short_candidate_from_research_intake(
     assert trial_packet["strategy_group_id"] == "BRF2-001"
     assert trial_packet["candidate_status"] == (
         "short_candidate_trade_packet_pending_owner_policy"
+    )
+    assert trial_packet["decision"] == "promote"
+    assert trial_packet["reason"] == (
+        "promote_to_tiny_live_intake_candidate_not_live_ready"
+    )
+    assert trial_packet["promotion_scope"] == "intake_only"
+    assert trial_packet["promotion_target"] == (
+        "paper_observation_or_candidate_trade_packet"
+    )
+    assert trial_packet["tiny_live_ready"] is False
+    assert trial_packet["next_checkpoint"] == (
+        "BRF2-001_tiny_live_intake_candidate_packet"
     )
     assert trial_packet["side_scope"] == ["short"]
     assert trial_packet["required_facts_draft"] == [
@@ -282,10 +300,50 @@ def test_capital_trial_bridge_prefers_brf2_short_candidate_from_research_intake(
     ]
     assert trial_packet["actionable_now"] is False
     assert trial_packet["real_order_authority"] is False
+    assert trial_packet["authority_boundary"]["promotion_scope"] == "intake_only"
+    assert trial_packet["authority_boundary"]["promotion_scope_is_intake_only"] is True
+    assert trial_packet["authority_boundary"]["tiny_live_ready"] is False
+    assert trial_packet["authority_boundary"]["unscoped_promote"] is False
     assert trial_packet["authority_boundary"]["calls_finalgate"] is False
     assert trial_packet["authority_boundary"]["calls_operation_layer"] is False
     assert trial_packet["authority_boundary"]["calls_exchange_write"] is False
     assert trial_packet["authority_boundary"]["places_order"] is False
+
+
+def test_capital_trial_bridge_rejects_unscoped_promote_packet():
+    module = _load_module()
+
+    safety = module._safety_invariants()
+    trial_packet = {
+        "schema": "brc.strategygroup_capital_trial_packet.v0",
+        "decision": "promote",
+        "promotion_scope": "not_applicable",
+        "tiny_live_ready": False,
+        "actionable_now": False,
+        "live_permission_change": False,
+        "real_order_authority": False,
+        "authority_boundary": {
+            "promotion_scope": "not_applicable",
+            "unscoped_promote": False,
+        },
+    }
+
+    reasons = module._bridge_reject_reasons(
+        eligibility_rows=[{"strategy_group_id": item} for item in [
+            "BRF2-001",
+            "MI-001",
+            "LSR-001",
+            "BRF-001",
+            "CPM-RO-001",
+        ]],
+        ranking=[{"strategy_group_id": "BRF2-001"}],
+        selected={"strategy_group_id": "BRF2-001"},
+        trial_packet=trial_packet,
+        safety=safety,
+    )
+
+    assert "unscoped_promote_forbidden" in reasons
+    assert "authority_boundary_promotion_scope_missing" in reasons
 
 
 def test_capital_trial_bridge_keeps_insufficient_evidence_as_engineering_queue():

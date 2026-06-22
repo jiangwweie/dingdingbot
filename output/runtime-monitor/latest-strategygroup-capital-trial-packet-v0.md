@@ -3,6 +3,12 @@
 - Packet ID: trial-packet-v0:BRF2-001:20260622
 - StrategyGroup: BRF2-001
 - Candidate status: short_candidate_trade_packet_pending_owner_policy
+- Decision: promote
+- Reason: promote_to_tiny_live_intake_candidate_not_live_ready
+- Promotion scope: intake_only
+- Promotion target: paper_observation_or_candidate_trade_packet
+- Tiny live ready: 否
+- Next checkpoint: BRF2-001_tiny_live_intake_candidate_packet
 - Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json
 - Actionable now: 否
 - Live permission change: 否

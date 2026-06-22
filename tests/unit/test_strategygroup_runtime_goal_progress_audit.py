@@ -703,6 +703,8 @@ def test_goal_progress_projects_capital_trial_bridge_without_runtime_interventio
     assert boundary["selected_candidate_status"] == (
         "trial_prepare_candidate_pending_owner_policy"
     )
+    assert boundary["promotion_scope"] == "not_applicable"
+    assert boundary["tiny_live_ready"] is False
     assert boundary["trial_packet_generated"] is True
     assert boundary["actionable_now_count"] == 0
     assert boundary["live_permission_change_count"] == 0
@@ -726,6 +728,33 @@ def test_goal_progress_projects_capital_trial_bridge_without_runtime_interventio
     assert "- Live permission change count: 0" in text
     assert "- Runtime Owner intervention required: 否" in text
     assert "- Real order authority: 否" in text
+
+
+def test_goal_progress_rejects_unscoped_promote_in_capital_trial_packet():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_bridge()
+    packet["trial_packet_v0"].update(
+        {
+            "decision": "promote",
+            "promotion_scope": "not_applicable",
+            "tiny_live_ready": False,
+            "authority_boundary": {
+                "promotion_scope": "not_applicable",
+                "unscoped_promote": False,
+            },
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_readiness_bridge=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_readiness_bridge_boundary"]
+    assert "unscoped_promote_forbidden" in boundary["reject_reasons"]
+    assert "authority_boundary_promotion_scope_missing" in boundary["reject_reasons"]
 
 
 def test_goal_progress_default_live_cutover_path_uses_runtime_monitor_latest():
