@@ -1,0 +1,498 @@
+{
+  "checks": {
+    "automation_notify": true,
+    "blockers": [],
+    "engineering_gaps": [],
+    "execution_blockers": [],
+    "goal_complete": false,
+    "monitor_refresh_gaps": [
+      "runtime_progress_cache_stale"
+    ],
+    "monitor_refresh_needed": true,
+    "monitor_refresh_reasons": [
+      "runtime_progress_cache_stale"
+    ],
+    "monitor_status": "needs_refresh",
+    "non_market_gaps": [],
+    "owner_decision_required": false,
+    "owner_notify": false,
+    "owner_status": "waiting_for_opportunity",
+    "refresh_required": true,
+    "runtime_status": "waiting_for_market",
+    "waiting_for_market": true
+  },
+  "daily_check_mode": "cache",
+  "generated_at_utc": "2026-06-22T04:59:07.372053+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_monitor_sequence",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "monitor_status": "needs_refresh",
+  "owner_status": "waiting_for_opportunity",
+  "owner_summary": {
+    "current_action": "刷新本地 runtime monitor 缓存",
+    "owner_intervention_required": false,
+    "risk_level": "L0_local_monitor_sequence",
+    "state": "等待机会"
+  },
+  "runtime_status": "waiting_for_market",
+  "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
+  "scope": "strategygroup_runtime_local_monitor_sequence",
+  "source_paths": {
+    "btpc_classifier_rule_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
+    "btpc_l2_keep_revise_fact_source_decision_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json",
+    "btpc_l2_shadow_fact_quality_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
+    "btpc_live_derivatives_fact_source_mapping_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
+    "btpc_local_fact_proxy_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
+    "btpc_proxy_replay_quality_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
+    "completion_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+    "daily_check_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
+    "dry_run_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
+    "goal_progress_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
+    "l2_intake_dry_run_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-intake-dry-run.json",
+    "l2_readiness_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-readiness-review.json",
+    "l2_tier_policy_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-tier-policy-review.json",
+    "live_cutover_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
+    "opportunity_decision_loop_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-decision-loop.json",
+    "post_revision_replay_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-post-revision-replay-review.json",
+    "replay_lab_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-replay-lab.json",
+    "signal_coverage_expansion_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
+    "signal_coverage_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
+    "strategygroup_btpc_fact_classifier_guard_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
+    "strategygroup_decision_ledger_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-decision-ledger.json",
+    "strategygroup_handoff_boundary_closure_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
+    "strategygroup_lifecycle_rehearsal_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
+    "strategygroup_live_submit_readiness_bridge_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-submit-readiness-bridge.json",
+    "strategygroup_pre_live_rehearsal_readiness_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
+    "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
+  },
+  "status": "waiting_for_market_monitor_refresh_needed",
+  "steps": [
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_cache_read",
+        "max_remote_interactions": 0,
+        "mutates_remote_files": false,
+        "places_order": false,
+        "policy": {
+          "approaches_real_order": false,
+          "description": "Local cache, local files, or local computation only.",
+          "exchange_write_allowed": false,
+          "level_prefix": "L0",
+          "owner_label": "本地读取",
+          "rank": 0,
+          "remote_interaction_allowed": false,
+          "remote_mutation_allowed": false
+        },
+        "remote_interaction_count": 0,
+        "uses_snapshot_level": "L1_readonly_snapshot"
+      },
+      "name": "daily_check",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
+      "returncode": 2,
+      "status": "waiting_for_market_monitor_refresh_needed"
+    },
+    {
+      "interaction": {},
+      "name": "runtime_dry_run_audit_chain",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
+      "returncode": 0,
+      "status": "passed"
+    },
+    {
+      "interaction": {},
+      "name": "live_cutover_readiness",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
+      "returncode": 0,
+      "status": "live_cutover_waiting_for_fresh_signal"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_goal_progress_audit",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "goal_progress",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
+      "returncode": 0,
+      "status": "waiting_for_market_monitor_refresh_needed"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_completion_audit",
+        "max_remote_interactions": 0,
+        "mutates_remote_files": false,
+        "places_order": false,
+        "policy": {
+          "approaches_real_order": false,
+          "description": "Local cache, local files, or local computation only.",
+          "exchange_write_allowed": false,
+          "level_prefix": "L0",
+          "owner_label": "本地读取",
+          "rank": 0,
+          "remote_interaction_allowed": false,
+          "remote_mutation_allowed": false
+        },
+        "remote_interaction_count": 0
+      },
+      "name": "completion_audit",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+      "returncode": 0,
+      "status": "not_complete_waiting_for_market"
+    },
+    {
+      "interaction": {},
+      "name": "replay_lab",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-replay-lab.json",
+      "returncode": 0,
+      "status": "passed"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_signal_coverage",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "public_market_read_only": false,
+        "remote_interaction_count": 0
+      },
+      "name": "signal_coverage",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
+      "returncode": 0,
+      "status": "mainline_no_signal_low_priority_broader_would_enter"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_signal_coverage_expansion_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "signal_coverage_expansion_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
+      "returncode": 0,
+      "status": "low_priority_observe_only_would_enter_parked"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_l2_readiness_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "l2_readiness_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-readiness-review.json",
+      "returncode": 0,
+      "status": "l2_readiness_review_already_enabled"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_l2_intake_dry_run",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "l2_intake_dry_run",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-intake-dry-run.json",
+      "returncode": 0,
+      "status": "l2_intake_dry_run_no_candidates"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_l2_tier_policy_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "l2_tier_policy_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-tier-policy-review.json",
+      "returncode": 0,
+      "status": "l2_tier_policy_review_no_candidates"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_post_revision_replay_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "post_revision_replay_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-post-revision-replay-review.json",
+      "returncode": 0,
+      "status": "passed"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_opportunity_decision_loop",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "opportunity_decision_loop",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-decision-loop.json",
+      "returncode": 0,
+      "status": "decision_loop_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_l2_shadow_fact_quality_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_l2_shadow_fact_quality_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
+      "returncode": 0,
+      "status": "btpc_l2_shadow_fact_quality_review_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_fact_proxy_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_local_fact_proxy_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
+      "returncode": 0,
+      "status": "btpc_local_fact_proxy_review_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_proxy_replay_quality_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_proxy_replay_quality_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
+      "returncode": 0,
+      "status": "btpc_proxy_replay_quality_review_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_opportunity_decision_loop",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "opportunity_decision_loop_final",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-decision-loop.json",
+      "returncode": 0,
+      "status": "decision_loop_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_l2_keep_revise_fact_source_decision",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_l2_keep_revise_fact_source_decision",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json",
+      "returncode": 0,
+      "status": "btpc_l2_keep_revise_fact_source_decision_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_live_derivatives_fact_source_mapping",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_live_derivatives_fact_source_mapping",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
+      "returncode": 0,
+      "status": "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_classifier_rule_review",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "btpc_classifier_rule_review",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
+      "returncode": 0,
+      "status": "btpc_classifier_rule_review_recorded_without_live_authority"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_strategygroup_decision_ledger",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_decision_ledger",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-decision-ledger.json",
+      "returncode": 0,
+      "status": "decision_ledger_ready"
+    },
+    {
+      "interaction": {},
+      "name": "strategygroup_quality_wave",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
+      "returncode": 0,
+      "status": "quality_wave_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_handoff_boundary_closure",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_handoff_boundary_closure",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
+      "returncode": 0,
+      "status": "handoff_boundary_closure_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_btpc_fact_classifier_guard",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_btpc_fact_classifier_guard",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
+      "returncode": 0,
+      "status": "btpc_fact_classifier_guard_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_lifecycle_rehearsal",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_lifecycle_rehearsal",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
+      "returncode": 0,
+      "status": "lifecycle_rehearsal_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_pre_live_rehearsal_readiness",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_pre_live_rehearsal_readiness",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
+      "returncode": 0,
+      "status": "pre_live_rehearsal_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_live_submit_readiness_bridge",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_live_submit_readiness_bridge",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-submit-readiness-bridge.json",
+      "returncode": 0,
+      "status": "live_submit_standby_waiting_for_market"
+    }
+  ]
+}

@@ -224,6 +224,96 @@ def _post_revision_replay_review() -> dict:
     }
 
 
+def _capture_gap_audit() -> dict:
+    return {
+        "schema": "brc.strategy_capture_gap_audit.v3",
+        "status": "strategy_capture_gap_audit_ready",
+        "system_observation_summary": {
+            "would_enter_count": 44,
+            "high_priority_no_action_count": 671,
+        },
+        "decision_recommendations": [
+            {
+                "strategy_group_id": "BRF-001",
+                "decision": "promote_review",
+                "reason": "official windows produced BRF would_enter",
+                "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+            },
+            {
+                "strategy_group_id": "MI-001",
+                "decision": "identity_review",
+                "reason": "MI emits repeated would_enter events",
+                "next_checkpoint": "MI-001_registry_identity_review",
+            },
+            {
+                "strategy_group_id": "LSR-001",
+                "decision": "revise",
+                "reason": "side-specific rewrite remains the dominant blocker",
+                "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+            },
+            {
+                "strategy_group_id": "MPG-001",
+                "decision": "coverage_visibility_review",
+                "reason": "mainline no_action should stay visible",
+                "next_checkpoint": "MPG-001_no_action_visibility_and_routing_audit",
+            },
+        ],
+        "priority_line_closure": {
+            "phase2_priority_strategy_lines": [
+                {
+                    "strategy_group_id": "BRF-001",
+                    "decision": "promote_review",
+                    "would_enter_count": 1,
+                    "high_priority_no_action_count": 168,
+                    "would_enter_forward_positive_count": 0,
+                    "missed_no_action_forward_positive_count": 136,
+                },
+                {
+                    "strategy_group_id": "LSR-001",
+                    "decision": "revise",
+                    "would_enter_count": 2,
+                    "high_priority_no_action_count": 167,
+                    "would_enter_forward_positive_count": 2,
+                    "missed_no_action_forward_positive_count": 0,
+                }
+            ],
+            "phase3_registry_identity_review": [
+                {
+                    "strategy_group_id": "MI-001",
+                    "decision": "identity_review",
+                    "would_enter_count": 23,
+                    "high_priority_no_action_count": 0,
+                    "would_enter_forward_positive_count": 22,
+                    "missed_no_action_forward_positive_count": 0,
+                }
+            ],
+            "phase4_visibility_review": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "decision": "coverage_visibility_review",
+                    "would_enter_count": 0,
+                    "high_priority_no_action_count": 0,
+                    "would_enter_forward_positive_count": 0,
+                    "missed_no_action_forward_positive_count": 0,
+                }
+            ],
+        },
+        "owner_visibility_state": {
+            "p0_state": "waiting_for_market",
+            "p0_5_observation_state": "review_needed",
+            "no_live_permission": True,
+            "owner_intervention_required": False,
+        },
+        "safety_invariants": {
+            "server_files_mutated": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -327,6 +417,46 @@ def test_decision_ledger_blocks_forbidden_source_effect():
     assert packet["interaction"]["places_order"] is False
 
 
+def test_decision_ledger_integrates_capture_gap_audit_as_review_input_only():
+    module = _load_module()
+
+    packet = module.build_strategygroup_decision_ledger(
+        opportunity_decision_loop_packet=_opportunity_decision_loop(),
+        signal_coverage_packet=_signal_coverage(),
+        tier_policy=_tier_policy(),
+        post_revision_replay_packet=_post_revision_replay_review(),
+        capture_gap_audit_packet=_capture_gap_audit(),
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
+    assert rows["BRF-001"]["decision"] == "promote"
+    assert rows["BRF-001"]["required_next_evidence"].startswith(
+        "promotion_evidence_review_only:"
+    )
+    assert rows["MI-001"]["decision"] == "revise"
+    assert rows["MI-001"]["required_next_evidence"].startswith(
+        "registry_identity_classification:"
+    )
+    assert rows["LSR-001"]["decision"] == "revise"
+    assert rows["LSR-001"]["required_next_evidence"].startswith(
+        "classifier_fact_source_revision_review:"
+    )
+    assert rows["MPG-001"]["decision"] == "keep_observing"
+    assert (
+        "source_recommendation:coverage_visibility_review"
+        in rows["MPG-001"]["reason"]
+    )
+    assert packet["counts"]["capture_gap_audit_group_count"] == 4
+    assert packet["capture_gap_audit"]["integrated"] is True
+    assert packet["capture_gap_audit"]["owner_decision_required_now"] is False
+    assert packet["capture_gap_audit"]["live_permission_change_recommended_now"] is False
+    assert packet["decision"]["capture_gap_audit_is_decision_support_only"] is True
+    assert packet["decision"]["real_order_scope_change_recommended"] is False
+    assert packet["decision"]["l4_promotion_recommended"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
 def test_decision_ledger_cli_writes_outputs(tmp_path, capsys):
     module = _load_module()
     opportunity_path = tmp_path / "opportunity.json"
@@ -346,6 +476,8 @@ def test_decision_ledger_cli_writes_outputs(tmp_path, capsys):
             str(signal_path),
             "--tier-policy-json",
             str(policy_path),
+            "--capture-gap-audit-json",
+            str(tmp_path / "missing-capture-gap.json"),
             "--output-json",
             str(out_path),
             "--output-owner-progress",
