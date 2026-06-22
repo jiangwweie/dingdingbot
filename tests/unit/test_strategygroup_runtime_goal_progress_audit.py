@@ -276,6 +276,48 @@ def _strategy_review_evidence_closure_wave(**overrides):
     return base
 
 
+def _strategy_review_deep_dive_wave(**overrides):
+    base = {
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "phase_status": {
+            "phase_1_owner_perception_projection": "ready",
+            "phase_2_six_line_deep_dive": "ready",
+            "phase_3_owner_policy_decision_package": "ready_for_owner_policy_decision",
+        },
+        "deep_dive_packets": [
+            {"strategy_group_id": "BRF-001"},
+            {"strategy_group_id": "BTPC-001"},
+            {"strategy_group_id": "LSR-001"},
+            {"strategy_group_id": "MI-001"},
+            {"strategy_group_id": "CPM-RO-001"},
+            {"strategy_group_id": "MPG-001"},
+        ],
+        "owner_decision_package": {
+            "status": "owner_policy_decision_package_ready",
+            "owner_policy_confirmation_required_now": True,
+            "runtime_owner_intervention_required": False,
+            "decision_count": 6,
+        },
+        "interaction": {
+            "level": "L0_local_review_only_deep_dive",
+            "remote_interaction_count": 0,
+        },
+        "safety_invariants": {
+            "real_order_authority": False,
+            "exchange_write_called": False,
+            "final_gate_called": False,
+            "operation_layer_called": False,
+            "order_created": False,
+            "registry_authority_changed": False,
+            "tier_policy_changed": False,
+            "live_profile_changed": False,
+            "mpg_member_live_scope_expanded": False,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def test_goal_progress_waiting_for_market_with_p05_ready():
     module = _load_module()
 
@@ -439,6 +481,43 @@ def test_goal_progress_projects_strategy_review_evidence_closure_without_runtime
     )
     text = module._owner_progress_text(report)
     assert "## Strategy Review Evidence Closure Boundary" in text
+    assert "- Owner policy confirmation required now: 是" in text
+    assert "- Runtime Owner intervention required: 否" in text
+    assert "- Real order authority: 否" in text
+
+
+def test_goal_progress_projects_strategy_review_deep_dive_without_runtime_intervention():
+    module = _load_module()
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategy_review_deep_dive_wave=_strategy_review_deep_dive_wave(),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["checks"]["p05_ready"] is True
+    assert report["checks"]["product_gaps"] == []
+    boundary = report["strategy_review_deep_dive_boundary"]
+    assert boundary["status"] == "review_only_deep_dive_ready_for_owner_decision"
+    assert boundary["phase_1_status"] == "ready"
+    assert boundary["phase_2_status"] == "ready"
+    assert boundary["phase_3_status"] == "ready_for_owner_policy_decision"
+    assert boundary["deep_dive_packet_count"] == 6
+    assert boundary["next_owner_decision_count"] == 6
+    assert boundary["owner_policy_confirmation_required_now"] is True
+    assert boundary["runtime_owner_intervention_required"] is False
+    assert boundary["real_order_authority"] is False
+
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p05_strategy_review_deep_dive"]["status"] == "ready"
+    assert tracks["p05_strategy_review_deep_dive"]["owner_state"] == (
+        "六条线等待政策决策"
+    )
+    text = module._owner_progress_text(report)
+    assert "## Strategy Review Deep Dive Boundary" in text
     assert "- Owner policy confirmation required now: 是" in text
     assert "- Runtime Owner intervention required: 否" in text
     assert "- Real order authority: 否" in text

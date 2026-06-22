@@ -1,0 +1,835 @@
+{
+  "closed_problem": "The six review-only lanes now have concrete diagnostic conclusions and next Owner policy decisions without changing live authority.",
+  "completion_boundary": {
+    "allowed_without_owner_input": [
+      "rerun local review-only deep-dive synthesis",
+      "refresh read-only evidence",
+      "keep P0 live-submit standby waiting for fresh signal"
+    ],
+    "blocked_until_separate_owner_confirmation": [
+      "promote",
+      "park",
+      "kill",
+      "registry_admission",
+      "tier_policy_change",
+      "live_profile_change",
+      "mpg_member_live_scope_expansion",
+      "real_order_scope_expansion"
+    ],
+    "current_stage": "six_line_deep_dive_ready_for_owner_decision",
+    "owner_policy_confirmation_required_now": true,
+    "runtime_owner_intervention_required": false
+  },
+  "deep_dive_packets": [
+    {
+      "decision_options": [
+        "continue_promote_review_without_tier_change",
+        "keep_l1_observe_until_forward_outcome_completes",
+        "pause_brf_until_squeeze_classifier_improves"
+      ],
+      "decision_question": "BRF-001 是否继续 promote-review 证据线，但暂不升 tier、不扩大实盘范围。",
+      "decision_type": "promote_review_outcome",
+      "deep_dive_findings": [
+        "would_enter evidence exists, but the latest would_enter forward outcome is not enough to justify promotion",
+        "missed no_action forward positives indicate capture quality work is still useful",
+        "squeeze classifier and RequiredFacts should be completed before any L2 review"
+      ],
+      "diagnostic_conclusion": "BRF showed a real bear-rally-failure capture gap, but promotion quality is still constrained by squeeze risk, pending forward outcome, and RequiredFacts readiness.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "latest would_enter forward outcome is still pending",
+        "squeeze-risk replay sample recommends revise before promotion",
+        "RequiredFacts review is not a live-authority packet"
+      ],
+      "evidence_for": [
+        "would_enter observed: 1",
+        "missed no_action forward positives: 136",
+        "BRF replay sample count: 5"
+      ],
+      "executed_system_action": "build_brf_requiredfacts_squeeze_classifier_replay_pack",
+      "next_system_action_if_approved": "build_brf_squeeze_classifier_requiredfacts_forward_outcome_v2",
+      "owner_label": "熊市反弹失败",
+      "policy_effects_blocked": [
+        "tier_policy_change",
+        "live_scope_change"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "continue_promote_review_but_hold_l1_until_squeeze_and_forward_outcome_complete",
+      "residual_uncertainties": [
+        "latest would_enter forward outcome remains insufficient for promotion",
+        "squeeze-risk classifier is not yet a promotion-quality control",
+        "RequiredFacts are not live-authority facts"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "promote_review_evidence_lane_can_continue_without_live_scope_change",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 136,
+        "missed_positive_no_action_ratio": "136/168",
+        "no_action_count": 168,
+        "positive_forward_outcome_count": 136,
+        "would_enter_count": 1,
+        "would_enter_forward_positive_count": 0,
+        "would_enter_forward_positive_ratio": "0/1"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "BRF-001"
+    },
+    {
+      "btpc_attribution": {
+        "classifier_rule_review_count": 2,
+        "decision": {
+          "attach_live_fact_sources_before_live_eligibility": true,
+          "classifier_review_required_before_promotion": true,
+          "default_next_step": "execute_btpc_l2_fact_source_and_classifier_review_tasks_locally",
+          "keep_l2_shadow_observation": true,
+          "l2_promotion_recommended_now": false,
+          "l4_scope_change_recommended": false,
+          "proxy_decision_satisfies_live_required_facts": false,
+          "real_order_scope_change_recommended": false,
+          "revise_fact_classifier_inputs_before_promotion": true,
+          "tier_policy_change_recommended_now": false
+        },
+        "expected_live_fact_source_count": 8,
+        "fact_gap_count": 5,
+        "fact_source_pending_count": 4,
+        "implementation_ready_count": 2,
+        "live_required_fact_gap_count": 8,
+        "proxy_replay_case_count": 5,
+        "proxy_reviewable_would_enter_count": 2,
+        "revise_case_count": 3,
+        "source_attachment_pending_count": 8
+      },
+      "decision_options": [
+        "keep_l2_shadow_attach_sources_first",
+        "prepare_conditional_gate_relax_review_after_sources",
+        "park_btpc_until_edge_reappears"
+      ],
+      "decision_question": "BTPC-001 是否继续 L2 shadow，并先完成事实源挂接，而不是放松 stale gate。",
+      "decision_type": "l2_shadow_revise_boundary",
+      "deep_dive_findings": [
+        "all audited BTPC windows were blocked by stale/fact-source attribution",
+        "missed forward positives make the false-negative review material",
+        "live RequiredFacts gaps remain and prevent promotion or live authority"
+      ],
+      "diagnostic_conclusion": "BTPC is not simply idle; the dominant issue is systemic stale/fact source/classifier blocking. Gate relaxation remains unsafe before live fact-source attachment is closed.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "live RequiredFacts gaps remain: 8",
+        "source attachments pending: 8",
+        "relaxing stale gate now would be a policy and safety risk"
+      ],
+      "evidence_for": [
+        "high-priority stale-blocked no_action count: 169",
+        "missed no_action forward positives: 152",
+        "proxy reviewable would_enter count: 2",
+        "classifier rule review count: 2"
+      ],
+      "executed_system_action": "run_btpc_false_positive_and_fact_attachment_review",
+      "next_system_action_if_approved": "attach_btpc_live_fact_sources_then_rerun_false_negative_review",
+      "owner_label": "熊市回抽延续",
+      "policy_effects_blocked": [
+        "stale_gate_relaxation",
+        "tier_policy_change"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "keep_l2_shadow_attach_fact_sources_before_any_gate_relaxation",
+      "residual_uncertainties": [
+        "live_required_fact_gap_count=8",
+        "source_attachment_pending_count=8",
+        "stale-gate relaxation remains blocked until fact sources are attached"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "keep_l2_shadow_and_revise_fact_source_classifier_before_any_gate_relaxation",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 152,
+        "missed_positive_no_action_ratio": "152/169",
+        "no_action_count": 169,
+        "positive_forward_outcome_count": 152,
+        "would_enter_count": 0,
+        "would_enter_forward_positive_count": 0,
+        "would_enter_forward_positive_ratio": "0/0"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "BTPC-001"
+    },
+    {
+      "decision_options": [
+        "formalize_short_revival_rewrite",
+        "keep_l1_generic_observe",
+        "park_lsr_until_sample_size_improves"
+      ],
+      "decision_question": "LSR-001 是否正式采用 short-revival rewrite 方向，并保持 observe-only。",
+      "decision_type": "short_revival_rewrite_outcome",
+      "deep_dive_findings": [
+        "both would_enter samples are forward-positive in the source packet",
+        "side-specific short semantics still need separation from long preview logic",
+        "range-context RequiredFacts remain review-only and not live authority"
+      ],
+      "diagnostic_conclusion": "LSR short-revival has positive observe-only evidence, but the sample is small and range-context facts must be formalized before tier or live-scope changes.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "sample size is small",
+        "long preview and short-revival semantics still conflict",
+        "range-context RequiredFacts are not yet formal live authority"
+      ],
+      "evidence_for": [
+        "would_enter observed: 2",
+        "would_enter forward positives: 2",
+        "LSR replay sample count: 5"
+      ],
+      "executed_system_action": "build_lsr_range_context_requiredfacts_replay_pack",
+      "next_system_action_if_approved": "build_lsr_short_revival_v2_range_context_fixture",
+      "owner_label": "流动性扫盘/短线复活",
+      "policy_effects_blocked": [
+        "live_scope_change",
+        "l1_to_l2_promotion"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "formalize_short_revival_rewrite_keep_l1_until_range_facts_complete",
+      "residual_uncertainties": [
+        "sample size remains small",
+        "short-revival and long-preview semantics still need separation",
+        "range-context RequiredFacts are not live authority"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "formalize_short_revival_rewrite_review_without_live_scope_change",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 0,
+        "missed_positive_no_action_ratio": "0/167",
+        "no_action_count": 167,
+        "positive_forward_outcome_count": 2,
+        "would_enter_count": 2,
+        "would_enter_forward_positive_count": 2,
+        "would_enter_forward_positive_ratio": "2/2"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "LSR-001"
+    },
+    {
+      "decision_options": [
+        "formal_candidate_review_without_admission",
+        "mpg_support_capability_review",
+        "observe_asset_only",
+        "park_mi"
+      ],
+      "decision_question": "MI-001 是否进入正式候选复核，同时暂不进入 registry、不扩大实盘。",
+      "decision_type": "registry_identity_candidate_review",
+      "deep_dive_findings": [
+        "would_enter count and forward-positive ratio are materially stronger than most observe-only lanes",
+        "identity is still outside the current registry authority",
+        "overlap with MPG or adjacent momentum capability must be resolved before admission"
+      ],
+      "diagnostic_conclusion": "MI is the strongest identity-review candidate in this wave. It has high would_enter volume and forward-positive concentration, but registry identity, overlap, and concentration are unresolved.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "strategy identity is not in current registry",
+        "overlap with MPG / TEQ is not yet resolved",
+        "symbol concentration and semantic explanation still need review"
+      ],
+      "evidence_for": [
+        "would_enter observed: 23",
+        "would_enter forward positives: 22",
+        "forward positive ratio: 22/23"
+      ],
+      "executed_system_action": "build_mi_registry_handoff_draft_without_admission",
+      "next_system_action_if_approved": "build_mi_overlap_concentration_registry_candidate_packet_v2",
+      "owner_label": "MI 身份复核",
+      "policy_effects_blocked": [
+        "registry_admission",
+        "live_scope_change"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "open_formal_candidate_review_without_registry_admission",
+      "residual_uncertainties": [
+        "registry identity is unresolved",
+        "overlap with MPG or adjacent momentum capability remains unresolved",
+        "symbol concentration still needs review before admission"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "open_formal_candidate_review_without_registry_admission",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 0,
+        "missed_positive_no_action_ratio": "0/315",
+        "no_action_count": 315,
+        "positive_forward_outcome_count": 22,
+        "would_enter_count": 23,
+        "would_enter_forward_positive_count": 22,
+        "would_enter_forward_positive_ratio": "22/23"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "MI-001"
+    },
+    {
+      "decision_options": [
+        "observe_asset_and_merge_review",
+        "independent_strategy_review",
+        "merge_into_existing_family",
+        "park_cpm_ro"
+      ],
+      "decision_question": "CPM-RO-001 是否保留观察资产并进入 merge review，而不是独立 admission。",
+      "decision_type": "registry_identity_merge_review",
+      "deep_dive_findings": [
+        "would_enter evidence is meaningful but lower quality than MI",
+        "merge target across CPM, RBR, or momentum families is unresolved",
+        "independent admission would be premature without semantic source review"
+      ],
+      "diagnostic_conclusion": "CPM-RO has meaningful signal evidence, but the quality is mixed relative to MI and its family boundary is unresolved. Observation asset plus merge review is the safer next decision.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "strategy identity is not in current registry",
+        "forward quality is mixed relative to MI",
+        "merge target across CPM/RBR/momentum family is unresolved"
+      ],
+      "evidence_for": [
+        "would_enter observed: 18",
+        "would_enter forward positives: 13",
+        "forward positive ratio: 13/18"
+      ],
+      "executed_system_action": "build_cpm_ro_merge_target_review_without_registry_admission",
+      "next_system_action_if_approved": "build_cpm_ro_merge_target_and_quality_comparison_packet_v2",
+      "owner_label": "CPM-RO 合并复核",
+      "policy_effects_blocked": [
+        "registry_admission",
+        "live_scope_change"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "keep_observation_asset_run_merge_review_before_independent_admission",
+      "residual_uncertainties": [
+        "merge target is unresolved",
+        "forward quality is mixed relative to MI",
+        "independent admission is not justified by this packet"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "keep_observation_asset_and_run_merge_review_without_registry_admission",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 0,
+        "missed_positive_no_action_ratio": "0/151",
+        "no_action_count": 151,
+        "positive_forward_outcome_count": 13,
+        "would_enter_count": 18,
+        "would_enter_forward_positive_count": 13,
+        "would_enter_forward_positive_ratio": "13/18"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "CPM-RO-001"
+    },
+    {
+      "decision_options": [
+        "accept_member_role_split_without_live_expansion",
+        "keep_mpg_single_l4_box",
+        "freeze_member_review"
+      ],
+      "decision_question": "MPG-001 是否接受 member role split 和 exit-decay 复核，但不扩大 member live scope。",
+      "decision_type": "member_role_exit_decay_boundary",
+      "deep_dive_findings": [
+        "six member roles are present and can be separated for policy review",
+        "exit horizons and decay controls exist as review inputs",
+        "no member receives live scope from this deep-dive packet"
+      ],
+      "diagnostic_conclusion": "MPG remains the selected L4 live lane, but there is no executable fresh signal now. Member roles and exit-decay policy can be decided without expanding member live scope.",
+      "does_not_authorize_live_execution": true,
+      "evidence_against": [
+        "current package does not prove which member should receive live scope",
+        "member-level evidence remains review-only and not action-time live facts"
+      ],
+      "evidence_for": [
+        "MPG replay sample count: 8",
+        "six member roles are present in the quality closure wave",
+        "exit horizons and decay controls are present before any live expansion"
+      ],
+      "executed_system_action": "build_mpg_member_scoring_and_decay_controls",
+      "member_review": {
+        "exit_decay_review": {
+          "decay_controls_to_review": [
+            "momentum_exhaustion_disable",
+            "member_specific_decay",
+            "rolling_window_decay_detection",
+            "post_right_tail_giveback_control"
+          ],
+          "exit_horizons_to_review": [
+            "6h",
+            "12h",
+            "24h",
+            "72h"
+          ],
+          "status": "needed_before_any_live_scope_expansion"
+        },
+        "member_count": 6,
+        "member_rows": [
+          {
+            "member_id": "TSI-001",
+            "provisional_role": "core_member_candidate",
+            "recommended_action": "keep_core_candidate_but_require_decay_control",
+            "review_focus": "right_tail_return_vs_drawdown_decay"
+          },
+          {
+            "member_id": "MHI-001",
+            "provisional_role": "high_risk_member",
+            "recommended_action": "downshift_or_park_review_before_live_expansion",
+            "review_focus": "high_return_high_drawdown_survivability"
+          },
+          {
+            "member_id": "PPO-001",
+            "provisional_role": "support_member",
+            "recommended_action": "keep_observing_as_support_member",
+            "review_focus": "middle_return_middle_drawdown_stability"
+          },
+          {
+            "member_id": "DMI-001",
+            "provisional_role": "ignition_support_or_independent_observer",
+            "recommended_action": "identity_boundary_review",
+            "review_focus": "member_vs_independent_strategy_boundary"
+          },
+          {
+            "member_id": "WPR-001",
+            "provisional_role": "confirmation_member",
+            "recommended_action": "keep_as_confirmation_candidate",
+            "review_focus": "conservative_momentum_confirmation_value"
+          },
+          {
+            "member_id": "MFI-001",
+            "provisional_role": "risk_damper_or_scorer",
+            "recommended_action": "keep_as_scorer_not_primary_member",
+            "review_focus": "low_drawdown_low_return_filter_value"
+          }
+        ],
+        "status": "ready_for_owner_review"
+      },
+      "next_system_action_if_approved": "build_mpg_member_role_controls_v2_without_live_scope_expansion",
+      "owner_label": "动量延续成员治理",
+      "policy_effects_blocked": [
+        "mpg_member_live_scope_expansion",
+        "live_profile_change"
+      ],
+      "real_order_authority": false,
+      "recommended_owner_decision": "accept_member_role_split_hold_member_live_scope_until_exit_decay_review",
+      "residual_uncertainties": [
+        "no fresh executable signal exists for the P0 live lane",
+        "member roles are review inputs, not live-scope grants",
+        "exit-decay controls must be accepted before any member expansion review"
+      ],
+      "review_only": true,
+      "safety_invariants": {
+        "exchange_write_called": false,
+        "execution_intent_created": false,
+        "final_gate_called": false,
+        "l4_real_order_scope_expanded": false,
+        "live_profile_changed": false,
+        "local_review_only": true,
+        "mpg_member_live_scope_expanded": false,
+        "operation_layer_called": false,
+        "order_created": false,
+        "order_sizing_changed": false,
+        "preview_or_replay_treated_as_live_signal": false,
+        "real_order_authority": false,
+        "registry_authority_changed": false,
+        "server_files_mutated": false,
+        "server_interaction": false,
+        "shadow_candidate_created": false,
+        "strategy_parameters_changed": false,
+        "tier_policy_changed": false
+      },
+      "source_closure_result": "member_role_exit_decay_review_ready_without_member_live_scope_expansion",
+      "source_counts": {
+        "missed_no_action_forward_positive_count": 0,
+        "missed_positive_no_action_ratio": "0/0",
+        "no_action_count": 0,
+        "positive_forward_outcome_count": 0,
+        "would_enter_count": 0,
+        "would_enter_forward_positive_count": 0,
+        "would_enter_forward_positive_ratio": "0/0"
+      },
+      "status": "review_only_deep_dive_ready_for_owner_decision",
+      "strategy_group_id": "MPG-001"
+    }
+  ],
+  "generated_at_utc": "2026-06-22T09:36:57.315674+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_review_only_deep_dive",
+    "places_order": false,
+    "remote_interaction_count": 0,
+    "server_files_mutated": false
+  },
+  "owner_decision_package": {
+    "cards": [
+      {
+        "card_id": "BRF-001:deep_dive_owner_decision",
+        "decision_type": "promote_review_outcome",
+        "default_recommendation": "continue_promote_review_but_hold_l1_until_squeeze_and_forward_outcome_complete",
+        "diagnostic_conclusion": "BRF showed a real bear-rally-failure capture gap, but promotion quality is still constrained by squeeze risk, pending forward outcome, and RequiredFacts readiness.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "latest would_enter forward outcome is still pending",
+          "squeeze-risk replay sample recommends revise before promotion",
+          "RequiredFacts review is not a live-authority packet"
+        ],
+        "evidence_for": [
+          "would_enter observed: 1",
+          "missed no_action forward positives: 136",
+          "BRF replay sample count: 5"
+        ],
+        "next_system_action_if_approved": "build_brf_squeeze_classifier_requiredfacts_forward_outcome_v2",
+        "options": [
+          "continue_promote_review_without_tier_change",
+          "keep_l1_observe_until_forward_outcome_completes",
+          "pause_brf_until_squeeze_classifier_improves"
+        ],
+        "owner_label": "熊市反弹失败",
+        "policy_effects_blocked": [
+          "tier_policy_change",
+          "live_scope_change"
+        ],
+        "question": "BRF-001 是否继续 promote-review 证据线，但暂不升 tier、不扩大实盘范围。",
+        "strategy_group_id": "BRF-001"
+      },
+      {
+        "card_id": "BTPC-001:deep_dive_owner_decision",
+        "decision_type": "l2_shadow_revise_boundary",
+        "default_recommendation": "keep_l2_shadow_attach_fact_sources_before_any_gate_relaxation",
+        "diagnostic_conclusion": "BTPC is not simply idle; the dominant issue is systemic stale/fact source/classifier blocking. Gate relaxation remains unsafe before live fact-source attachment is closed.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "live RequiredFacts gaps remain: 8",
+          "source attachments pending: 8",
+          "relaxing stale gate now would be a policy and safety risk"
+        ],
+        "evidence_for": [
+          "high-priority stale-blocked no_action count: 169",
+          "missed no_action forward positives: 152",
+          "proxy reviewable would_enter count: 2",
+          "classifier rule review count: 2"
+        ],
+        "next_system_action_if_approved": "attach_btpc_live_fact_sources_then_rerun_false_negative_review",
+        "options": [
+          "keep_l2_shadow_attach_sources_first",
+          "prepare_conditional_gate_relax_review_after_sources",
+          "park_btpc_until_edge_reappears"
+        ],
+        "owner_label": "熊市回抽延续",
+        "policy_effects_blocked": [
+          "stale_gate_relaxation",
+          "tier_policy_change"
+        ],
+        "question": "BTPC-001 是否继续 L2 shadow，并先完成事实源挂接，而不是放松 stale gate。",
+        "strategy_group_id": "BTPC-001"
+      },
+      {
+        "card_id": "LSR-001:deep_dive_owner_decision",
+        "decision_type": "short_revival_rewrite_outcome",
+        "default_recommendation": "formalize_short_revival_rewrite_keep_l1_until_range_facts_complete",
+        "diagnostic_conclusion": "LSR short-revival has positive observe-only evidence, but the sample is small and range-context facts must be formalized before tier or live-scope changes.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "sample size is small",
+          "long preview and short-revival semantics still conflict",
+          "range-context RequiredFacts are not yet formal live authority"
+        ],
+        "evidence_for": [
+          "would_enter observed: 2",
+          "would_enter forward positives: 2",
+          "LSR replay sample count: 5"
+        ],
+        "next_system_action_if_approved": "build_lsr_short_revival_v2_range_context_fixture",
+        "options": [
+          "formalize_short_revival_rewrite",
+          "keep_l1_generic_observe",
+          "park_lsr_until_sample_size_improves"
+        ],
+        "owner_label": "流动性扫盘/短线复活",
+        "policy_effects_blocked": [
+          "live_scope_change",
+          "l1_to_l2_promotion"
+        ],
+        "question": "LSR-001 是否正式采用 short-revival rewrite 方向，并保持 observe-only。",
+        "strategy_group_id": "LSR-001"
+      },
+      {
+        "card_id": "MI-001:deep_dive_owner_decision",
+        "decision_type": "registry_identity_candidate_review",
+        "default_recommendation": "open_formal_candidate_review_without_registry_admission",
+        "diagnostic_conclusion": "MI is the strongest identity-review candidate in this wave. It has high would_enter volume and forward-positive concentration, but registry identity, overlap, and concentration are unresolved.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "strategy identity is not in current registry",
+          "overlap with MPG / TEQ is not yet resolved",
+          "symbol concentration and semantic explanation still need review"
+        ],
+        "evidence_for": [
+          "would_enter observed: 23",
+          "would_enter forward positives: 22",
+          "forward positive ratio: 22/23"
+        ],
+        "next_system_action_if_approved": "build_mi_overlap_concentration_registry_candidate_packet_v2",
+        "options": [
+          "formal_candidate_review_without_admission",
+          "mpg_support_capability_review",
+          "observe_asset_only",
+          "park_mi"
+        ],
+        "owner_label": "MI 身份复核",
+        "policy_effects_blocked": [
+          "registry_admission",
+          "live_scope_change"
+        ],
+        "question": "MI-001 是否进入正式候选复核，同时暂不进入 registry、不扩大实盘。",
+        "strategy_group_id": "MI-001"
+      },
+      {
+        "card_id": "CPM-RO-001:deep_dive_owner_decision",
+        "decision_type": "registry_identity_merge_review",
+        "default_recommendation": "keep_observation_asset_run_merge_review_before_independent_admission",
+        "diagnostic_conclusion": "CPM-RO has meaningful signal evidence, but the quality is mixed relative to MI and its family boundary is unresolved. Observation asset plus merge review is the safer next decision.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "strategy identity is not in current registry",
+          "forward quality is mixed relative to MI",
+          "merge target across CPM/RBR/momentum family is unresolved"
+        ],
+        "evidence_for": [
+          "would_enter observed: 18",
+          "would_enter forward positives: 13",
+          "forward positive ratio: 13/18"
+        ],
+        "next_system_action_if_approved": "build_cpm_ro_merge_target_and_quality_comparison_packet_v2",
+        "options": [
+          "observe_asset_and_merge_review",
+          "independent_strategy_review",
+          "merge_into_existing_family",
+          "park_cpm_ro"
+        ],
+        "owner_label": "CPM-RO 合并复核",
+        "policy_effects_blocked": [
+          "registry_admission",
+          "live_scope_change"
+        ],
+        "question": "CPM-RO-001 是否保留观察资产并进入 merge review，而不是独立 admission。",
+        "strategy_group_id": "CPM-RO-001"
+      },
+      {
+        "card_id": "MPG-001:deep_dive_owner_decision",
+        "decision_type": "member_role_exit_decay_boundary",
+        "default_recommendation": "accept_member_role_split_hold_member_live_scope_until_exit_decay_review",
+        "diagnostic_conclusion": "MPG remains the selected L4 live lane, but there is no executable fresh signal now. Member roles and exit-decay policy can be decided without expanding member live scope.",
+        "does_not_authorize_live_execution": true,
+        "evidence_against": [
+          "current package does not prove which member should receive live scope",
+          "member-level evidence remains review-only and not action-time live facts"
+        ],
+        "evidence_for": [
+          "MPG replay sample count: 8",
+          "six member roles are present in the quality closure wave",
+          "exit horizons and decay controls are present before any live expansion"
+        ],
+        "next_system_action_if_approved": "build_mpg_member_role_controls_v2_without_live_scope_expansion",
+        "options": [
+          "accept_member_role_split_without_live_expansion",
+          "keep_mpg_single_l4_box",
+          "freeze_member_review"
+        ],
+        "owner_label": "动量延续成员治理",
+        "policy_effects_blocked": [
+          "mpg_member_live_scope_expansion",
+          "live_profile_change"
+        ],
+        "question": "MPG-001 是否接受 member role split 和 exit-decay 复核，但不扩大 member live scope。",
+        "strategy_group_id": "MPG-001"
+      }
+    ],
+    "decision_count": 6,
+    "owner_policy_confirmation_required_now": true,
+    "runtime_owner_intervention_required": false,
+    "status": "owner_policy_decision_package_ready"
+  },
+  "owner_progress_projection": {
+    "deep_dive_packet_count": 6,
+    "next_owner_decision_count": 6,
+    "no_live_permission": true,
+    "owner_intervention_required": false,
+    "owner_policy_confirmation_required_now": true,
+    "owner_summary": "P0 主链路等待可执行机会；P0.5 六条策略复核线已深挖到下一轮 Owner 政策决策点；实盘权限没有变化。",
+    "p0_5_owner_label": "六条策略复核线等待政策决策",
+    "p0_5_state": "six_line_review_ready_for_owner_policy_decision",
+    "p0_owner_label": "主链路等待机会",
+    "p0_state": "waiting_for_market",
+    "rows": [
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "熊市反弹失败",
+        "recommended_owner_decision": "continue_promote_review_but_hold_l1_until_squeeze_and_forward_outcome_complete",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "BRF-001"
+      },
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "熊市回抽延续",
+        "recommended_owner_decision": "keep_l2_shadow_attach_fact_sources_before_any_gate_relaxation",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "BTPC-001"
+      },
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "流动性扫盘/短线复活",
+        "recommended_owner_decision": "formalize_short_revival_rewrite_keep_l1_until_range_facts_complete",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "LSR-001"
+      },
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "MI 身份复核",
+        "recommended_owner_decision": "open_formal_candidate_review_without_registry_admission",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "MI-001"
+      },
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "CPM-RO 合并复核",
+        "recommended_owner_decision": "keep_observation_asset_run_merge_review_before_independent_admission",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "CPM-RO-001"
+      },
+      {
+        "does_not_authorize_live_execution": true,
+        "owner_label": "动量延续成员治理",
+        "recommended_owner_decision": "accept_member_role_split_hold_member_live_scope_until_exit_decay_review",
+        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "strategy_group_id": "MPG-001"
+      }
+    ],
+    "status": "six_line_deep_dive_owner_progress_ready"
+  },
+  "phase_status": {
+    "phase_1_owner_perception_projection": "ready",
+    "phase_2_six_line_deep_dive": "ready",
+    "phase_3_owner_policy_decision_package": "ready_for_owner_policy_decision"
+  },
+  "safety_invariants": {
+    "exchange_write_called": false,
+    "execution_intent_created": false,
+    "final_gate_called": false,
+    "l4_real_order_scope_expanded": false,
+    "live_profile_changed": false,
+    "local_review_only": true,
+    "mpg_member_live_scope_expanded": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "preview_or_replay_treated_as_live_signal": false,
+    "real_order_authority": false,
+    "registry_authority_changed": false,
+    "server_files_mutated": false,
+    "server_interaction": false,
+    "shadow_candidate_created": false,
+    "strategy_parameters_changed": false,
+    "tier_policy_changed": false
+  },
+  "schema": "brc.strategygroup_review_only_deep_dive_wave.v1",
+  "scope": "strategygroup_review_only_six_line_deep_dive",
+  "source_status": {
+    "evidence_closure_wave": "review_only_evidence_closure_wave_ready"
+  },
+  "status": "review_only_deep_dive_ready_for_owner_decision"
+}
