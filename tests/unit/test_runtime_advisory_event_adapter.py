@@ -152,6 +152,13 @@ def test_watcher_prepared_signal_builds_push_only_strategy_event_without_order_p
                 "exchange_write_called": False,
                 "order_created": False,
                 "webhook_secret": "must-not-leak",
+                "webhookSecret": "must-not-leak-camel",
+                "ApiKey": "must-not-leak-pascal",
+                "client-order-id": "must-not-leak-kebab",
+                "ExchangeOrderId": "must-not-leak-exchange",
+                "accessToken": "must-not-leak-token",
+                "X-Signature": "must-not-leak-signature",
+                "preparedAuthorizationId": "must-not-leak-authorization",
             },
         },
         now=NOW_MS,
@@ -170,6 +177,14 @@ def test_watcher_prepared_signal_builds_push_only_strategy_event_without_order_p
     assert "leverage" not in payload_text
     assert "entry_price" not in payload_text
     assert "webhook_secret" not in payload_text
+    assert "webhookSecret" not in payload_text
+    assert "ApiKey" not in payload_text
+    assert "client-order-id" not in payload_text
+    assert "ExchangeOrderId" not in payload_text
+    assert "accessToken" not in payload_text
+    assert "X-Signature" not in payload_text
+    assert "preparedAuthorizationId" not in payload_text
+    assert "must-not-leak" not in payload_text
     assert event.not_execution_authority is True
     assert event.order_created is False
     assert event.exchange_called is False
@@ -211,7 +226,13 @@ def test_trade_closed_and_review_due_events_are_push_only_review_inputs():
             "symbol": "BTC/USDT:USDT",
             "status": "closed",
             "review_status": "review_due",
-            "outcome_summary": {"realized_pnl": "12.3", "side": "long"},
+            "outcome_summary": {
+                "realized_pnl": "12.3",
+                "side": "long",
+                "entryPrice": "100",
+                "stop-loss": "98",
+                "takeProfit": "120",
+            },
         },
         now=NOW_MS,
     )
@@ -227,7 +248,11 @@ def test_trade_closed_and_review_due_events_are_push_only_review_inputs():
     assert trade_event.event_type == LlmConsumableEventType.TRADE_CLOSED
     assert trade_event.delivery_policy == [LlmAdvisoryDeliveryChannel.FEISHU_PUSH]
     assert LlmAdvisoryAllowedAction.REVIEW_CLOSED_TRADE in trade_event.allowed_llm_actions
-    assert "side" not in json.dumps(trade_event.context_packet.model_dump(mode="json"))
+    trade_payload = json.dumps(trade_event.context_packet.model_dump(mode="json"))
+    assert "side" not in trade_payload
+    assert "entryPrice" not in trade_payload
+    assert "stop-loss" not in trade_payload
+    assert "takeProfit" not in trade_payload
     assert review_event.event_type == LlmConsumableEventType.REVIEW_DUE
     assert review_event.delivery_policy == [LlmAdvisoryDeliveryChannel.FEISHU_PUSH]
     assert review_event.strategy_family_ids == ["MPG-001"]
