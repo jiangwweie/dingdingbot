@@ -22,7 +22,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-22T05:28:28.068877+00:00",
+  "generated_at_utc": "2026-06-22T11:57:04.351415+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -65,10 +65,13 @@
     "signal_coverage_expansion_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
     "signal_coverage_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
     "strategygroup_btpc_fact_classifier_guard_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
+    "strategygroup_capital_trial_packet_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json",
+    "strategygroup_capital_trial_readiness_bridge_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json",
     "strategygroup_decision_ledger_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-decision-ledger.json",
     "strategygroup_handoff_boundary_closure_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
     "strategygroup_lifecycle_rehearsal_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
     "strategygroup_live_submit_readiness_bridge_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-submit-readiness-bridge.json",
+    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
     "strategygroup_pre_live_rehearsal_readiness_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
     "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
   },
@@ -115,6 +118,38 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
       "returncode": 0,
       "status": "live_cutover_waiting_for_fresh_signal"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_strategygroup_portfolio_board",
+        "places_order": false,
+        "remote_interaction_count": 0,
+        "server_files_mutated": false
+      },
+      "name": "strategygroup_portfolio_board",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+      "returncode": 0,
+      "status": "portfolio_board_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_capital_trial_readiness_bridge",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_capital_trial_readiness_bridge",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json",
+      "returncode": 0,
+      "status": "capital_trial_readiness_bridge_ready"
     },
     {
       "interaction": {

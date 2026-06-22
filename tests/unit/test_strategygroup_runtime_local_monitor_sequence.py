@@ -541,6 +541,104 @@ def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
     )
 
 
+def _write_ready_strategygroup_portfolio_board(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "portfolio_board_ready",
+            "portfolio_summary": {
+                "portfolio_row_count": 10,
+                "trial_candidate_count": 5,
+                "engineering_continuation_count": 9,
+                "owner_policy_decision_count": 4,
+            },
+            "trial_candidate_pool": {
+                "candidate_count": 5,
+                "eligible_now_count": 1,
+                "actionable_now_count": 0,
+                "live_permission_change_count": 0,
+            },
+            "owner_progress_projection": {
+                "owner_intervention_required": False,
+            },
+            "interaction": {
+                "level": "L0_local_strategygroup_portfolio_board",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+                "registry_authority_changed": False,
+                "tier_policy_changed": False,
+                "live_profile_changed": False,
+                "order_sizing_changed": False,
+            },
+        },
+    )
+
+
+def _write_ready_capital_trial_bridge(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "capital_trial_readiness_bridge_ready",
+            "capital_trial_summary": {
+                "eligibility_row_count": 5,
+                "non_mpg_trial_candidate_count": 5,
+                "selected_non_mpg_strategy_group_id": "MI-001",
+                "selected_candidate_status": "trial_prepare_candidate_pending_owner_policy",
+                "trial_packet_generated": True,
+                "actionable_now_count": 0,
+                "live_permission_change_count": 0,
+                "real_order_authority_count": 0,
+                "owner_policy_checkpoint_count": 1,
+            },
+            "trial_packet_v0": {
+                "schema": "brc.strategygroup_capital_trial_packet.v0",
+                "strategy_group_id": "MI-001",
+                "actionable_now": False,
+                "live_permission_change": False,
+                "real_order_authority": False,
+            },
+            "owner_policy_checkpoint": {
+                "runtime_owner_intervention_required": False,
+            },
+            "interaction": {
+                "level": "L0_local_capital_trial_readiness_bridge",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+                "registry_authority_changed": False,
+                "tier_policy_changed": False,
+                "live_profile_changed": False,
+                "order_sizing_changed": False,
+            },
+        },
+    )
+
+
 def _write_passed_runtime_dry_run_audit_chain(command: list[str]) -> None:
     _write_output(
         command,
@@ -596,6 +694,12 @@ def _maybe_write_strategygroup_closure_step(
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_live_submit_readiness_bridge.py":
         _write_ready_live_submit_readiness_bridge(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_portfolio_board.py":
+        _write_ready_strategygroup_portfolio_board(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_capital_trial_readiness_bridge.py":
+        _write_ready_capital_trial_bridge(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     return None
 
@@ -843,6 +947,15 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "live-submit-bridge.json",
         strategygroup_live_submit_readiness_bridge_md=tmp_path
         / "live-submit-bridge.md",
+        strategygroup_portfolio_board_json=tmp_path / "portfolio-board.json",
+        strategygroup_portfolio_board_md=tmp_path / "portfolio-board.md",
+        strategygroup_trial_candidate_pool_md=tmp_path / "trial-pool.md",
+        strategygroup_capital_trial_readiness_bridge_json=tmp_path
+        / "capital-trial-bridge.json",
+        strategygroup_capital_trial_readiness_bridge_md=tmp_path
+        / "capital-trial-bridge.md",
+        strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
+        strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
         command_runner=fake_runner,
     )
 
@@ -850,6 +963,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "run_strategygroup_runtime_daily_check.py",
         "runtime_dry_run_audit_chain.py",
         "runtime_live_cutover_readiness.py",
+        "build_strategygroup_portfolio_board.py",
+        "build_strategygroup_capital_trial_readiness_bridge.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",
@@ -1139,6 +1254,15 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "live-submit-bridge.json",
         strategygroup_live_submit_readiness_bridge_md=tmp_path
         / "live-submit-bridge.md",
+        strategygroup_portfolio_board_json=tmp_path / "portfolio-board.json",
+        strategygroup_portfolio_board_md=tmp_path / "portfolio-board.md",
+        strategygroup_trial_candidate_pool_md=tmp_path / "trial-pool.md",
+        strategygroup_capital_trial_readiness_bridge_json=tmp_path
+        / "capital-trial-bridge.json",
+        strategygroup_capital_trial_readiness_bridge_md=tmp_path
+        / "capital-trial-bridge.md",
+        strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
+        strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
         command_runner=fake_runner,
     )
 
@@ -1434,6 +1558,15 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "live-submit-bridge.json",
         strategygroup_live_submit_readiness_bridge_md=tmp_path
         / "live-submit-bridge.md",
+        strategygroup_portfolio_board_json=tmp_path / "portfolio-board.json",
+        strategygroup_portfolio_board_md=tmp_path / "portfolio-board.md",
+        strategygroup_trial_candidate_pool_md=tmp_path / "trial-pool.md",
+        strategygroup_capital_trial_readiness_bridge_json=tmp_path
+        / "capital-trial-bridge.json",
+        strategygroup_capital_trial_readiness_bridge_md=tmp_path
+        / "capital-trial-bridge.md",
+        strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
+        strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
         command_runner=fake_runner,
     )
 
@@ -1686,6 +1819,15 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "live-submit-bridge.json",
         strategygroup_live_submit_readiness_bridge_md=tmp_path
         / "live-submit-bridge.md",
+        strategygroup_portfolio_board_json=tmp_path / "portfolio-board.json",
+        strategygroup_portfolio_board_md=tmp_path / "portfolio-board.md",
+        strategygroup_trial_candidate_pool_md=tmp_path / "trial-pool.md",
+        strategygroup_capital_trial_readiness_bridge_json=tmp_path
+        / "capital-trial-bridge.json",
+        strategygroup_capital_trial_readiness_bridge_md=tmp_path
+        / "capital-trial-bridge.md",
+        strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
+        strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
         command_runner=fake_runner,
     )
 
@@ -1926,6 +2068,15 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "live-submit-bridge.json",
         strategygroup_live_submit_readiness_bridge_md=tmp_path
         / "live-submit-bridge.md",
+        strategygroup_portfolio_board_json=tmp_path / "portfolio-board.json",
+        strategygroup_portfolio_board_md=tmp_path / "portfolio-board.md",
+        strategygroup_trial_candidate_pool_md=tmp_path / "trial-pool.md",
+        strategygroup_capital_trial_readiness_bridge_json=tmp_path
+        / "capital-trial-bridge.json",
+        strategygroup_capital_trial_readiness_bridge_md=tmp_path
+        / "capital-trial-bridge.md",
+        strategygroup_capital_trial_packet_json=tmp_path / "trial-packet.json",
+        strategygroup_capital_trial_packet_md=tmp_path / "trial-packet.md",
         command_runner=fake_runner,
     )
 

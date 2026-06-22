@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-22T05:28:28.068877+00:00
+- 报告时间: 2026-06-22T11:57:04.351415+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -17,6 +17,8 @@
 | daily_check | waiting_for_market_monitor_refresh_needed | 2 |
 | runtime_dry_run_audit_chain | passed | 0 |
 | live_cutover_readiness | live_cutover_waiting_for_fresh_signal | 0 |
+| strategygroup_portfolio_board | portfolio_board_ready | 0 |
+| strategygroup_capital_trial_readiness_bridge | capital_trial_readiness_bridge_ready | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |

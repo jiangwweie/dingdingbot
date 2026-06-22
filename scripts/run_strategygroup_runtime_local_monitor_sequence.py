@@ -179,6 +179,29 @@ DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON = (
 DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-live-submit-readiness-bridge.md"
 )
+DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
+)
+DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.md"
+)
+DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md"
+)
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json"
+)
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.md"
+)
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json"
+)
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -292,6 +315,25 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_live_submit_readiness_bridge_md=Path(
             args.strategygroup_live_submit_readiness_bridge_md
+        ),
+        strategygroup_portfolio_board_json=Path(
+            args.strategygroup_portfolio_board_json
+        ),
+        strategygroup_portfolio_board_md=Path(args.strategygroup_portfolio_board_md),
+        strategygroup_trial_candidate_pool_md=Path(
+            args.strategygroup_trial_candidate_pool_md
+        ),
+        strategygroup_capital_trial_readiness_bridge_json=Path(
+            args.strategygroup_capital_trial_readiness_bridge_json
+        ),
+        strategygroup_capital_trial_readiness_bridge_md=Path(
+            args.strategygroup_capital_trial_readiness_bridge_md
+        ),
+        strategygroup_capital_trial_packet_json=Path(
+            args.strategygroup_capital_trial_packet_json
+        ),
+        strategygroup_capital_trial_packet_md=Path(
+            args.strategygroup_capital_trial_packet_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -430,6 +472,25 @@ def build_local_monitor_sequence_report(
     strategygroup_live_submit_readiness_bridge_md: Path = (
         DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD
     ),
+    strategygroup_portfolio_board_json: Path = (
+        DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON
+    ),
+    strategygroup_portfolio_board_md: Path = DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD,
+    strategygroup_trial_candidate_pool_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD
+    ),
+    strategygroup_capital_trial_readiness_bridge_json: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON
+    ),
+    strategygroup_capital_trial_readiness_bridge_md: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD
+    ),
+    strategygroup_capital_trial_packet_json: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON
+    ),
+    strategygroup_capital_trial_packet_md: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -476,10 +537,59 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_portfolio_board_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_portfolio_board.py"),
+        "--output-json",
+        str(strategygroup_portfolio_board_json),
+        "--output-md",
+        str(strategygroup_portfolio_board_md),
+        "--output-trial-pool-md",
+        str(strategygroup_trial_candidate_pool_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_portfolio_board",
+            strategygroup_portfolio_board_command,
+            strategygroup_portfolio_board_json,
+            runner,
+        )
+    )
+
+    strategygroup_capital_trial_readiness_bridge_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_capital_trial_readiness_bridge.py"
+        ),
+        "--portfolio-board-json",
+        str(strategygroup_portfolio_board_json),
+        "--output-json",
+        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--output-owner-progress",
+        str(strategygroup_capital_trial_readiness_bridge_md),
+        "--output-trial-packet-json",
+        str(strategygroup_capital_trial_packet_json),
+        "--output-trial-packet-md",
+        str(strategygroup_capital_trial_packet_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_capital_trial_readiness_bridge",
+            strategygroup_capital_trial_readiness_bridge_command,
+            strategygroup_capital_trial_readiness_bridge_json,
+            runner,
+        )
+    )
+
     goal_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/run_strategygroup_runtime_goal_progress_audit.py"),
         "--owner-progress",
+        "--strategygroup-portfolio-board-json",
+        str(strategygroup_portfolio_board_json),
+        "--strategygroup-capital-trial-readiness-bridge-json",
+        str(strategygroup_capital_trial_readiness_bridge_json),
         "--output-json",
         str(goal_progress_json),
         "--output-owner-progress",
@@ -1121,6 +1231,13 @@ def build_local_monitor_sequence_report(
             ),
             "strategygroup_live_submit_readiness_bridge_json": str(
                 strategygroup_live_submit_readiness_bridge_json
+            ),
+            "strategygroup_portfolio_board_json": str(strategygroup_portfolio_board_json),
+            "strategygroup_capital_trial_readiness_bridge_json": str(
+                strategygroup_capital_trial_readiness_bridge_json
+            ),
+            "strategygroup_capital_trial_packet_json": str(
+                strategygroup_capital_trial_packet_json
             ),
         },
     }
@@ -2051,6 +2168,34 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-live-submit-readiness-bridge-md",
         default=str(DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-portfolio-board-json",
+        default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-portfolio-board-md",
+        default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-trial-candidate-pool-md",
+        default=str(DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-readiness-bridge-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-readiness-bridge-md",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-packet-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-packet-md",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

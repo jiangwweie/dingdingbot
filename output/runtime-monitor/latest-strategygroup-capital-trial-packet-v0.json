@@ -1,0 +1,91 @@
+{
+  "actionable_now": false,
+  "authority_boundary": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "creates_execution_intent": false,
+    "live_permission_change": false,
+    "live_profile_change": false,
+    "order_sizing_change": false,
+    "places_order": false,
+    "pre_registered_review_only": true,
+    "preview_or_replay_treated_as_live_signal": false,
+    "real_order_authority": false,
+    "registry_admission": false,
+    "tier_policy_change": false
+  },
+  "candidate_status": "trial_prepare_candidate_pending_owner_policy",
+  "evidence_refs": {
+    "capture_gap_audit": "/Users/jiangwei/Documents/final/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+    "portfolio_board": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+    "recent_opportunity_count": 23,
+    "sampled_event_count": 8,
+    "tradable_forward_count": 22,
+    "would_enter_forward_positive_count": 22
+  },
+  "generated_at_utc": "2026-06-22T11:57:01.426804+00:00",
+  "hypothesis": "MI-001 SOL long momentum-impulse observe-only samples have enough recent cost-after-MFE evidence to prepare a bounded capital trial, but identity, capital scope, and live-action facts remain unresolved.",
+  "kill_conditions": [
+    "owner_policy_not_accepted",
+    "strategy_identity_unresolved",
+    "fresh_signal_absent",
+    "required_facts_missing_or_stale",
+    "candidate_authorization_missing",
+    "action_time_finalgate_not_passed",
+    "official_operation_layer_not_passed",
+    "protection_plan_missing",
+    "active_position_or_open_order_conflict",
+    "slippage_above_owner_policy",
+    "reconciliation_or_settlement_unavailable"
+  ],
+  "live_permission_change": false,
+  "packet_id": "trial-packet-v0:MI-001:20260622",
+  "real_order_authority": false,
+  "requires_finalgate": true,
+  "requires_fresh_signal": true,
+  "requires_operation_layer": true,
+  "requires_owner_policy_acceptance": true,
+  "requires_required_facts": true,
+  "review_fields": [
+    "submit_attempt_id",
+    "fill_status",
+    "avg_fill_price",
+    "slippage",
+    "fees",
+    "funding",
+    "mfe",
+    "mae",
+    "pnl",
+    "protection_status",
+    "reconciliation_status",
+    "settlement_status",
+    "review_decision"
+  ],
+  "schema": "brc.strategygroup_capital_trial_packet.v0",
+  "side_scope": [
+    "long"
+  ],
+  "stop_policy": {
+    "policy": "exchange_native_stop_or_official_protection_required_before_submit",
+    "required": true
+  },
+  "strategy_group_id": "MI-001",
+  "symbol_scope": [
+    "SOL/USDT:USDT"
+  ],
+  "trial_boundary": {
+    "action_time_finalgate_required": true,
+    "candidate_authorization_required": true,
+    "capital_scope": "owner_policy_required",
+    "exchange_native_protection_required": true,
+    "fresh_signal_required": true,
+    "max_attempts": 1,
+    "max_notional": "owner_policy_required",
+    "official_operation_layer_required": true,
+    "required_facts_required": true,
+    "slippage_limit": "owner_policy_required",
+    "valid_until": "owner_policy_required"
+  }
+}

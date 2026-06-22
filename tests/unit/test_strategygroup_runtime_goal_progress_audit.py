@@ -374,6 +374,59 @@ def _strategygroup_portfolio_board(**overrides):
     return base
 
 
+def _strategygroup_capital_trial_bridge(**overrides):
+    base = {
+        "status": "capital_trial_readiness_bridge_ready",
+        "capital_trial_summary": {
+            "eligibility_row_count": 5,
+            "non_mpg_trial_candidate_count": 5,
+            "selected_non_mpg_strategy_group_id": "MI-001",
+            "selected_candidate_status": "trial_prepare_candidate_pending_owner_policy",
+            "trial_packet_generated": True,
+            "actionable_now_count": 0,
+            "live_permission_change_count": 0,
+            "real_order_authority_count": 0,
+            "owner_policy_checkpoint_count": 1,
+        },
+        "trial_packet_v0": {
+            "schema": "brc.strategygroup_capital_trial_packet.v0",
+            "strategy_group_id": "MI-001",
+            "actionable_now": False,
+            "live_permission_change": False,
+            "real_order_authority": False,
+        },
+        "owner_policy_checkpoint": {
+            "status": "owner_policy_required_later",
+            "runtime_owner_intervention_required": False,
+        },
+        "interaction": {
+            "level": "L0_local_capital_trial_readiness_bridge",
+            "remote_interaction_count": 0,
+        },
+        "safety_invariants": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "exchange_write_called": False,
+            "calls_exchange_write": False,
+            "final_gate_called": False,
+            "calls_finalgate": False,
+            "operation_layer_called": False,
+            "calls_operation_layer": False,
+            "order_created": False,
+            "places_order": False,
+            "registry_authority_changed": False,
+            "tier_policy_changed": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "mpg_member_live_scope_expanded": False,
+            "l4_real_order_scope_expanded": False,
+            "preview_or_replay_treated_as_live_signal": False,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def test_goal_progress_waiting_for_market_with_p05_ready():
     module = _load_module()
 
@@ -617,6 +670,58 @@ def test_goal_progress_projects_portfolio_board_without_runtime_intervention():
     assert "## StrategyGroup Portfolio Board Boundary" in text
     assert "- Portfolio row count: 10" in text
     assert "- Trial candidate count: 5" in text
+    assert "- Actionable now count: 0" in text
+    assert "- Live permission change count: 0" in text
+    assert "- Runtime Owner intervention required: 否" in text
+    assert "- Real order authority: 否" in text
+
+
+def test_goal_progress_projects_capital_trial_bridge_without_runtime_intervention():
+    module = _load_module()
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_readiness_bridge=(
+            _strategygroup_capital_trial_bridge()
+        ),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["p05_capital_trial"] == (
+        "trial_prepare_candidate_pending_owner_policy"
+    )
+    assert report["checks"]["p05_ready"] is True
+    assert report["checks"]["product_gaps"] == []
+    boundary = report["strategygroup_capital_trial_readiness_bridge_boundary"]
+    assert boundary["status"] == "capital_trial_readiness_bridge_ready"
+    assert boundary["eligibility_row_count"] == 5
+    assert boundary["non_mpg_trial_candidate_count"] == 5
+    assert boundary["selected_non_mpg_strategy_group_id"] == "MI-001"
+    assert boundary["selected_candidate_status"] == (
+        "trial_prepare_candidate_pending_owner_policy"
+    )
+    assert boundary["trial_packet_generated"] is True
+    assert boundary["actionable_now_count"] == 0
+    assert boundary["live_permission_change_count"] == 0
+    assert boundary["real_order_authority_count"] == 0
+    assert boundary["runtime_owner_intervention_required"] is False
+    assert boundary["real_order_authority"] is False
+    assert boundary["reject_reasons"] == []
+
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p05_strategygroup_capital_trial_readiness_bridge"][
+        "status"
+    ] == "ready"
+    assert tracks["p05_strategygroup_capital_trial_readiness_bridge"][
+        "owner_state"
+    ] == "资金试验候选准备中"
+    text = module._owner_progress_text(report)
+    assert "## StrategyGroup Capital Trial Readiness Bridge Boundary" in text
+    assert "- Selected non-MPG StrategyGroup: MI-001" in text
+    assert "- Trial packet generated: 是" in text
     assert "- Actionable now count: 0" in text
     assert "- Live permission change count: 0" in text
     assert "- Runtime Owner intervention required: 否" in text

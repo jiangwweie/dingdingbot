@@ -58,6 +58,10 @@ DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON = (
 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
 )
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json"
+)
 SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
 MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
 DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
@@ -114,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
         strategygroup_portfolio_board=_read_optional_json(
             Path(args.strategygroup_portfolio_board_json)
         ),
+        strategygroup_capital_trial_readiness_bridge=_read_optional_json(
+            Path(args.strategygroup_capital_trial_readiness_bridge_json)
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -149,6 +156,7 @@ def build_goal_progress_report(
     strategy_review_evidence_closure_wave: dict[str, Any] | None = None,
     strategy_review_deep_dive_wave: dict[str, Any] | None = None,
     strategygroup_portfolio_board: dict[str, Any] | None = None,
+    strategygroup_capital_trial_readiness_bridge: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -238,6 +246,15 @@ def build_goal_progress_report(
         *(
             [_strategygroup_portfolio_board_track(strategygroup_portfolio_board)]
             if strategygroup_portfolio_board
+            else []
+        ),
+        *(
+            [
+                _strategygroup_capital_trial_readiness_bridge_track(
+                    strategygroup_capital_trial_readiness_bridge
+                )
+            ]
+            if strategygroup_capital_trial_readiness_bridge
             else []
         ),
         _safety_invariants_track(safety=safety),
@@ -429,6 +446,17 @@ def build_goal_progress_report(
                 == "portfolio_board_ready"
                 else "not_generated"
             ),
+            "p05_capital_trial": (
+                _strategygroup_capital_trial_readiness_bridge_boundary(
+                    strategygroup_capital_trial_readiness_bridge
+                )["selected_candidate_status"]
+                if strategygroup_capital_trial_readiness_bridge
+                and _strategygroup_capital_trial_readiness_bridge_boundary(
+                    strategygroup_capital_trial_readiness_bridge
+                )["status"]
+                == "capital_trial_readiness_bridge_ready"
+                else "not_generated"
+            ),
         },
         "completion_boundary": completion_boundary,
         "entry_fast_chain_boundary": entry_fast_chain_boundary,
@@ -446,6 +474,11 @@ def build_goal_progress_report(
         ),
         "strategygroup_portfolio_board_boundary": (
             _strategygroup_portfolio_board_boundary(strategygroup_portfolio_board)
+        ),
+        "strategygroup_capital_trial_readiness_bridge_boundary": (
+            _strategygroup_capital_trial_readiness_bridge_boundary(
+                strategygroup_capital_trial_readiness_bridge
+            )
         ),
         "p0_completion_audit_boundary": p0_completion_audit_boundary,
         "checks": {
@@ -482,6 +515,9 @@ def build_goal_progress_report(
             ),
             "strategygroup_portfolio_board_json": str(
                 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON
+            ),
+            "strategygroup_capital_trial_readiness_bridge_json": str(
+                DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON
             ),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
@@ -1665,6 +1701,156 @@ def _strategygroup_portfolio_board_boundary(
     }
 
 
+def _strategygroup_capital_trial_readiness_bridge_track(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    boundary = _strategygroup_capital_trial_readiness_bridge_boundary(packet)
+    blockers = [
+        f"strategygroup_capital_trial_readiness_bridge:{item}"
+        for item in boundary["reject_reasons"]
+    ]
+    evidence = [
+        f"status={boundary['status']}",
+        f"eligibility_row_count={boundary['eligibility_row_count']}",
+        f"non_mpg_trial_candidate_count={boundary['non_mpg_trial_candidate_count']}",
+        f"selected_non_mpg_strategy_group_id={boundary['selected_non_mpg_strategy_group_id']}",
+        f"selected_candidate_status={boundary['selected_candidate_status']}",
+        f"trial_packet_generated={boundary['trial_packet_generated']}",
+        f"actionable_now_count={boundary['actionable_now_count']}",
+        f"live_permission_change_count={boundary['live_permission_change_count']}",
+        f"real_order_authority_count={boundary['real_order_authority_count']}",
+        "runtime_owner_intervention_required="
+        + str(boundary["runtime_owner_intervention_required"]),
+    ]
+    return {
+        "id": "p05_strategygroup_capital_trial_readiness_bridge",
+        "label": "P0.5 Capital Trial Readiness Bridge",
+        "status": "blocked" if blockers else "ready",
+        "owner_state": "资金试验候选准备中" if not blockers else "需处理",
+        "next_action": (
+            "保留 MI-001 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点"
+            if not blockers
+            else "修复 Capital Trial Readiness Bridge 证据或安全边界"
+        ),
+        "evidence": evidence,
+        "blockers": blockers,
+    }
+
+
+def _strategygroup_capital_trial_readiness_bridge_boundary(
+    packet: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not packet:
+        return {
+            "status": "not_generated",
+            "eligibility_row_count": 0,
+            "non_mpg_trial_candidate_count": 0,
+            "selected_non_mpg_strategy_group_id": None,
+            "selected_candidate_status": "not_generated",
+            "trial_packet_generated": False,
+            "actionable_now_count": 0,
+            "live_permission_change_count": 0,
+            "real_order_authority_count": 0,
+            "owner_policy_checkpoint_count": 0,
+            "runtime_owner_intervention_required": False,
+            "real_order_authority": False,
+            "reject_reasons": [],
+        }
+    summary = packet.get("capital_trial_summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    trial_packet = packet.get("trial_packet_v0")
+    if not isinstance(trial_packet, dict):
+        trial_packet = {}
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    interaction = packet.get("interaction")
+    if not isinstance(interaction, dict):
+        interaction = {}
+    policy = packet.get("owner_policy_checkpoint")
+    if not isinstance(policy, dict):
+        policy = {}
+    reject_reasons: list[str] = []
+    if packet.get("status") != "capital_trial_readiness_bridge_ready":
+        reject_reasons.append("packet_not_ready")
+    if int(summary.get("eligibility_row_count") or 0) < 5:
+        reject_reasons.append("eligibility_row_count_below_5")
+    if int(summary.get("non_mpg_trial_candidate_count") or 0) < 1:
+        reject_reasons.append("non_mpg_trial_candidate_missing")
+    selected = str(summary.get("selected_non_mpg_strategy_group_id") or "")
+    if not selected or selected == "MPG-001":
+        reject_reasons.append("selected_non_mpg_candidate_invalid")
+    if summary.get("trial_packet_generated") is not True:
+        reject_reasons.append("trial_packet_not_generated")
+    if int(summary.get("actionable_now_count") or 0) != 0:
+        reject_reasons.append("actionable_now_count_not_zero")
+    if int(summary.get("live_permission_change_count") or 0) != 0:
+        reject_reasons.append("live_permission_change_count_not_zero")
+    if int(summary.get("real_order_authority_count") or 0) != 0:
+        reject_reasons.append("real_order_authority_count_not_zero")
+    if trial_packet.get("actionable_now") is not False:
+        reject_reasons.append("trial_packet_actionable_now_not_false")
+    if trial_packet.get("live_permission_change") is not False:
+        reject_reasons.append("trial_packet_live_permission_change_not_false")
+    if trial_packet.get("real_order_authority") is not False:
+        reject_reasons.append("trial_packet_real_order_authority_not_false")
+    for key in (
+        "actionable_now",
+        "real_order_authority",
+        "exchange_write_called",
+        "calls_exchange_write",
+        "final_gate_called",
+        "calls_finalgate",
+        "operation_layer_called",
+        "calls_operation_layer",
+        "order_created",
+        "places_order",
+        "registry_authority_changed",
+        "tier_policy_changed",
+        "live_profile_changed",
+        "order_sizing_changed",
+        "mpg_member_live_scope_expanded",
+        "l4_real_order_scope_expanded",
+        "preview_or_replay_treated_as_live_signal",
+    ):
+        if safety.get(key) is True:
+            reject_reasons.append(f"forbidden_effect:{key}")
+    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
+        reject_reasons.append("remote_interaction_not_zero")
+    if policy.get("runtime_owner_intervention_required") is True:
+        reject_reasons.append("owner_policy_checkpoint_became_runtime_intervention")
+    return {
+        "status": str(packet.get("status") or "unknown"),
+        "eligibility_row_count": int(summary.get("eligibility_row_count") or 0),
+        "non_mpg_trial_candidate_count": int(
+            summary.get("non_mpg_trial_candidate_count") or 0
+        ),
+        "selected_non_mpg_strategy_group_id": (
+            summary.get("selected_non_mpg_strategy_group_id")
+        ),
+        "selected_candidate_status": str(
+            summary.get("selected_candidate_status") or "unknown"
+        ),
+        "trial_packet_generated": summary.get("trial_packet_generated") is True,
+        "actionable_now_count": int(summary.get("actionable_now_count") or 0),
+        "live_permission_change_count": int(
+            summary.get("live_permission_change_count") or 0
+        ),
+        "real_order_authority_count": int(
+            summary.get("real_order_authority_count") or 0
+        ),
+        "owner_policy_checkpoint_count": int(
+            summary.get("owner_policy_checkpoint_count") or 0
+        ),
+        "runtime_owner_intervention_required": (
+            policy.get("runtime_owner_intervention_required") is True
+        ),
+        "real_order_authority": safety.get("real_order_authority") is True,
+        "reject_reasons": reject_reasons,
+    }
+
+
 def _safety_invariants_track(*, safety: dict[str, Any]) -> dict[str, Any]:
     forbidden_true = [
         key for key, value in safety.items()
@@ -1771,6 +1957,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     strategy_review = report["strategy_review_evidence_closure_boundary"]
     strategy_deep_dive = report["strategy_review_deep_dive_boundary"]
     portfolio_board = report["strategygroup_portfolio_board_boundary"]
+    capital_trial = report["strategygroup_capital_trial_readiness_bridge_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -1990,6 +2177,34 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
             [str(item) for item in portfolio_board["reject_reasons"]]
         ),
         "",
+        "## StrategyGroup Capital Trial Readiness Bridge Boundary",
+        "",
+        f"- Status: {capital_trial['status']}",
+        "- Eligibility row count: "
+        + str(capital_trial["eligibility_row_count"]),
+        "- Non-MPG trial candidate count: "
+        + str(capital_trial["non_mpg_trial_candidate_count"]),
+        "- Selected non-MPG StrategyGroup: "
+        + str(capital_trial["selected_non_mpg_strategy_group_id"] or "none"),
+        "- Selected candidate status: "
+        + str(capital_trial["selected_candidate_status"]),
+        "- Trial packet generated: "
+        + _yes_no(bool(capital_trial["trial_packet_generated"])),
+        "- Actionable now count: "
+        + str(capital_trial["actionable_now_count"]),
+        "- Live permission change count: "
+        + str(capital_trial["live_permission_change_count"]),
+        "- Real order authority count: "
+        + str(capital_trial["real_order_authority_count"]),
+        "- Runtime Owner intervention required: "
+        + _yes_no(bool(capital_trial["runtime_owner_intervention_required"])),
+        "- Real order authority: "
+        + _yes_no(bool(capital_trial["real_order_authority"])),
+        "- Reject reasons: "
+        + _list_or_none(
+            [str(item) for item in capital_trial["reject_reasons"]]
+        ),
+        "",
         "## Tracks",
         "",
         "| Track | Status | Owner state | Next action | Blockers |",
@@ -2115,6 +2330,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-portfolio-board-json",
         default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-readiness-bridge-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",
