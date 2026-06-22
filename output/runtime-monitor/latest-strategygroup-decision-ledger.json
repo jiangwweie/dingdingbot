@@ -1,0 +1,304 @@
+{
+  "capture_gap_audit": {
+    "authority_boundary": "capture_gap_audit_is_review_input_only; no_tier_policy_change; no_live_profile_change; no_real_order_authority",
+    "high_priority_no_action_count": 671,
+    "integrated": true,
+    "live_permission_change_recommended_now": false,
+    "owner_decision_required_now": false,
+    "owner_visibility_state": {
+      "no_live_permission": true,
+      "observation_active": true,
+      "owner_intervention_required": false,
+      "owner_summary": "P0 waiting_for_market; P0.5 observed StrategyGroup capture issues; no live permission change.",
+      "p0_5_observation_state": "review_needed",
+      "p0_state": "waiting_for_market",
+      "review_needed_strategy_groups": [
+        "BRF-001",
+        "BTPC-001",
+        "CPM-RO-001",
+        "LSR-001",
+        "MI-001"
+      ]
+    },
+    "schema": "brc.strategy_capture_gap_audit.v3",
+    "status": "strategy_capture_gap_audit_ready",
+    "would_enter_count": 52
+  },
+  "counts": {
+    "capture_gap_audit_group_count": 10,
+    "current_row_count": 10,
+    "forbidden_effect_count": 0,
+    "high_priority_no_action_group_count": 4,
+    "l4_scope_change_recommended_count": 0,
+    "real_order_authorized_count": 0,
+    "strategy_group_count": 10
+  },
+  "decision": {
+    "capture_gap_audit_is_decision_support_only": true,
+    "default_next_step": "execute_or_verify_top_revision_checkpoints_without_live_authority_expansion",
+    "l4_promotion_recommended": false,
+    "no_action_attribution_is_field_input_only": true,
+    "one_current_row_per_strategy_group": true,
+    "raw_replay_samples_duplicated": false,
+    "real_order_scope_change_recommended": false,
+    "replay_decision_bridge_is_field_input_only": true,
+    "single_main_product": true
+  },
+  "decision_counts": {
+    "keep_observing": 4,
+    "park": 1,
+    "promote": 1,
+    "revise": 4
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_strategygroup_decision_ledger",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "ledger_rows": [
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "promote",
+      "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+      "opportunity_type": "would_enter",
+      "reason": "capture_gap_audit:official live_market windows produced BRF would_enter; review RequiredFacts and squeeze classifier before any tier change; would_enter:1 high_priority_no_action:168 would_enter_forward_positive:0 missed_no_action_forward_positive:136; source_recommendation:promote_review",
+      "required_next_evidence": "promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review",
+      "strategy_group_id": "BRF-001",
+      "tier": "L1"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "revise",
+      "next_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:BTPC remains blocked by stale/fact-source attribution despite P0.5 priority; would_enter:0 high_priority_no_action:169 would_enter_forward_positive:0 missed_no_action_forward_positive:152; source_recommendation:revise",
+      "required_next_evidence": "classifier_fact_source_revision_review:BTPC-001_classifier_fact_source_revision_review",
+      "strategy_group_id": "BTPC-001",
+      "tier": "L2"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "revise",
+      "next_checkpoint": "CPM-RO-001_registry_identity_review",
+      "opportunity_type": "would_enter",
+      "reason": "capture_gap_audit:CPM emits repeated would_enter events but is not documented in the current expectation map; would_enter:18 high_priority_no_action:0 would_enter_forward_positive:13 missed_no_action_forward_positive:0; source_recommendation:identity_review",
+      "required_next_evidence": "registry_identity_classification:CPM-RO-001_registry_identity_review",
+      "strategy_group_id": "CPM-RO-001",
+      "tier": "unknown"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "keep_observing",
+      "next_checkpoint": "FBS-001_no_action_visibility_and_routing_audit",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:mainline no_action reasons should stay visible when waiting_for_market is reported; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:coverage_visibility_review",
+      "required_next_evidence": "no_action_visibility_and_routing_summary:FBS-001_no_action_visibility_and_routing_audit",
+      "strategy_group_id": "FBS-001",
+      "tier": "L3"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "revise",
+      "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+      "opportunity_type": "would_enter",
+      "reason": "capture_gap_audit:side-specific rewrite remains the dominant blocker; would_enter:2 high_priority_no_action:167 would_enter_forward_positive:2 missed_no_action_forward_positive:0; source_recommendation:revise",
+      "required_next_evidence": "classifier_fact_source_revision_review:LSR-001_classifier_fact_source_revision_review",
+      "strategy_group_id": "LSR-001",
+      "tier": "L1"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "revise",
+      "next_checkpoint": "MI-001_registry_identity_review",
+      "opportunity_type": "would_enter",
+      "reason": "capture_gap_audit:MI emits repeated would_enter events but is still treated like a smoke lane; classify as smoke, MPG sub-capability, or formal candidate; would_enter:23 high_priority_no_action:0 would_enter_forward_positive:22 missed_no_action_forward_positive:0; source_recommendation:identity_review",
+      "required_next_evidence": "registry_identity_classification:MI-001_registry_identity_review",
+      "strategy_group_id": "MI-001",
+      "tier": "unknown"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "keep_observing",
+      "next_checkpoint": "MPG-001_no_action_visibility_and_routing_audit",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:mainline no_action reasons should stay visible when waiting_for_market is reported; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:coverage_visibility_review",
+      "required_next_evidence": "no_action_visibility_and_routing_summary:MPG-001_no_action_visibility_and_routing_audit",
+      "strategy_group_id": "MPG-001",
+      "tier": "L4"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "park",
+      "next_checkpoint": "park_until_material_new_edge_evidence",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:parked vocabulary lane unless materially new positive forward evidence appears; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:park",
+      "required_next_evidence": "material_new_edge_evidence_before_reactivation",
+      "strategy_group_id": "RBR-001",
+      "tier": "L1"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "keep_observing",
+      "next_checkpoint": "SOR-001_no_action_visibility_and_routing_audit",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:mainline no_action reasons should stay visible when waiting_for_market is reported; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:coverage_visibility_review",
+      "required_next_evidence": "no_action_visibility_and_routing_summary:SOR-001_no_action_visibility_and_routing_audit",
+      "strategy_group_id": "SOR-001",
+      "tier": "L3"
+    },
+    {
+      "authority_boundary": "local_decision_support_only; source=capture_gap_audit; real_order_authority=false; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
+      "decision": "keep_observing",
+      "next_checkpoint": "VCB-001_continue_observe_only",
+      "opportunity_type": "no_action",
+      "reason": "capture_gap_audit:current windows mostly fail compression breakout; keep classifier redesign as P1; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:keep_observing",
+      "required_next_evidence": "VCB-001_continue_observe_only",
+      "strategy_group_id": "VCB-001",
+      "tier": "L1"
+    }
+  ],
+  "required_row_fields": [
+    "strategy_group_id",
+    "tier",
+    "opportunity_type",
+    "decision",
+    "reason",
+    "required_next_evidence",
+    "authority_boundary",
+    "next_checkpoint"
+  ],
+  "safety_invariants": {
+    "exchange_write_called": false,
+    "execution_intent_created": false,
+    "final_gate_called": false,
+    "input_is_not_execution_authority": true,
+    "l4_real_order_scope_expanded": false,
+    "local_decision_ledger_only": true,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "runtime_started": false,
+    "server_files_mutated": false,
+    "server_interaction": false,
+    "shadow_candidate_created": false,
+    "source_forbidden_effects": [],
+    "strategy_parameters_changed": false,
+    "tier_policy_changed": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.strategygroup_decision_ledger.v1",
+  "scope": "strategygroup_decision_ledger",
+  "source_status": {
+    "capture_gap_audit": "strategy_capture_gap_audit_ready",
+    "opportunity_decision_loop": "decision_loop_ready",
+    "signal_coverage": "mainline_no_signal_low_priority_broader_would_enter"
+  },
+  "status": "decision_ledger_ready",
+  "tier_review": {
+    "basis": "decision_ledger_only",
+    "counts": {
+      "keep_current_tier": 4,
+      "park": 1,
+      "promote_candidate_for_review": 1,
+      "revise_before_tier_change": 4
+    },
+    "rows": [
+      {
+        "basis_decision": "promote",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+        "real_order_authority": false,
+        "strategy_group_id": "BRF-001",
+        "tier": "L1",
+        "tier_review_decision": "promote_candidate_for_review"
+      },
+      {
+        "basis_decision": "revise",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
+        "real_order_authority": false,
+        "strategy_group_id": "BTPC-001",
+        "tier": "L2",
+        "tier_review_decision": "revise_before_tier_change"
+      },
+      {
+        "basis_decision": "revise",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "CPM-RO-001_registry_identity_review",
+        "real_order_authority": false,
+        "strategy_group_id": "CPM-RO-001",
+        "tier": "unknown",
+        "tier_review_decision": "revise_before_tier_change"
+      },
+      {
+        "basis_decision": "keep_observing",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "FBS-001_no_action_visibility_and_routing_audit",
+        "real_order_authority": false,
+        "strategy_group_id": "FBS-001",
+        "tier": "L3",
+        "tier_review_decision": "keep_current_tier"
+      },
+      {
+        "basis_decision": "revise",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+        "real_order_authority": false,
+        "strategy_group_id": "LSR-001",
+        "tier": "L1",
+        "tier_review_decision": "revise_before_tier_change"
+      },
+      {
+        "basis_decision": "revise",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "MI-001_registry_identity_review",
+        "real_order_authority": false,
+        "strategy_group_id": "MI-001",
+        "tier": "unknown",
+        "tier_review_decision": "revise_before_tier_change"
+      },
+      {
+        "basis_decision": "keep_observing",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "MPG-001_no_action_visibility_and_routing_audit",
+        "real_order_authority": false,
+        "strategy_group_id": "MPG-001",
+        "tier": "L4",
+        "tier_review_decision": "keep_current_tier"
+      },
+      {
+        "basis_decision": "park",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "park_until_material_new_edge_evidence",
+        "real_order_authority": false,
+        "strategy_group_id": "RBR-001",
+        "tier": "L1",
+        "tier_review_decision": "park"
+      },
+      {
+        "basis_decision": "keep_observing",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "SOR-001_no_action_visibility_and_routing_audit",
+        "real_order_authority": false,
+        "strategy_group_id": "SOR-001",
+        "tier": "L3",
+        "tier_review_decision": "keep_current_tier"
+      },
+      {
+        "basis_decision": "keep_observing",
+        "l4_scope_change_recommended": false,
+        "next_checkpoint": "VCB-001_continue_observe_only",
+        "real_order_authority": false,
+        "strategy_group_id": "VCB-001",
+        "tier": "L1",
+        "tier_review_decision": "keep_current_tier"
+      }
+    ],
+    "status": "ready"
+  }
+}

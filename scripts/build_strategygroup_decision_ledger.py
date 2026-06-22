@@ -31,6 +31,9 @@ DEFAULT_TIER_POLICY_JSON = (
 DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.json"
 )
+DEFAULT_CAPTURE_GAP_AUDIT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/strategy-capture-gap-audit-20260622.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
 )
@@ -56,6 +59,7 @@ def build_strategygroup_decision_ledger(
     signal_coverage_packet: dict[str, Any],
     tier_policy: dict[str, Any],
     post_revision_replay_packet: dict[str, Any] | None = None,
+    capture_gap_audit_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     no_action_by_group = _high_priority_no_action_by_group(signal_coverage_packet)
     quality_rows = _dict_rows(
@@ -89,6 +93,19 @@ def build_strategygroup_decision_ledger(
             )
         )
 
+    capture_gap_rows = _capture_gap_ledger_rows(
+        capture_gap_audit_packet or {},
+        current_tier_by_group=current_tier_by_group,
+    )
+    if capture_gap_rows:
+        by_group = {
+            str(row.get("strategy_group_id") or "unknown"): row
+            for row in ledger_rows
+        }
+        for row in capture_gap_rows:
+            by_group[str(row.get("strategy_group_id") or "unknown")] = row
+        ledger_rows = list(by_group.values())
+
     completed_post_revision_groups = _completed_post_revision_groups(
         post_revision_replay_packet or {}
     )
@@ -104,6 +121,7 @@ def build_strategygroup_decision_ledger(
         opportunity_decision_loop_packet,
         signal_coverage_packet,
         post_revision_replay_packet or {},
+        capture_gap_audit_packet or {},
     )
     decision_counts = Counter(str(row.get("decision") or "unknown") for row in ledger_rows)
     tier_review_rows = [_tier_review_row(row) for row in ledger_rows]
@@ -121,6 +139,7 @@ def build_strategygroup_decision_ledger(
         "source_status": {
             "opportunity_decision_loop": opportunity_decision_loop_packet.get("status"),
             "signal_coverage": signal_coverage_packet.get("status"),
+            "capture_gap_audit": _as_dict(capture_gap_audit_packet).get("status"),
         },
         "interaction": {
             "level": "L0_local_strategygroup_decision_ledger",
@@ -136,6 +155,7 @@ def build_strategygroup_decision_ledger(
             "strategy_group_count": len(ledger_rows),
             "current_row_count": len(ledger_rows),
             "high_priority_no_action_group_count": len(no_action_by_group),
+            "capture_gap_audit_group_count": len(capture_gap_rows),
             "forbidden_effect_count": len(forbidden_effects),
             "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
@@ -168,10 +188,12 @@ def build_strategygroup_decision_ledger(
             "raw_replay_samples_duplicated": False,
             "no_action_attribution_is_field_input_only": True,
             "replay_decision_bridge_is_field_input_only": True,
+            "capture_gap_audit_is_decision_support_only": bool(capture_gap_rows),
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
             "default_next_step": _default_next_step(ledger_rows, forbidden_effects),
         },
+        "capture_gap_audit": _capture_gap_audit_summary(capture_gap_audit_packet or {}),
         "safety_invariants": {
             "local_decision_ledger_only": True,
             "input_is_not_execution_authority": True,
@@ -430,6 +452,8 @@ def _apply_post_revision_completion(
     group = str(row.get("strategy_group_id") or "")
     if str(row.get("decision") or "") != "revise" or group not in completed_groups:
         return row
+    if "capture_gap_audit:" in str(row.get("reason") or ""):
+        return row
     completed = dict(row)
     case_count = completed_groups[group]
     completed["decision"] = "keep_observing"
@@ -444,6 +468,144 @@ def _apply_post_revision_completion(
         "run_post_revision_stage_review_before_any_l2_or_l4_scope_change"
     )
     return completed
+
+
+def _capture_gap_ledger_rows(
+    packet: dict[str, Any],
+    *,
+    current_tier_by_group: dict[str, str],
+) -> list[dict[str, Any]]:
+    if packet.get("schema") != "brc.strategy_capture_gap_audit.v3":
+        return []
+    if packet.get("status") != "strategy_capture_gap_audit_ready":
+        return []
+
+    closure_rows = _capture_gap_closure_rows(packet)
+    closure_by_group = {
+        str(row.get("strategy_group_id") or "unknown"): row
+        for row in closure_rows
+    }
+    rows: list[dict[str, Any]] = []
+    for recommendation in _dict_rows(packet.get("decision_recommendations")):
+        group = str(recommendation.get("strategy_group_id") or "unknown")
+        closure = closure_by_group.get(group, {})
+        mapped_decision = _decision_from_capture_gap(recommendation)
+        rows.append(
+            {
+                "strategy_group_id": group,
+                "tier": current_tier_by_group.get(group, "unknown"),
+                "opportunity_type": (
+                    "would_enter"
+                    if _int(closure.get("would_enter_count")) > 0
+                    else "no_action"
+                ),
+                "decision": mapped_decision,
+                "reason": _capture_gap_reason(recommendation, closure),
+                "required_next_evidence": _capture_gap_required_next_evidence(
+                    recommendation
+                ),
+                "authority_boundary": (
+                    "local_decision_support_only; source=capture_gap_audit; "
+                    "real_order_authority=false; no_tier_policy_change; "
+                    "no_finalgate_no_operation_layer_no_exchange_write"
+                ),
+                "next_checkpoint": str(
+                    recommendation.get("next_checkpoint") or "continue_local_review"
+                ),
+            }
+        )
+    return rows
+
+
+def _capture_gap_closure_rows(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    closure = _as_dict(packet.get("priority_line_closure"))
+    rows: list[dict[str, Any]] = []
+    for key in (
+        "phase2_priority_strategy_lines",
+        "phase3_registry_identity_review",
+        "phase4_visibility_review",
+    ):
+        rows.extend(_dict_rows(closure.get(key)))
+    return rows
+
+
+def _decision_from_capture_gap(row: dict[str, Any]) -> str:
+    recommendation = str(row.get("decision") or "")
+    if recommendation == "promote_review":
+        return "promote"
+    if recommendation in {"revise", "identity_review"}:
+        return "revise"
+    if recommendation == "park":
+        return "park"
+    return "keep_observing"
+
+
+def _capture_gap_reason(
+    recommendation: dict[str, Any],
+    closure: dict[str, Any],
+) -> str:
+    metrics = "would_enter:{} high_priority_no_action:{} would_enter_forward_positive:{} missed_no_action_forward_positive:{}".format(
+        _int(closure.get("would_enter_count")),
+        _int(closure.get("high_priority_no_action_count")),
+        _int(closure.get("would_enter_forward_positive_count")),
+        _int(closure.get("missed_no_action_forward_positive_count")),
+    )
+    return _join_reason_parts(
+        [
+            "capture_gap_audit:{}".format(
+                recommendation.get("reason") or "strategy_capture_gap_review"
+            ),
+            metrics,
+            "source_recommendation:{}".format(
+                recommendation.get("decision") or "keep_observing"
+            ),
+        ]
+    )
+
+
+def _capture_gap_required_next_evidence(row: dict[str, Any]) -> str:
+    recommendation = str(row.get("decision") or "")
+    checkpoint = str(row.get("next_checkpoint") or "continue_local_review")
+    if recommendation == "identity_review":
+        return f"registry_identity_classification:{checkpoint}"
+    if recommendation == "coverage_visibility_review":
+        return f"no_action_visibility_and_routing_summary:{checkpoint}"
+    if recommendation == "promote_review":
+        return f"promotion_evidence_review_only:{checkpoint}"
+    if recommendation == "revise":
+        return f"classifier_fact_source_revision_review:{checkpoint}"
+    if recommendation == "park":
+        return "material_new_edge_evidence_before_reactivation"
+    return checkpoint
+
+
+def _capture_gap_audit_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    if packet.get("schema") != "brc.strategy_capture_gap_audit.v3":
+        return {
+            "status": "not_loaded",
+            "integrated": False,
+            "owner_decision_required_now": False,
+            "live_permission_change_recommended_now": False,
+        }
+    visibility = _as_dict(packet.get("owner_visibility_state"))
+    observation = _as_dict(packet.get("system_observation_summary"))
+    return {
+        "status": packet.get("status"),
+        "integrated": packet.get("status") == "strategy_capture_gap_audit_ready",
+        "schema": packet.get("schema"),
+        "would_enter_count": observation.get("would_enter_count", 0),
+        "high_priority_no_action_count": observation.get(
+            "high_priority_no_action_count",
+            0,
+        ),
+        "owner_visibility_state": visibility,
+        "owner_decision_required_now": False,
+        "live_permission_change_recommended_now": False,
+        "authority_boundary": (
+            "capture_gap_audit_is_review_input_only; no_tier_policy_change; "
+            "no_live_profile_change; no_real_order_authority"
+        ),
+    }
 
 
 def _high_priority_no_action_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -617,6 +779,10 @@ def main(argv: list[str] | None = None) -> int:
         "--post-revision-replay-review-json",
         default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON),
     )
+    parser.add_argument(
+        "--capture-gap-audit-json",
+        default=str(DEFAULT_CAPTURE_GAP_AUDIT_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
@@ -631,6 +797,9 @@ def main(argv: list[str] | None = None) -> int:
         tier_policy=_load_json_object(Path(args.tier_policy_json).expanduser()),
         post_revision_replay_packet=_load_optional_json_object(
             Path(args.post_revision_replay_review_json).expanduser()
+        ),
+        capture_gap_audit_packet=_load_optional_json_object(
+            Path(args.capture_gap_audit_json).expanduser()
         ),
     )
     payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
