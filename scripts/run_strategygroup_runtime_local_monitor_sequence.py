@@ -574,6 +574,23 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_research_intake_review_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_research_intake_review.py"),
+        "--output-json",
+        str(strategygroup_research_intake_review_json),
+        "--output-owner-progress",
+        str(strategygroup_research_intake_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_research_intake_review",
+            strategygroup_research_intake_review_command,
+            strategygroup_research_intake_review_json,
+            runner,
+        )
+    )
+
     strategygroup_capital_trial_readiness_bridge_command = [
         sys.executable,
         str(
@@ -582,6 +599,8 @@ def build_local_monitor_sequence_report(
         ),
         "--portfolio-board-json",
         str(strategygroup_portfolio_board_json),
+        "--research-intake-review-json",
+        str(strategygroup_research_intake_review_json),
         "--output-json",
         str(strategygroup_capital_trial_readiness_bridge_json),
         "--output-owner-progress",
@@ -596,23 +615,6 @@ def build_local_monitor_sequence_report(
             "strategygroup_capital_trial_readiness_bridge",
             strategygroup_capital_trial_readiness_bridge_command,
             strategygroup_capital_trial_readiness_bridge_json,
-            runner,
-        )
-    )
-
-    strategygroup_research_intake_review_command = [
-        sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_research_intake_review.py"),
-        "--output-json",
-        str(strategygroup_research_intake_review_json),
-        "--output-owner-progress",
-        str(strategygroup_research_intake_review_md),
-    ]
-    steps.append(
-        _run_step(
-            "strategygroup_research_intake_review",
-            strategygroup_research_intake_review_command,
-            strategygroup_research_intake_review_json,
             runner,
         )
     )
@@ -1176,6 +1178,9 @@ def build_local_monitor_sequence_report(
     research_intake_summary = _sequence_research_intake_summary(
         packets.get("strategygroup_research_intake_review", {})
     )
+    capital_trial_summary = _sequence_capital_trial_summary(
+        packets.get("strategygroup_capital_trial_readiness_bridge", {})
+    )
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -1192,9 +1197,11 @@ def build_local_monitor_sequence_report(
             "owner_intervention_required": owner_decision_required,
             "risk_level": interaction["level"],
             "strategy_research_intake": research_intake_summary,
+            "strategy_candidate_trade": capital_trial_summary,
         },
         "interaction": interaction,
         "strategy_research_intake": research_intake_summary,
+        "strategy_candidate_trade": capital_trial_summary,
         "checks": {
             "blockers": execution_blockers,
             "execution_blockers": execution_blockers,
@@ -1204,6 +1211,14 @@ def build_local_monitor_sequence_report(
             "research_intake_candidates": research_intake_summary[
                 "strategy_group_ids"
             ],
+            "candidate_trade_selected_strategy_group_id": capital_trial_summary[
+                "selected_strategy_group_id"
+            ],
+            "candidate_trade_selected_short_strategy_group_id": (
+                capital_trial_summary["selected_short_strategy_group_id"]
+            ),
+            "candidate_trade_actionable_now": False,
+            "candidate_trade_real_order_authority": False,
             "runtime_status": runtime_status,
             "monitor_status": monitor_status,
             "owner_status": owner_status,
@@ -1872,6 +1887,38 @@ def _sequence_research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    summary = packet.get("capital_trial_summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    selected = packet.get("selected_non_mpg_trial_candidate")
+    if not isinstance(selected, dict):
+        selected = {}
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "capital_trial_readiness_bridge_ready",
+        "selected_strategy_group_id": str(
+            summary.get("selected_non_mpg_strategy_group_id") or ""
+        ),
+        "selected_short_strategy_group_id": str(
+            summary.get("selected_short_strategy_group_id") or ""
+        ),
+        "selected_candidate_status": str(
+            summary.get("selected_candidate_status") or "missing"
+        ),
+        "side_scope": [
+            str(item) for item in selected.get("side_scope") or [] if str(item)
+        ],
+        "short_candidate_trade_count": _int(
+            summary.get("short_candidate_trade_count")
+        ),
+        "trial_packet_generated": summary.get("trial_packet_generated") is True,
+        "live_permission_change": False,
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _packet_monitor_refresh_needed(packet: dict[str, Any]) -> bool:
     checks = packet.get("checks") if isinstance(packet, dict) else {}
     if not isinstance(checks, dict):
@@ -1963,6 +2010,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     interaction = report["interaction"]
     checks = report["checks"]
     research_intake = report.get("strategy_research_intake") or {}
+    candidate_trade = report.get("strategy_candidate_trade") or {}
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
         "",
@@ -1977,6 +2025,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
+        f"- 候选交易状态: `{candidate_trade.get('status', 'missing')}`",
+        f"- 候选交易策略组: `{candidate_trade.get('selected_strategy_group_id') or 'none'}`",
+        f"- 做空候选策略组: `{candidate_trade.get('selected_short_strategy_group_id') or 'none'}`",
         "",
         "## Steps",
         "",

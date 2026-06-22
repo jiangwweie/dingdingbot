@@ -2,6 +2,10 @@
   "checks": {
     "automation_notify": true,
     "blockers": [],
+    "candidate_trade_actionable_now": false,
+    "candidate_trade_real_order_authority": false,
+    "candidate_trade_selected_short_strategy_group_id": "BRF2-001",
+    "candidate_trade_selected_strategy_group_id": "BRF2-001",
     "engineering_gaps": [],
     "execution_blockers": [],
     "goal_complete": false,
@@ -27,7 +31,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-22T15:07:02.917912+00:00",
+  "generated_at_utc": "2026-06-22T15:23:06.056336+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -45,6 +49,21 @@
     "owner_intervention_required": false,
     "risk_level": "L0_local_monitor_sequence",
     "state": "等待机会",
+    "strategy_candidate_trade": {
+      "actionable_now": false,
+      "active": true,
+      "live_permission_change": false,
+      "real_order_authority": false,
+      "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+      "selected_short_strategy_group_id": "BRF2-001",
+      "selected_strategy_group_id": "BRF2-001",
+      "short_candidate_trade_count": 1,
+      "side_scope": [
+        "short"
+      ],
+      "status": "capital_trial_readiness_bridge_ready",
+      "trial_packet_generated": true
+    },
     "strategy_research_intake": {
       "actionable_now": false,
       "active": true,
@@ -160,22 +179,6 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "level": "L0_local_capital_trial_readiness_bridge",
-        "mutates_remote_files": false,
-        "places_order": false,
-        "remote_interaction_count": 0
-      },
-      "name": "strategygroup_capital_trial_readiness_bridge",
-      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json",
-      "returncode": 0,
-      "status": "capital_trial_readiness_bridge_ready"
-    },
-    {
-      "interaction": {
-        "approaches_real_order": false,
-        "calls_exchange_write": false,
-        "calls_finalgate": false,
-        "calls_operation_layer": false,
         "level": "L0_local_research_intake_review",
         "mutates_remote_files": false,
         "places_order": false,
@@ -185,6 +188,22 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
       "returncode": 0,
       "status": "research_intake_review_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_capital_trial_readiness_bridge",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_capital_trial_readiness_bridge",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json",
+      "returncode": 0,
+      "status": "capital_trial_readiness_bridge_ready"
     },
     {
       "interaction": {
@@ -565,6 +584,21 @@
       "status": "live_submit_standby_waiting_for_market"
     }
   ],
+  "strategy_candidate_trade": {
+    "actionable_now": false,
+    "active": true,
+    "live_permission_change": false,
+    "real_order_authority": false,
+    "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+    "selected_short_strategy_group_id": "BRF2-001",
+    "selected_strategy_group_id": "BRF2-001",
+    "short_candidate_trade_count": 1,
+    "side_scope": [
+      "short"
+    ],
+    "status": "capital_trial_readiness_bridge_ready",
+    "trial_packet_generated": true
+  },
   "strategy_research_intake": {
     "actionable_now": false,
     "active": true,

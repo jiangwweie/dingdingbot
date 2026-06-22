@@ -1,8 +1,8 @@
 ## StrategyGroup Capital Trial Packet v0
 
-- Packet ID: trial-packet-v0:MI-001:20260622
-- StrategyGroup: MI-001
-- Candidate status: trial_prepare_candidate_pending_owner_policy
+- Packet ID: trial-packet-v0:BRF2-001:20260622
+- StrategyGroup: BRF2-001
+- Candidate status: short_candidate_trade_packet_pending_owner_policy
 - Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json
 - Actionable now: 否
 - Live permission change: 否

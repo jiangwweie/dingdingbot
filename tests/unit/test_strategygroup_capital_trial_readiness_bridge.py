@@ -146,6 +146,66 @@ def _capture_audit() -> dict:
     }
 
 
+def _research_intake_review() -> dict:
+    return {
+        "status": "research_intake_review_ready",
+        "candidate_rows": [
+            {
+                "strategy_group_id": "BRF2-001",
+                "strategy_direction": "bear_rally_failure_right_tail_short",
+                "main_control_intake_position": (
+                    "paper_observation_admission_candidate"
+                ),
+                "source_recommended_runtime_stage": (
+                    "tiny_live_intake_candidate_with_path_risk"
+                ),
+                "paper_observation_ready": True,
+                "source_tiny_live_ready": False,
+                "required_facts_draft": [
+                    "closed_1h_ohlcv",
+                    "closed_4h_trend",
+                    "squeeze_risk_state",
+                ],
+                "disable_or_review_facts_draft": [
+                    "disable_strong_reclaim_proxy"
+                ],
+                "known_risks": ["3_of_11_cap4_events_hit_5m_stop"],
+                "risk_envelope": {"attempt_cap_per_review_cycle": 3},
+                "path_risk_evidence": {
+                    "accepted_event_count": 11,
+                    "path_safe_count": 8,
+                    "stop_hit_count": 3,
+                },
+                "paper_observation_packet_shape": {
+                    "record_type": "paper_observation_only",
+                    "must_not_feed": [
+                        "FinalGate",
+                        "Operation Layer",
+                        "exchange_write",
+                    ],
+                },
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            {
+                "strategy_group_id": "RBR2-001",
+                "strategy_direction": "range_upper_boundary_mean_reversion_short",
+                "main_control_intake_position": "role_only_intake_candidate",
+                "paper_observation_ready": True,
+                "source_tiny_live_ready": False,
+                "known_risks": ["5m_stop_hit_rate_is_high"],
+                "path_risk_evidence": {
+                    "accepted_events": 78,
+                    "path_safe_5m_count": 32,
+                },
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+        ],
+        "safety_invariants": _safe(),
+    }
+
+
 def test_capital_trial_bridge_selects_mi_without_live_authority():
     module = _load_module()
 
@@ -176,6 +236,52 @@ def test_capital_trial_bridge_selects_mi_without_live_authority():
     assert trial_packet["live_permission_change"] is False
     assert trial_packet["real_order_authority"] is False
     assert trial_packet["authority_boundary"]["creates_execution_intent"] is False
+    assert trial_packet["authority_boundary"]["calls_finalgate"] is False
+    assert trial_packet["authority_boundary"]["calls_operation_layer"] is False
+    assert trial_packet["authority_boundary"]["calls_exchange_write"] is False
+    assert trial_packet["authority_boundary"]["places_order"] is False
+
+
+def test_capital_trial_bridge_prefers_brf2_short_candidate_from_research_intake():
+    module = _load_module()
+
+    packet = module.build_capital_trial_readiness_bridge(
+        portfolio_board=_portfolio(),
+        capture_gap_audit=_capture_audit(),
+        research_intake_review=_research_intake_review(),
+    )
+
+    assert packet["status"] == "capital_trial_readiness_bridge_ready"
+    summary = packet["capital_trial_summary"]
+    assert summary["selected_non_mpg_strategy_group_id"] == "BRF2-001"
+    assert summary["selected_short_strategy_group_id"] == "BRF2-001"
+    assert summary["short_candidate_trade_count"] == 1
+    assert summary["trial_packet_generated"] is True
+    assert summary["actionable_now_count"] == 0
+    assert summary["live_permission_change_count"] == 0
+    assert summary["real_order_authority_count"] == 0
+
+    selected = packet["selected_non_mpg_trial_candidate"]
+    assert selected["candidate_family"] == "short_research_intake"
+    assert selected["candidate_status"] == (
+        "short_candidate_trade_packet_pending_owner_policy"
+    )
+    assert selected["side_scope"] == ["short"]
+    assert "source_tiny_live_ready_false" in selected["trial_blockers"]
+
+    trial_packet = packet["trial_packet_v0"]
+    assert trial_packet["strategy_group_id"] == "BRF2-001"
+    assert trial_packet["candidate_status"] == (
+        "short_candidate_trade_packet_pending_owner_policy"
+    )
+    assert trial_packet["side_scope"] == ["short"]
+    assert trial_packet["required_facts_draft"] == [
+        "closed_1h_ohlcv",
+        "closed_4h_trend",
+        "squeeze_risk_state",
+    ]
+    assert trial_packet["actionable_now"] is False
+    assert trial_packet["real_order_authority"] is False
     assert trial_packet["authority_boundary"]["calls_finalgate"] is False
     assert trial_packet["authority_boundary"]["calls_operation_layer"] is False
     assert trial_packet["authority_boundary"]["calls_exchange_write"] is False

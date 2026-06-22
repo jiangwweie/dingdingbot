@@ -588,15 +588,20 @@ def _write_ready_strategygroup_portfolio_board(command: list[str]) -> None:
 
 
 def _write_ready_capital_trial_bridge(command: list[str]) -> None:
+    assert "--research-intake-review-json" in command
     _write_output(
         command,
         {
             "status": "capital_trial_readiness_bridge_ready",
             "capital_trial_summary": {
-                "eligibility_row_count": 5,
-                "non_mpg_trial_candidate_count": 5,
-                "selected_non_mpg_strategy_group_id": "MI-001",
-                "selected_candidate_status": "trial_prepare_candidate_pending_owner_policy",
+                "eligibility_row_count": 7,
+                "non_mpg_trial_candidate_count": 7,
+                "selected_non_mpg_strategy_group_id": "BRF2-001",
+                "selected_short_strategy_group_id": "BRF2-001",
+                "short_candidate_trade_count": 1,
+                "selected_candidate_status": (
+                    "short_candidate_trade_packet_pending_owner_policy"
+                ),
                 "trial_packet_generated": True,
                 "actionable_now_count": 0,
                 "live_permission_change_count": 0,
@@ -605,10 +610,15 @@ def _write_ready_capital_trial_bridge(command: list[str]) -> None:
             },
             "trial_packet_v0": {
                 "schema": "brc.strategygroup_capital_trial_packet.v0",
-                "strategy_group_id": "MI-001",
+                "strategy_group_id": "BRF2-001",
+                "side_scope": ["short"],
                 "actionable_now": False,
                 "live_permission_change": False,
                 "real_order_authority": False,
+            },
+            "selected_non_mpg_trial_candidate": {
+                "strategy_group_id": "BRF2-001",
+                "side_scope": ["short"],
             },
             "owner_policy_checkpoint": {
                 "runtime_owner_intervention_required": False,
@@ -1052,8 +1062,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "runtime_dry_run_audit_chain.py",
         "runtime_live_cutover_readiness.py",
         "build_strategygroup_portfolio_board.py",
-        "build_strategygroup_capital_trial_readiness_bridge.py",
         "build_strategygroup_research_intake_review.py",
+        "build_strategygroup_capital_trial_readiness_bridge.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",
@@ -1101,6 +1111,16 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "BRF2-001",
         "RBR2-001",
     ]
+    assert report["strategy_candidate_trade"]["selected_strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["strategy_candidate_trade"]["selected_short_strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["checks"]["candidate_trade_selected_strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["checks"]["candidate_trade_real_order_authority"] is False
     assert report["checks"]["non_market_gaps"] == []
 
 

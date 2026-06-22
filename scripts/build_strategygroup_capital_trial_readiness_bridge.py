@@ -39,6 +39,9 @@ DEFAULT_TRIAL_PACKET_JSON = (
 DEFAULT_TRIAL_PACKET_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.md"
 )
+DEFAULT_RESEARCH_INTAKE_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.json"
+)
 
 SCHEMA = "brc.strategygroup_capital_trial_readiness_bridge.v1"
 TRIAL_PACKET_SCHEMA = "brc.strategygroup_capital_trial_packet.v0"
@@ -75,6 +78,10 @@ TRIAL_REVIEW_ORDER = (
     "CPM-RO-001",
     "BTPC-001",
 )
+SHORT_RESEARCH_INTAKE_ORDER = (
+    "BRF2-001",
+    "RBR2-001",
+)
 
 OWNER_POLICY_FIELDS = (
     "capital_scope",
@@ -99,13 +106,28 @@ def main(argv: list[str] | None = None) -> int:
         "--output-trial-packet-json", default=str(DEFAULT_TRIAL_PACKET_JSON)
     )
     parser.add_argument("--output-trial-packet-md", default=str(DEFAULT_TRIAL_PACKET_MD))
+    parser.add_argument(
+        "--research-intake-review-json",
+        default="",
+        help=(
+            "Optional main-control research intake review artifact. When supplied, "
+            "paper-observation short candidates can enter the candidate-trade pool "
+            "without live authority."
+        ),
+    )
     args = parser.parse_args(argv)
 
     portfolio_board = _read_json(Path(args.portfolio_board_json))
     capture_gap_audit = _read_json(Path(args.capture_gap_audit_json))
+    research_intake_review = (
+        _read_json(Path(args.research_intake_review_json))
+        if args.research_intake_review_json
+        else None
+    )
     packet = build_capital_trial_readiness_bridge(
         portfolio_board=portfolio_board,
         capture_gap_audit=capture_gap_audit,
+        research_intake_review=research_intake_review,
     )
     trial_packet = packet["trial_packet_v0"]
 
@@ -143,31 +165,36 @@ def build_capital_trial_readiness_bridge(
     *,
     portfolio_board: dict[str, Any],
     capture_gap_audit: dict[str, Any],
+    research_intake_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _validate_safety("portfolio_board", portfolio_board)
     _validate_safety("capture_gap_audit", capture_gap_audit)
+    if research_intake_review is not None:
+        _validate_safety("research_intake_review", research_intake_review)
 
     portfolio_rows = _portfolio_rows_by_id(portfolio_board)
     trial_pool_rows = _trial_pool_rows_by_id(portfolio_board)
     audit_rows = _audit_rows_by_id(capture_gap_audit)
     would_enter_events = _would_enter_events_by_id(capture_gap_audit)
+    research_rows = _research_intake_rows_by_id(research_intake_review or {})
     generated_at = datetime.now(timezone.utc).isoformat()
 
     eligibility_rows = [
-        _eligibility_row(
+        _eligibility_row_for_strategy(
             strategy_group_id=strategy_group_id,
-            portfolio_row=portfolio_rows.get(strategy_group_id, {}),
-            trial_pool_row=trial_pool_rows.get(strategy_group_id, {}),
-            audit_row=audit_rows.get(strategy_group_id, {}),
-            sampled_events=would_enter_events.get(strategy_group_id, []),
+            portfolio_rows=portfolio_rows,
+            trial_pool_rows=trial_pool_rows,
+            audit_rows=audit_rows,
+            would_enter_events=would_enter_events,
+            research_rows=research_rows,
         )
-        for strategy_group_id in TRIAL_REVIEW_ORDER
+        for strategy_group_id in _trial_review_order(research_rows)
     ]
     ranking = sorted(
         eligibility_rows,
         key=lambda row: (
             -int(row["ranking_score"]),
-            TRIAL_REVIEW_ORDER.index(row["strategy_group_id"]),
+            _trial_review_order(research_rows).index(row["strategy_group_id"]),
         ),
     )
     selected = next(
@@ -175,7 +202,10 @@ def build_capital_trial_readiness_bridge(
             row
             for row in ranking
             if row["strategy_group_id"] != "MPG-001"
-            and row["trial_recommendation"].startswith("trial_prepare")
+            and (
+                row["trial_recommendation"].startswith("candidate_trade_prepare")
+                or row["trial_recommendation"].startswith("trial_prepare")
+            )
         ),
         ranking[0] if ranking else {},
     )
@@ -227,6 +257,19 @@ def build_capital_trial_readiness_bridge(
             "actionable_now_count": 0,
             "live_permission_change_count": 0,
             "real_order_authority_count": 0,
+            "short_candidate_trade_count": sum(
+                1
+                for row in eligibility_rows
+                if row.get("candidate_family") == "short_research_intake"
+                and row["trial_recommendation"].startswith(
+                    "candidate_trade_prepare"
+                )
+            ),
+            "selected_short_strategy_group_id": (
+                selected.get("strategy_group_id")
+                if selected.get("candidate_family") == "short_research_intake"
+                else None
+            ),
             "owner_policy_checkpoint_count": 1 if policy_checkpoint else 0,
             "engineering_continuation_count": len(continuation_queue),
         },
@@ -252,12 +295,134 @@ def build_capital_trial_readiness_bridge(
         "source_status": {
             "portfolio_board": str(portfolio_board.get("status") or "unknown"),
             "capture_gap_audit": str(capture_gap_audit.get("status") or "unknown"),
+            "research_intake_review": str(
+                (research_intake_review or {}).get("status") or "not_supplied"
+            ),
             "would_enter_sampled_count": len(
                 capture_gap_audit.get("would_enter_events")
                 if isinstance(capture_gap_audit.get("would_enter_events"), list)
                 else []
             ),
         },
+    }
+
+
+def _trial_review_order(
+    research_rows: dict[str, dict[str, Any]],
+) -> list[str]:
+    return _dedupe(
+        [
+            strategy_group_id
+            for strategy_group_id in SHORT_RESEARCH_INTAKE_ORDER
+            if strategy_group_id in research_rows
+        ]
+        + list(TRIAL_REVIEW_ORDER)
+    )
+
+
+def _eligibility_row_for_strategy(
+    *,
+    strategy_group_id: str,
+    portfolio_rows: dict[str, dict[str, Any]],
+    trial_pool_rows: dict[str, dict[str, Any]],
+    audit_rows: dict[str, dict[str, Any]],
+    would_enter_events: dict[str, list[dict[str, Any]]],
+    research_rows: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    research_row = research_rows.get(strategy_group_id)
+    if research_row is not None:
+        return _research_intake_eligibility_row(
+            strategy_group_id=strategy_group_id,
+            research_row=research_row,
+        )
+    return _eligibility_row(
+        strategy_group_id=strategy_group_id,
+        portfolio_row=portfolio_rows.get(strategy_group_id, {}),
+        trial_pool_row=trial_pool_rows.get(strategy_group_id, {}),
+        audit_row=audit_rows.get(strategy_group_id, {}),
+        sampled_events=would_enter_events.get(strategy_group_id, []),
+    )
+
+
+def _research_intake_eligibility_row(
+    *,
+    strategy_group_id: str,
+    research_row: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = _as_dict(research_row.get("path_risk_evidence"))
+    opportunity_count = _int(
+        evidence.get("accepted_event_count")
+        or evidence.get("accepted_events")
+        or evidence.get("sample_event_count")
+    )
+    forward_positive = _int(
+        evidence.get("path_safe_count") or evidence.get("path_safe_5m_count")
+    )
+    if opportunity_count == 0 and forward_positive > 0:
+        opportunity_count = forward_positive
+    direction = str(research_row.get("strategy_direction") or "unknown")
+    blockers = _research_intake_blockers(research_row)
+    recommendation, candidate_status = _research_trial_recommendation(
+        strategy_group_id=strategy_group_id,
+        research_row=research_row,
+    )
+    ranking_score = _research_ranking_score(
+        strategy_group_id=strategy_group_id,
+        opportunity_count=opportunity_count,
+        forward_positive=forward_positive,
+        blockers=blockers,
+    )
+    return {
+        "strategy_group_id": strategy_group_id,
+        "candidate_family": "short_research_intake",
+        "execution_tier": "unknown",
+        "evidence_stage": str(
+            research_row.get("main_control_intake_position")
+            or "research_intake_review"
+        ),
+        "pool_stage": str(
+            research_row.get("source_recommended_runtime_stage")
+            or "research_intake_candidate"
+        ),
+        "candidate_status": candidate_status,
+        "recent_opportunity_count": opportunity_count,
+        "would_enter_forward_positive_count": forward_positive,
+        "tradable_forward_count": forward_positive,
+        "forward_pending_count": 0,
+        "sampled_event_count": opportunity_count,
+        "dominant_sampled_candidate_id": strategy_group_id,
+        "symbol_scope": _research_symbol_scope(research_row),
+        "side_scope": ["short"] if "short" in direction else [],
+        "dominant_blocker": blockers[0] if blockers else "none",
+        "identity_status": "main_control_research_intake_asset",
+        "risk_boundary_ready": False,
+        "risk_boundary_missing": list(OWNER_POLICY_FIELDS),
+        "trial_blockers": blockers,
+        "ranking_score": ranking_score,
+        "trial_recommendation": recommendation,
+        "owner_policy_required": recommendation.startswith(
+            "candidate_trade_prepare"
+        ),
+        "owner_policy_required_now": False,
+        "engineering_continue": recommendation != "not_a_trial_candidate_now",
+        "actionable_now": False,
+        "live_permission_change": False,
+        "real_order_authority": False,
+        "does_not_authorize_live_execution": True,
+        "research_intake_position": str(
+            research_row.get("main_control_intake_position") or "unknown"
+        ),
+        "required_facts_draft": _string_list(
+            research_row.get("required_facts_draft")
+        ),
+        "disable_or_review_facts_draft": _string_list(
+            research_row.get("disable_or_review_facts_draft")
+        ),
+        "risk_envelope": _as_dict(research_row.get("risk_envelope")),
+        "path_risk_evidence": evidence,
+        "paper_observation_packet_shape": _as_dict(
+            research_row.get("paper_observation_packet_shape")
+        ),
     }
 
 
@@ -302,6 +467,7 @@ def _eligibility_row(
     owner_policy_required = recommendation.startswith("trial_prepare")
     return {
         "strategy_group_id": strategy_group_id,
+        "candidate_family": "portfolio_capture_gap",
         "execution_tier": str(portfolio_row.get("execution_tier") or "unknown"),
         "evidence_stage": str(portfolio_row.get("evidence_stage") or "unknown"),
         "pool_stage": str(trial_pool_row.get("pool_stage") or "not_in_trial_pool"),
@@ -342,8 +508,20 @@ def _trial_packet_v0(
         "packet_id": f"trial-packet-v0:{strategy_group_id}:20260622",
         "generated_at_utc": generated_at,
         "strategy_group_id": strategy_group_id,
-        "candidate_status": "trial_prepare_candidate_pending_owner_policy",
+        "candidate_status": selected.get("candidate_status")
+        or "trial_prepare_candidate_pending_owner_policy",
         "hypothesis": (
+            "BRF2-001 bear-rally-failure short has a research-intake paper "
+            "observation asset with explicit path-risk evidence, RequiredFacts "
+            "draft, disable/review facts, and risk envelope. It can be prepared "
+            "as a non-executing candidate-trade packet, pending Owner policy "
+            "scope and future official live gates."
+            if strategy_group_id == "BRF2-001"
+            else "RBR2-001 range-upper-boundary short is role-only intake material "
+            "for range detector and failed-upside-expansion classifier review; "
+            "it is not the primary candidate-trade lane."
+            if strategy_group_id == "RBR2-001"
+            else
             "MI-001 SOL long momentum-impulse observe-only samples have enough "
             "recent cost-after-MFE evidence to prepare a bounded capital trial, "
             "but identity, capital scope, and live-action facts remain unresolved."
@@ -359,9 +537,19 @@ def _trial_packet_v0(
             ),
             "tradable_forward_count": selected.get("tradable_forward_count"),
             "sampled_event_count": selected.get("sampled_event_count"),
+            "research_intake_position": selected.get("research_intake_position"),
         },
         "symbol_scope": selected.get("symbol_scope") or ["owner_policy_required"],
         "side_scope": selected.get("side_scope") or ["owner_policy_required"],
+        "required_facts_draft": selected.get("required_facts_draft") or [],
+        "disable_or_review_facts_draft": (
+            selected.get("disable_or_review_facts_draft") or []
+        ),
+        "risk_envelope": selected.get("risk_envelope") or {},
+        "path_risk_evidence": selected.get("path_risk_evidence") or {},
+        "paper_observation_packet_shape": (
+            selected.get("paper_observation_packet_shape") or {}
+        ),
         "trial_boundary": {
             "max_notional": "owner_policy_required",
             "max_attempts": 1,
@@ -476,6 +664,24 @@ def _trial_blockers(
     return _dedupe(blockers)
 
 
+def _research_intake_blockers(research_row: dict[str, Any]) -> list[str]:
+    blockers = _string_list(research_row.get("known_risks"))
+    if research_row.get("paper_observation_ready") is not True:
+        blockers.append("paper_observation_not_ready")
+    if research_row.get("source_tiny_live_ready") is not True:
+        blockers.append("source_tiny_live_ready_false")
+    blockers.extend(
+        [
+            "owner_capital_scope_not_confirmed",
+            "owner_trial_identity_not_confirmed",
+            "fresh_signal_absent",
+            "action_time_finalgate_not_reached",
+            "official_operation_layer_not_reached",
+        ]
+    )
+    return _dedupe(blockers)
+
+
 def _trial_recommendation(
     *,
     strategy_group_id: str,
@@ -512,6 +718,29 @@ def _trial_recommendation(
     return "not_a_trial_candidate_now", "not_selected"
 
 
+def _research_trial_recommendation(
+    *,
+    strategy_group_id: str,
+    research_row: dict[str, Any],
+) -> tuple[str, str]:
+    if (
+        strategy_group_id == "BRF2-001"
+        and research_row.get("main_control_intake_position")
+        == "paper_observation_admission_candidate"
+        and research_row.get("paper_observation_ready") is True
+    ):
+        return (
+            "candidate_trade_prepare_pending_owner_policy",
+            "short_candidate_trade_packet_pending_owner_policy",
+        )
+    if strategy_group_id == "RBR2-001":
+        return (
+            "role_only_short_candidate_trade_watchlist",
+            "role_only_short_candidate_trade_watchlist",
+        )
+    return "research_intake_review_before_trial_prepare", "research_intake_review"
+
+
 def _ranking_score(
     *,
     strategy_group_id: str,
@@ -533,6 +762,23 @@ def _ranking_score(
         score -= 40
     if any("stale" in blocker for blocker in blockers):
         score -= 50
+    return score
+
+
+def _research_ranking_score(
+    *,
+    strategy_group_id: str,
+    opportunity_count: int,
+    forward_positive: int,
+    blockers: list[str],
+) -> int:
+    score = opportunity_count * 3 + forward_positive * 8
+    if strategy_group_id == "BRF2-001":
+        score += 500
+    if strategy_group_id == "RBR2-001":
+        score -= 100
+    if any("high_5m_stop" in blocker for blocker in blockers):
+        score -= 80
     return score
 
 
@@ -624,6 +870,17 @@ def _audit_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _research_intake_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = packet.get("candidate_rows")
+    if not isinstance(rows, list):
+        return {}
+    return {
+        str(row.get("strategy_group_id")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("strategy_group_id")
+    }
+
+
 def _would_enter_events_by_id(packet: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     events = packet.get("would_enter_events")
     by_id: dict[str, list[dict[str, Any]]] = {}
@@ -651,6 +908,14 @@ def _sorted_counter_values(values: Any) -> list[str]:
         value
         for value, _count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _research_symbol_scope(row: dict[str, Any]) -> list[str]:
+    shape = _as_dict(row.get("paper_observation_packet_shape"))
+    symbol = shape.get("symbol")
+    if symbol:
+        return [str(symbol)]
+    return ["owner_policy_required"]
 
 
 def _max_tradable_after_cost(audit_row: dict[str, Any]) -> int:
@@ -882,6 +1147,16 @@ def _list_or_none(values: list[Any]) -> str:
     if not values:
         return "none"
     return ", ".join(str(value) for value in values)
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
 
 
 def _dedupe(values: Any) -> list[str]:

@@ -16,17 +16,23 @@
     "registry_admission": false,
     "tier_policy_change": false
   },
-  "candidate_status": "trial_prepare_candidate_pending_owner_policy",
+  "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+  "disable_or_review_facts_draft": [
+    "disable_strong_reclaim_proxy",
+    "disable_low_structure_loss_atr_lt_0_15",
+    "disable_trend_flip_proxy"
+  ],
   "evidence_refs": {
     "capture_gap_audit": "/Users/jiangwei/Documents/final/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
     "portfolio_board": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
-    "recent_opportunity_count": 23,
-    "sampled_event_count": 8,
-    "tradable_forward_count": 22,
-    "would_enter_forward_positive_count": 22
+    "recent_opportunity_count": 11,
+    "research_intake_position": "paper_observation_admission_candidate",
+    "sampled_event_count": 11,
+    "tradable_forward_count": 8,
+    "would_enter_forward_positive_count": 8
   },
-  "generated_at_utc": "2026-06-22T11:57:01.426804+00:00",
-  "hypothesis": "MI-001 SOL long momentum-impulse observe-only samples have enough recent cost-after-MFE evidence to prepare a bounded capital trial, but identity, capital scope, and live-action facts remain unresolved.",
+  "generated_at_utc": "2026-06-22T15:23:00.479244+00:00",
+  "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as a non-executing candidate-trade packet, pending Owner policy scope and future official live gates.",
   "kill_conditions": [
     "owner_policy_not_accepted",
     "strategy_identity_unresolved",
@@ -41,8 +47,60 @@
     "reconciliation_or_settlement_unavailable"
   ],
   "live_permission_change": false,
-  "packet_id": "trial-packet-v0:MI-001:20260622",
+  "packet_id": "trial-packet-v0:BRF2-001:20260622",
+  "paper_observation_packet_shape": {
+    "disable_or_review_facts_draft": [
+      "disable_strong_reclaim_proxy",
+      "disable_low_structure_loss_atr_lt_0_15",
+      "disable_trend_flip_proxy"
+    ],
+    "fresh_signal_source": "future_observation_only_not_live_signal",
+    "must_not_feed": [
+      "FinalGate",
+      "Operation Layer",
+      "exchange_write",
+      "live RequiredFacts",
+      "actionable_now"
+    ],
+    "must_record": [
+      "would_enter_timestamp",
+      "symbol",
+      "side",
+      "strategy_direction",
+      "required_facts_snapshot",
+      "disable_or_review_fact_snapshot",
+      "paper_forward_outcome",
+      "review_ledger_decision"
+    ],
+    "record_type": "paper_observation_only",
+    "required_facts_draft": [
+      "closed_1h_ohlcv",
+      "closed_4h_trend",
+      "ema_20",
+      "ema_48",
+      "rally_depth_24h",
+      "squeeze_risk_state"
+    ],
+    "strategy_group_id": "BRF2-001"
+  },
+  "path_risk_evidence": {
+    "accepted_event_count": 11,
+    "path_safe_count": 8,
+    "path_safe_rate": 0.7273,
+    "preferred_variant": "cap4_12h_time_stop",
+    "right_tail_mechanism": "Weak rally fails, late longs exit, and trend-following shorts re-enter.",
+    "sample_event_count": 112,
+    "stop_hit_count": 3
+  },
   "real_order_authority": false,
+  "required_facts_draft": [
+    "closed_1h_ohlcv",
+    "closed_4h_trend",
+    "ema_20",
+    "ema_48",
+    "rally_depth_24h",
+    "squeeze_risk_state"
+  ],
   "requires_finalgate": true,
   "requires_fresh_signal": true,
   "requires_operation_layer": true,
@@ -63,17 +121,28 @@
     "settlement_status",
     "review_decision"
   ],
+  "risk_envelope": {
+    "attempt_cap_per_review_cycle": 3,
+    "daily_loss_cap_units": 1,
+    "max_consecutive_losses": 2,
+    "pause_conditions": [
+      "any_path_stop_without_post_trade_review",
+      "two_consecutive_losses",
+      "symbol_specific_loss_until_symbol_review",
+      "missing_required_path_or_liquidation_buffer_evidence"
+    ]
+  },
   "schema": "brc.strategygroup_capital_trial_packet.v0",
   "side_scope": [
-    "long"
+    "short"
   ],
   "stop_policy": {
     "policy": "exchange_native_stop_or_official_protection_required_before_submit",
     "required": true
   },
-  "strategy_group_id": "MI-001",
+  "strategy_group_id": "BRF2-001",
   "symbol_scope": [
-    "SOL/USDT:USDT"
+    "owner_policy_required"
   ],
   "trial_boundary": {
     "action_time_finalgate_required": true,

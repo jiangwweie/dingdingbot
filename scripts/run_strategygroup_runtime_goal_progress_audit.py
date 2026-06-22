@@ -1728,7 +1728,9 @@ def _strategygroup_capital_trial_readiness_bridge_track(
         "status": "blocked" if blockers else "ready",
         "owner_state": "资金试验候选准备中" if not blockers else "需处理",
         "next_action": (
-            "保留 MI-001 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点"
+            "保留 "
+            + str(boundary["selected_non_mpg_strategy_group_id"] or "候选策略组")
+            + " 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点"
             if not blockers
             else "修复 Capital Trial Readiness Bridge 证据或安全边界"
         ),
