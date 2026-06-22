@@ -41,6 +41,16 @@ DEFAULT_OUTPUT_MD = (
 )
 
 PRIORITY_CAPTURE_GROUPS = ("BTPC-001", "LSR-001", "BRF-001")
+WAVE_1_REQUIRED_GROUPS = (
+    "MPG-001",
+    "BTPC-001",
+    "LSR-001",
+    "BRF-001",
+    "MI-001",
+    "CPM-RO-001",
+)
+WAVE_1_VISIBILITY_GROUPS = ("FBS-001", "SOR-001", "VCB-001", "TEQ-001")
+WAVE_2_CAPTURE_GROUPS = ("BTPC-001", "LSR-001", "BRF-001", "VCB-001", "RBR-001")
 IDENTITY_REVIEW_GROUPS = ("MI-001", "CPM-RO-001")
 VISIBILITY_GROUPS = ("MPG-001", "SOR-001", "FBS-001")
 
@@ -50,6 +60,34 @@ OWNER_REVIEW_LABEL = {
     "park": "暂停",
     "kill": "停用",
     "keep_observing": "待复盘",
+}
+
+WAVE_2_CAPTURE_SPECS = {
+    "BTPC-001": {
+        "current_problem": "169/169 windows are attributed to stale gate or fact-source blocking.",
+        "closure_action": "review_stale_gate_fact_source_classifier_attribution",
+        "review_decision": "revise",
+    },
+    "LSR-001": {
+        "current_problem": "side-specific short-revival has would-enter evidence but needs range-context review.",
+        "closure_action": "side_specific_short_revival_range_context_review",
+        "review_decision": "revise",
+    },
+    "BRF-001": {
+        "current_problem": "bear-rally failure short structure appeared, but squeeze and RequiredFacts review are incomplete.",
+        "closure_action": "forward_outcome_squeeze_classifier_requiredfacts_review",
+        "review_decision": "promote_review",
+    },
+    "VCB-001": {
+        "current_problem": "breakout structure appeared but true/false breakout quality is not strong enough for promotion.",
+        "closure_action": "true_false_breakout_classifier_review",
+        "review_decision": "keep_observing_or_revise",
+    },
+    "RBR-001": {
+        "current_problem": "positive observe-only samples exist, but the lane remains parked without materially new edge evidence.",
+        "closure_action": "material_new_edge_review_before_reactivation",
+        "review_decision": "park_unless_new_edge",
+    },
 }
 
 MPG_MEMBER_REVIEW_ROWS = [
@@ -189,6 +227,17 @@ def build_quality_closure_wave(
         registry_by_group.get("MPG-001", {}),
         mpg_replay_corpus,
     )
+    wave_1_strategy_explainer = _wave_1_strategy_explainer(owner_cards)
+    wave_2_capture_quality_closure = _wave_2_capture_quality_closure(
+        audit_by_group=audit_by_group,
+        closure_by_group=closure_by_group,
+        ledger_by_group=ledger_by_group,
+        registry_by_group=registry_by_group,
+        current_tiers=current_tiers,
+    )
+    wave_3_mpg_member_deepening = _wave_3_mpg_member_deepening(
+        mpg_member_tiering_review
+    )
     forward_no_action_ledger_extension = _forward_no_action_ledger_extension(
         capture_gap_audit,
         ledger_by_group,
@@ -225,12 +274,18 @@ def build_quality_closure_wave(
             "mpg_replay_sample_count": len(_dict_rows(mpg_replay_corpus.get("replay_samples"))),
         },
         "priority_order": [
+            "wave_1_strategy_explainer",
+            "wave_2_capture_quality_closure",
+            "wave_3_mpg_member_deepening",
             "priority_1_btpc_lsr_brf_capture_closure",
             "priority_2_owner_cards_v1_from_ledger",
             "priority_3_mi_cpm_registry_identity_review",
             "priority_4_mpg_member_tiering_exit_decay_review",
             "priority_5_forward_outcome_no_action_ledger_extension",
         ],
+        "wave_1_strategy_explainer": wave_1_strategy_explainer,
+        "wave_2_capture_quality_closure": wave_2_capture_quality_closure,
+        "wave_3_mpg_member_deepening": wave_3_mpg_member_deepening,
         "priority_1_capture_closure": {
             "status": "ready_for_owner_review",
             "rows": priority_capture_closure,
@@ -275,6 +330,178 @@ def build_quality_closure_wave(
             "real_order_authority": False,
             "preview_or_replay_treated_as_live_signal": False,
         },
+    }
+
+
+def _wave_1_strategy_explainer(owner_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    cards_by_group = {str(card.get("strategy_group_id")): card for card in owner_cards}
+    required_groups = list(WAVE_1_REQUIRED_GROUPS)
+    visibility_groups = list(WAVE_1_VISIBILITY_GROUPS)
+    required_missing = [
+        group for group in required_groups + visibility_groups if group not in cards_by_group
+    ]
+    cards = [
+        _wave_1_card(cards_by_group[group])
+        for group in required_groups + visibility_groups
+        if group in cards_by_group
+    ]
+    return {
+        "status": "ready" if not required_missing else "incomplete_missing_cards",
+        "purpose": "turn StrategyGroup ids into Owner-readable strategy assets",
+        "required_groups": required_groups,
+        "visibility_groups": visibility_groups,
+        "card_count": len(cards),
+        "missing_required_cards": required_missing,
+        "done_when": {
+            "strategy_assets_are_owner_readable": not required_missing,
+            "cards_explain_why_not_live": all(card["why_not_live"] for card in cards),
+            "cards_separate_owner_decision_from_system_action": all(
+                card["owner_can_decide"] and card["system_auto_action"]
+                for card in cards
+            ),
+        },
+        "cards": cards,
+        "authority_boundary": _review_only_boundary(),
+    }
+
+
+def _wave_1_card(card: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strategy_group_id": card["strategy_group_id"],
+        "owner_label": card["owner_label"],
+        "current_tier": card["current_tier"],
+        "eats_market_structure": card["market_opportunity"],
+        "trade_logic": card["trade_logic"],
+        "why_not_live": card["why_not_live"],
+        "current_risk": card["main_risks"] or ["strategy_quality_or_identity_risk_not_yet_closed"],
+        "missing_facts": card["missing_evidence"],
+        "owner_can_decide": _owner_decision_surface(card),
+        "system_auto_action": card["system_next_action"],
+        "next_evidence": card["missing_evidence"],
+        "actionable_now": False,
+        "live_permission_change_recommended_now": False,
+    }
+
+
+def _wave_2_capture_quality_closure(
+    *,
+    audit_by_group: dict[str, dict[str, Any]],
+    closure_by_group: dict[str, dict[str, Any]],
+    ledger_by_group: dict[str, dict[str, Any]],
+    registry_by_group: dict[str, dict[str, Any]],
+    current_tiers: dict[str, str],
+) -> dict[str, Any]:
+    rows = [
+        _wave_2_capture_row(
+            group,
+            audit_row=audit_by_group.get(group, {}),
+            closure_row=closure_by_group.get(group, {}),
+            ledger_row=ledger_by_group.get(group, {}),
+            registry_row=registry_by_group.get(group, {}),
+            current_tier=current_tiers.get(group, "unknown"),
+        )
+        for group in WAVE_2_CAPTURE_GROUPS
+    ]
+    return {
+        "status": "ready_for_owner_review",
+        "purpose": "answer where capture quality failed without changing live authority",
+        "rows": rows,
+        "done_when": {
+            "btpc_lsr_brf_have_closure_rows": all(
+                group in {row["strategy_group_id"] for row in rows}
+                for group in PRIORITY_CAPTURE_GROUPS
+            ),
+            "vcb_rbr_are_not_hidden_in_forward_rollup": all(
+                group in {row["strategy_group_id"] for row in rows}
+                for group in ("VCB-001", "RBR-001")
+            ),
+            "all_rows_are_review_only": all(
+                row["live_permission_change_recommended_now"] is False
+                and row["authority_boundary"] == _review_only_boundary()
+                for row in rows
+            ),
+        },
+        "authority_boundary": _review_only_boundary(),
+    }
+
+
+def _wave_2_capture_row(
+    group: str,
+    *,
+    audit_row: dict[str, Any],
+    closure_row: dict[str, Any],
+    ledger_row: dict[str, Any],
+    registry_row: dict[str, Any],
+    current_tier: str,
+) -> dict[str, Any]:
+    spec = WAVE_2_CAPTURE_SPECS[group]
+    ledger_decision = str(ledger_row.get("decision") or spec["review_decision"])
+    return {
+        "strategy_group_id": group,
+        "owner_label": registry_row.get("owner_label") or group,
+        "current_tier": current_tier,
+        "current_problem": spec["current_problem"],
+        "closure_action": spec["closure_action"],
+        "review_decision": spec["review_decision"],
+        "ledger_decision": ledger_decision,
+        "would_enter_count": _int(audit_row.get("would_enter_count") or closure_row.get("would_enter_count")),
+        "no_action_count": _int(audit_row.get("no_action_count") or closure_row.get("no_action_count")),
+        "high_priority_no_action_count": _int(
+            audit_row.get("high_priority_no_action_count")
+            or closure_row.get("high_priority_no_action_count")
+        ),
+        "would_enter_forward_positive_count": _int(
+            audit_row.get("would_enter_forward_positive_count")
+            or closure_row.get("would_enter_forward_positive_count")
+        ),
+        "missed_no_action_forward_positive_count": _int(
+            audit_row.get("missed_no_action_forward_positive_count")
+            or closure_row.get("missed_no_action_forward_positive_count")
+        ),
+        "dominant_blocker_classes": audit_row.get("dominant_blocker_classes", []),
+        "next_checkpoint": ledger_row.get("next_checkpoint")
+        or registry_row.get("required_next_evidence")
+        or spec["closure_action"],
+        "owner_policy_decision_required_later": ledger_decision in {"promote", "park", "kill"},
+        "live_permission_change_recommended_now": False,
+        "authority_boundary": _review_only_boundary(),
+    }
+
+
+def _wave_3_mpg_member_deepening(
+    mpg_member_tiering_review: dict[str, Any],
+) -> dict[str, Any]:
+    member_rows = _dict_rows(mpg_member_tiering_review.get("member_rows"))
+    member_ids = {str(row.get("member_id")) for row in member_rows}
+    required_member_ids = {str(row["member_id"]) for row in MPG_MEMBER_REVIEW_ROWS}
+    return {
+        "status": "ready_for_owner_review",
+        "purpose": "explain MPG member roles, drawdown risk, and exit/decay review before live scope expansion",
+        "strategy_group_id": "MPG-001",
+        "current_tier": mpg_member_tiering_review.get("current_tier"),
+        "member_count": len(member_rows),
+        "member_rows": member_rows,
+        "exit_decay_review": mpg_member_tiering_review.get("exit_decay_review"),
+        "done_when": {
+            "six_member_roles_present": required_member_ids.issubset(member_ids),
+            "exit_horizons_present": bool(
+                _as_dict(mpg_member_tiering_review.get("exit_decay_review")).get(
+                    "exit_horizons_to_review"
+                )
+            ),
+            "decay_controls_present": bool(
+                _as_dict(mpg_member_tiering_review.get("exit_decay_review")).get(
+                    "decay_controls_to_review"
+                )
+            ),
+            "no_live_scope_expansion": mpg_member_tiering_review.get(
+                "live_permission_change_recommended_now"
+            )
+            is False,
+        },
+        "owner_policy_decision_required": True,
+        "live_permission_change_recommended_now": False,
+        "authority_boundary": _review_only_boundary(),
     }
 
 
@@ -551,6 +778,23 @@ def _ledger_extension_class(row: dict[str, Any]) -> str:
     return "visibility_only_or_no_recent_structure"
 
 
+def _owner_decision_surface(card: dict[str, Any]) -> str:
+    decision = str(card.get("review_recommendation") or "keep_observing")
+    if card.get("strategy_group_id") in {"MI-001", "CPM-RO-001"}:
+        return "decide registry identity after review packet"
+    if card.get("strategy_group_id") == "MPG-001":
+        return "decide member tiering and exit-decay policy after review packet"
+    if decision == "promote":
+        return "decide promote review outcome after evidence packet"
+    if decision == "revise":
+        return "approve or reject revised strategy direction after evidence packet"
+    if decision == "park":
+        return "confirm park decision or request materially new evidence"
+    if decision == "kill":
+        return "confirm kill decision after review evidence"
+    return "no immediate Owner action; review only if evidence changes"
+
+
 def _owner_visible_status(decision: str) -> str:
     if decision == "promote":
         return "待复盘"
@@ -603,11 +847,72 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
         "- Real order authority: `false`",
         "- Live permission change: `false`",
         "",
+        "## Wave 1 Strategy Explainer",
+        "",
+        "| StrategyGroup | Label | Tier | Eats structure | Why not live | Owner can decide | System action |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for card in packet["wave_1_strategy_explainer"]["cards"]:
+        lines.append(
+            "| `{}` | {} | `{}` | {} | `{}` | {} | `{}` |".format(
+                card["strategy_group_id"],
+                card["owner_label"],
+                card["current_tier"],
+                card["eats_market_structure"],
+                card["why_not_live"],
+                card["owner_can_decide"],
+                card["system_auto_action"],
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Wave 2 Capture Quality Closure",
+            "",
+            "| StrategyGroup | Problem | Action | Review | Would enter | High-priority no_action | WE positive | Missed NA positive |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in packet["wave_2_capture_quality_closure"]["rows"]:
+        lines.append(
+            "| `{}` | {} | `{}` | `{}` | {} | {} | {} | {} |".format(
+                row["strategy_group_id"],
+                row["current_problem"],
+                row["closure_action"],
+                row["review_decision"],
+                row["would_enter_count"],
+                row["high_priority_no_action_count"],
+                row["would_enter_forward_positive_count"],
+                row["missed_no_action_forward_positive_count"],
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Wave 3 MPG Member Deepening",
+            "",
+            "| Member | Role | Review focus | Recommendation |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for row in packet["wave_3_mpg_member_deepening"]["member_rows"]:
+        lines.append(
+            "| `{}` | `{}` | `{}` | `{}` |".format(
+                row["member_id"],
+                row["provisional_role"],
+                row["review_focus"],
+                row["recommended_action"],
+            )
+        )
+    lines.extend(
+        [
+            "",
         "## Priority 1 Capture Closure",
         "",
         "| StrategyGroup | Tier | Decision | Would enter | High-priority no_action | Forward positives | Next |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
-    ]
+        ]
+    )
     for row in packet["priority_1_capture_closure"]["rows"]:
         lines.append(
             "| `{}` | `{}` | `{}` | {} | {} | {} / {} | `{}` |".format(

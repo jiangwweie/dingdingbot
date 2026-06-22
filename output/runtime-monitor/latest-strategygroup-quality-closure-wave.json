@@ -1,7 +1,7 @@
 {
   "capability_unlocked": "Owner can review strategy-quality decisions without reading raw would_enter/no_action samples, while runtime authority remains false.",
   "closed_engineering_problem": "Strategy capture findings, identity ambiguity, Owner explanation, MPG member review, and forward/no-action evidence are now projected from current audit/ledger sources into one comparable packet.",
-  "generated_at_utc": "2026-06-22T05:28:09.663202+00:00",
+  "generated_at_utc": "2026-06-22T06:21:40.665777+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -643,6 +643,9 @@
     }
   },
   "priority_order": [
+    "wave_1_strategy_explainer",
+    "wave_2_capture_quality_closure",
+    "wave_3_mpg_member_deepening",
     "priority_1_btpc_lsr_brf_capture_closure",
     "priority_2_owner_cards_v1_from_ledger",
     "priority_3_mi_cpm_registry_identity_review",
@@ -676,5 +679,464 @@
     "registry": "current_pilot_baseline",
     "tier_policy_groups": 10
   },
-  "status": "quality_closure_wave_ready"
+  "status": "quality_closure_wave_ready",
+  "wave_1_strategy_explainer": {
+    "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+    "card_count": 10,
+    "cards": [
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L4 tier still is not direct submit authority",
+          "economic_risk:fee, funding, fill-gap slippage, and min-size friction",
+          "execution_safety_risk:missing protection, stale account facts, open-order or active-position conflict",
+          "fact_coverage_risk:closed-candle and member-state freshness remain action-time runtime facts",
+          "strategy_quality_risk:false breakout"
+        ],
+        "current_tier": "L4",
+        "eats_market_structure": "Directional crypto momentum with clean 1h persistence and acceptable liquidity.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "no_action_visibility_and_routing_summary:MPG-001_no_action_visibility_and_routing_audit",
+        "next_evidence": "no_action_visibility_and_routing_summary:MPG-001_no_action_visibility_and_routing_audit",
+        "owner_can_decide": "decide member tiering and exit-decay policy after review packet",
+        "owner_label": "动量延续",
+        "strategy_group_id": "MPG-001",
+        "system_auto_action": "MPG-001_no_action_visibility_and_routing_audit",
+        "trade_logic": "Long-only continuation lane with exhaustion and concentration disables, protected by stop/exit plan.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L2 proxy/replay evidence cannot authorize L4, FinalGate, Operation Layer, or order submit",
+          "economic_risk:funding, spread, slippage, leverage survival, liquidation envelope",
+          "execution_safety_risk:live facts, protection, account state, and exchange filters remain runtime-only",
+          "fact_coverage_risk:historical OI, global long/short, top-trader ratio, live margin/liquidation model",
+          "strategy_quality_risk:strong-uptrend conflict"
+        ],
+        "current_tier": "L2",
+        "eats_market_structure": "Downtrend continuation after weak rally or pullback, excluding strong upside reclaim regimes.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "classifier_fact_source_revision_review:BTPC-001_classifier_fact_source_revision_review",
+        "next_evidence": "classifier_fact_source_revision_review:BTPC-001_classifier_fact_source_revision_review",
+        "owner_can_decide": "approve or reject revised strategy direction after evidence packet",
+        "owner_label": "熊市回抽延续",
+        "strategy_group_id": "BTPC-001",
+        "system_auto_action": "BTPC-001_classifier_fact_source_revision_review",
+        "trade_logic": "Short-only L2 shadow lane using pullback structure loss, strong-uptrend disable, squeeze review, and derivatives facts.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L1 observe-only evidence cannot create shadow candidate or real order",
+          "economic_risk:fee, slippage, funding, fill-slot, leverage survival",
+          "execution_safety_risk:runtime facts and protection remain hard stops",
+          "fact_coverage_risk:liquidity sweep confirmation, reclaim context, disable state",
+          "strategy_quality_risk:lookahead proxy failure"
+        ],
+        "current_tier": "L1",
+        "eats_market_structure": "Liquidity sweep, reclaim, and short-revival structures where range context is known.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "classifier_fact_source_revision_review:LSR-001_classifier_fact_source_revision_review",
+        "next_evidence": "classifier_fact_source_revision_review:LSR-001_classifier_fact_source_revision_review",
+        "owner_can_decide": "approve or reject revised strategy direction after evidence packet",
+        "owner_label": "流动性扫盘/短线复活",
+        "strategy_group_id": "LSR-001",
+        "system_auto_action": "LSR-001_classifier_fact_source_revision_review",
+        "trade_logic": "Observe sweep/reclaim cases; keep short-revival rewrite and cost review as promotion prerequisites.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L1 observe-only evidence cannot create shadow candidate or real order",
+          "economic_risk:cost/fill/leverage boundary missing",
+          "execution_safety_risk:runtime facts and protection remain hard stops",
+          "fact_coverage_risk:rally high/rejection context and squeeze-risk classifier",
+          "strategy_quality_risk:rally failure context may be weak"
+        ],
+        "current_tier": "L1",
+        "eats_market_structure": "Bear rally failure, rejection, and structure-extreme regimes.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review",
+        "next_evidence": "promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review",
+        "owner_can_decide": "decide promote review outcome after evidence packet",
+        "owner_label": "熊市反弹失败",
+        "strategy_group_id": "BRF-001",
+        "system_auto_action": "BRF-001_forward_outcome_and_requiredfacts_review",
+        "trade_logic": "Observe rally failure and squeeze-risk cases; require context and classifier quality before L2.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "strategy_quality_or_identity_risk_not_yet_closed"
+        ],
+        "current_tier": "unknown",
+        "eats_market_structure": "current registry identity is incomplete",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "registry_identity_classification:MI-001_registry_identity_review",
+        "next_evidence": "registry_identity_classification:MI-001_registry_identity_review",
+        "owner_can_decide": "decide registry identity after review packet",
+        "owner_label": "MI-001",
+        "strategy_group_id": "MI-001",
+        "system_auto_action": "MI-001_registry_identity_review",
+        "trade_logic": "review-only strategy identity; no execution authority",
+        "why_not_live": "decision-ledger evidence is review-only and cannot authorize execution"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "strategy_quality_or_identity_risk_not_yet_closed"
+        ],
+        "current_tier": "unknown",
+        "eats_market_structure": "current registry identity is incomplete",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "registry_identity_classification:CPM-RO-001_registry_identity_review",
+        "next_evidence": "registry_identity_classification:CPM-RO-001_registry_identity_review",
+        "owner_can_decide": "decide registry identity after review packet",
+        "owner_label": "CPM-RO-001",
+        "strategy_group_id": "CPM-RO-001",
+        "system_auto_action": "CPM-RO-001_registry_identity_review",
+        "trade_logic": "review-only strategy identity; no execution authority",
+        "why_not_live": "decision-ledger evidence is review-only and cannot authorize execution"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L3 armed observation cannot place real orders without separate L4 eligibility",
+          "economic_risk:funding, basis reversal, spread, and liquidation envelope",
+          "execution_safety_risk:protection, account, open-order, and exchange filter facts remain hard stops",
+          "fact_coverage_risk:OI, long/short, top-trader, settlement, and margin/liquidation facts are heavy",
+          "strategy_quality_risk:crowding stress may unwind before runtime capture"
+        ],
+        "current_tier": "L3",
+        "eats_market_structure": "Derivative crowding, negative funding, basis/premium stress, and settlement timing regimes.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "no_action_visibility_and_routing_summary:FBS-001_no_action_visibility_and_routing_audit",
+        "next_evidence": "no_action_visibility_and_routing_summary:FBS-001_no_action_visibility_and_routing_audit",
+        "owner_can_decide": "no immediate Owner action; review only if evidence changes",
+        "owner_label": "资金费率/基差压力",
+        "strategy_group_id": "FBS-001",
+        "system_auto_action": "FBS-001_no_action_visibility_and_routing_audit",
+        "trade_logic": "Observe derivatives stress; long lane is primary while short side remains disable/redesign-only.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L3 conditional observation is not live submit authority",
+          "economic_risk:session gap fill, mark/funding, slippage around session open",
+          "execution_safety_risk:closed-bar freshness, protection, account, and exchange filters remain hard stops",
+          "fact_coverage_risk:closed open range, trigger bar, and session mapping must be fresh",
+          "strategy_quality_risk:session false breakout"
+        ],
+        "current_tier": "L3",
+        "eats_market_structure": "TradFi-linked session opens with closed range bars, trigger bar, and post-open decay control.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "no_action_visibility_and_routing_summary:SOR-001_no_action_visibility_and_routing_audit",
+        "next_evidence": "no_action_visibility_and_routing_summary:SOR-001_no_action_visibility_and_routing_audit",
+        "owner_can_decide": "no immediate Owner action; review only if evidence changes",
+        "owner_label": "开盘区间结构",
+        "strategy_group_id": "SOR-001",
+        "system_auto_action": "SOR-001_no_action_visibility_and_routing_audit",
+        "trade_logic": "Session-window short lane with long-revival branch only when branch conditions are satisfied.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L1 observe-only evidence cannot create shadow candidate or real order",
+          "economic_risk:cost m2m, fee, slippage, funding, fill-slot assumptions",
+          "execution_safety_risk:runtime facts and protection remain hard stops",
+          "fact_coverage_risk:compression context, volume expansion, disable state",
+          "strategy_quality_risk:false breakout reversal"
+        ],
+        "current_tier": "L1",
+        "eats_market_structure": "Volatility compression, breakout close, and volume expansion regimes.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "VCB-001_continue_observe_only",
+        "next_evidence": "VCB-001_continue_observe_only",
+        "owner_can_decide": "no immediate Owner action; review only if evidence changes",
+        "owner_label": "波动压缩突破",
+        "strategy_group_id": "VCB-001",
+        "system_auto_action": "VCB-001_continue_observe_only",
+        "trade_logic": "Observe long-side breakout candidates; revise false-breakout disable and cost review before L2.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      },
+      {
+        "actionable_now": false,
+        "current_risk": [
+          "authority_risk:L2 shadow candidate evidence cannot create real-order authority",
+          "economic_risk:session fill slippage and funding/mark review",
+          "execution_safety_risk:runtime account, protection, and exchange filters remain hard stops",
+          "fact_coverage_risk:theme breadth, product eligibility, and session gap context",
+          "strategy_quality_risk:low-history product momentum"
+        ],
+        "current_tier": "L2",
+        "eats_market_structure": "Theme momentum where product/session and concentration risks are acceptable.",
+        "live_permission_change_recommended_now": false,
+        "missing_facts": "shadow outcomes and cost/session review before any L4 review",
+        "next_evidence": "shadow outcomes and cost/session review before any L4 review",
+        "owner_can_decide": "no immediate Owner action; review only if evidence changes",
+        "owner_label": "类股权永续动量",
+        "strategy_group_id": "TEQ-001",
+        "system_auto_action": "continue_strategy_review",
+        "trade_logic": "Long-only burst continuation with product eligibility, breadth, and overextension disables.",
+        "why_not_live": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts"
+      }
+    ],
+    "done_when": {
+      "cards_explain_why_not_live": true,
+      "cards_separate_owner_decision_from_system_action": true,
+      "strategy_assets_are_owner_readable": true
+    },
+    "missing_required_cards": [],
+    "purpose": "turn StrategyGroup ids into Owner-readable strategy assets",
+    "required_groups": [
+      "MPG-001",
+      "BTPC-001",
+      "LSR-001",
+      "BRF-001",
+      "MI-001",
+      "CPM-RO-001"
+    ],
+    "status": "ready",
+    "visibility_groups": [
+      "FBS-001",
+      "SOR-001",
+      "VCB-001",
+      "TEQ-001"
+    ]
+  },
+  "wave_2_capture_quality_closure": {
+    "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+    "done_when": {
+      "all_rows_are_review_only": true,
+      "btpc_lsr_brf_have_closure_rows": true,
+      "vcb_rbr_are_not_hidden_in_forward_rollup": true
+    },
+    "purpose": "answer where capture quality failed without changing live authority",
+    "rows": [
+      {
+        "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+        "closure_action": "review_stale_gate_fact_source_classifier_attribution",
+        "current_problem": "169/169 windows are attributed to stale gate or fact-source blocking.",
+        "current_tier": "L2",
+        "dominant_blocker_classes": [
+          {
+            "count": 169,
+            "key": "stale_data_or_signal"
+          }
+        ],
+        "high_priority_no_action_count": 169,
+        "ledger_decision": "revise",
+        "live_permission_change_recommended_now": false,
+        "missed_no_action_forward_positive_count": 152,
+        "next_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
+        "no_action_count": 169,
+        "owner_label": "熊市回抽延续",
+        "owner_policy_decision_required_later": false,
+        "review_decision": "revise",
+        "strategy_group_id": "BTPC-001",
+        "would_enter_count": 0,
+        "would_enter_forward_positive_count": 0
+      },
+      {
+        "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+        "closure_action": "side_specific_short_revival_range_context_review",
+        "current_problem": "side-specific short-revival has would-enter evidence but needs range-context review.",
+        "current_tier": "L1",
+        "dominant_blocker_classes": [
+          {
+            "count": 167,
+            "key": "no_action_other"
+          },
+          {
+            "count": 2,
+            "key": "observe_only_would_enter"
+          }
+        ],
+        "high_priority_no_action_count": 167,
+        "ledger_decision": "revise",
+        "live_permission_change_recommended_now": false,
+        "missed_no_action_forward_positive_count": 0,
+        "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+        "no_action_count": 167,
+        "owner_label": "流动性扫盘/短线复活",
+        "owner_policy_decision_required_later": false,
+        "review_decision": "revise",
+        "strategy_group_id": "LSR-001",
+        "would_enter_count": 2,
+        "would_enter_forward_positive_count": 2
+      },
+      {
+        "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+        "closure_action": "forward_outcome_squeeze_classifier_requiredfacts_review",
+        "current_problem": "bear-rally failure short structure appeared, but squeeze and RequiredFacts review are incomplete.",
+        "current_tier": "L1",
+        "dominant_blocker_classes": [
+          {
+            "count": 85,
+            "key": "market_structure_not_confirmed"
+          },
+          {
+            "count": 63,
+            "key": "no_action_other"
+          },
+          {
+            "count": 20,
+            "key": "classifier_threshold_not_met"
+          },
+          {
+            "count": 1,
+            "key": "observe_only_would_enter"
+          }
+        ],
+        "high_priority_no_action_count": 168,
+        "ledger_decision": "promote",
+        "live_permission_change_recommended_now": false,
+        "missed_no_action_forward_positive_count": 136,
+        "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+        "no_action_count": 168,
+        "owner_label": "熊市反弹失败",
+        "owner_policy_decision_required_later": true,
+        "review_decision": "promote_review",
+        "strategy_group_id": "BRF-001",
+        "would_enter_count": 1,
+        "would_enter_forward_positive_count": 0
+      },
+      {
+        "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+        "closure_action": "true_false_breakout_classifier_review",
+        "current_problem": "breakout structure appeared but true/false breakout quality is not strong enough for promotion.",
+        "current_tier": "L1",
+        "dominant_blocker_classes": [
+          {
+            "count": 162,
+            "key": "classifier_threshold_not_met"
+          },
+          {
+            "count": 5,
+            "key": "no_action_other"
+          },
+          {
+            "count": 2,
+            "key": "observe_only_would_enter"
+          }
+        ],
+        "high_priority_no_action_count": 167,
+        "ledger_decision": "keep_observing",
+        "live_permission_change_recommended_now": false,
+        "missed_no_action_forward_positive_count": 135,
+        "next_checkpoint": "VCB-001_continue_observe_only",
+        "no_action_count": 167,
+        "owner_label": "波动压缩突破",
+        "owner_policy_decision_required_later": false,
+        "review_decision": "keep_observing_or_revise",
+        "strategy_group_id": "VCB-001",
+        "would_enter_count": 2,
+        "would_enter_forward_positive_count": 2
+      },
+      {
+        "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+        "closure_action": "material_new_edge_review_before_reactivation",
+        "current_problem": "positive observe-only samples exist, but the lane remains parked without materially new edge evidence.",
+        "current_tier": "L1",
+        "dominant_blocker_classes": [
+          {
+            "count": 163,
+            "key": "no_action_other"
+          },
+          {
+            "count": 6,
+            "key": "observe_only_would_enter"
+          }
+        ],
+        "high_priority_no_action_count": 0,
+        "ledger_decision": "park",
+        "live_permission_change_recommended_now": false,
+        "missed_no_action_forward_positive_count": 0,
+        "next_checkpoint": "park_until_material_new_edge_evidence",
+        "no_action_count": 163,
+        "owner_label": "区间边界回归",
+        "owner_policy_decision_required_later": true,
+        "review_decision": "park_unless_new_edge",
+        "strategy_group_id": "RBR-001",
+        "would_enter_count": 6,
+        "would_enter_forward_positive_count": 6
+      }
+    ],
+    "status": "ready_for_owner_review"
+  },
+  "wave_3_mpg_member_deepening": {
+    "authority_boundary": "local_review_only; no FinalGate; no Operation Layer; no exchange write; no tier policy change; no live profile change; no real order authority",
+    "current_tier": "L4",
+    "done_when": {
+      "decay_controls_present": true,
+      "exit_horizons_present": true,
+      "no_live_scope_expansion": true,
+      "six_member_roles_present": true
+    },
+    "exit_decay_review": {
+      "decay_controls_to_review": [
+        "momentum_exhaustion_disable",
+        "member_specific_decay",
+        "rolling_window_decay_detection",
+        "post_right_tail_giveback_control"
+      ],
+      "exit_horizons_to_review": [
+        "6h",
+        "12h",
+        "24h",
+        "72h"
+      ],
+      "status": "needed_before_any_live_scope_expansion"
+    },
+    "live_permission_change_recommended_now": false,
+    "member_count": 6,
+    "member_rows": [
+      {
+        "member_id": "TSI-001",
+        "provisional_role": "core_member_candidate",
+        "recommended_action": "keep_core_candidate_but_require_decay_control",
+        "review_focus": "right_tail_return_vs_drawdown_decay"
+      },
+      {
+        "member_id": "MHI-001",
+        "provisional_role": "high_risk_member",
+        "recommended_action": "downshift_or_park_review_before_live_expansion",
+        "review_focus": "high_return_high_drawdown_survivability"
+      },
+      {
+        "member_id": "PPO-001",
+        "provisional_role": "support_member",
+        "recommended_action": "keep_observing_as_support_member",
+        "review_focus": "middle_return_middle_drawdown_stability"
+      },
+      {
+        "member_id": "DMI-001",
+        "provisional_role": "ignition_support_or_independent_observer",
+        "recommended_action": "identity_boundary_review",
+        "review_focus": "member_vs_independent_strategy_boundary"
+      },
+      {
+        "member_id": "WPR-001",
+        "provisional_role": "confirmation_member",
+        "recommended_action": "keep_as_confirmation_candidate",
+        "review_focus": "conservative_momentum_confirmation_value"
+      },
+      {
+        "member_id": "MFI-001",
+        "provisional_role": "risk_damper_or_scorer",
+        "recommended_action": "keep_as_scorer_not_primary_member",
+        "review_focus": "low_drawdown_low_return_filter_value"
+      }
+    ],
+    "owner_policy_decision_required": true,
+    "purpose": "explain MPG member roles, drawdown risk, and exit/decay review before live scope expansion",
+    "status": "ready_for_owner_review",
+    "strategy_group_id": "MPG-001"
+  }
 }
