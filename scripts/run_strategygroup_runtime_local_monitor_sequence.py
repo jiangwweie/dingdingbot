@@ -228,6 +228,12 @@ DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON = (
 DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.md"
 )
+DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-facts.json"
+)
+DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-facts.md"
+)
 DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.json"
 )
@@ -409,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
             args.brf2_required_facts_mapping_json
         ),
         brf2_required_facts_mapping_md=Path(args.brf2_required_facts_mapping_md),
+        brf2_runtime_signal_facts_json=Path(
+            args.brf2_runtime_signal_facts_json
+        ),
+        brf2_runtime_signal_facts_md=Path(args.brf2_runtime_signal_facts_md),
         brf2_runtime_signal_capture_json=Path(
             args.brf2_runtime_signal_capture_json
         ),
@@ -607,6 +617,8 @@ def build_local_monitor_sequence_report(
     ),
     brf2_required_facts_mapping_json: Path = DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON,
     brf2_required_facts_mapping_md: Path = DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD,
+    brf2_runtime_signal_facts_json: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_JSON,
+    brf2_runtime_signal_facts_md: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_MD,
     brf2_runtime_signal_capture_json: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON,
     brf2_runtime_signal_capture_md: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD,
     brf2_non_executing_candidate_packet_json: Path = (
@@ -801,6 +813,23 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    brf2_runtime_signal_facts_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_brf2_runtime_signal_facts.py"),
+        "--output-json",
+        str(brf2_runtime_signal_facts_json),
+        "--output-owner-progress",
+        str(brf2_runtime_signal_facts_md),
+    ]
+    steps.append(
+        _run_step(
+            "brf2_runtime_signal_facts",
+            brf2_runtime_signal_facts_command,
+            brf2_runtime_signal_facts_json,
+            runner,
+        )
+    )
+
     brf2_runtime_signal_capture_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_brf2_runtime_signal_capture.py"),
@@ -808,6 +837,8 @@ def build_local_monitor_sequence_report(
         str(brf2_required_facts_mapping_json),
         "--owner-policy-json",
         str(brf2_owner_trial_policy_scope_json),
+        "--fact-input-json",
+        str(brf2_runtime_signal_facts_json),
         "--output-json",
         str(brf2_runtime_signal_capture_json),
         "--output-owner-progress",
@@ -1366,6 +1397,8 @@ def build_local_monitor_sequence_report(
         str(brf2_owner_trial_policy_scope_json),
         "--brf2-required-facts-mapping-json",
         str(brf2_required_facts_mapping_json),
+        "--brf2-runtime-signal-capture-json",
+        str(brf2_runtime_signal_capture_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
         "--output-json",
@@ -1464,6 +1497,12 @@ def build_local_monitor_sequence_report(
         )
     if signal_coverage_gap:
         non_market_gaps.append(signal_coverage_gap)
+    brf2_fact_input_gap = _brf2_fact_input_non_market_gap(
+        packets.get("brf2_runtime_signal_facts", {}),
+        packets.get("brf2_runtime_signal_capture", {}),
+    )
+    if brf2_fact_input_gap:
+        non_market_gaps.append(brf2_fact_input_gap)
     owner_decision_required = _sequence_owner_decision_required(
         packets=packets,
         execution_blockers=execution_blockers,
@@ -1494,6 +1533,9 @@ def build_local_monitor_sequence_report(
     )
     brf2_required_facts_summary = _sequence_brf2_required_facts_mapping_summary(
         packets.get("brf2_required_facts_mapping", {})
+    )
+    brf2_runtime_signal_facts_summary = _sequence_brf2_runtime_signal_facts_summary(
+        packets.get("brf2_runtime_signal_facts", {})
     )
     brf2_runtime_signal_capture_summary = _sequence_brf2_runtime_signal_capture_summary(
         packets.get("brf2_runtime_signal_capture", {})
@@ -1534,6 +1576,7 @@ def build_local_monitor_sequence_report(
             "strategy_experiment_candidate": capital_trial_summary,
             "trial_asset_admission": trial_admission_summary,
             "brf2_owner_trial_policy": brf2_policy_summary,
+            "brf2_runtime_signal_facts": brf2_runtime_signal_facts_summary,
             "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
             "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
@@ -1547,6 +1590,7 @@ def build_local_monitor_sequence_report(
         "strategy_trial_asset_admission": trial_admission_summary,
         "brf2_owner_trial_policy": brf2_policy_summary,
         "brf2_required_facts_mapping": brf2_required_facts_summary,
+        "brf2_runtime_signal_facts": brf2_runtime_signal_facts_summary,
         "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
         "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
@@ -1648,6 +1692,15 @@ def build_local_monitor_sequence_report(
             ],
             "brf2_runtime_signal_capture_ready": (
                 brf2_runtime_signal_capture_summary["ready"]
+            ),
+            "brf2_runtime_signal_fact_input_present": (
+                brf2_runtime_signal_facts_summary["fact_input_present"]
+            ),
+            "brf2_runtime_signal_watcher_tick_present": (
+                brf2_runtime_signal_facts_summary["watcher_tick_present"]
+            ),
+            "brf2_runtime_signal_fact_input_status": (
+                brf2_runtime_signal_facts_summary["status"]
             ),
             "brf2_runtime_signal_state": brf2_runtime_signal_capture_summary[
                 "current_signal_state"
@@ -1808,6 +1861,7 @@ def build_local_monitor_sequence_report(
                 strategygroup_trial_asset_admission_proposal_json
             ),
             "brf2_required_facts_mapping_json": str(brf2_required_facts_mapping_json),
+            "brf2_runtime_signal_facts_json": str(brf2_runtime_signal_facts_json),
             "brf2_runtime_signal_capture_json": str(
                 brf2_runtime_signal_capture_json
             ),
@@ -1910,6 +1964,11 @@ def _sequence_status(
         return "needs_non_market_repair"
     completion_status = _status(packets["completion_audit"])
     if completion_status == "needs_non_market_repair":
+        return "needs_non_market_repair"
+    if _brf2_fact_input_non_market_gap(
+        packets.get("brf2_runtime_signal_facts", {}),
+        packets.get("brf2_runtime_signal_capture", {}),
+    ):
         return "needs_non_market_repair"
     if _sequence_has_processing_signal(packets=packets):
         return "processing"
@@ -2058,6 +2117,37 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
             "missing_or_false": ["signal_coverage_forbidden_effect"],
         }
     return None
+
+
+def _brf2_fact_input_non_market_gap(
+    facts_packet: dict[str, Any],
+    capture_packet: dict[str, Any],
+) -> dict[str, Any] | None:
+    facts_missing = (
+        _status(facts_packet) == "brf2_runtime_signal_facts_missing_watcher_input"
+        or facts_packet.get("fact_input_present") is False
+    )
+    capture_preview = _as_dict(capture_packet.get("signal_detector_preview"))
+    capture_missing = (
+        str(capture_preview.get("current_signal_state") or "") == "fact_input_missing"
+        or str(capture_preview.get("first_blocker_class") or "")
+        == "brf2_watcher_fact_input_missing"
+    )
+    if not facts_missing and not capture_missing:
+        return None
+    return {
+        "class": "missing_fact",
+        "source": "brf2_runtime_signal_facts",
+        "strategy_group_id": "BRF2-001",
+        "gap": "brf2_watcher_fact_input_missing",
+        "owner": "engineering",
+        "next_action": "attach_brf2_watcher_fact_input_producer",
+        "requirement": "BRF2 armed observation must have watcher fact input before it can be classified as market wait",
+        "missing_or_false": [
+            "brf2_runtime_signal_fact_input_present",
+            "brf2_runtime_signal_watcher_tick_present",
+        ],
+    }
 
 
 def _expansion_review_resolved(
@@ -2518,6 +2608,30 @@ def _sequence_brf2_required_facts_mapping_summary(
     }
 
 
+def _sequence_brf2_runtime_signal_facts_summary(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    first_blocker = _as_dict(packet.get("first_blocker"))
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet)
+        in {
+            "brf2_runtime_signal_facts_ready",
+            "brf2_runtime_signal_facts_missing_watcher_input",
+        },
+        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
+        "fact_input_present": packet.get("fact_input_present") is True,
+        "watcher_tick_present": packet.get("watcher_tick_present") is True,
+        "source_status": str(packet.get("source_status") or "missing"),
+        "source_path": str(packet.get("source_path") or ""),
+        "first_blocker_class": str(first_blocker.get("class") or "missing"),
+        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
+        "next_action": str(packet.get("next_action") or first_blocker.get("next_action") or ""),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_brf2_runtime_signal_capture_summary(
     packet: dict[str, Any],
 ) -> dict[str, Any]:
@@ -2531,6 +2645,15 @@ def _sequence_brf2_runtime_signal_capture_summary(
         "ready": _status(packet) == "brf2_runtime_signal_capture_ready",
         "strategy_group_id": str(packet.get("strategy_group_id") or ""),
         "signal_id": str(watcher_scope.get("signal_id") or ""),
+        "fact_input_present": packet.get("fact_input_present") is True
+        or preview.get("fact_input_present") is True,
+        "watcher_tick_present": packet.get("watcher_tick_present") is True
+        or preview.get("watcher_tick_present") is True,
+        "fact_input_status": str(
+            packet.get("fact_input_status")
+            or preview.get("fact_input_status")
+            or "missing"
+        ),
         "current_signal_state": str(
             preview.get("current_signal_state") or "unknown"
         ),
@@ -2852,6 +2975,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     trial_admission = report.get("strategy_trial_asset_admission") or {}
     brf2_policy = report.get("brf2_owner_trial_policy") or {}
     brf2_required_facts_mapping = report.get("brf2_required_facts_mapping") or {}
+    brf2_runtime_signal_facts = report.get("brf2_runtime_signal_facts") or {}
     brf2_runtime_signal_capture = report.get("brf2_runtime_signal_capture") or {}
     brf2_candidate_packet = (
         report.get("brf2_non_executing_candidate_packet") or {}
@@ -2897,6 +3021,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- BRF2 RequiredFacts mapping: `{brf2_required_facts_mapping.get('status', 'missing')}`",
         f"- BRF2 fresh signal rule: `{brf2_required_facts_mapping.get('fresh_signal_rule_id') or 'none'}`",
         f"- BRF2 after mapping state: `{brf2_required_facts_mapping.get('after_next_state') or 'none'}`",
+        f"- BRF2 runtime signal facts: `{brf2_runtime_signal_facts.get('status', 'missing')}`",
+        f"- BRF2 fact input / watcher tick: `{_yes_no(brf2_runtime_signal_facts.get('fact_input_present') is True)}` / `{_yes_no(brf2_runtime_signal_facts.get('watcher_tick_present') is True)}`",
         f"- BRF2 runtime signal capture: `{brf2_runtime_signal_capture.get('status', 'missing')}`",
         f"- BRF2 signal state: `{brf2_runtime_signal_capture.get('current_signal_state', 'unknown')}`",
         f"- BRF2 signal first blocker: `{brf2_runtime_signal_capture.get('first_blocker_class', 'missing')}` / `{brf2_runtime_signal_capture.get('first_blocker_owner', 'unknown')}`",
@@ -3259,6 +3385,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--brf2-required-facts-mapping-md",
         default=str(DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD),
+    )
+    parser.add_argument(
+        "--brf2-runtime-signal-facts-json",
+        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_JSON),
+    )
+    parser.add_argument(
+        "--brf2-runtime-signal-facts-md",
+        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_MD),
     )
     parser.add_argument(
         "--brf2-runtime-signal-capture-json",

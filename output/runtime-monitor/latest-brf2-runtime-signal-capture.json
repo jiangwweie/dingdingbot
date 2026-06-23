@@ -45,6 +45,8 @@
     "calls_finalgate": false,
     "calls_operation_layer": false,
     "candidate_packet_shape_ready": true,
+    "fact_input_present": false,
+    "fact_input_status_ready": false,
     "fresh_signal_present": false,
     "mapping_ready": true,
     "missing_required_fact_count": 8,
@@ -52,9 +54,12 @@
     "places_order": false,
     "real_order_authority": false,
     "signal_detector_preview_ready": true,
-    "watcher_scope_ready": true
+    "watcher_scope_ready": true,
+    "watcher_tick_present": false
   },
-  "generated_at_utc": "2026-06-23T08:34:12.918686+00:00",
+  "fact_input_present": false,
+  "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
+  "generated_at_utc": "2026-06-23T09:42:54.620139+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -69,7 +74,7 @@
     "active_disable_fact_keys": [],
     "attribution_ready": true,
     "blocked_fact_count": 8,
-    "blocker_owner": "market",
+    "blocker_owner": "engineering",
     "missing_required_fact_keys": [
       "closed_1h_ohlcv",
       "closed_5m_ohlcv",
@@ -80,7 +85,7 @@
       "liquidity_downshift_state",
       "spread_liquidity_state"
     ],
-    "reason": "fresh_brf2_short_signal_absent",
+    "reason": "brf2_watcher_fact_input_missing",
     "strategy_group_id": "BRF2-001"
   },
   "safety_invariants": {
@@ -100,7 +105,7 @@
   "scope": "brf2_runtime_signal_capture_read_model",
   "signal_detector_preview": {
     "active_disable_fact_keys": [],
-    "current_signal_state": "fresh_signal_absent",
+    "current_signal_state": "fact_input_missing",
     "detector_ready": true,
     "disable_fact_status": [
       {
@@ -134,8 +139,10 @@
         "state": "missing"
       }
     ],
-    "first_blocker_class": "fresh_brf2_short_signal_absent",
-    "first_blocker_owner": "market",
+    "fact_input_present": false,
+    "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
+    "first_blocker_class": "brf2_watcher_fact_input_missing",
+    "first_blocker_owner": "engineering",
     "fresh_signal_present": false,
     "missing_required_fact_keys": [
       "closed_1h_ohlcv",
@@ -147,7 +154,7 @@
       "liquidity_downshift_state",
       "spread_liquidity_state"
     ],
-    "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+    "next_action": "attach_brf2_watcher_fact_input_producer",
     "required_fact_status": [
       {
         "fact_key": "closed_1h_ohlcv",
@@ -197,7 +204,8 @@
         "raw_state": "",
         "state": "missing"
       }
-    ]
+    ],
+    "watcher_tick_present": false
   },
   "source_signal_context": {
     "closed_at_utc": "",
@@ -224,5 +232,6 @@
       "1h_closed",
       "5m_closed"
     ]
-  }
+  },
+  "watcher_tick_present": false
 }

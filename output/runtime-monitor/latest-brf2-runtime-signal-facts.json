@@ -1,0 +1,63 @@
+{
+  "checks": {
+    "actionable_now": false,
+    "brf2_source_row_present": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "fact_input_present": false,
+    "missing_watcher_input": true,
+    "places_order": false,
+    "real_order_authority": false,
+    "watcher_tick_present": false
+  },
+  "fact_input_present": false,
+  "facts": {},
+  "first_blocker": {
+    "class": "brf2_watcher_fact_input_missing",
+    "next_action": "attach_brf2_watcher_fact_input_producer",
+    "owner": "engineering"
+  },
+  "generated_at_utc": "2026-06-23T09:42:54.571142+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_brf2_runtime_signal_facts",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "next_action": "attach_brf2_watcher_fact_input_producer",
+  "safety_invariants": {
+    "actionable_now": false,
+    "authorization_evidence_created": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "execution_intent_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "real_order_authority": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.brf2_runtime_signal_facts.v1",
+  "scope": "brf2_runtime_signal_facts_read_model",
+  "source_path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-market-strategy-preview.json",
+  "source_signal_context": {
+    "closed_at_utc": "",
+    "exchange_symbol": "",
+    "market": "",
+    "runtime_instance_id": "",
+    "signal_packet_id": "",
+    "source": "brf2_runtime_signal_facts_read_model",
+    "symbol": "",
+    "timeframe": ""
+  },
+  "source_status": "preview_built",
+  "status": "brf2_runtime_signal_facts_missing_watcher_input",
+  "strategy_group_id": "BRF2-001",
+  "watcher_tick_present": false
+}

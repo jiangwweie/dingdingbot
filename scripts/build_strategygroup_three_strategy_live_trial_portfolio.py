@@ -40,6 +40,9 @@ DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
 DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.json"
 )
+DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.json"
+)
 DEFAULT_SIGNAL_COVERAGE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
 )
@@ -77,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON),
     )
     parser.add_argument(
+        "--brf2-runtime-signal-capture-json",
+        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON),
+    )
+    parser.add_argument(
         "--signal-coverage-json",
         default=str(DEFAULT_SIGNAL_COVERAGE_JSON),
     )
@@ -96,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         brf2_required_facts_mapping=_read_optional_json(
             Path(args.brf2_required_facts_mapping_json)
+        ),
+        brf2_runtime_signal_capture=_read_optional_json(
+            Path(args.brf2_runtime_signal_capture_json)
         ),
         signal_coverage=_read_optional_json(Path(args.signal_coverage_json)),
     )
@@ -127,6 +137,7 @@ def build_three_strategy_live_trial_portfolio(
     trial_asset_admission_proposal: dict[str, Any] | None = None,
     brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     brf2_required_facts_mapping: dict[str, Any] | None = None,
+    brf2_runtime_signal_capture: dict[str, Any] | None = None,
     signal_coverage: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -144,6 +155,7 @@ def build_three_strategy_live_trial_portfolio(
             proposal=proposal,
             owner_policy_scope=owner_policy_scope,
             required_facts_mapping=required_facts_mapping,
+            runtime_signal_capture=brf2_runtime_signal_capture or {},
         ),
         "SOR-001": _sor_seat(registry_rows, tier_rows, signal_coverage or {}),
     }
@@ -363,8 +375,16 @@ def _brf2_seat(
     proposal: dict[str, Any],
     owner_policy_scope: dict[str, Any],
     required_facts_mapping: dict[str, Any],
+    runtime_signal_capture: dict[str, Any],
 ) -> dict[str, Any]:
     mapping_ready = _brf2_required_facts_mapping_ready(required_facts_mapping)
+    runtime_capture_blocker = _brf2_runtime_capture_first_blocker(
+        runtime_signal_capture
+    )
+    runtime_fact_input_missing = (
+        runtime_capture_blocker.get("first_blocker_class")
+        == "brf2_watcher_fact_input_missing"
+    )
     required_facts = _string_list(
         required_facts_mapping.get("required_fact_keys")
         or [
@@ -419,6 +439,9 @@ def _brf2_seat(
         else "trial_scope_policy_missing_machine_checkable"
     )
     first_blocker = (
+        runtime_capture_blocker
+        if mapping_ready and runtime_capture_blocker
+        else
         {
             "verdict": "not_tradable_market_wait",
             "first_blocker_class": "fresh_brf2_short_signal_absent",
@@ -442,6 +465,15 @@ def _brf2_seat(
         }
     )
     tradeability_projection = (
+        {
+            "can_trade": False,
+            "verdict": str(runtime_capture_blocker.get("verdict")),
+            "next_state_after_blocker_removed": "armed_observation"
+            if runtime_fact_input_missing
+            else "live_submit_ready",
+        }
+        if mapping_ready and runtime_capture_blocker
+        else
         {
             "can_trade": False,
             "verdict": "not_tradable_market_wait",
@@ -469,6 +501,19 @@ def _brf2_seat(
         "stage": stage,
         "admitted_or_selected_as_live_trial_asset": True,
         "registry_admitted": False,
+        "provisional_trial_asset_admitted": policy_recorded and mapping_ready,
+        "admission_source": (
+            "trial_asset_admission_proposal_owner_policy_requiredfacts"
+            if policy_recorded and mapping_ready
+            else "trial_asset_admission_proposal_owner_policy"
+            if policy_recorded
+            else "trial_asset_admission_proposal_pending_owner_policy"
+        ),
+        "registry_admission_status": (
+            "not_registry_admitted_provisional_trial_asset"
+            if policy_recorded and mapping_ready
+            else "not_registry_admitted"
+        ),
         "tier_policy_mode": "trial_asset_admission_candidate",
         "experiment_worthiness_review_closed": True,
         "loss_envelope_expressed": True,
@@ -531,9 +576,12 @@ def _brf2_seat(
             "spread_liquidity_downshift_state",
         ],
         "runtime_readiness": {
-            "armed_observation_ready": mapping_ready,
+            "armed_observation_ready": mapping_ready and not runtime_fact_input_missing,
             "armed_observation_plan_ready": True,
             "blocked_by": (
+                runtime_capture_blocker.get("first_blocker_class")
+                if mapping_ready and runtime_capture_blocker
+                else
                 "fresh_brf2_short_signal_absent"
                 if mapping_ready
                 else "required_facts_mapping_gap"
@@ -552,6 +600,9 @@ def _brf2_seat(
             "post_submit_review_ledger_after_real_attempt",
         ],
         "next_bottleneck": (
+            runtime_capture_blocker.get("first_blocker_class")
+            if mapping_ready and runtime_capture_blocker
+            else
             "fresh_signal_wait"
             if mapping_ready
             else "required_facts_mapping_gap"
@@ -578,6 +629,43 @@ def _brf2_required_facts_mapping_ready(packet: dict[str, Any]) -> bool:
         and packet.get("required_facts_mapping_ready") is True
         and packet.get("after_next_state") == "armed_observation"
     )
+
+
+def _brf2_runtime_capture_first_blocker(packet: dict[str, Any]) -> dict[str, str]:
+    if packet.get("status") != "brf2_runtime_signal_capture_ready":
+        return {}
+    preview = _as_dict(packet.get("signal_detector_preview"))
+    signal_state = str(preview.get("current_signal_state") or "")
+    first_blocker_class = str(
+        preview.get("first_blocker_class") or "fresh_brf2_short_signal_absent"
+    )
+    blocker_owner = str(preview.get("first_blocker_owner") or "market")
+    next_action = str(
+        preview.get("next_action")
+        or "continue_brf2_armed_observation_until_fresh_signal"
+    )
+    if signal_state == "fact_input_missing":
+        return {
+            "verdict": "not_tradable_facts",
+            "first_blocker_class": first_blocker_class,
+            "blocker_owner": blocker_owner,
+            "next_action": next_action,
+        }
+    if signal_state == "blocked_by_disable_fact":
+        return {
+            "verdict": "not_tradable_market_wait",
+            "first_blocker_class": first_blocker_class,
+            "blocker_owner": blocker_owner,
+            "next_action": next_action,
+        }
+    if signal_state == "fresh_signal_present":
+        return {
+            "verdict": "not_tradable_execution_gate",
+            "first_blocker_class": "brf2_candidate_authorization_evidence_not_created",
+            "blocker_owner": "runtime",
+            "next_action": "build_brf2_non_executing_candidate_packet_for_action_time_chain",
+        }
+    return {}
 
 
 def _brf2_recorded_policy_scope(policy: dict[str, Any]) -> dict[str, Any]:

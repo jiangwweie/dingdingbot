@@ -87,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
                 "signal_state": packet["signal_detector_preview"][
                     "current_signal_state"
                 ],
+                "fact_input_present": packet["fact_input_present"],
+                "watcher_tick_present": packet["watcher_tick_present"],
                 "fresh_signal_present": packet["signal_detector_preview"][
                     "fresh_signal_present"
                 ],
@@ -109,11 +111,15 @@ def build_brf2_runtime_signal_capture(
     fact_input: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
+    fact_input = fact_input or {}
     mapping_ready = (
         required_facts_mapping.get("status") == "brf2_required_facts_mapping_ready"
         and required_facts_mapping.get("required_facts_mapping_ready") is True
     )
-    facts = _facts_by_key(fact_input or {})
+    facts = _facts_by_key(fact_input)
+    fact_input_status = str(fact_input.get("status") or "missing")
+    fact_input_present = _fact_input_present(fact_input, facts)
+    watcher_tick_present = fact_input.get("watcher_tick_present") is True
     required_fact_keys = [
         str(item)
         for item in required_facts_mapping.get("required_fact_keys") or []
@@ -141,10 +147,17 @@ def build_brf2_runtime_signal_capture(
         row["fact_key"] for row in disable_status if row["state"] == "disable_active"
     ]
     detector_ready = mapping_ready and bool(required_fact_keys)
-    fresh_signal_present = detector_ready and not missing_required and not active_disable
+    fresh_signal_present = (
+        detector_ready
+        and fact_input_present
+        and not missing_required
+        and not active_disable
+    )
     current_signal_state = (
         "fresh_signal_present"
         if fresh_signal_present
+        else "fact_input_missing"
+        if detector_ready and not fact_input_present
         else "blocked_by_disable_fact"
         if active_disable
         else "fresh_signal_absent"
@@ -153,6 +166,7 @@ def build_brf2_runtime_signal_capture(
     )
     first_blocker = _first_blocker(
         detector_ready=detector_ready,
+        fact_input_present=fact_input_present,
         missing_required=missing_required,
         active_disable=active_disable,
     )
@@ -170,6 +184,9 @@ def build_brf2_runtime_signal_capture(
         "generated_at_utc": generated_at_utc
         or datetime.now(timezone.utc).isoformat(),
         "strategy_group_id": "BRF2-001",
+        "fact_input_status": fact_input_status,
+        "fact_input_present": fact_input_present,
+        "watcher_tick_present": watcher_tick_present,
         "watcher_scope": {
             "strategy_group_id": "BRF2-001",
             "signal_id": str(fresh_signal_rule.get("signal_id") or ""),
@@ -185,6 +202,9 @@ def build_brf2_runtime_signal_capture(
         "source_signal_context": source_signal_context,
         "signal_detector_preview": {
             "detector_ready": detector_ready,
+            "fact_input_present": fact_input_present,
+            "watcher_tick_present": watcher_tick_present,
+            "fact_input_status": fact_input_status,
             "fresh_signal_present": fresh_signal_present,
             "current_signal_state": current_signal_state,
             "first_blocker_class": first_blocker["class"],
@@ -230,6 +250,10 @@ def build_brf2_runtime_signal_capture(
         },
         "checks": {
             "mapping_ready": mapping_ready,
+            "fact_input_present": fact_input_present,
+            "watcher_tick_present": watcher_tick_present,
+            "fact_input_status_ready": fact_input_status
+            == "brf2_runtime_signal_facts_ready",
             "watcher_scope_ready": detector_ready,
             "signal_detector_preview_ready": detector_ready,
             "no_action_attribution_ready": detector_ready,
@@ -311,6 +335,17 @@ def _facts_by_key(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {}
 
 
+def _fact_input_present(
+    packet: dict[str, Any],
+    facts: dict[str, dict[str, Any]],
+) -> bool:
+    if packet.get("status") == "brf2_runtime_signal_facts_missing_watcher_input":
+        return False
+    if packet.get("fact_input_present") is False:
+        return False
+    return packet.get("fact_input_present") is True or bool(facts)
+
+
 def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
     context = _as_dict(packet.get("signal_context"))
     if not context:
@@ -343,6 +378,7 @@ def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
 def _first_blocker(
     *,
     detector_ready: bool,
+    fact_input_present: bool,
     missing_required: list[str],
     active_disable: list[str],
 ) -> dict[str, str]:
@@ -351,6 +387,12 @@ def _first_blocker(
             "class": "brf2_required_facts_mapping_not_ready",
             "owner": "engineering",
             "next_action": "build_brf2_required_facts_mapping",
+        }
+    if not fact_input_present:
+        return {
+            "class": "brf2_watcher_fact_input_missing",
+            "owner": "engineering",
+            "next_action": "attach_brf2_watcher_fact_input_producer",
         }
     if active_disable:
         return {
@@ -380,6 +422,8 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Generated: `{packet['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
         f"- StrategyGroup: `{packet['strategy_group_id']}`",
+        f"- Fact input present: `{_yes_no(packet.get('fact_input_present') is True)}`",
+        f"- Watcher tick present: `{_yes_no(packet.get('watcher_tick_present') is True)}`",
         f"- Signal state: `{preview['current_signal_state']}`",
         f"- First blocker: `{preview['first_blocker_class']}`",
         f"- Candidate packet ready: `{_yes_no(packet['candidate_packet_shape']['candidate_packet_ready'])}`",

@@ -133,6 +133,7 @@ def test_current_brf2_required_facts_mapping_artifact_is_complete():
 
 
 def test_current_brf2_runtime_signal_capture_artifact_is_complete():
+    facts = _read_json("output/runtime-monitor/latest-brf2-runtime-signal-facts.json")
     capture = _read_json("output/runtime-monitor/latest-brf2-runtime-signal-capture.json")
     monitor = _read_json("output/runtime-monitor/latest-local-monitor-sequence.json")
     checks = monitor.get("checks") or {}
@@ -144,12 +145,20 @@ def test_current_brf2_runtime_signal_capture_artifact_is_complete():
     assert capture["status"] == "brf2_runtime_signal_capture_ready"
     assert capture["generated_at_utc"]
     assert capture["strategy_group_id"] == "BRF2-001"
+    assert facts["schema"] == "brc.brf2_runtime_signal_facts.v1"
+    assert facts["status"] in {
+        "brf2_runtime_signal_facts_ready",
+        "brf2_runtime_signal_facts_missing_watcher_input",
+    }
+    assert capture["fact_input_present"] == facts["fact_input_present"]
+    assert capture["watcher_tick_present"] == facts["watcher_tick_present"]
     assert capture["watcher_scope"]["signal_id"] == (
         "brf2_short_rally_failure_fresh_signal_v1"
     )
     assert capture["watcher_scope"]["side_scope"] == ["short"]
     assert preview["detector_ready"] is True
     assert preview["current_signal_state"] in {
+        "fact_input_missing",
         "fresh_signal_absent",
         "fresh_signal_present",
         "blocked_by_disable_fact",
@@ -168,6 +177,12 @@ def test_current_brf2_runtime_signal_capture_artifact_is_complete():
     assert capture["checks"]["calls_exchange_write"] is False
     assert capture["checks"]["places_order"] is False
     assert checks["brf2_runtime_signal_capture_ready"] is True
+    assert checks["brf2_runtime_signal_fact_input_present"] == (
+        facts["fact_input_present"]
+    )
+    assert checks["brf2_runtime_signal_watcher_tick_present"] == (
+        facts["watcher_tick_present"]
+    )
     assert checks["brf2_runtime_signal_state"] == preview["current_signal_state"]
     assert checks["brf2_runtime_candidate_packet_ready"] == (
         candidate["candidate_packet_ready"]
@@ -229,9 +244,9 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert brf2["armed_observation_plan_ready"] is True
     assert brf2["required_facts_mapping_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
-    assert brf2["runtime_readiness"]["armed_observation_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_ready"] is False
     assert brf2["runtime_readiness"]["blocked_by"] == (
-        "fresh_brf2_short_signal_absent"
+        "brf2_watcher_fact_input_missing"
     )
     assert brf2["runtime_readiness"]["tiny_live_ready"] is False
     assert brf2["runtime_readiness"]["live_submit_ready"] is False
@@ -256,7 +271,7 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert checks["live_trial_seat_count"] == 3
     assert checks["live_trial_strategy_groups"] == ["MPG-001", "BRF2-001", "SOR-001"]
     assert checks["live_trial_owner_policy_gap_count"] == 0
-    assert checks["live_trial_engineering_gap_count"] == 0
+    assert checks["live_trial_engineering_gap_count"] == 1
     assert checks["brf2_owner_policy_recorded"] is True
     assert checks["brf2_owner_policy_scope_missing"] is False
     assert checks["brf2_required_facts_mapping_ready"] is True
@@ -279,9 +294,10 @@ def test_current_tradeability_brf2_resolves_old_owner_policy_blockers():
     assert brf2["runtime_scope_status"]["owner_policy_recorded"] is True
     assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
     assert brf2["stage"] == "armed_observation"
-    assert brf2["verdict"] == "not_tradable_market_wait"
-    assert brf2["first_blocker_class"] == "fresh_brf2_short_signal_absent"
-    assert brf2["blocker_owner"] == "market"
+    assert brf2["verdict"] == "not_tradable_facts"
+    assert brf2["first_blocker_class"] == "brf2_watcher_fact_input_missing"
+    assert brf2["blocker_owner"] == "engineering"
+    assert brf2["next_action"] == "attach_brf2_watcher_fact_input_producer"
     assert "owner_capital_scope_not_confirmed" not in secondary
     assert "owner_trial_identity_not_confirmed" not in secondary
     assert "owner_capital_scope_not_confirmed" in resolved

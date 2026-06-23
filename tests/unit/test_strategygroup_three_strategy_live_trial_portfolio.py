@@ -149,6 +149,22 @@ def _brf2_required_facts_mapping() -> dict:
     }
 
 
+def _brf2_runtime_signal_capture_missing_fact_input() -> dict:
+    return {
+        "status": "brf2_runtime_signal_capture_ready",
+        "strategy_group_id": "BRF2-001",
+        "fact_input_present": False,
+        "watcher_tick_present": False,
+        "signal_detector_preview": {
+            "current_signal_state": "fact_input_missing",
+            "fresh_signal_present": False,
+            "first_blocker_class": "brf2_watcher_fact_input_missing",
+            "first_blocker_owner": "engineering",
+            "next_action": "attach_brf2_watcher_fact_input_producer",
+        },
+    }
+
+
 def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     module = _load_module()
 
@@ -227,6 +243,14 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
 
     brf2 = packet["seat_readiness"]["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
+    assert brf2["registry_admitted"] is False
+    assert brf2["provisional_trial_asset_admitted"] is True
+    assert brf2["admission_source"] == (
+        "trial_asset_admission_proposal_owner_policy_requiredfacts"
+    )
+    assert brf2["registry_admission_status"] == (
+        "not_registry_admitted_provisional_trial_asset"
+    )
     assert brf2["required_facts_mapping_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_ready"] is True
     assert brf2["runtime_readiness"]["blocked_by"] == (
@@ -248,6 +272,44 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
     assert packet["next_engineering_bottleneck"]["BRF2-001"] == "fresh_signal_wait"
 
 
+def test_three_strategy_portfolio_surfaces_brf2_fact_input_gap_after_mapping():
+    module = _load_module()
+
+    packet = module.build_three_strategy_live_trial_portfolio(
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        capital_trial_bridge=_capital_trial_bridge(),
+        trial_asset_admission_proposal=_trial_admission_proposal(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        brf2_required_facts_mapping=_brf2_required_facts_mapping(),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture_missing_fact_input(),
+        signal_coverage={"events": [{"strategy_group_id": "SOR-001"}]},
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    brf2 = packet["seat_readiness"]["BRF2-001"]
+    assert brf2["stage"] == "armed_observation"
+    assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_ready"] is False
+    assert brf2["runtime_readiness"]["blocked_by"] == (
+        "brf2_watcher_fact_input_missing"
+    )
+    assert brf2["first_blocker"]["verdict"] == "not_tradable_facts"
+    assert brf2["first_blocker"]["first_blocker_class"] == (
+        "brf2_watcher_fact_input_missing"
+    )
+    assert brf2["first_blocker"]["blocker_owner"] == "engineering"
+    assert brf2["first_blocker"]["next_action"] == (
+        "attach_brf2_watcher_fact_input_producer"
+    )
+    assert brf2["tradeability_projection"]["next_state_after_blocker_removed"] == (
+        "armed_observation"
+    )
+    assert packet["next_engineering_bottleneck"]["BRF2-001"] == (
+        "brf2_watcher_fact_input_missing"
+    )
+
+
 def test_three_strategy_portfolio_cli_writes_artifacts(tmp_path: Path):
     module = _load_module()
     registry_json = tmp_path / "registry.json"
@@ -257,6 +319,7 @@ def test_three_strategy_portfolio_cli_writes_artifacts(tmp_path: Path):
     signal_json = tmp_path / "signal.json"
     policy_json = tmp_path / "policy.json"
     mapping_json = tmp_path / "brf2-required-facts.json"
+    capture_json = tmp_path / "brf2-runtime-signal-capture.json"
     output_json = tmp_path / "portfolio.json"
     output_md = tmp_path / "portfolio.md"
     registry_json.write_text(json.dumps(_registry()), encoding="utf-8")
@@ -265,6 +328,7 @@ def test_three_strategy_portfolio_cli_writes_artifacts(tmp_path: Path):
     proposal_json.write_text(json.dumps(_trial_admission_proposal()), encoding="utf-8")
     policy_json.write_text(json.dumps(_owner_policy_scope()), encoding="utf-8")
     mapping_json.write_text(json.dumps(_brf2_required_facts_mapping()), encoding="utf-8")
+    capture_json.write_text(json.dumps({}), encoding="utf-8")
     signal_json.write_text(json.dumps({"events": []}), encoding="utf-8")
 
     exit_code = module.main(
@@ -281,6 +345,8 @@ def test_three_strategy_portfolio_cli_writes_artifacts(tmp_path: Path):
             str(policy_json),
             "--brf2-required-facts-mapping-json",
             str(mapping_json),
+            "--brf2-runtime-signal-capture-json",
+            str(capture_json),
             "--signal-coverage-json",
             str(signal_json),
             "--output-json",

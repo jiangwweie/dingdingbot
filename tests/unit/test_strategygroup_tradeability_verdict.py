@@ -406,6 +406,26 @@ def _brf2_runtime_signal_capture(signal_state: str = "fresh_signal_absent") -> d
     }
 
 
+def _brf2_runtime_signal_capture_missing_fact_input() -> dict:
+    packet = _brf2_runtime_signal_capture("fact_input_missing")
+    packet["fact_input_status"] = "brf2_runtime_signal_facts_missing_watcher_input"
+    packet["fact_input_present"] = False
+    packet["watcher_tick_present"] = False
+    packet["signal_detector_preview"] = {
+        **packet["signal_detector_preview"],
+        "fact_input_present": False,
+        "watcher_tick_present": False,
+        "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
+        "fresh_signal_present": False,
+        "current_signal_state": "fact_input_missing",
+        "first_blocker_class": "brf2_watcher_fact_input_missing",
+        "first_blocker_owner": "engineering",
+        "next_action": "attach_brf2_watcher_fact_input_producer",
+    }
+    packet["candidate_packet_shape"]["candidate_packet_ready"] = False
+    return packet
+
+
 def _brf2_non_executing_candidate_packet() -> dict:
     return {
         "status": "brf2_non_executing_candidate_packet_ready",
@@ -601,6 +621,38 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
     assert brf2["real_order_authority"] is False
     assert packet["summary"]["tradable_now_count"] == 0
     assert packet["checks"]["market_wait_only_after_admission"] is True
+
+
+def test_tradeability_verdict_exposes_brf2_watcher_fact_input_gap():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture_missing_fact_input(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    assert brf2["stage"] == "armed_observation"
+    assert brf2["verdict"] == "not_tradable_facts"
+    assert brf2["first_blocker_class"] == "brf2_watcher_fact_input_missing"
+    assert brf2["blocker_owner"] == "engineering"
+    assert brf2["next_action"] == "attach_brf2_watcher_fact_input_producer"
+    assert brf2["after_next_state"] == "armed_observation"
+    assert brf2["actionable_now"] is False
+    assert brf2["real_order_authority"] is False
+    assert packet["summary"]["top_strategy_group_id"] == "BRF2-001"
+    assert packet["summary"]["top_verdict"] == "not_tradable_facts"
 
 
 def test_tradeability_verdict_moves_brf2_to_candidate_packet_after_fresh_capture():

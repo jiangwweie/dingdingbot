@@ -65,14 +65,14 @@ def _write_waiting_brf2_candidate_packet(command: list[str]) -> None:
             "candidate_packet_ready": False,
             "candidate_packet": {
                 "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
-                "signal_state": "fresh_signal_absent",
+                "signal_state": "fact_input_missing",
             },
             "first_blocker": {
-                "class": "fresh_brf2_short_signal_absent",
-                "owner": "market",
-                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+                "class": "brf2_watcher_fact_input_missing",
+                "owner": "engineering",
+                "next_action": "attach_brf2_watcher_fact_input_producer",
             },
-            "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+            "next_runtime_step": "attach_brf2_watcher_fact_input_producer",
             "checks": {
                 "actionable_now": False,
                 "real_order_authority": False,
@@ -634,28 +634,24 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
                 "owner_first_blocker_count": 0,
-                "engineering_first_blocker_count": 0,
-                "market_first_blocker_count": 3,
+                "engineering_first_blocker_count": 1,
+                "market_first_blocker_count": 2,
                 "runtime_first_blocker_count": 0,
                 "strategy_review_first_blocker_count": 1,
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_market_wait",
-                "top_first_blocker_class": "fresh_brf2_short_signal_absent",
-                "top_next_action": (
-                    "continue_brf2_armed_observation_until_fresh_signal"
-                ),
+                "top_verdict": "not_tradable_facts",
+                "top_first_blocker_class": "brf2_watcher_fact_input_missing",
+                "top_next_action": "attach_brf2_watcher_fact_input_producer",
             },
             "verdict_rows": [
                 {
                     "strategy_group_id": "BRF2-001",
                     "stage": "armed_observation",
-                    "verdict": "not_tradable_market_wait",
-                    "first_blocker_class": "fresh_brf2_short_signal_absent",
-                    "blocker_owner": "market",
-                    "next_action": (
-                        "continue_brf2_armed_observation_until_fresh_signal"
-                    ),
-                    "after_next_state": "live_submit_ready",
+                    "verdict": "not_tradable_facts",
+                    "first_blocker_class": "brf2_watcher_fact_input_missing",
+                    "blocker_owner": "engineering",
+                    "next_action": "attach_brf2_watcher_fact_input_producer",
+                    "after_next_state": "armed_observation",
                     "actionable_now": False,
                     "real_order_authority": False,
                 },
@@ -685,8 +681,8 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
             "owner_summary": {
                 "state": "交易资格已判定",
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_market_wait",
-                "top_first_blocker": "fresh_brf2_short_signal_absent",
+                "top_verdict": "not_tradable_facts",
+                "top_first_blocker": "brf2_watcher_fact_input_missing",
                 "owner_policy_blocker_present": False,
                 "owner_intervention_required": False,
                 "real_order_authority": False,
@@ -753,18 +749,16 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     "stage": "armed_observation",
                     "required_facts_mapping_ready": True,
                     "runtime_readiness": {
-                        "armed_observation_ready": True,
-                        "blocked_by": "fresh_brf2_short_signal_absent",
+                        "armed_observation_ready": False,
+                        "blocked_by": "brf2_watcher_fact_input_missing",
                         "tiny_live_ready": False,
                         "live_submit_ready": False,
                     },
                     "first_blocker": {
-                        "verdict": "not_tradable_market_wait",
-                        "first_blocker_class": "fresh_brf2_short_signal_absent",
-                        "blocker_owner": "market",
-                        "next_action": (
-                            "continue_brf2_armed_observation_until_fresh_signal"
-                        ),
+                        "verdict": "not_tradable_facts",
+                        "first_blocker_class": "brf2_watcher_fact_input_missing",
+                        "blocker_owner": "engineering",
+                        "next_action": "attach_brf2_watcher_fact_input_producer",
                     },
                 },
                 "SOR-001": {
@@ -779,7 +773,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
             },
             "next_engineering_bottleneck": {
                 "MPG-001": "fresh_signal_wait",
-                "BRF2-001": "fresh_signal_wait",
+                "BRF2-001": "brf2_watcher_fact_input_missing",
                 "SOR-001": "fresh_signal_wait",
             },
             "checks": {
@@ -879,6 +873,63 @@ def _write_ready_brf2_required_facts_mapping(command: list[str]) -> None:
     )
 
 
+def _write_missing_brf2_runtime_signal_facts(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "schema": "brc.brf2_runtime_signal_facts.v1",
+            "scope": "brf2_runtime_signal_facts_read_model",
+            "status": "brf2_runtime_signal_facts_missing_watcher_input",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
+            "strategy_group_id": "BRF2-001",
+            "fact_input_present": False,
+            "watcher_tick_present": False,
+            "source_status": "missing",
+            "source_path": "output/runtime-monitor/latest-live-market-strategy-preview.json",
+            "facts": {},
+            "first_blocker": {
+                "class": "brf2_watcher_fact_input_missing",
+                "owner": "engineering",
+                "next_action": "attach_brf2_watcher_fact_input_producer",
+            },
+            "next_action": "attach_brf2_watcher_fact_input_producer",
+            "checks": {
+                "fact_input_present": False,
+                "watcher_tick_present": False,
+                "missing_watcher_input": True,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_brf2_runtime_signal_facts",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _expected_brf2_fact_input_gap() -> dict:
+    return {
+        "class": "missing_fact",
+        "source": "brf2_runtime_signal_facts",
+        "strategy_group_id": "BRF2-001",
+        "gap": "brf2_watcher_fact_input_missing",
+        "owner": "engineering",
+        "next_action": "attach_brf2_watcher_fact_input_producer",
+        "requirement": "BRF2 armed observation must have watcher fact input before it can be classified as market wait",
+        "missing_or_false": [
+            "brf2_runtime_signal_fact_input_present",
+            "brf2_runtime_signal_watcher_tick_present",
+        ],
+    }
+
+
 def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
     _write_output(
         command,
@@ -888,6 +939,9 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             "status": "brf2_runtime_signal_capture_ready",
             "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "strategy_group_id": "BRF2-001",
+            "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
+            "fact_input_present": False,
+            "watcher_tick_present": False,
             "watcher_scope": {
                 "strategy_group_id": "BRF2-001",
                 "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
@@ -896,20 +950,23 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             },
             "signal_detector_preview": {
                 "detector_ready": True,
+                "fact_input_present": False,
+                "watcher_tick_present": False,
+                "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
                 "fresh_signal_present": False,
-                "current_signal_state": "fresh_signal_absent",
-                "first_blocker_class": "fresh_brf2_short_signal_absent",
-                "first_blocker_owner": "market",
-                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+                "current_signal_state": "fact_input_missing",
+                "first_blocker_class": "brf2_watcher_fact_input_missing",
+                "first_blocker_owner": "engineering",
+                "next_action": "attach_brf2_watcher_fact_input_producer",
                 "missing_required_fact_keys": ["closed_1h_ohlcv"],
                 "active_disable_fact_keys": [],
             },
             "no_action_attribution": {
                 "attribution_ready": True,
                 "strategy_group_id": "BRF2-001",
-                "reason": "fresh_brf2_short_signal_absent",
+                "reason": "brf2_watcher_fact_input_missing",
                 "blocked_fact_count": 1,
-                "blocker_owner": "market",
+                "blocker_owner": "engineering",
             },
             "candidate_packet_shape": {
                 "candidate_packet_ready": False,
@@ -917,6 +974,9 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             },
             "checks": {
                 "mapping_ready": True,
+                "fact_input_present": False,
+                "watcher_tick_present": False,
+                "fact_input_status_ready": False,
                 "watcher_scope_ready": True,
                 "signal_detector_preview_ready": True,
                 "no_action_attribution_ready": True,
@@ -1343,6 +1403,9 @@ def _maybe_write_strategygroup_closure_step(
     if script == "build_brf2_required_facts_mapping.py":
         _write_ready_brf2_required_facts_mapping(command)
         return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_brf2_runtime_signal_facts.py":
+        _write_missing_brf2_runtime_signal_facts(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_runtime_signal_capture.py":
         _write_ready_brf2_runtime_signal_capture(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -1662,6 +1725,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         brf2_required_facts_mapping_json=tmp_path / "brf2-required-facts.json",
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
+        brf2_runtime_signal_facts_json=tmp_path / "brf2-signal-facts.json",
+        brf2_runtime_signal_facts_md=tmp_path / "brf2-signal-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
         brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
@@ -1685,6 +1750,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_brf2_owner_trial_policy_scope.py",
         "build_strategygroup_trial_asset_admission_proposal.py",
         "build_brf2_required_facts_mapping.py",
+        "build_brf2_runtime_signal_facts.py",
         "build_brf2_runtime_signal_capture.py",
         "build_brf2_non_executing_candidate_packet.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
@@ -1720,7 +1786,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert decision_loop_commands[1][
         decision_loop_commands[1].index("--btpc-proxy-replay-quality-json") + 1
     ] == str(tmp_path / "btpc-proxy-replay.json")
-    assert report["status"] == "waiting_for_market"
+    assert report["status"] == "needs_non_market_repair"
     assert report["checks"]["blockers"] == []
     assert report["interaction"]["level"] == "L0_local_monitor_sequence"
     assert report["interaction"]["remote_interaction_count"] == 0
@@ -1808,21 +1874,30 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     )
     assert report["checks"]["brf2_required_fact_count"] == 8
     assert report["checks"]["brf2_disable_fact_count"] == 5
+    assert report["brf2_runtime_signal_facts"]["status"] == (
+        "brf2_runtime_signal_facts_missing_watcher_input"
+    )
+    assert report["brf2_runtime_signal_facts"]["fact_input_present"] is False
+    assert report["brf2_runtime_signal_facts"]["watcher_tick_present"] is False
+    assert report["checks"]["brf2_runtime_signal_fact_input_present"] is False
+    assert report["checks"]["brf2_runtime_signal_watcher_tick_present"] is False
     assert report["brf2_runtime_signal_capture"]["ready"] is True
     assert report["brf2_runtime_signal_capture"]["current_signal_state"] == (
-        "fresh_signal_absent"
+        "fact_input_missing"
     )
     assert report["brf2_runtime_signal_capture"]["first_blocker_class"] == (
-        "fresh_brf2_short_signal_absent"
+        "brf2_watcher_fact_input_missing"
     )
     assert report["brf2_runtime_signal_capture"]["candidate_packet_ready"] is False
     assert report["checks"]["brf2_runtime_signal_capture_ready"] is True
-    assert report["checks"]["brf2_runtime_signal_state"] == "fresh_signal_absent"
+    assert report["checks"]["brf2_runtime_signal_state"] == "fact_input_missing"
     assert report["checks"]["brf2_runtime_signal_first_blocker_class"] == (
-        "fresh_brf2_short_signal_absent"
+        "brf2_watcher_fact_input_missing"
     )
     assert report["checks"]["brf2_runtime_candidate_packet_ready"] is False
-    assert report["checks"]["brf2_next_bottleneck"] == "fresh_signal_wait"
+    assert report["checks"]["brf2_next_bottleneck"] == (
+        "brf2_watcher_fact_input_missing"
+    )
     assert report["three_strategy_live_trial_portfolio"]["ready"] is True
     assert report["three_strategy_live_trial_portfolio"]["seat_count"] == 3
     assert report["three_strategy_live_trial_portfolio"][
@@ -1835,28 +1910,28 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "BRF2-001",
         "SOR-001",
     ]
-    assert report["checks"]["live_trial_market_wait_count"] == 3
+    assert report["checks"]["live_trial_market_wait_count"] == 2
     assert report["checks"]["live_trial_owner_policy_gap_count"] == 0
-    assert report["checks"]["live_trial_engineering_gap_count"] == 0
+    assert report["checks"]["live_trial_engineering_gap_count"] == 1
     assert report["strategy_tradeability_verdict"]["top_verdict"] == (
-        "not_tradable_market_wait"
+        "not_tradable_facts"
     )
     assert report["strategy_tradeability_verdict"]["top_first_blocker_class"] == (
-        "fresh_brf2_short_signal_absent"
+        "brf2_watcher_fact_input_missing"
     )
     assert report["strategy_tradeability_verdict"]["top_next_action"] == (
-        "continue_brf2_armed_observation_until_fresh_signal"
+        "attach_brf2_watcher_fact_input_producer"
     )
     assert report["checks"]["tradeability_top_strategy_group_id"] == "BRF2-001"
     assert report["checks"]["tradeability_top_verdict"] == (
-        "not_tradable_market_wait"
+        "not_tradable_facts"
     )
     assert report["checks"]["tradeability_row_count"] == 3
     assert report["checks"]["tradeability_verdict_rows_count"] == 3
     assert report["checks"]["tradeability_row_count_matches_verdict_rows"] is True
     assert report["checks"]["tradeability_tradable_now_count"] == 0
     assert report["checks"]["tradeability_real_order_authority_count"] == 0
-    assert report["checks"]["non_market_gaps"] == []
+    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
 
 
 def test_local_monitor_sequence_artifact_daily_check_uses_report_json_path(
@@ -2134,6 +2209,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         brf2_required_facts_mapping_json=tmp_path / "brf2-required-facts.json",
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
+        brf2_runtime_signal_facts_json=tmp_path / "brf2-signal-facts.json",
+        brf2_runtime_signal_facts_md=tmp_path / "brf2-signal-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
         brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
@@ -2464,6 +2541,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         brf2_required_facts_mapping_json=tmp_path / "brf2-required-facts.json",
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
+        brf2_runtime_signal_facts_json=tmp_path / "brf2-signal-facts.json",
+        brf2_runtime_signal_facts_md=tmp_path / "brf2-signal-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
         brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
@@ -2477,11 +2556,11 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         command_runner=fake_runner,
     )
 
-    assert report["status"] == "waiting_for_market_monitor_refresh_needed"
+    assert report["status"] == "needs_non_market_repair"
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "needs_refresh"
     assert report["owner_status"] == "waiting_for_opportunity"
-    assert report["owner_summary"]["state"] == "等待机会"
+    assert report["owner_summary"]["state"] == "需要修复"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["monitor_refresh_needed"] is True
@@ -2491,6 +2570,7 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
     assert report["checks"]["refresh_required"] is True
     assert report["checks"]["automation_notify"] is True
     assert report["checks"]["owner_notify"] is False
+    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
@@ -2751,6 +2831,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         brf2_required_facts_mapping_json=tmp_path / "brf2-required-facts.json",
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
+        brf2_runtime_signal_facts_json=tmp_path / "brf2-signal-facts.json",
+        brf2_runtime_signal_facts_md=tmp_path / "brf2-signal-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
         brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
@@ -2775,7 +2857,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
                 "conditional_l2_tier_policy_update_needed",
                 "groups:BTPC-001",
             ],
-        }
+        },
+        _expected_brf2_fact_input_gap(),
     ]
     assert report["checks"]["engineering_gaps"] == report["checks"]["non_market_gaps"]
     assert report["checks"]["owner_decision_required"] is False
@@ -3026,6 +3109,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         brf2_required_facts_mapping_json=tmp_path / "brf2-required-facts.json",
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
+        brf2_runtime_signal_facts_json=tmp_path / "brf2-signal-facts.json",
+        brf2_runtime_signal_facts_md=tmp_path / "brf2-signal-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
         brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
@@ -3039,9 +3124,9 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         command_runner=fake_runner,
     )
 
-    assert report["status"] == "waiting_for_market"
+    assert report["status"] == "needs_non_market_repair"
     assert report["checks"]["blockers"] == []
-    assert report["checks"]["non_market_gaps"] == []
+    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False

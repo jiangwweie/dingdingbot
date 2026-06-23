@@ -89,7 +89,7 @@ def _fresh_facts() -> dict:
     }
 
 
-def test_brf2_runtime_signal_capture_waits_without_fact_input():
+def test_brf2_runtime_signal_capture_exposes_missing_fact_input():
     module = _load_module()
 
     packet = module.build_brf2_runtime_signal_capture(
@@ -102,8 +102,12 @@ def test_brf2_runtime_signal_capture_waits_without_fact_input():
     assert packet["schema"] == module.SCHEMA
     assert packet["status"] == "brf2_runtime_signal_capture_ready"
     preview = packet["signal_detector_preview"]
-    assert preview["current_signal_state"] == "fresh_signal_absent"
-    assert preview["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert packet["fact_input_present"] is False
+    assert packet["watcher_tick_present"] is False
+    assert preview["current_signal_state"] == "fact_input_missing"
+    assert preview["first_blocker_class"] == "brf2_watcher_fact_input_missing"
+    assert preview["first_blocker_owner"] == "engineering"
+    assert preview["next_action"] == "attach_brf2_watcher_fact_input_producer"
     assert preview["fresh_signal_present"] is False
     assert len(preview["missing_required_fact_keys"]) == 8
     assert packet["candidate_packet_shape"]["candidate_packet_ready"] is False

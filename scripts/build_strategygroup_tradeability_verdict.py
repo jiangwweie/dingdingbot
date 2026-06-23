@@ -639,6 +639,15 @@ def _brf2_runtime_signal_capture_blocker(packet: dict[str, Any]) -> dict[str, st
         or "continue_brf2_armed_observation_until_fresh_signal"
     )
     blocker_owner = str(preview.get("first_blocker_owner") or "market")
+    if signal_state == "fact_input_missing":
+        return _classifier(
+            "not_tradable_facts",
+            first_blocker_class,
+            "BRF2 RequiredFacts mapping is defined, but watcher fact input is not attached to runtime signal capture",
+            blocker_owner,
+            next_action,
+            "armed_observation",
+        )
     if signal_state == "fresh_signal_present":
         return _classifier(
             "not_tradable_execution_gate",

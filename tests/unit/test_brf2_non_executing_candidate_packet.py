@@ -86,6 +86,21 @@ def _capture(*, fresh_signal_present: bool) -> dict:
     }
 
 
+def _missing_fact_input_capture() -> dict:
+    packet = _capture(fresh_signal_present=False)
+    packet["fact_input_present"] = False
+    packet["watcher_tick_present"] = False
+    packet["fact_input_status"] = "brf2_runtime_signal_facts_missing_watcher_input"
+    packet["signal_detector_preview"] = {
+        **packet["signal_detector_preview"],
+        "current_signal_state": "fact_input_missing",
+        "first_blocker_class": "brf2_watcher_fact_input_missing",
+        "first_blocker_owner": "engineering",
+        "next_action": "attach_brf2_watcher_fact_input_producer",
+    }
+    return packet
+
+
 def test_brf2_candidate_packet_waits_without_fresh_signal():
     module = _load_module()
 
@@ -106,6 +121,26 @@ def test_brf2_candidate_packet_waits_without_fresh_signal():
     assert packet["safety_invariants"]["calls_operation_layer"] is False
     assert packet["safety_invariants"]["calls_exchange_write"] is False
     assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_brf2_candidate_packet_mirrors_missing_fact_input_blocker():
+    module = _load_module()
+
+    packet = module.build_brf2_non_executing_candidate_packet(
+        runtime_signal_capture=_missing_fact_input_capture(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    assert packet["status"] == module.WAITING_STATUS
+    assert packet["candidate_packet_ready"] is False
+    assert packet["candidate_packet"]["signal_state"] == "fact_input_missing"
+    assert packet["first_blocker"]["class"] == "brf2_watcher_fact_input_missing"
+    assert packet["first_blocker"]["owner"] == "engineering"
+    assert packet["first_blocker"]["next_action"] == (
+        "attach_brf2_watcher_fact_input_producer"
+    )
+    assert packet["checks"]["actionable_now"] is False
+    assert packet["checks"]["real_order_authority"] is False
 
 
 def test_brf2_candidate_packet_ready_from_fresh_signal_without_authority():

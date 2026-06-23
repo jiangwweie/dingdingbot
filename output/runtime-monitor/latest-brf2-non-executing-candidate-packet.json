@@ -103,7 +103,7 @@
     ],
     "side": "short",
     "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
-    "signal_state": "fresh_signal_absent",
+    "signal_state": "fact_input_missing",
     "source_signal_packet_id": "",
     "strategy_group_id": "BRF2-001",
     "symbol": "",
@@ -124,11 +124,11 @@
     "runtime_signal_capture_ready": true
   },
   "first_blocker": {
-    "class": "fresh_brf2_short_signal_absent",
-    "next_action": "continue_brf2_armed_observation_until_fresh_signal",
-    "owner": "market"
+    "class": "brf2_watcher_fact_input_missing",
+    "next_action": "attach_brf2_watcher_fact_input_producer",
+    "owner": "engineering"
   },
-  "generated_at_utc": "2026-06-23T08:34:12.961781+00:00",
+  "generated_at_utc": "2026-06-23T09:42:54.666296+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -139,7 +139,7 @@
     "places_order": false,
     "remote_interaction_count": 0
   },
-  "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+  "next_runtime_step": "attach_brf2_watcher_fact_input_producer",
   "safety_invariants": {
     "actionable_now": false,
     "authorization_evidence_created": false,
