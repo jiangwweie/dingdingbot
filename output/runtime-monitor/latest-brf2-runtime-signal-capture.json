@@ -1,0 +1,218 @@
+{
+  "candidate_packet_shape": {
+    "candidate_packet_ready": false,
+    "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+    "forbidden_until_action_time": [
+      "actionable_now",
+      "real_order_authority",
+      "finalgate_call",
+      "operation_layer_call",
+      "exchange_write",
+      "order_creation"
+    ],
+    "required_next_chain": [
+      "live_watcher_signal_packet_id",
+      "required_facts_readiness_packet_id",
+      "candidate_authorization_evidence",
+      "action_time_finalgate_packet_id",
+      "operation_layer_submit_authorization_id"
+    ],
+    "side": "short",
+    "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
+    "strategy_group_id": "BRF2-001",
+    "would_bind_disable_facts": [
+      "short_squeeze_risk_state",
+      "strong_reclaim_disable_state",
+      "rally_extension_invalidates_failure_state",
+      "liquidity_downshift_state",
+      "spread_liquidity_state"
+    ],
+    "would_bind_required_facts": [
+      "closed_1h_ohlcv",
+      "closed_5m_ohlcv",
+      "rally_context",
+      "rally_failure_trigger_state",
+      "short_squeeze_risk_state",
+      "strong_reclaim_disable_state",
+      "liquidity_downshift_state",
+      "spread_liquidity_state"
+    ]
+  },
+  "checks": {
+    "actionable_now": false,
+    "active_disable_fact_count": 0,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "candidate_packet_shape_ready": true,
+    "fresh_signal_present": false,
+    "mapping_ready": true,
+    "missing_required_fact_count": 8,
+    "no_action_attribution_ready": true,
+    "places_order": false,
+    "real_order_authority": false,
+    "signal_detector_preview_ready": true,
+    "watcher_scope_ready": true
+  },
+  "generated_at_utc": "2026-06-23T08:13:30.580068+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_brf2_runtime_signal_capture",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "no_action_attribution": {
+    "active_disable_fact_keys": [],
+    "attribution_ready": true,
+    "blocked_fact_count": 8,
+    "blocker_owner": "market",
+    "missing_required_fact_keys": [
+      "closed_1h_ohlcv",
+      "closed_5m_ohlcv",
+      "rally_context",
+      "rally_failure_trigger_state",
+      "short_squeeze_risk_state",
+      "strong_reclaim_disable_state",
+      "liquidity_downshift_state",
+      "spread_liquidity_state"
+    ],
+    "reason": "fresh_brf2_short_signal_absent",
+    "strategy_group_id": "BRF2-001"
+  },
+  "safety_invariants": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "candidate_created": false,
+    "execution_intent_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "real_order_authority": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.brf2_runtime_signal_capture.v1",
+  "scope": "brf2_runtime_signal_capture_read_model",
+  "signal_detector_preview": {
+    "active_disable_fact_keys": [],
+    "current_signal_state": "fresh_signal_absent",
+    "detector_ready": true,
+    "disable_fact_status": [
+      {
+        "fact_key": "short_squeeze_risk_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "strong_reclaim_disable_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "rally_extension_invalidates_failure_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "liquidity_downshift_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "spread_liquidity_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      }
+    ],
+    "first_blocker_class": "fresh_brf2_short_signal_absent",
+    "first_blocker_owner": "market",
+    "fresh_signal_present": false,
+    "missing_required_fact_keys": [
+      "closed_1h_ohlcv",
+      "closed_5m_ohlcv",
+      "rally_context",
+      "rally_failure_trigger_state",
+      "short_squeeze_risk_state",
+      "strong_reclaim_disable_state",
+      "liquidity_downshift_state",
+      "spread_liquidity_state"
+    ],
+    "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+    "required_fact_status": [
+      {
+        "fact_key": "closed_1h_ohlcv",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "closed_5m_ohlcv",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "rally_context",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "rally_failure_trigger_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "short_squeeze_risk_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "strong_reclaim_disable_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "liquidity_downshift_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      },
+      {
+        "fact_key": "spread_liquidity_state",
+        "fresh": false,
+        "raw_state": "",
+        "state": "missing"
+      }
+    ]
+  },
+  "status": "brf2_runtime_signal_capture_ready",
+  "strategy_group_id": "BRF2-001",
+  "watcher_scope": {
+    "freshness_window_ms": 300000,
+    "side_scope": [
+      "short"
+    ],
+    "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
+    "source_mode": "runtime_watcher_read_only_fact_input",
+    "strategy_group_id": "BRF2-001",
+    "symbol_scope": "brf2_research_supported_symbols_only",
+    "timeframes": [
+      "1h_closed",
+      "5m_closed"
+    ]
+  }
+}

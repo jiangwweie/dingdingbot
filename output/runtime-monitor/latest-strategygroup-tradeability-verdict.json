@@ -14,7 +14,7 @@
     "tradable_now_rows_have_authority": true,
     "tradable_now_scoped_to_live_submit": true
   },
-  "generated_at_utc": "2026-06-23T06:48:35.340522+00:00",
+  "generated_at_utc": "2026-06-23T08:13:33.271696+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -116,6 +116,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation",
@@ -151,7 +153,7 @@
         "would_enter_forward_positive_count": 8
       },
       "first_blocker_class": "fresh_brf2_short_signal_absent",
-      "first_blocker_detail": "fresh_brf2_short_signal_absent",
+      "first_blocker_detail": "BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
       "next_action": "continue_brf2_armed_observation_until_fresh_signal",
       "policy_scope": {
         "attempt_cap": 3,
@@ -201,6 +203,8 @@
         }
       ],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "fresh_signal_absent",
+        "brf2_runtime_signal_capture_status": "brf2_runtime_signal_capture_ready",
         "brf2_trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation",
@@ -281,6 +285,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -342,6 +348,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -436,6 +444,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -526,6 +536,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -620,6 +632,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -726,6 +740,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -825,6 +841,8 @@
       "required_facts_status": "missing",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -921,6 +939,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -972,6 +992,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
@@ -1028,6 +1050,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation_ready",
@@ -1079,6 +1103,8 @@
       "required_facts_status": "action_time_only",
       "resolved_blockers": [],
       "runtime_scope_status": {
+        "brf2_current_signal_state": "",
+        "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",

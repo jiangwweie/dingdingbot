@@ -132,6 +132,48 @@ def test_current_brf2_required_facts_mapping_artifact_is_complete():
     assert mapping["checks"]["places_order"] is False
 
 
+def test_current_brf2_runtime_signal_capture_artifact_is_complete():
+    capture = _read_json("output/runtime-monitor/latest-brf2-runtime-signal-capture.json")
+    monitor = _read_json("output/runtime-monitor/latest-local-monitor-sequence.json")
+    checks = monitor.get("checks") or {}
+    preview = capture["signal_detector_preview"]
+    candidate = capture["candidate_packet_shape"]
+
+    assert capture["schema"] == "brc.brf2_runtime_signal_capture.v1"
+    assert capture["scope"] == "brf2_runtime_signal_capture_read_model"
+    assert capture["status"] == "brf2_runtime_signal_capture_ready"
+    assert capture["generated_at_utc"]
+    assert capture["strategy_group_id"] == "BRF2-001"
+    assert capture["watcher_scope"]["signal_id"] == (
+        "brf2_short_rally_failure_fresh_signal_v1"
+    )
+    assert capture["watcher_scope"]["side_scope"] == ["short"]
+    assert preview["detector_ready"] is True
+    assert preview["current_signal_state"] in {
+        "fresh_signal_absent",
+        "fresh_signal_present",
+        "blocked_by_disable_fact",
+    }
+    assert preview["first_blocker_class"]
+    assert capture["no_action_attribution"]["attribution_ready"] is True
+    assert candidate["candidate_packet_type"] == (
+        "brf2_non_executing_short_signal_candidate"
+    )
+    assert "action_time_finalgate_packet_id" in candidate["required_next_chain"]
+    assert "operation_layer_submit_authorization_id" in candidate["required_next_chain"]
+    assert capture["checks"]["actionable_now"] is False
+    assert capture["checks"]["real_order_authority"] is False
+    assert capture["checks"]["calls_finalgate"] is False
+    assert capture["checks"]["calls_operation_layer"] is False
+    assert capture["checks"]["calls_exchange_write"] is False
+    assert capture["checks"]["places_order"] is False
+    assert checks["brf2_runtime_signal_capture_ready"] is True
+    assert checks["brf2_runtime_signal_state"] == preview["current_signal_state"]
+    assert checks["brf2_runtime_candidate_packet_ready"] == (
+        candidate["candidate_packet_ready"]
+    )
+
+
 def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     portfolio = _read_json(
         "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"

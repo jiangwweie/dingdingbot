@@ -362,6 +362,50 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
     }
 
 
+def _brf2_runtime_signal_capture(signal_state: str = "fresh_signal_absent") -> dict:
+    fresh = signal_state == "fresh_signal_present"
+    return {
+        "status": "brf2_runtime_signal_capture_ready",
+        "signal_detector_preview": {
+            "current_signal_state": signal_state,
+            "fresh_signal_present": fresh,
+            "first_blocker_class": (
+                "brf2_fresh_short_signal_present_non_executing"
+                if fresh
+                else "fresh_brf2_short_signal_absent"
+            ),
+            "first_blocker_owner": "runtime" if fresh else "market",
+            "next_action": (
+                "build_brf2_non_executing_candidate_packet"
+                if fresh
+                else "continue_brf2_armed_observation_until_fresh_signal"
+            ),
+            "missing_required_fact_keys": [] if fresh else ["closed_1h_ohlcv"],
+            "active_disable_fact_keys": [],
+        },
+        "candidate_packet_shape": {
+            "candidate_packet_ready": fresh,
+            "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+        },
+        "checks": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
 def test_tradeability_verdict_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -498,6 +542,7 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
         three_strategy_live_trial_portfolio=(
             _three_strategy_portfolio_with_brf2_armed_observation()
         ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
@@ -516,6 +561,43 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
     assert brf2["real_order_authority"] is False
     assert packet["summary"]["tradable_now_count"] == 0
     assert packet["checks"]["market_wait_only_after_admission"] is True
+
+
+def test_tradeability_verdict_moves_brf2_to_candidate_packet_after_fresh_capture():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(
+            "fresh_signal_present"
+        ),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    assert brf2["stage"] == "armed_observation"
+    assert brf2["verdict"] == "not_tradable_execution_gate"
+    assert brf2["first_blocker_class"] == (
+        "brf2_candidate_authorization_evidence_not_created"
+    )
+    assert brf2["blocker_owner"] == "runtime"
+    assert brf2["next_action"] == (
+        "build_brf2_non_executing_candidate_packet_for_action_time_chain"
+    )
+    assert brf2["after_next_state"] == "candidate_packet_ready"
+    assert brf2["actionable_now"] is False
+    assert brf2["real_order_authority"] is False
+    assert packet["summary"]["tradable_now_count"] == 0
 
 
 def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
@@ -588,6 +670,7 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     signal_json = tmp_path / "signal.json"
     live_json = tmp_path / "live.json"
     policy_json = tmp_path / "policy.json"
+    brf2_capture_json = tmp_path / "brf2-capture.json"
     output_json = tmp_path / "verdict.json"
     output_md = tmp_path / "verdict.md"
     bridge_json.write_text(json.dumps(_capital_trial_bridge()), encoding="utf-8")
@@ -596,6 +679,7 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     signal_json.write_text(json.dumps(_signal_coverage()), encoding="utf-8")
     live_json.write_text(json.dumps(_live_submit_readiness()), encoding="utf-8")
     policy_json.write_text(json.dumps({}), encoding="utf-8")
+    brf2_capture_json.write_text(json.dumps({}), encoding="utf-8")
 
     exit_code = module.main(
         [
@@ -611,6 +695,8 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
             str(live_json),
             "--brf2-owner-trial-policy-scope-json",
             str(policy_json),
+            "--brf2-runtime-signal-capture-json",
+            str(brf2_capture_json),
             "--output-json",
             str(output_json),
             "--output-owner-progress",

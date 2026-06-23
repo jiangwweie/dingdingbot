@@ -46,6 +46,9 @@ DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
 )
+DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
@@ -118,6 +121,10 @@ def main(argv: list[str] | None = None) -> int:
         "--three-strategy-live-trial-portfolio-json",
         default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
     )
+    parser.add_argument(
+        "--brf2-runtime-signal-capture-json",
+        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -136,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         three_strategy_live_trial_portfolio=_read_optional_json(
             Path(args.three_strategy_live_trial_portfolio_json)
+        ),
+        brf2_runtime_signal_capture=_read_optional_json(
+            Path(args.brf2_runtime_signal_capture_json)
         ),
     )
     output_json = Path(args.output_json)
@@ -169,6 +179,7 @@ def build_tradeability_verdict(
     trial_asset_admission_proposal: dict[str, Any] | None = None,
     brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     three_strategy_live_trial_portfolio: dict[str, Any] | None = None,
+    brf2_runtime_signal_capture: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
@@ -179,6 +190,7 @@ def build_tradeability_verdict(
         trial_asset_admission_proposal or {},
         brf2_owner_trial_policy_scope or {},
         three_strategy_live_trial_portfolio or {},
+        brf2_runtime_signal_capture or {},
     )
     registry_rows = _registry_rows_by_id(registry)
     tier_rows = _tier_rows_by_id(tier_policy)
@@ -215,6 +227,11 @@ def build_tradeability_verdict(
             admission_proposal=admission_proposals.get(strategy_group_id, {}),
             owner_policy_scope=owner_policy_scopes.get(strategy_group_id, {}),
             portfolio_seat=portfolio_seats.get(strategy_group_id, {}),
+            brf2_runtime_signal_capture=(
+                brf2_runtime_signal_capture or {}
+                if strategy_group_id == "BRF2-001"
+                else {}
+            ),
             live_submit_readiness=live_submit_readiness,
             forbidden_effects=forbidden_effects,
         )
@@ -295,6 +312,7 @@ def _verdict_row(
     admission_proposal: dict[str, Any],
     owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
+    brf2_runtime_signal_capture: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
@@ -322,6 +340,7 @@ def _verdict_row(
         tier_present=tier_present,
         tier_row=tier_row,
         portfolio_seat=portfolio_seat,
+        brf2_runtime_signal_capture=brf2_runtime_signal_capture,
         blockers=blockers,
         live_submit_readiness=live_submit_readiness,
         forbidden_effects=forbidden_effects,
@@ -379,6 +398,15 @@ def _verdict_row(
             "observe_only_would_enter": bool(observed_row),
             "live_trial_portfolio_seat": bool(portfolio_seat),
             "live_trial_portfolio_stage": str(portfolio_seat.get("stage") or ""),
+            "brf2_runtime_signal_capture_status": str(
+                brf2_runtime_signal_capture.get("status") or ""
+            ),
+            "brf2_current_signal_state": str(
+                _as_dict(
+                    brf2_runtime_signal_capture.get("signal_detector_preview")
+                ).get("current_signal_state")
+                or ""
+            ),
         },
         "evidence_snapshot": {
             "recent_opportunity_count": _int(candidate.get("recent_opportunity_count")),
@@ -414,6 +442,7 @@ def _first_blocker(
     tier_present: bool,
     tier_row: dict[str, Any],
     portfolio_seat: dict[str, Any],
+    brf2_runtime_signal_capture: dict[str, Any],
     blockers: list[str],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
@@ -470,6 +499,12 @@ def _first_blocker(
             "continue_official_live_submit_chain",
             "live_submit_ready",
         )
+    if strategy_group_id == "BRF2-001":
+        brf2_capture_blocker = _brf2_runtime_signal_capture_blocker(
+            brf2_runtime_signal_capture
+        )
+        if brf2_capture_blocker:
+            return brf2_capture_blocker
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         live_submit_readiness=live_submit_readiness,
@@ -557,6 +592,40 @@ def _first_blocker(
         "complete_experiment_worthiness_and_loss_envelope_review",
         "trial_asset_admission_candidate",
     )
+
+
+def _brf2_runtime_signal_capture_blocker(packet: dict[str, Any]) -> dict[str, str]:
+    if _status(packet) != "brf2_runtime_signal_capture_ready":
+        return {}
+    preview = _as_dict(packet.get("signal_detector_preview"))
+    signal_state = str(preview.get("current_signal_state") or "")
+    first_blocker_class = str(
+        preview.get("first_blocker_class") or "fresh_brf2_short_signal_absent"
+    )
+    next_action = str(
+        preview.get("next_action")
+        or "continue_brf2_armed_observation_until_fresh_signal"
+    )
+    blocker_owner = str(preview.get("first_blocker_owner") or "market")
+    if signal_state == "fresh_signal_present":
+        return _classifier(
+            "not_tradable_execution_gate",
+            "brf2_candidate_authorization_evidence_not_created",
+            "BRF2 fresh signal is present in the non-executing detector; candidate and action-time evidence are not created",
+            "runtime",
+            "build_brf2_non_executing_candidate_packet_for_action_time_chain",
+            "candidate_packet_ready",
+        )
+    if signal_state in {"fresh_signal_absent", "blocked_by_disable_fact"}:
+        return _classifier(
+            "not_tradable_market_wait",
+            first_blocker_class,
+            "BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
+            blocker_owner,
+            next_action,
+            "live_submit_ready",
+        )
+    return {}
 
 
 def _classifier(
