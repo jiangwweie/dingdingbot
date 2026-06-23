@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T10:22:13.119548+00:00
+- 报告时间: 2026-06-23T12:25:43.867010+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -43,11 +43,18 @@
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
+- 第五阶段状态: `phase_5_waiting_for_live_opportunity`
+- 30U trial standby 席位: `3` / `3`
+- Fresh signal 后 action-time preflight: `是`
 - 交易资格状态: `tradeability_verdict_ready`
 - 交易资格 Top: `BRF2-001` / `not_tradable_market_wait`
 - 第一阻断: `fresh_brf2_short_signal_absent` / `market`
 - 下一动作: `continue_brf2_armed_observation_until_fresh_signal`
 - 当前可交易数量: `0`
+- Tradeability trial-grade standby: `3`
+- Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
+- Trial-grade 30d observation / action-time submit: `1` / `0`
+- Trial-grade hard gates relaxed: `否`
 
 ## Steps
 
@@ -89,6 +96,7 @@
 | strategygroup_lifecycle_rehearsal | lifecycle_rehearsal_ready | 0 |
 | strategygroup_pre_live_rehearsal_readiness | pre_live_rehearsal_ready | 0 |
 | strategygroup_live_submit_readiness_bridge | live_submit_standby_waiting_for_market | 0 |
+| strategygroup_trial_grade_signal_gate_audit | trial_grade_signal_gate_audit_ready | 0 |
 | three_strategy_live_trial_portfolio | three_strategy_live_trial_portfolio_ready | 0 |
 | strategygroup_tradeability_verdict | tradeability_verdict_ready | 0 |
 

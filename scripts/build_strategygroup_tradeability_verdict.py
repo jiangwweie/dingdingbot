@@ -52,6 +52,10 @@ DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
 DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json"
 )
+DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
@@ -132,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         "--brf2-non-executing-candidate-packet-json",
         default=str(DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON),
     )
+    parser.add_argument(
+        "--trial-grade-signal-gate-audit-json",
+        default=str(DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -156,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         brf2_non_executing_candidate_packet=_read_optional_json(
             Path(args.brf2_non_executing_candidate_packet_json)
+        ),
+        trial_grade_signal_gate_audit=_read_optional_json(
+            Path(args.trial_grade_signal_gate_audit_json)
         ),
     )
     output_json = Path(args.output_json)
@@ -191,6 +202,7 @@ def build_tradeability_verdict(
     three_strategy_live_trial_portfolio: dict[str, Any] | None = None,
     brf2_runtime_signal_capture: dict[str, Any] | None = None,
     brf2_non_executing_candidate_packet: dict[str, Any] | None = None,
+    trial_grade_signal_gate_audit: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
@@ -203,6 +215,7 @@ def build_tradeability_verdict(
         three_strategy_live_trial_portfolio or {},
         brf2_runtime_signal_capture or {},
         brf2_non_executing_candidate_packet or {},
+        trial_grade_signal_gate_audit or {},
     )
     registry_rows = _registry_rows_by_id(registry)
     tier_rows = _tier_rows_by_id(tier_policy)
@@ -215,6 +228,7 @@ def build_tradeability_verdict(
         brf2_owner_trial_policy_scope or {}
     )
     portfolio_seats = _portfolio_seats_by_id(three_strategy_live_trial_portfolio or {})
+    trial_grade_rows = _trial_grade_rows_by_id(trial_grade_signal_gate_audit or {})
 
     all_ids = set(candidate_rows)
     all_ids.update(tier_rows)
@@ -249,6 +263,7 @@ def build_tradeability_verdict(
                 if strategy_group_id == "BRF2-001"
                 else {}
             ),
+            trial_grade_row=trial_grade_rows.get(strategy_group_id, {}),
             live_submit_readiness=live_submit_readiness,
             forbidden_effects=forbidden_effects,
         )
@@ -331,6 +346,7 @@ def _verdict_row(
     portfolio_seat: dict[str, Any],
     brf2_runtime_signal_capture: dict[str, Any],
     brf2_non_executing_candidate_packet: dict[str, Any],
+    trial_grade_row: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
@@ -375,6 +391,11 @@ def _verdict_row(
         blockers,
         strategy_group_id=strategy_group_id,
         owner_policy_recorded=owner_policy_recorded,
+    )
+    signal_grade_status = _signal_grade_status(
+        strategy_group_id=strategy_group_id,
+        trial_grade_row=trial_grade_row,
+        portfolio_seat=portfolio_seat,
     )
     return {
         "strategy_group_id": strategy_group_id,
@@ -434,6 +455,7 @@ def _verdict_row(
                 is True
             ),
         },
+        "signal_grade_status": signal_grade_status,
         "evidence_snapshot": {
             "recent_opportunity_count": _int(candidate.get("recent_opportunity_count")),
             "would_enter_forward_positive_count": _int(
@@ -884,6 +906,86 @@ def _portfolio_seats_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(key): _as_dict(value) for key, value in seats.items()}
 
 
+def _trial_grade_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if _status(packet) != "trial_grade_signal_gate_audit_ready":
+        return {}
+    rows = _as_dict(packet.get("strategy_group_rows"))
+    return {str(key): _as_dict(value) for key, value in rows.items()}
+
+
+def _signal_grade_status(
+    *,
+    strategy_group_id: str,
+    trial_grade_row: dict[str, Any],
+    portfolio_seat: dict[str, Any],
+) -> dict[str, Any]:
+    runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
+    if not trial_grade_row:
+        return {
+            "strategy_group_id": strategy_group_id,
+            "trial_grade_audit_ready": False,
+            "trial_grade_30u_standby_ready": runtime_readiness.get(
+                "trial_grade_30u_standby_ready"
+            )
+            is True,
+            "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
+                "stage_5_waiting_live_opportunity_ready"
+            )
+            is True,
+            "actionable_now": False,
+            "real_order_authority": False,
+        }
+    assessment = _as_dict(trial_grade_row.get("signal_grade_current_assessment"))
+    counts_30d = _as_dict(
+        _as_dict(
+            _as_dict(trial_grade_row.get("verified_recent_window_counts")).get(
+                "windows_days"
+            )
+        ).get("30")
+    )
+    projection = _as_dict(trial_grade_row.get("fixture_replay_projection"))
+    tomorrow = _as_dict(trial_grade_row.get("tomorrow_same_structure_assessment"))
+    authority = _as_dict(trial_grade_row.get("authority_boundary"))
+    return {
+        "strategy_group_id": strategy_group_id,
+        "trial_grade_audit_ready": True,
+        "current_gate_looks_like": str(
+            assessment.get("current_gate_looks_like") or "unknown"
+        ),
+        "trial_grade_30u_standby_ready": runtime_readiness.get(
+            "trial_grade_30u_standby_ready"
+        )
+        is True,
+        "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
+            "stage_5_waiting_live_opportunity_ready"
+        )
+        is True,
+        "recent_30d_trial_grade_observation_count": _int(
+            counts_30d.get("trial_grade_observation_count")
+        ),
+        "recent_30d_action_time_trial_submit_count": _int(
+            counts_30d.get("action_time_trial_submit_count")
+        ),
+        "fixture_trial_grade_trigger_case_count": _int(
+            projection.get("trial_grade_trigger_case_count")
+        ),
+        "max_loss_estimate_usdt": str(
+            projection.get("max_loss_estimate_usdt") or ""
+        ),
+        "would_enter_30u_trial_if_same_structure": (
+            tomorrow.get("would_enter_30u_trial") is True
+        ),
+        "trial_grade_signal_can_prepare_30u_trial": (
+            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        ),
+        "trial_grade_signal_can_bypass_hard_safety_gates": (
+            authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
+        ),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _policy_scope(
     candidate: dict[str, Any],
     portfolio_seat: dict[str, Any],
@@ -1153,6 +1255,18 @@ def _summary(
     for row in rows:
         by_verdict[str(row["verdict"])] = by_verdict.get(str(row["verdict"]), 0) + 1
         by_owner[str(row["blocker_owner"])] = by_owner.get(str(row["blocker_owner"]), 0) + 1
+    trial_grade_standby_count = sum(
+        _as_dict(row.get("signal_grade_status")).get("trial_grade_30u_standby_ready")
+        is True
+        for row in rows
+    )
+    stage_5_ready_count = sum(
+        _as_dict(row.get("signal_grade_status")).get(
+            "stage_5_waiting_live_opportunity_ready"
+        )
+        is True
+        for row in rows
+    )
     return {
         "row_count": len(rows),
         "tradable_now_count": sum(row["verdict"] == "tradable_now" for row in rows),
@@ -1169,6 +1283,8 @@ def _summary(
         "strategy_review_first_blocker_count": by_owner.get("strategy_review", 0),
         "by_verdict": by_verdict,
         "by_blocker_owner": by_owner,
+        "trial_grade_30u_standby_count": trial_grade_standby_count,
+        "stage_5_waiting_live_opportunity_ready_count": stage_5_ready_count,
         "selected_strategy_group_id": selected_strategy_group_id,
         "selected_candidate_strategy_group_id": str(
             selected_candidate_top.get("strategy_group_id") or ""

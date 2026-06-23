@@ -32,6 +32,136 @@ def test_current_tradeability_artifact_matches_monitor_sequence_contract():
     assert monitor_checks.get("tradeability_row_count_matches_verdict_rows") is True
 
 
+def test_current_trial_grade_signal_gate_audit_artifact_matches_monitor_sequence_contract():
+    audit = _read_json(
+        "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
+    )
+    monitor = _read_json("output/runtime-monitor/latest-local-monitor-sequence.json")
+    checks = monitor.get("checks") or {}
+    summary = audit.get("summary") or {}
+    rows = audit.get("strategy_group_rows") or {}
+
+    assert audit["schema"] == "brc.strategygroup_trial_grade_signal_gate_audit.v1"
+    assert (
+        audit["scope"]
+        == "strategygroup_trial_grade_signal_gate_audit_non_executing"
+    )
+    assert audit["status"] == "trial_grade_signal_gate_audit_ready"
+    assert audit["generated_at_utc"]
+    assert audit["signal_grade_catalog"]["observe_only_signal"]["may_place_order"] is False
+    assert audit["signal_grade_catalog"]["invalid_signal"]["may_place_order"] is False
+    assert set(audit["signal_grade_catalog"]) == {
+        "observe_only_signal",
+        "trial_grade_signal",
+        "production_grade_signal",
+        "invalid_signal",
+    }
+    assert "action_time_finalgate" in audit["hard_safety_gate_list"]
+    assert "official_operation_layer" in audit["hard_safety_gate_list"]
+    assert "no_live_profile_or_order_sizing_expansion" in audit[
+        "hard_safety_gate_list"
+    ]
+    live_trial_policy_update = audit["live_trial_policy_update"]
+    assert live_trial_policy_update["scope"] == "30U_bounded_trial_only"
+    assert (
+        live_trial_policy_update["does_not_change_production_grade_authority"]
+        is True
+    )
+    assert live_trial_policy_update["does_not_expand_live_profile"] is True
+    assert (
+        live_trial_policy_update["does_not_change_order_sizing_defaults"] is True
+    )
+    assert audit["checks"]["hard_safety_gates_not_relaxed"] is True
+    assert audit["checks"]["risk_expressed_as_envelope"] is True
+    assert audit["checks"]["replay_or_proxy_not_action_time_authority"] is True
+    assert audit["checks"]["actionable_now"] is False
+    assert audit["checks"]["real_order_authority"] is False
+    assert audit["checks"]["calls_finalgate"] is False
+    assert audit["checks"]["calls_operation_layer"] is False
+    assert audit["checks"]["calls_exchange_write"] is False
+    assert audit["checks"]["places_order"] is False
+    assert audit["safety_invariants"]["actionable_now"] is False
+    assert audit["safety_invariants"]["real_order_authority"] is False
+    assert (
+        audit["safety_invariants"]["action_time_required_facts_satisfied_by_proxy"]
+        is False
+    )
+    assert audit["safety_invariants"]["places_order"] is False
+    assert summary["strategy_group_count"] == 3
+    assert summary["trial_grade_observation_count_30d"] == 1
+    assert summary["action_time_trial_submit_count_30d"] == 0
+    assert summary["hard_safety_gates_relaxed"] is False
+    assert set(rows) == {"MPG-001", "BRF2-001", "SOR-001"}
+
+    for strategy_group_id, row in rows.items():
+        assert row["strategy_group_id"] == strategy_group_id
+        assert row["production_grade_gate_profile"]["grade"] == (
+            "production_grade_signal"
+        )
+        assert row["trial_grade_gate_profile"]["grade"] == "trial_grade_signal"
+        assert row["trial_grade_trigger_diff"]
+        assert row["hard_safety_gate_list"] == audit["hard_safety_gate_list"]
+        assert row["risk_envelope"]["attempt_cap"] >= 1
+        assert row["risk_envelope"]["stop_or_protection_required"] is True
+        assert set(row["verified_recent_window_counts"]["windows_days"]) == {
+            "7",
+            "14",
+            "30",
+        }
+        assert (
+            row["verified_recent_window_counts"][
+                "counts_do_not_authorize_submit"
+            ]
+            is True
+        )
+        assert (
+            row["verified_recent_window_counts"][
+                "verified_recent_counts_are_action_time_counts"
+            ]
+            is False
+        )
+        assert row["fixture_replay_projection"]["max_loss_estimate_usdt"]
+        assert row["fixture_replay_projection"]["projection_boundary"]
+        assert row["false_positive_review_pack"]
+        assert (
+            row["authority_boundary"][
+                "trial_grade_signal_can_bypass_hard_safety_gates"
+            ]
+            is False
+        )
+        assert row["authority_boundary"]["actionable_now"] is False
+        assert row["authority_boundary"]["real_order_authority"] is False
+
+    brf2 = rows["BRF2-001"]
+    brf2_counts_30d = brf2["verified_recent_window_counts"]["windows_days"]["30"]
+    assert brf2_counts_30d["trial_grade_observation_count"] == 1
+    assert brf2_counts_30d["action_time_trial_submit_count"] == 0
+    assert brf2["risk_envelope"]["path_risk_treatment"] == (
+        "known_path_risk_enters_envelope_not_trade_denial"
+    )
+    assert brf2["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+
+    sor = rows["SOR-001"]
+    assert sor["fixture_replay_projection"]["trial_grade_trigger_case_count"] == 1
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+
+    assert checks["trial_grade_signal_gate_audit_ready"] is True
+    assert checks["trial_grade_strategy_group_count"] == summary["strategy_group_count"]
+    assert checks["trial_grade_observation_count_30d"] == (
+        summary["trial_grade_observation_count_30d"]
+    )
+    assert checks["trial_grade_action_time_submit_count_30d"] == 0
+    assert checks["trial_grade_hard_safety_gates_relaxed"] is False
+    assert (
+        checks["trial_grade_brf2_would_enter_30u_trial_if_same_structure"]
+        is True
+    )
+    assert (
+        checks["trial_grade_sor_would_enter_30u_trial_if_same_structure"]
+        is True
+    )
+
+
 def test_current_trial_asset_admission_proposal_artifact_is_complete():
     proposal_packet = _read_json(
         "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
@@ -258,12 +388,43 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert portfolio["checks"]["all_seats_have_first_blocker"] is True
     assert portfolio["checks"]["all_seats_have_required_facts"] is True
     assert portfolio["checks"]["all_seats_have_review_hooks"] is True
+    stage_5 = portfolio["stage_5_live_opportunity_standby"]
+    assert stage_5["status"] == "phase_5_waiting_for_live_opportunity"
+    assert stage_5["ready"] is True
+    assert stage_5["standby_count"] == 3
+    assert stage_5["market_wait_count"] == 3
+    assert stage_5["action_time_preflight_pending_fresh_signal"] is True
+    assert stage_5["hard_safety_gates_relaxed"] is False
+    assert stage_5["actionable_now"] is False
+    assert stage_5["real_order_authority"] is False
     brf2 = portfolio["seat_readiness"]["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
+    assert brf2["stage_5_status"] == "waiting_for_live_opportunity"
+    assert brf2["trial_grade_signal_status"]["trial_grade_audit_ready"] is True
+    assert (
+        brf2["trial_grade_signal_status"][
+            "trial_grade_signal_can_prepare_30u_trial"
+        ]
+        is True
+    )
+    assert (
+        brf2["trial_grade_signal_status"][
+            "trial_grade_signal_can_bypass_hard_safety_gates"
+        ]
+        is False
+    )
     assert brf2["armed_observation_plan_ready"] is True
     assert brf2["required_facts_mapping_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_ready"] is True
+    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is True
+    assert (
+        brf2["runtime_readiness"]["stage_5_waiting_live_opportunity_ready"] is True
+    )
+    assert (
+        brf2["runtime_readiness"]["action_time_preflight_pending_fresh_signal"]
+        is True
+    )
     assert brf2["runtime_readiness"]["blocked_by"] == (
         "fresh_brf2_short_signal_absent"
     )
@@ -292,6 +453,13 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert checks["live_trial_owner_policy_gap_count"] == 0
     assert checks["live_trial_engineering_gap_count"] == 0
     assert checks["live_trial_market_wait_count"] == 3
+    assert checks["stage_5_waiting_live_opportunity_ready"] is True
+    assert checks["stage_5_status"] == "phase_5_waiting_for_live_opportunity"
+    assert checks["trial_grade_30u_standby_count"] == 3
+    assert checks["action_time_preflight_pending_fresh_signal"] is True
+    assert checks["stage_5_hard_safety_gates_relaxed"] is False
+    assert checks["tradeability_trial_grade_30u_standby_count"] == 3
+    assert checks["tradeability_stage_5_waiting_live_opportunity_ready_count"] == 3
     assert checks["brf2_owner_policy_recorded"] is True
     assert checks["brf2_owner_policy_scope_missing"] is False
     assert checks["brf2_required_facts_mapping_ready"] is True

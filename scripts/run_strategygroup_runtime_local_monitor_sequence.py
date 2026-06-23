@@ -260,6 +260,14 @@ DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON = (
 DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.md"
 )
+DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
+)
+DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -440,6 +448,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_tradeability_verdict_md=Path(
             args.strategygroup_tradeability_verdict_md
+        ),
+        strategygroup_trial_grade_signal_gate_audit_json=Path(
+            args.strategygroup_trial_grade_signal_gate_audit_json
+        ),
+        strategygroup_trial_grade_signal_gate_audit_md=Path(
+            args.strategygroup_trial_grade_signal_gate_audit_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -638,6 +652,12 @@ def build_local_monitor_sequence_report(
     ),
     strategygroup_tradeability_verdict_md: Path = (
         DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD
+    ),
+    strategygroup_trial_grade_signal_gate_audit_json: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
+    ),
+    strategygroup_trial_grade_signal_gate_audit_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD
     ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -1375,6 +1395,36 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_trial_grade_signal_gate_audit_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_trial_grade_signal_gate_audit.py"
+        ),
+        "--live-preview-json",
+        str(REPO_ROOT / "output/runtime-monitor/latest-live-market-strategy-preview.json"),
+        "--local-preview-json",
+        str(REPO_ROOT / "output/runtime-monitor/latest-local-sqlite-strategy-preview.json"),
+        "--brf2-policy-json",
+        str(brf2_owner_trial_policy_scope_json),
+        "--brf2-capture-json",
+        str(brf2_runtime_signal_capture_json),
+        "--three-strategy-portfolio-json",
+        str(three_strategy_live_trial_portfolio_json),
+        "--output-json",
+        str(strategygroup_trial_grade_signal_gate_audit_json),
+        "--output-owner-progress",
+        str(strategygroup_trial_grade_signal_gate_audit_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_trial_grade_signal_gate_audit",
+            strategygroup_trial_grade_signal_gate_audit_command,
+            strategygroup_trial_grade_signal_gate_audit_json,
+            runner,
+        )
+    )
+
     three_strategy_live_trial_portfolio_command = [
         sys.executable,
         str(
@@ -1401,6 +1451,8 @@ def build_local_monitor_sequence_report(
         str(brf2_required_facts_mapping_json),
         "--brf2-runtime-signal-capture-json",
         str(brf2_runtime_signal_capture_json),
+        "--trial-grade-signal-gate-audit-json",
+        str(strategygroup_trial_grade_signal_gate_audit_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
         "--output-json",
@@ -1446,6 +1498,8 @@ def build_local_monitor_sequence_report(
         str(brf2_runtime_signal_capture_json),
         "--brf2-non-executing-candidate-packet-json",
         str(brf2_non_executing_candidate_packet_json),
+        "--trial-grade-signal-gate-audit-json",
+        str(strategygroup_trial_grade_signal_gate_audit_json),
         "--output-json",
         str(strategygroup_tradeability_verdict_json),
         "--output-owner-progress",
@@ -1557,6 +1611,11 @@ def build_local_monitor_sequence_report(
     tradeability_summary = _sequence_tradeability_summary(
         packets.get("strategygroup_tradeability_verdict", {})
     )
+    trial_grade_signal_gate_audit_summary = (
+        _sequence_trial_grade_signal_gate_audit_summary(
+            packets.get("strategygroup_trial_grade_signal_gate_audit", {})
+        )
+    )
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -1583,6 +1642,9 @@ def build_local_monitor_sequence_report(
             "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "tradeability_verdict": tradeability_summary,
+            "trial_grade_signal_gate_audit": (
+                trial_grade_signal_gate_audit_summary
+            ),
         },
         "interaction": interaction,
         "strategy_observation_layer": observation_layer_summary,
@@ -1597,6 +1659,9 @@ def build_local_monitor_sequence_report(
         "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "strategy_tradeability_verdict": tradeability_summary,
+        "strategy_trial_grade_signal_gate_audit": (
+            trial_grade_signal_gate_audit_summary
+        ),
         "checks": {
             "blockers": execution_blockers,
             "execution_blockers": execution_blockers,
@@ -1754,6 +1819,25 @@ def build_local_monitor_sequence_report(
             "live_trial_next_bottlenecks": three_strategy_portfolio_summary[
                 "next_bottlenecks"
             ],
+            "stage_5_waiting_live_opportunity_ready": (
+                three_strategy_portfolio_summary[
+                    "stage_5_waiting_live_opportunity_ready"
+                ]
+            ),
+            "stage_5_status": three_strategy_portfolio_summary[
+                "stage_5_status"
+            ],
+            "trial_grade_30u_standby_count": three_strategy_portfolio_summary[
+                "trial_grade_30u_standby_count"
+            ],
+            "action_time_preflight_pending_fresh_signal": (
+                three_strategy_portfolio_summary[
+                    "action_time_preflight_pending_fresh_signal"
+                ]
+            ),
+            "stage_5_hard_safety_gates_relaxed": three_strategy_portfolio_summary[
+                "hard_safety_gates_relaxed"
+            ],
             "tradeability_top_strategy_group_id": tradeability_summary[
                 "top_strategy_group_id"
             ],
@@ -1772,9 +1856,56 @@ def build_local_monitor_sequence_report(
             "tradeability_tradable_now_count": tradeability_summary[
                 "tradable_now_count"
             ],
+            "tradeability_trial_grade_30u_standby_count": tradeability_summary[
+                "trial_grade_30u_standby_count"
+            ],
+            "tradeability_stage_5_waiting_live_opportunity_ready_count": (
+                tradeability_summary[
+                    "stage_5_waiting_live_opportunity_ready_count"
+                ]
+            ),
             "tradeability_real_order_authority_count": tradeability_summary[
                 "real_order_authority_count"
             ],
+            "trial_grade_signal_gate_audit_ready": (
+                trial_grade_signal_gate_audit_summary["ready"]
+            ),
+            "trial_grade_strategy_group_count": (
+                trial_grade_signal_gate_audit_summary["strategy_group_count"]
+            ),
+            "trial_grade_observation_count_30d": (
+                trial_grade_signal_gate_audit_summary[
+                    "trial_grade_observation_count_30d"
+                ]
+            ),
+            "trial_grade_action_time_submit_count_30d": (
+                trial_grade_signal_gate_audit_summary[
+                    "action_time_trial_submit_count_30d"
+                ]
+            ),
+            "trial_grade_hard_safety_gates_relaxed": (
+                trial_grade_signal_gate_audit_summary[
+                    "hard_safety_gates_relaxed"
+                ]
+            ),
+            "trial_grade_brf2_would_enter_30u_trial_if_same_structure": (
+                trial_grade_signal_gate_audit_summary[
+                    "tomorrow_same_structure"
+                ].get("BRF2-001")
+                is True
+            ),
+            "trial_grade_mpg_would_enter_30u_trial_if_same_structure": (
+                trial_grade_signal_gate_audit_summary[
+                    "tomorrow_same_structure"
+                ].get("MPG-001")
+                is True
+            ),
+            "trial_grade_sor_would_enter_30u_trial_if_same_structure": (
+                trial_grade_signal_gate_audit_summary[
+                    "tomorrow_same_structure"
+                ].get("SOR-001")
+                is True
+            ),
             "runtime_status": runtime_status,
             "monitor_status": monitor_status,
             "owner_status": owner_status,
@@ -1872,6 +2003,9 @@ def build_local_monitor_sequence_report(
             ),
             "strategygroup_tradeability_verdict_json": str(
                 strategygroup_tradeability_verdict_json
+            ),
+            "strategygroup_trial_grade_signal_gate_audit_json": str(
+                strategygroup_trial_grade_signal_gate_audit_json
             ),
         },
     }
@@ -2717,6 +2851,29 @@ def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[s
         "objective_met": packet.get("objective_met") is True,
         "seat_count": _int(packet.get("seat_count")),
         "selected_strategy_groups": selected,
+        "stage_5_status": str(
+            _as_dict(packet.get("stage_5_live_opportunity_standby")).get(
+                "status"
+            )
+            or "missing"
+        ),
+        "stage_5_waiting_live_opportunity_ready": _as_dict(
+            packet.get("stage_5_live_opportunity_standby")
+        ).get("ready")
+        is True,
+        "trial_grade_30u_standby_count": _int(
+            _as_dict(packet.get("stage_5_live_opportunity_standby")).get(
+                "standby_count"
+            )
+        ),
+        "action_time_preflight_pending_fresh_signal": _as_dict(
+            packet.get("stage_5_live_opportunity_standby")
+        ).get("action_time_preflight_pending_fresh_signal")
+        is True,
+        "hard_safety_gates_relaxed": _as_dict(
+            packet.get("stage_5_live_opportunity_standby")
+        ).get("hard_safety_gates_relaxed")
+        is True,
         "market_wait_count": sum(
             blocker.get("blocker_owner") == "market" for blocker in blocker_rows
         ),
@@ -2755,6 +2912,12 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "verdict_rows_count": len(verdict_rows),
         "row_count_matches_verdict_rows": row_count_matches_verdict_rows,
         "tradable_now_count": _int(summary.get("tradable_now_count")),
+        "trial_grade_30u_standby_count": _int(
+            summary.get("trial_grade_30u_standby_count")
+        ),
+        "stage_5_waiting_live_opportunity_ready_count": _int(
+            summary.get("stage_5_waiting_live_opportunity_ready_count")
+        ),
         "actionable_now_count": _int(summary.get("actionable_now_count")),
         "real_order_authority_count": _int(
             summary.get("real_order_authority_count")
@@ -2771,6 +2934,56 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
             "owner_decision_required"
         )
         is True,
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
+def _sequence_trial_grade_signal_gate_audit_summary(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    summary = _as_dict(packet.get("summary"))
+    rows = _as_dict(packet.get("strategy_group_rows"))
+    tomorrow: dict[str, bool] = {}
+    current_gate: dict[str, str] = {}
+    fixture_trial_cases: dict[str, int] = {}
+    for strategy_group_id, value in rows.items():
+        row = _as_dict(value)
+        tomorrow_row = _as_dict(row.get("tomorrow_same_structure_assessment"))
+        assessment = _as_dict(row.get("signal_grade_current_assessment"))
+        projection = _as_dict(row.get("fixture_replay_projection"))
+        tomorrow[str(strategy_group_id)] = (
+            tomorrow_row.get("would_enter_30u_trial") is True
+        )
+        current_gate[str(strategy_group_id)] = str(
+            assessment.get("current_gate_looks_like") or "unknown"
+        )
+        fixture_trial_cases[str(strategy_group_id)] = _int(
+            projection.get("trial_grade_trigger_case_count")
+        )
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "trial_grade_signal_gate_audit_ready",
+        "ready": _status(packet) == "trial_grade_signal_gate_audit_ready",
+        "strategy_group_count": _int(summary.get("strategy_group_count")),
+        "trial_grade_observation_count_30d": _int(
+            summary.get("trial_grade_observation_count_30d")
+        ),
+        "action_time_trial_submit_count_30d": _int(
+            summary.get("action_time_trial_submit_count_30d")
+        ),
+        "production_grade_observation_count_30d": _int(
+            summary.get("production_grade_observation_count_30d")
+        ),
+        "hard_safety_gates_relaxed": summary.get("hard_safety_gates_relaxed")
+        is True,
+        "risk_treatment": str(summary.get("risk_treatment") or ""),
+        "next_engineering_bottleneck": str(
+            summary.get("next_engineering_bottleneck") or ""
+        ),
+        "tomorrow_same_structure": tomorrow,
+        "current_gate_by_strategy_group": current_gate,
+        "fixture_trial_case_count_by_strategy_group": fixture_trial_cases,
         "actionable_now": False,
         "real_order_authority": False,
     }
@@ -2986,6 +3199,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         report.get("three_strategy_live_trial_portfolio") or {}
     )
     tradeability = report.get("strategy_tradeability_verdict") or {}
+    trial_grade_audit = (
+        report.get("strategy_trial_grade_signal_gate_audit") or {}
+    )
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
         "",
@@ -3036,11 +3252,18 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
+        f"- 第五阶段状态: `{three_strategy_portfolio.get('stage_5_status', 'missing')}`",
+        f"- 30U trial standby 席位: `{three_strategy_portfolio.get('trial_grade_30u_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- Fresh signal 后 action-time preflight: `{_yes_no(three_strategy_portfolio.get('action_time_preflight_pending_fresh_signal') is True)}`",
         f"- 交易资格状态: `{tradeability.get('status', 'missing')}`",
         f"- 交易资格 Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_verdict', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
         f"- 下一动作: `{tradeability.get('top_next_action', 'missing')}`",
         f"- 当前可交易数量: `{tradeability.get('tradable_now_count', 0)}`",
+        f"- Tradeability trial-grade standby: `{tradeability.get('trial_grade_30u_standby_count', 0)}`",
+        f"- Trial-grade signal audit: `{trial_grade_audit.get('status', 'missing')}`",
+        f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_trial_submit_count_30d', 0)}`",
+        f"- Trial-grade hard gates relaxed: `{_yes_no(trial_grade_audit.get('hard_safety_gates_relaxed') is True)}`",
         "",
         "## Steps",
         "",
@@ -3427,6 +3650,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-tradeability-verdict-md",
         default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-trial-grade-signal-gate-audit-json",
+        default=str(DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-trial-grade-signal-gate-audit-md",
+        default=str(DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

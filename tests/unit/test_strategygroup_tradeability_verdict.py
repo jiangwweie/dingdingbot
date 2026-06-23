@@ -324,6 +324,14 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
         "status": "three_strategy_live_trial_portfolio_ready",
         "selected_strategy_groups": ["MPG-001", "BRF2-001", "SOR-001"],
         "seat_readiness": {
+            "MPG-001": {
+                "stage": "armed_observation",
+                "runtime_readiness": {
+                    "trial_grade_30u_standby_ready": True,
+                    "stage_5_waiting_live_opportunity_ready": True,
+                    "action_time_preflight_pending_fresh_signal": True,
+                },
+            },
             "BRF2-001": {
                 "stage": "armed_observation",
                 "required_facts_mapping_ready": True,
@@ -331,6 +339,9 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
                     "armed_observation_ready": True,
                     "tiny_live_ready": False,
                     "live_submit_ready": False,
+                    "trial_grade_30u_standby_ready": True,
+                    "stage_5_waiting_live_opportunity_ready": True,
+                    "action_time_preflight_pending_fresh_signal": True,
                 },
                 "first_blocker": {
                     "verdict": "not_tradable_market_wait",
@@ -344,6 +355,14 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
                     "can_trade": False,
                     "verdict": "not_tradable_market_wait",
                     "next_state_after_blocker_removed": "live_submit_ready",
+                },
+            },
+            "SOR-001": {
+                "stage": "armed_observation",
+                "runtime_readiness": {
+                    "trial_grade_30u_standby_ready": True,
+                    "stage_5_waiting_live_opportunity_ready": True,
+                    "action_time_preflight_pending_fresh_signal": True,
                 },
             }
         },
@@ -617,9 +636,16 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
     )
     assert brf2["after_next_state"] == "live_submit_ready"
     assert brf2["required_facts_status"] == "ready"
+    assert brf2["signal_grade_status"]["trial_grade_30u_standby_ready"] is True
+    assert (
+        brf2["signal_grade_status"]["stage_5_waiting_live_opportunity_ready"]
+        is True
+    )
     assert brf2["actionable_now"] is False
     assert brf2["real_order_authority"] is False
     assert packet["summary"]["tradable_now_count"] == 0
+    assert packet["summary"]["trial_grade_30u_standby_count"] == 3
+    assert packet["summary"]["stage_5_waiting_live_opportunity_ready_count"] == 3
     assert packet["checks"]["market_wait_only_after_admission"] is True
 
 

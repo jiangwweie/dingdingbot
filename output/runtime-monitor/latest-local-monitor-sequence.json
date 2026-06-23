@@ -98,6 +98,7 @@
     "watcher_tick_present": true
   },
   "checks": {
+    "action_time_preflight_pending_fresh_signal": true,
     "automation_notify": true,
     "blockers": [],
     "brf2_actionable_now": false,
@@ -175,24 +176,38 @@
     "short_experiment_candidate_promotion_scope": "intake_only",
     "short_experiment_candidate_selected_strategy_group_id": "BRF2-001",
     "short_experiment_candidate_tiny_live_ready": false,
+    "stage_5_hard_safety_gates_relaxed": false,
+    "stage_5_status": "phase_5_waiting_for_live_opportunity",
+    "stage_5_waiting_live_opportunity_ready": true,
     "three_strategy_live_trial_portfolio_ready": true,
     "tradeability_real_order_authority_count": 0,
     "tradeability_row_count": 13,
     "tradeability_row_count_matches_verdict_rows": true,
+    "tradeability_stage_5_waiting_live_opportunity_ready_count": 3,
     "tradeability_top_first_blocker_class": "fresh_brf2_short_signal_absent",
     "tradeability_top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "tradeability_top_strategy_group_id": "BRF2-001",
     "tradeability_top_verdict": "not_tradable_market_wait",
     "tradeability_tradable_now_count": 0,
+    "tradeability_trial_grade_30u_standby_count": 3,
     "tradeability_verdict_rows_count": 13,
     "trial_asset_admission_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
     "trial_asset_admission_owner_policy_required": false,
     "trial_asset_admission_proposal_status": "trial_asset_admission_proposal_ready",
     "trial_asset_admission_strategy_group_id": "BRF2-001",
+    "trial_grade_30u_standby_count": 3,
+    "trial_grade_action_time_submit_count_30d": 0,
+    "trial_grade_brf2_would_enter_30u_trial_if_same_structure": true,
+    "trial_grade_hard_safety_gates_relaxed": false,
+    "trial_grade_mpg_would_enter_30u_trial_if_same_structure": true,
+    "trial_grade_observation_count_30d": 1,
+    "trial_grade_signal_gate_audit_ready": true,
+    "trial_grade_sor_would_enter_30u_trial_if_same_structure": true,
+    "trial_grade_strategy_group_count": 3,
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-23T10:22:13.119548+00:00",
+  "generated_at_utc": "2026-06-23T12:25:43.867010+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -384,8 +399,10 @@
       ]
     },
     "three_strategy_live_trial_portfolio": {
+      "action_time_preflight_pending_fresh_signal": true,
       "actionable_now": false,
       "engineering_gap_count": 0,
+      "hard_safety_gates_relaxed": false,
       "market_wait_count": 3,
       "next_bottlenecks": {
         "BRF2-001": "fresh_signal_wait",
@@ -402,8 +419,11 @@
         "BRF2-001",
         "SOR-001"
       ],
+      "stage_5_status": "phase_5_waiting_for_live_opportunity",
+      "stage_5_waiting_live_opportunity_ready": true,
       "status": "three_strategy_live_trial_portfolio_ready",
-      "strategy_review_gap_count": 0
+      "strategy_review_gap_count": 0,
+      "trial_grade_30u_standby_count": 3
     },
     "tradeability_verdict": {
       "actionable_now": false,
@@ -414,6 +434,7 @@
       "real_order_authority_count": 0,
       "row_count": 13,
       "row_count_matches_verdict_rows": true,
+      "stage_5_waiting_live_opportunity_ready_count": 3,
       "status": "tradeability_verdict_ready",
       "top_after_next_state": "live_submit_ready",
       "top_blocker_owner": "market",
@@ -422,6 +443,7 @@
       "top_strategy_group_id": "BRF2-001",
       "top_verdict": "not_tradable_market_wait",
       "tradable_now_count": 0,
+      "trial_grade_30u_standby_count": 3,
       "verdict_rows_count": 13
     },
     "trial_asset_admission": {
@@ -447,6 +469,35 @@
       "real_order_authority": false,
       "status": "trial_asset_admission_proposal_ready",
       "strategy_group_id": "BRF2-001"
+    },
+    "trial_grade_signal_gate_audit": {
+      "action_time_trial_submit_count_30d": 0,
+      "actionable_now": false,
+      "active": true,
+      "current_gate_by_strategy_group": {
+        "BRF2-001": "production_grade_strict_with_trial_grade_proxy_evidence",
+        "MPG-001": "l4_production_path_with_trial_grade_warning_candidates",
+        "SOR-001": "conditional_armed_observation_with_trial_grade_replay_calibration"
+      },
+      "fixture_trial_case_count_by_strategy_group": {
+        "BRF2-001": 1,
+        "MPG-001": 3,
+        "SOR-001": 1
+      },
+      "hard_safety_gates_relaxed": false,
+      "next_engineering_bottleneck": "convert trial-grade audit into 30U trial admission policy wording and runtime trigger calibration without changing production authority.",
+      "production_grade_observation_count_30d": 0,
+      "ready": true,
+      "real_order_authority": false,
+      "risk_treatment": "strategy_risk_to_envelope_not_generic_blocker",
+      "status": "trial_grade_signal_gate_audit_ready",
+      "strategy_group_count": 3,
+      "tomorrow_same_structure": {
+        "BRF2-001": true,
+        "MPG-001": true,
+        "SOR-001": true
+      },
+      "trial_grade_observation_count_30d": 1
     }
   },
   "runtime_status": "waiting_for_market",
@@ -488,7 +539,8 @@
     "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
     "strategygroup_research_intake_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
     "strategygroup_tradeability_verdict_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-verdict.json",
-    "strategygroup_trial_asset_admission_proposal_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
+    "strategygroup_trial_asset_admission_proposal_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
+    "strategygroup_trial_grade_signal_gate_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
   },
   "status": "waiting_for_market_monitor_refresh_needed",
   "steps": [
@@ -1062,6 +1114,22 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
+        "level": "L0_local_trial_grade_signal_gate_audit",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategygroup_trial_grade_signal_gate_audit",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json",
+      "returncode": 0,
+      "status": "trial_grade_signal_gate_audit_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
         "level": "L0_local_three_strategy_live_trial_portfolio",
         "mutates_remote_files": false,
         "places_order": false,
@@ -1187,6 +1255,7 @@
     "real_order_authority_count": 0,
     "row_count": 13,
     "row_count_matches_verdict_rows": true,
+    "stage_5_waiting_live_opportunity_ready_count": 3,
     "status": "tradeability_verdict_ready",
     "top_after_next_state": "live_submit_ready",
     "top_blocker_owner": "market",
@@ -1195,6 +1264,7 @@
     "top_strategy_group_id": "BRF2-001",
     "top_verdict": "not_tradable_market_wait",
     "tradable_now_count": 0,
+    "trial_grade_30u_standby_count": 3,
     "verdict_rows_count": 13
   },
   "strategy_trial_asset_admission": {
@@ -1221,9 +1291,40 @@
     "status": "trial_asset_admission_proposal_ready",
     "strategy_group_id": "BRF2-001"
   },
+  "strategy_trial_grade_signal_gate_audit": {
+    "action_time_trial_submit_count_30d": 0,
+    "actionable_now": false,
+    "active": true,
+    "current_gate_by_strategy_group": {
+      "BRF2-001": "production_grade_strict_with_trial_grade_proxy_evidence",
+      "MPG-001": "l4_production_path_with_trial_grade_warning_candidates",
+      "SOR-001": "conditional_armed_observation_with_trial_grade_replay_calibration"
+    },
+    "fixture_trial_case_count_by_strategy_group": {
+      "BRF2-001": 1,
+      "MPG-001": 3,
+      "SOR-001": 1
+    },
+    "hard_safety_gates_relaxed": false,
+    "next_engineering_bottleneck": "convert trial-grade audit into 30U trial admission policy wording and runtime trigger calibration without changing production authority.",
+    "production_grade_observation_count_30d": 0,
+    "ready": true,
+    "real_order_authority": false,
+    "risk_treatment": "strategy_risk_to_envelope_not_generic_blocker",
+    "status": "trial_grade_signal_gate_audit_ready",
+    "strategy_group_count": 3,
+    "tomorrow_same_structure": {
+      "BRF2-001": true,
+      "MPG-001": true,
+      "SOR-001": true
+    },
+    "trial_grade_observation_count_30d": 1
+  },
   "three_strategy_live_trial_portfolio": {
+    "action_time_preflight_pending_fresh_signal": true,
     "actionable_now": false,
     "engineering_gap_count": 0,
+    "hard_safety_gates_relaxed": false,
     "market_wait_count": 3,
     "next_bottlenecks": {
       "BRF2-001": "fresh_signal_wait",
@@ -1240,7 +1341,10 @@
       "BRF2-001",
       "SOR-001"
     ],
+    "stage_5_status": "phase_5_waiting_for_live_opportunity",
+    "stage_5_waiting_live_opportunity_ready": true,
     "status": "three_strategy_live_trial_portfolio_ready",
-    "strategy_review_gap_count": 0
+    "strategy_review_gap_count": 0,
+    "trial_grade_30u_standby_count": 3
   }
 }

@@ -165,6 +165,60 @@ def _brf2_runtime_signal_capture_missing_fact_input() -> dict:
     }
 
 
+def _trial_grade_signal_gate_audit() -> dict:
+    def row(strategy_group_id: str, current_gate: str) -> dict:
+        return {
+            "strategy_group_id": strategy_group_id,
+            "signal_grade_current_assessment": {
+                "current_gate_looks_like": current_gate,
+            },
+            "verified_recent_window_counts": {
+                "windows_days": {
+                    "30": {
+                        "trial_grade_observation_count": (
+                            1 if strategy_group_id == "BRF2-001" else 0
+                        ),
+                        "action_time_trial_submit_count": 0,
+                    }
+                }
+            },
+            "fixture_replay_projection": {
+                "trial_grade_trigger_case_count": 1,
+                "max_loss_estimate_usdt": "30",
+            },
+            "tomorrow_same_structure_assessment": {
+                "would_enter_30u_trial": True,
+            },
+            "authority_boundary": {
+                "trial_grade_signal_can_prepare_30u_trial": True,
+                "trial_grade_signal_can_bypass_hard_safety_gates": False,
+            },
+        }
+
+    return {
+        "status": "trial_grade_signal_gate_audit_ready",
+        "strategy_group_rows": {
+            "MPG-001": row(
+                "MPG-001",
+                "l4_production_path_with_trial_grade_warning_candidates",
+            ),
+            "BRF2-001": row(
+                "BRF2-001",
+                "production_grade_strict_with_trial_grade_proxy_evidence",
+            ),
+            "SOR-001": row(
+                "SOR-001",
+                "conditional_armed_observation_with_trial_grade_replay_calibration",
+            ),
+        },
+        "summary": {"hard_safety_gates_relaxed": False},
+        "live_trial_policy_update": {
+            "scope": "30U_bounded_trial_only",
+            "does_not_change_production_grade_authority": True,
+        },
+    }
+
+
 def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     module = _load_module()
 
@@ -237,6 +291,7 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
         trial_asset_admission_proposal=_trial_admission_proposal(),
         brf2_owner_trial_policy_scope=_owner_policy_scope(),
         brf2_required_facts_mapping=_brf2_required_facts_mapping(),
+        trial_grade_signal_gate_audit=_trial_grade_signal_gate_audit(),
         signal_coverage={"events": [{"strategy_group_id": "SOR-001"}]},
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
@@ -258,6 +313,28 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
     )
     assert brf2["runtime_readiness"]["tiny_live_ready"] is False
     assert brf2["runtime_readiness"]["live_submit_ready"] is False
+    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is True
+    assert (
+        brf2["runtime_readiness"]["stage_5_waiting_live_opportunity_ready"] is True
+    )
+    assert (
+        brf2["runtime_readiness"]["action_time_preflight_pending_fresh_signal"]
+        is True
+    )
+    assert brf2["stage_5_status"] == "waiting_for_live_opportunity"
+    assert brf2["trial_grade_signal_status"]["trial_grade_audit_ready"] is True
+    assert (
+        brf2["trial_grade_signal_status"][
+            "trial_grade_signal_can_prepare_30u_trial"
+        ]
+        is True
+    )
+    assert (
+        brf2["trial_grade_signal_status"][
+            "trial_grade_signal_can_bypass_hard_safety_gates"
+        ]
+        is False
+    )
     assert brf2["first_blocker"]["verdict"] == "not_tradable_market_wait"
     assert brf2["first_blocker"]["first_blocker_class"] == (
         "fresh_brf2_short_signal_absent"
@@ -270,6 +347,24 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
         "live_submit_ready"
     )
     assert packet["next_engineering_bottleneck"]["BRF2-001"] == "fresh_signal_wait"
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is True
+    assert packet["stage_5_live_opportunity_standby"]["standby_count"] == 3
+    assert packet["stage_5_live_opportunity_standby"]["market_wait_count"] == 3
+    assert (
+        packet["stage_5_live_opportunity_standby"][
+            "action_time_preflight_pending_fresh_signal"
+        ]
+        is True
+    )
+    assert (
+        packet["stage_5_live_opportunity_standby"]["hard_safety_gates_relaxed"]
+        is False
+    )
+    assert packet["checks"]["trial_grade_30u_standby_ready"] is True
+    assert packet["checks"]["trial_grade_30u_standby_count"] == 3
+    assert packet["checks"]["stage_5_waiting_live_opportunity"] is True
+    assert packet["checks"]["action_time_preflight_pending_fresh_signal"] is True
+    assert packet["checks"]["hard_safety_gates_relaxed"] is False
 
 
 def test_three_strategy_portfolio_surfaces_brf2_fact_input_gap_after_mapping():

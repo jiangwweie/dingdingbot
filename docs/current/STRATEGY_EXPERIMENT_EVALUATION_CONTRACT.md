@@ -86,6 +86,43 @@ Did the strategy look like stable year-round alpha?
 | `tiny_live_ready` | A downstream state after main-control review, facts, risk envelope, and runtime scope are closed | Automatic exchange write |
 | `live_submit_ready` | Action-time runtime state says a real submit may proceed through FinalGate and Operation Layer | Research or markdown conclusion |
 
+## Signal Grade Semantics
+
+Signal grade must be explicit. A strategy such as `BRF2-001` may be suitable
+for a bounded small-capital trial before it has enough evidence for production
+expansion. Do not hide that distinction inside a generic `fresh_signal` label.
+
+| Signal type | May place order | Use |
+| --- | --- | --- |
+| `observe_only_signal` | No | Record, replay, repair classifier, and improve RequiredFacts |
+| `trial_grade_signal` | Yes, only inside scoped small-capital trial boundaries | Enter a bounded trial such as the 30 USDT BRF2 trial after hard safety gates still pass |
+| `production_grade_signal` | Yes, at higher or normalized production grade after later promotion | Support future scale-up or regularized runtime operation |
+| `invalid_signal` | No | Attribution, replay, and rule repair |
+
+Trial-grade does not mean relaxed authority. It means the strategy-quality
+standard may accept known path risk when that risk is expressed as a bounded
+experiment envelope. The action-time runtime path still requires fresh facts,
+candidate/authorization evidence, FinalGate, Operation Layer, protection,
+account state, and exchange facts.
+
+Known strategy risk should enter the experiment envelope instead of becoming a
+generic trade blocker:
+
+```text
+path risk known
+-> max attempts limited
+-> loss unit fixed
+-> stop/protection required
+-> pause after configured failures
+-> review required
+```
+
+Hard safety and authority gates are not downgradable by trial-grade status.
+Examples include wrong account or profile, stale action-time facts, missing
+protection, duplicate-submit risk, conflicting exposure, FinalGate bypass,
+Operation Layer bypass, exchange-write bypass, withdrawal or transfer,
+credential mutation, and order-sizing expansion.
+
 ## Return Target Semantics
 
 Numbers such as `100%`, `90d 100%`, or similar high-return anchors are aspiration

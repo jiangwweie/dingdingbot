@@ -43,6 +43,10 @@ DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON = (
 DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.json"
 )
+DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
+)
 DEFAULT_SIGNAL_COVERAGE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
 )
@@ -84,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON),
     )
     parser.add_argument(
+        "--trial-grade-signal-gate-audit-json",
+        default=str(DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON),
+    )
+    parser.add_argument(
         "--signal-coverage-json",
         default=str(DEFAULT_SIGNAL_COVERAGE_JSON),
     )
@@ -106,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         brf2_runtime_signal_capture=_read_optional_json(
             Path(args.brf2_runtime_signal_capture_json)
+        ),
+        trial_grade_signal_gate_audit=_read_optional_json(
+            Path(args.trial_grade_signal_gate_audit_json)
         ),
         signal_coverage=_read_optional_json(Path(args.signal_coverage_json)),
     )
@@ -138,6 +149,7 @@ def build_three_strategy_live_trial_portfolio(
     brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     brf2_required_facts_mapping: dict[str, Any] | None = None,
     brf2_runtime_signal_capture: dict[str, Any] | None = None,
+    trial_grade_signal_gate_audit: dict[str, Any] | None = None,
     signal_coverage: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -159,6 +171,10 @@ def build_three_strategy_live_trial_portfolio(
         ),
         "SOR-001": _sor_seat(registry_rows, tier_rows, signal_coverage or {}),
     }
+    stage_5_standby = _attach_trial_grade_standby(
+        seats,
+        trial_grade_signal_gate_audit or {},
+    )
     selected_strategy_groups = list(SELECTED_STRATEGY_GROUPS)
     seat_count = len(selected_strategy_groups)
     first_blockers = {
@@ -196,6 +212,7 @@ def build_three_strategy_live_trial_portfolio(
             strategy_id: seats[strategy_id]["authority_boundary"]
             for strategy_id in selected_strategy_groups
         },
+        "stage_5_live_opportunity_standby": stage_5_standby,
         "review_hooks": {
             strategy_id: seats[strategy_id]["review_hooks"]
             for strategy_id in selected_strategy_groups
@@ -239,6 +256,15 @@ def build_three_strategy_live_trial_portfolio(
                 bool(seats[strategy_id]["review_hooks"])
                 for strategy_id in selected_strategy_groups
             ),
+            "trial_grade_30u_standby_ready": stage_5_standby["ready"],
+            "trial_grade_30u_standby_count": stage_5_standby["standby_count"],
+            "stage_5_waiting_live_opportunity": stage_5_standby["ready"],
+            "action_time_preflight_pending_fresh_signal": stage_5_standby[
+                "action_time_preflight_pending_fresh_signal"
+            ],
+            "hard_safety_gates_relaxed": stage_5_standby[
+                "hard_safety_gates_relaxed"
+            ],
             "objective_met": objective_met,
             "actionable_now": False,
             "real_order_authority": False,
@@ -252,9 +278,10 @@ def build_three_strategy_live_trial_portfolio(
             "capability_unlocked": (
                 "main control can display at least three StrategyGroup trial "
                 "seats with first blocker, next action, policy scope, RequiredFacts, "
-                "authority boundary, and review hooks"
+                "trial-grade standby, authority boundary, and review hooks"
             ),
             "three_strategy_portfolio_status": status,
+            "stage_5_live_opportunity_standby_status": stage_5_standby["status"],
             "brf2_policy_scope_recorded": _policy_recorded(owner_policy_scope),
             "brf2_stage_after_policy": seats["BRF2-001"].get("stage", ""),
             "brf2_new_first_blocker": _as_dict(
@@ -701,7 +728,7 @@ def _sor_seat(
         "seat": "C",
         "seat_role": "session_range_decorrelated_experiment",
         "strategy_thesis": "session/opening-range/range-structure decorrelated trial",
-        "stage": "armed_observation_ready",
+        "stage": "armed_observation",
         "admitted_or_selected_as_live_trial_asset": True,
         "registry_admitted": "SOR-001" in registry_rows,
         "tier_policy_mode": _as_dict(tier_rows.get("SOR-001")).get("mode", "unknown"),
@@ -709,21 +736,25 @@ def _sor_seat(
         "loss_envelope_expressed": True,
         "observed_no_action_count": no_action_count,
         "policy_scope": {
-            "capital_scope": "existing_conditional_observation_scope",
+            "capital_scope": {
+                "amount": "30",
+                "currency": "USDT",
+                "type": "trial_grade_audit_envelope_not_sizing_default",
+            },
             "symbol_scope": ["session_eligible_perps"],
             "side_scope": ["short", "long_revival_only"],
-            "leverage_scenario": "owner_policy_required_before_tiny_live_submit",
+            "leverage_scenario": "trial_grade_scenario_not_production_authority",
             "attempt_cap": 3,
-            "loss_unit": 1,
+            "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
             "profile": "existing_observation_profile_boundary",
         },
         "owner_policy_required": False,
-        "owner_policy_status": "conditional_observation_policy_recorded_tiny_live_scope_not_authorized",
+        "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
         "symbol_scope": ["session_eligible_perps"],
         "side_scope": ["short", "long_revival_only"],
-        "leverage_scenario": "owner_policy_required_before_tiny_live_submit",
+        "leverage_scenario": "trial_grade_scenario_not_production_authority",
         "attempt_cap": 3,
-        "loss_unit": 1,
+        "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
         "pause_conditions": [
             "outside_session_window",
             "post_open_decay_disable_state_true",
@@ -765,6 +796,134 @@ def _sor_seat(
             "post_submit_review_ledger_after_real_attempt",
         ],
         "next_bottleneck": "fresh_signal_wait",
+}
+
+
+def _attach_trial_grade_standby(
+    seats: dict[str, dict[str, Any]],
+    audit: dict[str, Any],
+) -> dict[str, Any]:
+    audit_ready = _status(audit) == "trial_grade_signal_gate_audit_ready"
+    rows = _as_dict(audit.get("strategy_group_rows"))
+    summary = _as_dict(audit.get("summary"))
+    policy_update = _as_dict(audit.get("live_trial_policy_update"))
+    hard_safety_gates_relaxed = summary.get("hard_safety_gates_relaxed") is True
+    standby_ids: list[str] = []
+    waiting_ids: list[str] = []
+    for strategy_id, seat in seats.items():
+        row = _as_dict(rows.get(strategy_id))
+        signal_status = _trial_grade_signal_status(
+            strategy_id=strategy_id,
+            row=row,
+            policy_update=policy_update,
+            audit_ready=audit_ready,
+            hard_safety_gates_relaxed=hard_safety_gates_relaxed,
+        )
+        blocker = _as_dict(seat.get("first_blocker"))
+        runtime_readiness = _as_dict(seat.get("runtime_readiness"))
+        standby_ready = (
+            signal_status["trial_grade_audit_ready"]
+            and seat.get("admitted_or_selected_as_live_trial_asset") is True
+            and seat.get("owner_policy_required") is False
+            and bool(seat.get("required_facts"))
+            and seat.get("loss_envelope_expressed") is True
+            and blocker.get("blocker_owner") == "market"
+            and not hard_safety_gates_relaxed
+            and not signal_status["trial_grade_signal_can_bypass_hard_safety_gates"]
+        )
+        runtime_readiness["trial_grade_30u_standby_ready"] = standby_ready
+        runtime_readiness["stage_5_waiting_live_opportunity_ready"] = standby_ready
+        runtime_readiness["action_time_preflight_pending_fresh_signal"] = standby_ready
+        runtime_readiness["trial_grade_policy_scope"] = policy_update.get(
+            "scope", "missing"
+        )
+        seat["runtime_readiness"] = runtime_readiness
+        seat["trial_grade_signal_status"] = signal_status
+        seat["stage_5_status"] = (
+            "waiting_for_live_opportunity" if standby_ready else "not_ready"
+        )
+        if standby_ready:
+            standby_ids.append(strategy_id)
+        if blocker.get("blocker_owner") == "market":
+            waiting_ids.append(strategy_id)
+    selected = list(SELECTED_STRATEGY_GROUPS)
+    ready = set(standby_ids) == set(selected)
+    return {
+        "status": (
+            "phase_5_waiting_for_live_opportunity"
+            if ready
+            else "pre_phase_5_trial_standby_closure"
+        ),
+        "ready": ready,
+        "selected_strategy_groups": selected,
+        "standby_strategy_groups": standby_ids,
+        "market_wait_strategy_groups": waiting_ids,
+        "standby_count": len(standby_ids),
+        "market_wait_count": len(waiting_ids),
+        "trial_grade_policy_scope": policy_update.get("scope", "missing"),
+        "hard_safety_gates_relaxed": hard_safety_gates_relaxed,
+        "action_time_preflight_pending_fresh_signal": ready,
+        "fresh_signal_required_before_live_submit": True,
+        "live_submit_ready_now": False,
+        "actionable_now": False,
+        "real_order_authority": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
+
+
+def _trial_grade_signal_status(
+    *,
+    strategy_id: str,
+    row: dict[str, Any],
+    policy_update: dict[str, Any],
+    audit_ready: bool,
+    hard_safety_gates_relaxed: bool,
+) -> dict[str, Any]:
+    assessment = _as_dict(row.get("signal_grade_current_assessment"))
+    counts_30d = _as_dict(
+        _as_dict(_as_dict(row.get("verified_recent_window_counts")).get("windows_days")).get("30")
+    )
+    projection = _as_dict(row.get("fixture_replay_projection"))
+    tomorrow = _as_dict(row.get("tomorrow_same_structure_assessment"))
+    authority = _as_dict(row.get("authority_boundary"))
+    return {
+        "strategy_group_id": strategy_id,
+        "trial_grade_audit_ready": audit_ready and bool(row),
+        "current_gate_looks_like": str(
+            assessment.get("current_gate_looks_like") or "missing"
+        ),
+        "trial_grade_policy_scope": policy_update.get("scope", "missing"),
+        "production_grade_authority_changed": (
+            policy_update.get("does_not_change_production_grade_authority")
+            is not True
+        ),
+        "hard_safety_gates_relaxed": hard_safety_gates_relaxed,
+        "recent_30d_trial_grade_observation_count": _int(
+            counts_30d.get("trial_grade_observation_count")
+        ),
+        "recent_30d_action_time_trial_submit_count": _int(
+            counts_30d.get("action_time_trial_submit_count")
+        ),
+        "fixture_trial_grade_trigger_case_count": _int(
+            projection.get("trial_grade_trigger_case_count")
+        ),
+        "max_loss_estimate_usdt": str(
+            projection.get("max_loss_estimate_usdt") or ""
+        ),
+        "would_enter_30u_trial_if_same_structure": (
+            tomorrow.get("would_enter_30u_trial") is True
+        ),
+        "trial_grade_signal_can_prepare_30u_trial": (
+            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        ),
+        "trial_grade_signal_can_bypass_hard_safety_gates": (
+            authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
+        ),
+        "actionable_now": False,
+        "real_order_authority": False,
     }
 
 
@@ -813,6 +972,17 @@ def _rows_by_id(value: Any) -> dict[str, dict[str, Any]]:
         for row in _dict_rows(value)
         if row.get("strategy_group_id")
     }
+
+
+def _status(packet: dict[str, Any]) -> str:
+    return str(packet.get("status") or "")
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _interaction() -> dict[str, Any]:

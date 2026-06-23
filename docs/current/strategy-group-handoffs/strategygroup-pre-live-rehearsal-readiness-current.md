@@ -29,8 +29,8 @@ last_verified: 2026-06-20
 | --- | --- | --- | --- |
 | `BTPC-001` | `L2` | `revise` | revise lane guarded; L2 shadow may continue; no L4/live authority |
 | `VCB-001` | `L1` | `keep_observing` | observe-only decision retained with explicit missing handoff boundary |
-| `LSR-001` | `L1` | `keep_observing` | observe-only decision retained with explicit missing handoff boundary |
-| `BRF-001` | `L1` | `keep_observing` | observe-only decision retained with explicit missing handoff boundary |
+| `LSR-001` | `L1` | `revise` | observe-only decision retained with explicit missing handoff boundary |
+| `BRF-001` | `L1` | `promote_review_only` | observe-only decision retained with explicit missing handoff boundary |
 | `RBR-001` | `L1` | `park` | park decision retained until material new edge evidence |
 
 ## Next Engineering Bottleneck

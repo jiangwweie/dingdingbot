@@ -20,8 +20,8 @@ last_verified: 2026-06-20
 | --- | --- | --- | --- | --- |
 | `BTPC-001` | `L2` | `revise` | `handoff_present_non_executing_input` | `continue_btpc_fact_classifier_guard` |
 | `VCB-001` | `L1` | `keep_observing` | `explicit_missing_handoff_boundary_accepted` | `create_handoff_pack_before_l2_or_l4_review` |
-| `LSR-001` | `L1` | `keep_observing` | `explicit_missing_handoff_boundary_accepted` | `create_handoff_pack_before_l2_or_l4_review` |
-| `BRF-001` | `L1` | `keep_observing` | `explicit_missing_handoff_boundary_accepted` | `create_handoff_pack_before_l2_or_l4_review` |
+| `LSR-001` | `L1` | `revise` | `explicit_missing_handoff_boundary_accepted` | `create_handoff_pack_before_l2_or_l4_review` |
+| `BRF-001` | `L1` | `promote_review_only` | `explicit_missing_handoff_boundary_accepted` | `create_handoff_pack_before_l2_or_l4_review` |
 | `RBR-001` | `L1` | `park` | `parked_no_handoff_boundary` | `keep_parked_until_material_new_edge_evidence` |
 
 ## Boundary

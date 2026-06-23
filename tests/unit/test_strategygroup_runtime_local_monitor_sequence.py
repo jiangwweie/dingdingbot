@@ -65,14 +65,14 @@ def _write_waiting_brf2_candidate_packet(command: list[str]) -> None:
             "candidate_packet_ready": False,
             "candidate_packet": {
                 "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
-                "signal_state": "fact_input_missing",
+                "signal_state": "fresh_signal_absent",
             },
             "first_blocker": {
-                "class": "brf2_watcher_fact_input_missing",
-                "owner": "engineering",
-                "next_action": "attach_brf2_watcher_fact_input_producer",
+                "class": "fresh_brf2_short_signal_absent",
+                "owner": "market",
+                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
             },
-            "next_runtime_step": "attach_brf2_watcher_fact_input_producer",
+            "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
             "checks": {
                 "actionable_now": False,
                 "real_order_authority": False,
@@ -634,26 +634,32 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
                 "owner_first_blocker_count": 0,
-                "engineering_first_blocker_count": 1,
-                "market_first_blocker_count": 2,
+                "engineering_first_blocker_count": 0,
+                "market_first_blocker_count": 3,
                 "runtime_first_blocker_count": 0,
-                "strategy_review_first_blocker_count": 1,
+                "strategy_review_first_blocker_count": 0,
+                "trial_grade_30u_standby_count": 3,
+                "stage_5_waiting_live_opportunity_ready_count": 3,
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_facts",
-                "top_first_blocker_class": "brf2_watcher_fact_input_missing",
-                "top_next_action": "attach_brf2_watcher_fact_input_producer",
+                "top_verdict": "not_tradable_market_wait",
+                "top_first_blocker_class": "fresh_brf2_short_signal_absent",
+                "top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
             },
             "verdict_rows": [
                 {
                     "strategy_group_id": "BRF2-001",
                     "stage": "armed_observation",
-                    "verdict": "not_tradable_facts",
-                    "first_blocker_class": "brf2_watcher_fact_input_missing",
-                    "blocker_owner": "engineering",
-                    "next_action": "attach_brf2_watcher_fact_input_producer",
-                    "after_next_state": "armed_observation",
+                    "verdict": "not_tradable_market_wait",
+                    "first_blocker_class": "fresh_brf2_short_signal_absent",
+                    "blocker_owner": "market",
+                    "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+                    "after_next_state": "live_submit_ready",
                     "actionable_now": False,
                     "real_order_authority": False,
+                    "signal_grade_status": {
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                    },
                 },
                 {
                     "strategy_group_id": "MPG-001",
@@ -665,6 +671,10 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                     "after_next_state": "live_submit_ready",
                     "actionable_now": False,
                     "real_order_authority": False,
+                    "signal_grade_status": {
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                    },
                 },
                 {
                     "strategy_group_id": "SOR-001",
@@ -676,13 +686,17 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                     "after_next_state": "live_submit_ready",
                     "actionable_now": False,
                     "real_order_authority": False,
+                    "signal_grade_status": {
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                    },
                 },
             ],
             "owner_summary": {
                 "state": "交易资格已判定",
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_facts",
-                "top_first_blocker": "brf2_watcher_fact_input_missing",
+                "top_verdict": "not_tradable_market_wait",
+                "top_first_blocker": "fresh_brf2_short_signal_absent",
                 "owner_policy_blocker_present": False,
                 "owner_intervention_required": False,
                 "real_order_authority": False,
@@ -738,6 +752,12 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
             "seat_readiness": {
                 "MPG-001": {
                     "stage": "armed_observation",
+                    "runtime_readiness": {
+                        "armed_observation_ready": True,
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                        "action_time_preflight_pending_fresh_signal": True,
+                    },
                     "first_blocker": {
                         "verdict": "not_tradable_market_wait",
                         "first_blocker_class": "fresh_executable_signal_absent",
@@ -749,20 +769,29 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     "stage": "armed_observation",
                     "required_facts_mapping_ready": True,
                     "runtime_readiness": {
-                        "armed_observation_ready": False,
-                        "blocked_by": "brf2_watcher_fact_input_missing",
+                        "armed_observation_ready": True,
+                        "blocked_by": "fresh_brf2_short_signal_absent",
                         "tiny_live_ready": False,
                         "live_submit_ready": False,
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                        "action_time_preflight_pending_fresh_signal": True,
                     },
                     "first_blocker": {
-                        "verdict": "not_tradable_facts",
-                        "first_blocker_class": "brf2_watcher_fact_input_missing",
-                        "blocker_owner": "engineering",
-                        "next_action": "attach_brf2_watcher_fact_input_producer",
+                        "verdict": "not_tradable_market_wait",
+                        "first_blocker_class": "fresh_brf2_short_signal_absent",
+                        "blocker_owner": "market",
+                        "next_action": "continue_brf2_armed_observation_until_fresh_signal",
                     },
                 },
                 "SOR-001": {
-                    "stage": "armed_observation_ready",
+                    "stage": "armed_observation",
+                    "runtime_readiness": {
+                        "armed_observation_ready": True,
+                        "trial_grade_30u_standby_ready": True,
+                        "stage_5_waiting_live_opportunity_ready": True,
+                        "action_time_preflight_pending_fresh_signal": True,
+                    },
                     "first_blocker": {
                         "verdict": "not_tradable_market_wait",
                         "first_blocker_class": "fresh_session_range_signal_absent",
@@ -773,13 +802,28 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
             },
             "next_engineering_bottleneck": {
                 "MPG-001": "fresh_signal_wait",
-                "BRF2-001": "brf2_watcher_fact_input_missing",
+                "BRF2-001": "fresh_signal_wait",
                 "SOR-001": "fresh_signal_wait",
+            },
+            "stage_5_live_opportunity_standby": {
+                "status": "phase_5_waiting_for_live_opportunity",
+                "ready": True,
+                "standby_count": 3,
+                "market_wait_count": 3,
+                "action_time_preflight_pending_fresh_signal": True,
+                "hard_safety_gates_relaxed": False,
+                "actionable_now": False,
+                "real_order_authority": False,
             },
             "checks": {
                 "seat_count": 3,
                 "at_least_three_seats": True,
                 "objective_met": True,
+                "trial_grade_30u_standby_ready": True,
+                "trial_grade_30u_standby_count": 3,
+                "stage_5_waiting_live_opportunity": True,
+                "action_time_preflight_pending_fresh_signal": True,
+                "hard_safety_gates_relaxed": False,
                 "actionable_now": False,
                 "real_order_authority": False,
             },
@@ -873,30 +917,33 @@ def _write_ready_brf2_required_facts_mapping(command: list[str]) -> None:
     )
 
 
-def _write_missing_brf2_runtime_signal_facts(command: list[str]) -> None:
+def _write_ready_brf2_runtime_signal_facts(command: list[str]) -> None:
     _write_output(
         command,
         {
             "schema": "brc.brf2_runtime_signal_facts.v1",
             "scope": "brf2_runtime_signal_facts_read_model",
-            "status": "brf2_runtime_signal_facts_missing_watcher_input",
+            "status": "brf2_runtime_signal_facts_ready",
             "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "strategy_group_id": "BRF2-001",
-            "fact_input_present": False,
-            "watcher_tick_present": False,
-            "source_status": "missing",
+            "fact_input_present": True,
+            "watcher_tick_present": True,
+            "source_status": "ready",
             "source_path": "output/runtime-monitor/latest-live-market-strategy-preview.json",
-            "facts": {},
-            "first_blocker": {
-                "class": "brf2_watcher_fact_input_missing",
-                "owner": "engineering",
-                "next_action": "attach_brf2_watcher_fact_input_producer",
+            "facts": {
+                "closed_1h_ohlcv": {"status": "ready"},
+                "closed_5m_ohlcv": {"status": "ready"},
             },
-            "next_action": "attach_brf2_watcher_fact_input_producer",
+            "first_blocker": {
+                "class": "fresh_brf2_short_signal_absent",
+                "owner": "market",
+                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+            },
+            "next_action": "continue_brf2_armed_observation_until_fresh_signal",
             "checks": {
-                "fact_input_present": False,
-                "watcher_tick_present": False,
-                "missing_watcher_input": True,
+                "fact_input_present": True,
+                "watcher_tick_present": True,
+                "missing_watcher_input": False,
                 "actionable_now": False,
                 "real_order_authority": False,
             },
@@ -961,9 +1008,9 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             "status": "brf2_runtime_signal_capture_ready",
             "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "strategy_group_id": "BRF2-001",
-            "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
-            "fact_input_present": False,
-            "watcher_tick_present": False,
+            "fact_input_status": "brf2_runtime_signal_facts_ready",
+            "fact_input_present": True,
+            "watcher_tick_present": True,
             "watcher_scope": {
                 "strategy_group_id": "BRF2-001",
                 "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
@@ -972,23 +1019,23 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             },
             "signal_detector_preview": {
                 "detector_ready": True,
-                "fact_input_present": False,
-                "watcher_tick_present": False,
-                "fact_input_status": "brf2_runtime_signal_facts_missing_watcher_input",
+                "fact_input_present": True,
+                "watcher_tick_present": True,
+                "fact_input_status": "brf2_runtime_signal_facts_ready",
                 "fresh_signal_present": False,
-                "current_signal_state": "fact_input_missing",
-                "first_blocker_class": "brf2_watcher_fact_input_missing",
-                "first_blocker_owner": "engineering",
-                "next_action": "attach_brf2_watcher_fact_input_producer",
+                "current_signal_state": "fresh_signal_absent",
+                "first_blocker_class": "fresh_brf2_short_signal_absent",
+                "first_blocker_owner": "market",
+                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
                 "missing_required_fact_keys": ["closed_1h_ohlcv"],
                 "active_disable_fact_keys": [],
             },
             "no_action_attribution": {
                 "attribution_ready": True,
                 "strategy_group_id": "BRF2-001",
-                "reason": "brf2_watcher_fact_input_missing",
+                "reason": "fresh_brf2_short_signal_absent",
                 "blocked_fact_count": 1,
-                "blocker_owner": "engineering",
+                "blocker_owner": "market",
             },
             "candidate_packet_shape": {
                 "candidate_packet_ready": False,
@@ -996,9 +1043,9 @@ def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
             },
             "checks": {
                 "mapping_ready": True,
-                "fact_input_present": False,
-                "watcher_tick_present": False,
-                "fact_input_status_ready": False,
+                "fact_input_present": True,
+                "watcher_tick_present": True,
+                "fact_input_status_ready": True,
                 "watcher_scope_ready": True,
                 "signal_detector_preview_ready": True,
                 "no_action_attribution_ready": True,
@@ -1389,6 +1436,297 @@ def _write_passed_runtime_dry_run_audit_chain(command: list[str]) -> None:
     )
 
 
+def _write_ready_trial_grade_signal_gate_audit(command: list[str]) -> None:
+    hard_safety_gates = [
+        "selected_strategygroup_scope",
+        "allocated_subaccount_profile_boundary",
+        "action_time_required_facts_fresh",
+        "candidate_authorization_evidence",
+        "action_time_finalgate",
+        "official_operation_layer",
+        "exchange_native_protection",
+        "no_duplicate_submit",
+        "no_conflicting_active_position_or_open_order",
+        "exchange_rules_and_min_notional_ready",
+        "no_secret_or_credential_mutation",
+        "no_live_profile_or_order_sizing_expansion",
+        "no_withdrawal_or_transfer",
+    ]
+
+    def row(
+        *,
+        strategy_group_id: str,
+        current_gate: str,
+        trial_observations_30d: int,
+        fixture_cases: int,
+        path_risk_treatment: str,
+        tomorrow_action: str,
+    ) -> dict:
+        windows_days = {
+            str(days): {
+                "source": "timestamped_preview_rows",
+                "row_count": trial_observations_30d if days == 30 else 0,
+                "trial_grade_observation_count": (
+                    trial_observations_30d if days == 30 else 0
+                ),
+                "production_grade_observation_count": 0,
+                "action_time_trial_submit_count": 0,
+                "invalid_signal_count": 0,
+                "evidence_level": (
+                    "timestamped_proxy_or_preview_observation_not_action_time_submit"
+                ),
+                "matched_signal_ids": (
+                    [f"{strategy_group_id.lower()}-trial-proxy"]
+                    if days == 30 and trial_observations_30d
+                    else []
+                ),
+            }
+            for days in (7, 14, 30)
+        }
+        return {
+            "strategy_group_id": strategy_group_id,
+            "signal_grade_current_assessment": {
+                "current_gate_looks_like": current_gate,
+                "trial_grade_audit_needed": True,
+            },
+            "production_grade_gate_profile": {
+                "grade": "production_grade_signal",
+                "required_conditions": [
+                    "production_fresh_signal",
+                    "action_time_live_required_facts",
+                ],
+            },
+            "trial_grade_gate_profile": {
+                "grade": "trial_grade_signal",
+                "required_conditions": [
+                    "selected_strategygroup_scope",
+                    "30U_policy_envelope",
+                    "action_time_live_required_facts_before_submit",
+                ],
+                "warnings_allowed": ["path_risk_known"],
+            },
+            "trial_grade_trigger_diff": [
+                {
+                    "condition": "strategy_quality_risk",
+                    "production_grade_treatment": "blocks_production_scale_up",
+                    "trial_grade_treatment": "enters_30u_loss_envelope",
+                    "recommendation": "downgrade_to_warning_for_trial",
+                    "currently_blocks_production_grade": True,
+                },
+                {
+                    "condition": "action_time_live_required_facts",
+                    "production_grade_treatment": "required",
+                    "trial_grade_treatment": "required",
+                    "recommendation": "keep_hard_gate",
+                    "currently_blocks_production_grade": False,
+                },
+            ],
+            "hard_safety_gate_list": hard_safety_gates,
+            "risk_envelope": {
+                "capital_scope": {
+                    "amount": "30",
+                    "currency": "USDT",
+                    "type": "trial",
+                },
+                "loss_unit": {
+                    "amount": "10",
+                    "currency": "USDT",
+                    "basis": "30U / 3 attempts",
+                },
+                "attempt_cap": 3,
+                "max_consecutive_losses": 2,
+                "pause_conditions": ["two_consecutive_losses"],
+                "path_risk_treatment": path_risk_treatment,
+                "stop_or_protection_required": True,
+            },
+            "verified_recent_window_counts": {
+                "windows_days": windows_days,
+                "counts_do_not_authorize_submit": True,
+                "verified_recent_counts_are_action_time_counts": False,
+            },
+            "fixture_replay_projection": {
+                "source": "timestampless_fixture_replay_projection",
+                "recent_7_14_30_day_counts_available": False,
+                "sample_count": fixture_cases,
+                "trial_grade_trigger_case_count": fixture_cases,
+                "production_grade_trigger_case_count": 0,
+                "would_trigger_cases": [f"{strategy_group_id.lower()}-trial-case"]
+                if fixture_cases
+                else [],
+                "max_loss_estimate_usdt": "30",
+                "projection_boundary": (
+                    "fixture cases are not recent-market counts and cannot "
+                    "satisfy live RequiredFacts."
+                ),
+            },
+            "false_positive_review_pack": [
+                {
+                    "case": f"{strategy_group_id.lower()}-false-positive-review",
+                    "potential_loss_reason": "known_strategy_path_risk",
+                    "estimated_loss_usdt": "10",
+                    "mitigation": "pause_after_loss_unit_and_review",
+                }
+            ],
+            "tomorrow_same_structure_assessment": {
+                "if_same_structure_appears_tomorrow": tomorrow_action,
+                "would_enter_30u_trial": True,
+                "reason": (
+                    "trial-grade structure may enter non-executing review; "
+                    "submit still needs action-time hard gates."
+                ),
+            },
+            "authority_boundary": {
+                "trial_grade_signal_can_prepare_30u_trial": True,
+                "trial_grade_signal_can_bypass_hard_safety_gates": False,
+                "replay_or_proxy_counts_are_live_signals": False,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+        }
+
+    _write_output(
+        command,
+        {
+            "schema": "brc.strategygroup_trial_grade_signal_gate_audit.v1",
+            "scope": "strategygroup_trial_grade_signal_gate_audit_non_executing",
+            "status": "trial_grade_signal_gate_audit_ready",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
+            "signal_grade_catalog": {
+                "observe_only_signal": {
+                    "may_place_order": False,
+                    "use": "record_replay_repair_classifier",
+                },
+                "trial_grade_signal": {
+                    "may_place_order": (
+                        "only_inside_scoped_small_capital_trial_after_action_time_gates"
+                    ),
+                    "use": "enter_30u_bounded_live_trial",
+                },
+                "production_grade_signal": {
+                    "may_place_order": (
+                        "yes_after_higher_tier_or_production_policy_and_action_time_gates"
+                    ),
+                    "use": "future_scale_up_or_regularized_runtime_operation",
+                },
+                "invalid_signal": {
+                    "may_place_order": False,
+                    "use": "attribution_replay_rule_repair",
+                },
+            },
+            "summary": {
+                "strategy_group_count": 3,
+                "trial_grade_observation_count_30d": 1,
+                "action_time_trial_submit_count_30d": 0,
+                "production_grade_observation_count_30d": 0,
+                "hard_safety_gates_relaxed": False,
+                "risk_treatment": (
+                    "strategy_risk_to_envelope_not_generic_blocker"
+                ),
+            },
+            "strategy_group_rows": {
+                "MPG-001": row(
+                    strategy_group_id="MPG-001",
+                    current_gate=(
+                        "l4_production_path_with_trial_grade_warning_candidates"
+                    ),
+                    trial_observations_30d=0,
+                    fixture_cases=3,
+                    path_risk_treatment=(
+                        "false_breakout_and_fast_reversal_enter_envelope"
+                    ),
+                    tomorrow_action=(
+                        "enter_trial_only_if_selected_scope_and_action_time_hard_gates_pass"
+                    ),
+                ),
+                "BRF2-001": row(
+                    strategy_group_id="BRF2-001",
+                    current_gate=(
+                        "production_grade_strict_with_trial_grade_proxy_evidence"
+                    ),
+                    trial_observations_30d=1,
+                    fixture_cases=1,
+                    path_risk_treatment=(
+                        "known_path_risk_enters_envelope_not_trade_denial"
+                    ),
+                    tomorrow_action=(
+                        "enter_non_executing_trial_candidate_review_then_action_time_gate"
+                    ),
+                ),
+                "SOR-001": row(
+                    strategy_group_id="SOR-001",
+                    current_gate=(
+                        "conditional_armed_observation_with_trial_grade_replay_calibration"
+                    ),
+                    trial_observations_30d=0,
+                    fixture_cases=1,
+                    path_risk_treatment=(
+                        "session_gap_and_false_breakout_risk_enter_envelope"
+                    ),
+                    tomorrow_action=(
+                        "enter_non_executing_session_trial_review_then_action_time_gate"
+                    ),
+                ),
+            },
+            "hard_safety_gate_list": hard_safety_gates,
+            "live_trial_policy_update": {
+                "scope": "30U_bounded_trial_only",
+                "does_not_change_production_grade_authority": True,
+                "does_not_expand_live_profile": True,
+                "does_not_change_order_sizing_defaults": True,
+                "trial_grade_signal_may_enter_bounded_trial": True,
+                "production_grade_signal_required_for_scale_up": True,
+                "action_time_chain_still_required": [
+                    "fresh_signal",
+                    "live_required_facts",
+                    "candidate_authorization_evidence",
+                    "action_time_finalgate",
+                    "official_operation_layer",
+                    "protection_account_exchange_facts",
+                ],
+            },
+            "checks": {
+                "signal_grade_catalog_present": True,
+                "all_selected_strategy_groups_covered": True,
+                "hard_safety_gates_not_relaxed": True,
+                "risk_expressed_as_envelope": True,
+                "recent_counts_are_source_qualified": True,
+                "replay_or_proxy_not_action_time_authority": True,
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "replay_or_proxy_signal_treated_as_live_signal": False,
+                "action_time_required_facts_satisfied_by_proxy": False,
+                "authorization_evidence_created": False,
+                "execution_intent_created": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+                "live_profile_changed": False,
+                "order_sizing_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+            "interaction": {
+                "level": "L0_local_trial_grade_signal_gate_audit",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
 def _maybe_write_strategygroup_closure_step(
     script: str, command: list[str]
 ) -> subprocess.CompletedProcess[str] | None:
@@ -1419,6 +1757,9 @@ def _maybe_write_strategygroup_closure_step(
     if script == "build_strategygroup_tradeability_verdict.py":
         _write_ready_tradeability_verdict(command)
         return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_trial_grade_signal_gate_audit.py":
+        _write_ready_trial_grade_signal_gate_audit(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -1426,7 +1767,7 @@ def _maybe_write_strategygroup_closure_step(
         _write_ready_brf2_required_facts_mapping(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_runtime_signal_facts.py":
-        _write_missing_brf2_runtime_signal_facts(command)
+        _write_ready_brf2_runtime_signal_facts(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_runtime_signal_capture.py":
         _write_ready_brf2_runtime_signal_capture(command)
@@ -1759,6 +2100,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
+        strategygroup_trial_grade_signal_gate_audit_json=tmp_path
+        / "trial-grade-audit.json",
+        strategygroup_trial_grade_signal_gate_audit_md=tmp_path
+        / "trial-grade-audit.md",
         command_runner=fake_runner,
     )
 
@@ -1799,6 +2144,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_lifecycle_rehearsal.py",
         "build_strategygroup_pre_live_rehearsal_readiness.py",
         "build_strategygroup_live_submit_readiness_bridge.py",
+        "build_strategygroup_trial_grade_signal_gate_audit.py",
         "build_strategygroup_three_strategy_live_trial_portfolio.py",
         "build_strategygroup_tradeability_verdict.py",
     ]
@@ -1808,11 +2154,22 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert decision_loop_commands[1][
         decision_loop_commands[1].index("--btpc-proxy-replay-quality-json") + 1
     ] == str(tmp_path / "btpc-proxy-replay.json")
-    assert report["status"] == "needs_non_market_repair"
+    assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
     assert report["interaction"]["level"] == "L0_local_monitor_sequence"
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
+    assert report["checks"]["trial_grade_signal_gate_audit_ready"] is True
+    assert report["checks"]["trial_grade_strategy_group_count"] == 3
+    assert report["checks"]["trial_grade_observation_count_30d"] == 1
+    assert report["checks"]["trial_grade_action_time_submit_count_30d"] == 0
+    assert report["checks"]["trial_grade_hard_safety_gates_relaxed"] is False
+    assert (
+        report["checks"][
+            "trial_grade_brf2_would_enter_30u_trial_if_same_structure"
+        ]
+        is True
+    )
     assert report["interaction"]["approaches_real_order"] is False
     assert report["strategy_research_intake"]["active"] is True
     assert report["strategy_research_intake"]["strategy_group_ids"] == [
@@ -1897,28 +2254,28 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["checks"]["brf2_required_fact_count"] == 8
     assert report["checks"]["brf2_disable_fact_count"] == 5
     assert report["brf2_runtime_signal_facts"]["status"] == (
-        "brf2_runtime_signal_facts_missing_watcher_input"
+        "brf2_runtime_signal_facts_ready"
     )
-    assert report["brf2_runtime_signal_facts"]["fact_input_present"] is False
-    assert report["brf2_runtime_signal_facts"]["watcher_tick_present"] is False
-    assert report["checks"]["brf2_runtime_signal_fact_input_present"] is False
-    assert report["checks"]["brf2_runtime_signal_watcher_tick_present"] is False
+    assert report["brf2_runtime_signal_facts"]["fact_input_present"] is True
+    assert report["brf2_runtime_signal_facts"]["watcher_tick_present"] is True
+    assert report["checks"]["brf2_runtime_signal_fact_input_present"] is True
+    assert report["checks"]["brf2_runtime_signal_watcher_tick_present"] is True
     assert report["brf2_runtime_signal_capture"]["ready"] is True
     assert report["brf2_runtime_signal_capture"]["current_signal_state"] == (
-        "fact_input_missing"
+        "fresh_signal_absent"
     )
     assert report["brf2_runtime_signal_capture"]["first_blocker_class"] == (
-        "brf2_watcher_fact_input_missing"
+        "fresh_brf2_short_signal_absent"
     )
     assert report["brf2_runtime_signal_capture"]["candidate_packet_ready"] is False
     assert report["checks"]["brf2_runtime_signal_capture_ready"] is True
-    assert report["checks"]["brf2_runtime_signal_state"] == "fact_input_missing"
+    assert report["checks"]["brf2_runtime_signal_state"] == "fresh_signal_absent"
     assert report["checks"]["brf2_runtime_signal_first_blocker_class"] == (
-        "brf2_watcher_fact_input_missing"
+        "fresh_brf2_short_signal_absent"
     )
     assert report["checks"]["brf2_runtime_candidate_packet_ready"] is False
     assert report["checks"]["brf2_next_bottleneck"] == (
-        "brf2_watcher_fact_input_missing"
+        "fresh_signal_wait"
     )
     assert report["three_strategy_live_trial_portfolio"]["ready"] is True
     assert report["three_strategy_live_trial_portfolio"]["seat_count"] == 3
@@ -1932,28 +2289,40 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "BRF2-001",
         "SOR-001",
     ]
-    assert report["checks"]["live_trial_market_wait_count"] == 2
+    assert report["checks"]["live_trial_market_wait_count"] == 3
     assert report["checks"]["live_trial_owner_policy_gap_count"] == 0
-    assert report["checks"]["live_trial_engineering_gap_count"] == 1
+    assert report["checks"]["live_trial_engineering_gap_count"] == 0
+    assert report["checks"]["stage_5_waiting_live_opportunity_ready"] is True
+    assert report["checks"]["stage_5_status"] == (
+        "phase_5_waiting_for_live_opportunity"
+    )
+    assert report["checks"]["trial_grade_30u_standby_count"] == 3
+    assert report["checks"]["action_time_preflight_pending_fresh_signal"] is True
+    assert report["checks"]["stage_5_hard_safety_gates_relaxed"] is False
     assert report["strategy_tradeability_verdict"]["top_verdict"] == (
-        "not_tradable_facts"
+        "not_tradable_market_wait"
     )
     assert report["strategy_tradeability_verdict"]["top_first_blocker_class"] == (
-        "brf2_watcher_fact_input_missing"
+        "fresh_brf2_short_signal_absent"
     )
     assert report["strategy_tradeability_verdict"]["top_next_action"] == (
-        "attach_brf2_watcher_fact_input_producer"
+        "continue_brf2_armed_observation_until_fresh_signal"
     )
     assert report["checks"]["tradeability_top_strategy_group_id"] == "BRF2-001"
     assert report["checks"]["tradeability_top_verdict"] == (
-        "not_tradable_facts"
+        "not_tradable_market_wait"
     )
     assert report["checks"]["tradeability_row_count"] == 3
     assert report["checks"]["tradeability_verdict_rows_count"] == 3
     assert report["checks"]["tradeability_row_count_matches_verdict_rows"] is True
     assert report["checks"]["tradeability_tradable_now_count"] == 0
+    assert report["checks"]["tradeability_trial_grade_30u_standby_count"] == 3
+    assert (
+        report["checks"]["tradeability_stage_5_waiting_live_opportunity_ready_count"]
+        == 3
+    )
     assert report["checks"]["tradeability_real_order_authority_count"] == 0
-    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
+    assert report["checks"]["non_market_gaps"] == []
 
 
 def test_local_monitor_sequence_artifact_daily_check_uses_report_json_path(
@@ -2243,6 +2612,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
+        strategygroup_trial_grade_signal_gate_audit_json=tmp_path
+        / "trial-grade-audit.json",
+        strategygroup_trial_grade_signal_gate_audit_md=tmp_path
+        / "trial-grade-audit.md",
         command_runner=fake_runner,
     )
 
@@ -2575,14 +2948,18 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
+        strategygroup_trial_grade_signal_gate_audit_json=tmp_path
+        / "trial-grade-audit.json",
+        strategygroup_trial_grade_signal_gate_audit_md=tmp_path
+        / "trial-grade-audit.md",
         command_runner=fake_runner,
     )
 
-    assert report["status"] == "needs_non_market_repair"
+    assert report["status"] == "waiting_for_market_monitor_refresh_needed"
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "needs_refresh"
     assert report["owner_status"] == "waiting_for_opportunity"
-    assert report["owner_summary"]["state"] == "需要修复"
+    assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["monitor_refresh_needed"] is True
@@ -2592,7 +2969,7 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
     assert report["checks"]["refresh_required"] is True
     assert report["checks"]["automation_notify"] is True
     assert report["checks"]["owner_notify"] is False
-    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
+    assert report["checks"]["non_market_gaps"] == []
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
@@ -2865,6 +3242,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
+        strategygroup_trial_grade_signal_gate_audit_json=tmp_path
+        / "trial-grade-audit.json",
+        strategygroup_trial_grade_signal_gate_audit_md=tmp_path
+        / "trial-grade-audit.md",
         command_runner=fake_runner,
     )
 
@@ -2880,7 +3261,6 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
                 "groups:BTPC-001",
             ],
         },
-        _expected_brf2_fact_input_gap(),
     ]
     assert report["checks"]["engineering_gaps"] == report["checks"]["non_market_gaps"]
     assert report["checks"]["owner_decision_required"] is False
@@ -3143,12 +3523,16 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
+        strategygroup_trial_grade_signal_gate_audit_json=tmp_path
+        / "trial-grade-audit.json",
+        strategygroup_trial_grade_signal_gate_audit_md=tmp_path
+        / "trial-grade-audit.md",
         command_runner=fake_runner,
     )
 
-    assert report["status"] == "needs_non_market_repair"
+    assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
-    assert report["checks"]["non_market_gaps"] == [_expected_brf2_fact_input_gap()]
+    assert report["checks"]["non_market_gaps"] == []
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False

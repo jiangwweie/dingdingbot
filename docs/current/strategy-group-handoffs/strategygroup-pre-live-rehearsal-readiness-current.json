@@ -99,7 +99,7 @@
     },
     {
       "actionable_now": false,
-      "current_decision": "keep_observing",
+      "current_decision": "revise",
       "current_tier": "L1",
       "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
       "real_order_authority": false,
@@ -107,7 +107,7 @@
     },
     {
       "actionable_now": false,
-      "current_decision": "keep_observing",
+      "current_decision": "promote_review_only",
       "current_tier": "L1",
       "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
       "real_order_authority": false,
