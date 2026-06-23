@@ -140,6 +140,11 @@ def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     assert brf2["trial_policy_proposal_ready"] is True
     assert brf2["admitted_trial_asset_proposal_ready"] is True
     assert brf2["armed_observation_plan_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_ready"] is False
+    assert brf2["runtime_readiness"]["blocked_by"] == "required_facts_mapping_gap"
+    assert brf2["runtime_readiness"]["tiny_live_ready"] is False
+    assert brf2["runtime_readiness"]["live_submit_ready"] is False
     assert brf2["owner_policy_required"] is False
     assert brf2["owner_policy_recorded"] is True
     assert brf2["owner_policy_scope_missing"] is False

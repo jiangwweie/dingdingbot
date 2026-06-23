@@ -77,6 +77,10 @@ def test_current_brf2_owner_trial_policy_scope_artifact_is_complete():
     )
     assert policy_packet["status"] == "brf2_owner_trial_policy_scope_recorded"
     assert docs_policy_packet["schema"] == policy_packet["schema"]
+    assert policy_packet["view_mode"] == "monitor_view_from_final_owned_policy"
+    assert policy_packet["source_policy_json"].endswith(
+        "docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.json"
+    )
     assert policy_packet["brf2_policy_scope_recorded"] is True
     assert policy_packet["owner_policy_scope_missing"] is False
     assert policy["strategy_group_id"] == "BRF2-001"
@@ -113,6 +117,13 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert portfolio["checks"]["all_seats_have_first_blocker"] is True
     assert portfolio["checks"]["all_seats_have_required_facts"] is True
     assert portfolio["checks"]["all_seats_have_review_hooks"] is True
+    brf2 = portfolio["seat_readiness"]["BRF2-001"]
+    assert brf2["armed_observation_plan_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
+    assert brf2["runtime_readiness"]["armed_observation_ready"] is False
+    assert brf2["runtime_readiness"]["blocked_by"] == "required_facts_mapping_gap"
+    assert brf2["runtime_readiness"]["tiny_live_ready"] is False
+    assert brf2["runtime_readiness"]["live_submit_ready"] is False
     assert portfolio["safety_invariants"]["actionable_now"] is False
     assert portfolio["safety_invariants"]["real_order_authority"] is False
     assert portfolio["safety_invariants"]["calls_finalgate"] is False
@@ -138,3 +149,21 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert checks["brf2_owner_policy_recorded"] is True
     assert checks["brf2_owner_policy_scope_missing"] is False
     assert checks["brf2_new_first_blocker"] == "required_facts_mapping_gap"
+
+
+def test_current_tradeability_brf2_resolves_old_owner_policy_blockers():
+    verdict = _read_json(
+        "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
+    )
+    rows = {row["strategy_group_id"]: row for row in verdict["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    secondary = {row["blocker"] for row in brf2["secondary_blockers"]}
+    resolved = {row["blocker"] for row in brf2["resolved_blockers"]}
+
+    assert brf2["runtime_scope_status"]["owner_policy_recorded"] is True
+    assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
+    assert brf2["first_blocker_class"] == "required_facts_mapping_gap"
+    assert "owner_capital_scope_not_confirmed" not in secondary
+    assert "owner_trial_identity_not_confirmed" not in secondary
+    assert "owner_capital_scope_not_confirmed" in resolved
+    assert "owner_trial_identity_not_confirmed" in resolved

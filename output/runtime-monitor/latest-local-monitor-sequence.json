@@ -113,7 +113,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-23T05:37:42.691929+00:00",
+  "generated_at_utc": "2026-06-23T06:16:36.860207+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

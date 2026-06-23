@@ -244,7 +244,9 @@
           "post_submit_review_ledger_after_real_attempt"
         ],
         "runtime_readiness": {
-          "armed_observation_ready": true,
+          "armed_observation_plan_ready": true,
+          "armed_observation_ready": false,
+          "blocked_by": "required_facts_mapping_gap",
           "live_submit_ready": false,
           "tiny_live_ready": false
         },
@@ -403,7 +405,7 @@
       "verdict": "not_tradable_market_wait"
     }
   },
-  "generated_at_utc": "2026-06-23T05:37:42.633710+00:00",
+  "generated_at_utc": "2026-06-23T06:16:36.800761+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -564,7 +566,9 @@
         "post_submit_review_ledger_after_real_attempt"
       ],
       "runtime_readiness": {
-        "armed_observation_ready": true,
+        "armed_observation_plan_ready": true,
+        "armed_observation_ready": false,
+        "blocked_by": "required_facts_mapping_gap",
         "live_submit_ready": false,
         "tiny_live_ready": false
       },

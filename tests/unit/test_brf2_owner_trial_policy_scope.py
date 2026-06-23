@@ -61,7 +61,50 @@ def test_brf2_owner_trial_policy_scope_records_30u_boundary_without_authority():
     assert packet["checks"]["places_order"] is False
 
 
-def test_brf2_owner_trial_policy_scope_cli_writes_docs_and_output(tmp_path: Path):
+def test_brf2_owner_trial_policy_scope_cli_default_writes_output_only(
+    tmp_path: Path,
+):
+    module = _load_module()
+    authority = module.build_brf2_owner_trial_policy_scope(
+        generated_at_utc="2026-06-23T00:00:00+00:00"
+    )
+    policy_json = tmp_path / "policy.json"
+    output_json = tmp_path / "output.json"
+    output_md = tmp_path / "output.md"
+    docs_json = tmp_path / "docs.json"
+    docs_md = tmp_path / "docs.md"
+    policy_json.write_text(json.dumps(authority), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--policy-json",
+            str(policy_json),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+            "--docs-json",
+            str(docs_json),
+            "--docs-md",
+            str(docs_md),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    assert packet["schema"] == module.SCHEMA
+    assert packet["view_mode"] == "monitor_view_from_final_owned_policy"
+    assert packet["source_policy_json"] == str(policy_json)
+    assert "BRF2 Owner Trial Policy Scope V0" in output_md.read_text(
+        encoding="utf-8"
+    )
+    assert not docs_json.exists()
+    assert not docs_md.exists()
+
+
+def test_brf2_owner_trial_policy_scope_cli_writes_docs_only_when_explicit(
+    tmp_path: Path,
+):
     module = _load_module()
     output_json = tmp_path / "output.json"
     output_md = tmp_path / "output.md"
@@ -78,15 +121,11 @@ def test_brf2_owner_trial_policy_scope_cli_writes_docs_and_output(tmp_path: Path
             str(docs_json),
             "--docs-md",
             str(docs_md),
+            "--write-docs",
         ]
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
     docs_packet = json.loads(docs_json.read_text(encoding="utf-8"))
-    assert packet["schema"] == module.SCHEMA
     assert docs_packet["schema"] == module.SCHEMA
-    assert "BRF2 Owner Trial Policy Scope V0" in output_md.read_text(
-        encoding="utf-8"
-    )
     assert "BRF2 Owner Trial Policy Scope V0" in docs_md.read_text(encoding="utf-8")

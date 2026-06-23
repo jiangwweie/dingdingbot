@@ -79,19 +79,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
+    parser.add_argument("--policy-json", default=str(DEFAULT_DOCS_JSON))
     parser.add_argument("--docs-json", default=str(DEFAULT_DOCS_JSON))
     parser.add_argument("--docs-md", default=str(DEFAULT_DOCS_MD))
+    parser.add_argument(
+        "--write-docs",
+        action="store_true",
+        help=(
+            "Write the docs/current authority record. Default monitor mode only "
+            "reads the authority record and refreshes output/runtime-monitor."
+        ),
+    )
     args = parser.parse_args(argv)
 
-    packet = build_brf2_owner_trial_policy_scope()
+    packet = (
+        build_brf2_owner_trial_policy_scope()
+        if args.write_docs
+        else build_brf2_owner_trial_policy_scope_view(Path(args.policy_json))
+    )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     docs_json = Path(args.docs_json)
     docs_md = Path(args.docs_md)
     _write_json(output_json, packet)
     _write_text(output_md, _markdown(packet, output_json))
-    _write_json(docs_json, packet)
-    _write_text(docs_md, _markdown(packet, docs_json))
+    if args.write_docs:
+        _write_json(docs_json, packet)
+        _write_text(docs_md, _markdown(packet, docs_json))
     print(
         json.dumps(
             {
@@ -105,7 +119,9 @@ def main(argv: list[str] | None = None) -> int:
                     "owner_policy_scope_missing"
                 ],
                 "output_json": str(output_json),
-                "docs_json": str(docs_json),
+                "policy_json": str(args.policy_json),
+                "docs_json": str(docs_json) if args.write_docs else "",
+                "docs_written": bool(args.write_docs),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -198,6 +214,25 @@ def build_brf2_owner_trial_policy_scope(
     }
 
 
+def build_brf2_owner_trial_policy_scope_view(
+    policy_json: Path = DEFAULT_DOCS_JSON,
+    *,
+    view_generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Build a monitor view from the stable docs/current authority record."""
+
+    if policy_json.exists():
+        packet = _read_json(policy_json)
+    else:
+        packet = build_brf2_owner_trial_policy_scope()
+    view_generated = view_generated_at_utc or datetime.now(timezone.utc).isoformat()
+    view_packet = dict(packet)
+    view_packet["source_policy_json"] = str(policy_json)
+    view_packet["view_generated_at_utc"] = view_generated
+    view_packet["view_mode"] = "monitor_view_from_final_owned_policy"
+    return view_packet
+
+
 def _markdown(packet: dict[str, Any], output_json: Path) -> str:
     policy = packet["policy"]
     capital = policy["capital_scope"]
@@ -286,6 +321,10 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_text(path: Path, text: str) -> None:

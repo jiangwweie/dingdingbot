@@ -114,11 +114,12 @@ def _capital_trial_bridge() -> dict:
             "promotion_scope": "intake_only",
             "tiny_live_ready": False,
             "side_scope": ["short"],
-            "trial_blockers": [
-                "source_tiny_live_ready_false",
-                "owner_capital_scope_not_confirmed",
-                "fresh_signal_absent",
-            ],
+                "trial_blockers": [
+                    "source_tiny_live_ready_false",
+                    "owner_capital_scope_not_confirmed",
+                    "owner_trial_identity_not_confirmed",
+                    "fresh_signal_absent",
+                ],
         },
     }
 
@@ -424,6 +425,16 @@ def test_tradeability_verdict_advances_brf2_to_facts_blocker_after_policy_record
     )
     assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
     assert brf2["policy_scope"]["max_notional"]["amount"] == "150"
+    secondary = {row["blocker"] for row in brf2["secondary_blockers"]}
+    resolved = {row["blocker"] for row in brf2["resolved_blockers"]}
+    assert "owner_capital_scope_not_confirmed" not in secondary
+    assert "owner_trial_identity_not_confirmed" not in secondary
+    assert "owner_capital_scope_not_confirmed" in resolved
+    assert "owner_trial_identity_not_confirmed" in resolved
+    assert all(
+        row["resolved_by"] == "brf2_owner_trial_policy_scope"
+        for row in brf2["resolved_blockers"]
+    )
     assert packet["checks"]["owner_policy_blocker_present"] is False
     assert packet["summary"]["engineering_first_blocker_count"] >= 1
     assert brf2["actionable_now"] is False

@@ -1,7 +1,7 @@
 ## BRF2 Owner Trial Policy Scope V0
 
 - Status: `brf2_owner_trial_policy_scope_recorded`
-- Generated: `2026-06-23T05:37:39.929705+00:00`
+- Generated: `2026-06-23T05:45:11.392547+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json`
 - StrategyGroup: `BRF2-001`
 - Trial identity: `BRF2_TINY_SHORT_TRIAL_30U_V0`

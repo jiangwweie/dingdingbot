@@ -59,7 +59,7 @@
     ],
     "three_strategy_portfolio_status": "pending_downstream_regeneration"
   },
-  "generated_at_utc": "2026-06-23T05:37:39.929705+00:00",
+  "generated_at_utc": "2026-06-23T05:45:11.392547+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -124,5 +124,8 @@
   },
   "schema": "brc.brf2_owner_trial_policy_scope.v0",
   "scope": "final_owned_brf2_owner_trial_policy_scope_non_executing",
-  "status": "brf2_owner_trial_policy_scope_recorded"
+  "source_policy_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.json",
+  "status": "brf2_owner_trial_policy_scope_recorded",
+  "view_generated_at_utc": "2026-06-23T06:16:33.945881+00:00",
+  "view_mode": "monitor_view_from_final_owned_policy"
 }

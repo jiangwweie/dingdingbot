@@ -333,6 +333,11 @@ def _verdict_row(
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
     )
+    resolved_blockers = _resolved_blockers(
+        blockers,
+        strategy_group_id=strategy_group_id,
+        owner_policy_recorded=owner_policy_recorded,
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
@@ -342,7 +347,12 @@ def _verdict_row(
         "blocker_owner": classifier["blocker_owner"],
         "next_action": classifier["next_action"],
         "after_next_state": classifier["after_next_state"],
-        "secondary_blockers": _secondary_blockers(blockers, classifier),
+        "secondary_blockers": _secondary_blockers(
+            blockers,
+            classifier,
+            resolved_blockers,
+        ),
+        "resolved_blockers": resolved_blockers,
         "policy_scope": policy_scope,
         "required_facts_status": _required_facts_status(
             strategy_group_id=strategy_group_id,
@@ -860,14 +870,51 @@ def _required_facts_status(
 def _secondary_blockers(
     blockers: list[str],
     classifier: dict[str, str],
+    resolved_blockers: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
+    resolved = {row["blocker"] for row in resolved_blockers or []}
     rows: list[dict[str, str]] = []
     for blocker in blockers:
+        if blocker in resolved:
+            continue
         klass = _class_for_blocker(blocker)
         if klass == classifier["first_blocker_class"]:
             continue
         rows.append({"blocker": blocker, "class": klass})
     return rows
+
+
+def _resolved_blockers(
+    blockers: list[str],
+    *,
+    strategy_group_id: str,
+    owner_policy_recorded: bool,
+) -> list[dict[str, str]]:
+    if strategy_group_id != "BRF2-001" or not owner_policy_recorded:
+        return []
+    rows: list[dict[str, str]] = []
+    for blocker in blockers:
+        if _owner_policy_blocker_resolved_by_brf2_scope(blocker):
+            rows.append(
+                {
+                    "blocker": blocker,
+                    "class": "policy",
+                    "resolved_by": "brf2_owner_trial_policy_scope",
+                }
+            )
+    return rows
+
+
+def _owner_policy_blocker_resolved_by_brf2_scope(blocker: str) -> bool:
+    lowered = blocker.lower()
+    resolved_tokens = (
+        "owner_capital_scope_not_confirmed",
+        "owner_trial_identity_not_confirmed",
+        "owner_policy_scope_not_confirmed",
+        "capital_scope_not_confirmed",
+        "trial_identity_not_confirmed",
+    )
+    return any(token in lowered for token in resolved_tokens)
 
 
 def _class_for_blocker(blocker: str) -> str:

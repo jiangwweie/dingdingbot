@@ -468,7 +468,13 @@ def _brf2_seat(
             "spread_liquidity_downshift_state",
         ],
         "runtime_readiness": {
-            "armed_observation_ready": True,
+            "armed_observation_ready": False,
+            "armed_observation_plan_ready": True,
+            "blocked_by": (
+                "required_facts_mapping_gap"
+                if policy_recorded
+                else "owner_policy_scope_missing"
+            ),
             "tiny_live_ready": False,
             "live_submit_ready": False,
         },

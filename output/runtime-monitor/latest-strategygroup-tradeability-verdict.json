@@ -14,7 +14,7 @@
     "tradable_now_rows_have_authority": true,
     "tradable_now_scoped_to_live_submit": true
   },
-  "generated_at_utc": "2026-06-23T05:37:42.685847+00:00",
+  "generated_at_utc": "2026-06-23T06:16:36.853634+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -114,6 +114,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
@@ -187,6 +188,18 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy",
+          "resolved_by": "brf2_owner_trial_policy_scope"
+        },
+        {
+          "blocker": "owner_trial_identity_not_confirmed",
+          "class": "policy",
+          "resolved_by": "brf2_owner_trial_policy_scope"
+        }
+      ],
       "runtime_scope_status": {
         "brf2_trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "live_trial_portfolio_seat": true,
@@ -217,14 +230,6 @@
         },
         {
           "blocker": "source_tiny_live_ready_false",
-          "class": "asset_admission"
-        },
-        {
-          "blocker": "owner_capital_scope_not_confirmed",
-          "class": "policy"
-        },
-        {
-          "blocker": "owner_trial_identity_not_confirmed",
           "class": "asset_admission"
         },
         {
@@ -274,6 +279,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -334,6 +340,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -427,6 +434,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -516,6 +524,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -609,6 +618,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -714,6 +724,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -812,6 +823,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "missing",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -907,6 +919,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -957,6 +970,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -1012,6 +1026,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
@@ -1062,6 +1077,7 @@
       },
       "real_order_authority": false,
       "required_facts_status": "action_time_only",
+      "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
