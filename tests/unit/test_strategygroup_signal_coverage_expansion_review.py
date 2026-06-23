@@ -175,6 +175,70 @@ def test_expansion_review_records_p2_parked_signal_without_priority_review():
     assert row["coverage_review_priority"] == "P2"
     assert row["policy_l2_readiness"] == "blocked_parked_negative_evidence"
     assert row["may_place_real_order_after_this_review"] is False
+    assert packet["observation_layer"]["latest_observe_only_would_enter"] == {
+        "strategy_group_id": "RBR-001",
+        "symbol": "ADA/USDT:USDT",
+        "side": "short",
+        "confidence": "0.55",
+        "source": "signal_coverage_broader_observation",
+        "not_live_signal": True,
+    }
+    assert packet["counts"]["role_review_row_count"] == 1
+    role = packet["role_review_rows"][0]
+    assert role["source_observation_strategy_group_id"] == "RBR-001"
+    assert role["linked_intake_strategy_group_id"] == "RBR2-001"
+    assert role["authority_boundary"] == (
+        "role_review_only; actionable_now=false; "
+        "real_order_authority=false; no_finalgate_no_operation_layer"
+    )
+
+
+def test_expansion_review_records_high_priority_no_action_attribution_queue():
+    module = _load_module()
+    signal_coverage = _signal_coverage(would_enter=False)
+    signal_coverage["broader_observation"]["high_priority_no_action_signals"] = [
+        {
+            "strategy_group_id": "BRF-001",
+            "symbol": "BTC/USDT:USDT",
+            "side": "none",
+            "confidence": "0.25",
+            "signal_type": "no_action",
+            "reason_codes": ["brf_no_action_no_rally_extension"],
+            "policy_l2_readiness": (
+                "blocked_requiredfacts_and_squeeze_classifier_needed"
+            ),
+            "policy_recommended_action": (
+                "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached"
+            ),
+        },
+        {
+            "strategy_group_id": "BTPC-001",
+            "symbol": "AVAX/USDT:USDT",
+            "side": "none",
+            "confidence": "0.25",
+            "signal_type": "no_action",
+            "reason_codes": ["btpc_disable_stale_signal_before_l2_review"],
+            "policy_l2_readiness": "l2_shadow_candidate_observation_enabled",
+            "policy_recommended_action": (
+                "continue_l2_shadow_candidate_observation_without_l4_scope_change"
+            ),
+        },
+    ]
+
+    packet = module.build_signal_coverage_expansion_review(
+        signal_coverage_packet=signal_coverage,
+        tier_policy=_tier_policy(),
+        expansion_policy=_expansion_policy(),
+    )
+
+    assert packet["counts"]["high_priority_no_action_attribution_count"] == 2
+    queue = {row["strategy_group_id"]: row for row in packet["no_action_attribution_queue"]}
+    assert queue["BRF-001"]["attribution_class"] == "market_structure_or_path_risk"
+    assert queue["BTPC-001"]["attribution_class"] == "fact_source_or_freshness"
+    assert queue["BRF-001"]["authority_boundary"] == (
+        "no_action_attribution_only; actionable_now=false; "
+        "real_order_authority=false"
+    )
 
 
 def test_expansion_review_reports_no_review_when_no_broader_signal():

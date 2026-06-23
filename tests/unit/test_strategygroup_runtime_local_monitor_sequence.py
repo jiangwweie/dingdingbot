@@ -291,9 +291,57 @@ def _write_ready_strategygroup_decision_ledger(command: list[str]) -> None:
                 "single_main_product": True,
                 "one_current_row_per_strategy_group": True,
                 "raw_replay_samples_duplicated": False,
+                "role_review_is_decision_support_only": True,
+                "no_action_attribution_queue_recorded": True,
                 "real_order_scope_change_recommended": False,
                 "l4_promotion_recommended": False,
             },
+            "observation_layer": {
+                "p0_state": "waiting_for_executable_fresh_signal",
+                "p0_5_state": "observation_active",
+                "mainline_ready_signal_count": 0,
+                "broader_would_enter_count": 1,
+                "broader_actionable_would_enter_count": 0,
+                "high_priority_no_action_count": 4,
+                "latest_observe_only_would_enter": {
+                    "strategy_group_id": "RBR-001",
+                    "symbol": "ADA/USDT:USDT",
+                    "side": "short",
+                    "confidence": "0.57",
+                    "not_live_signal": True,
+                },
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "role_review_rows": [
+                {
+                    "source_observation_strategy_group_id": "RBR-001",
+                    "source_observation_symbol": "ADA/USDT:USDT",
+                    "source_observation_side": "short",
+                    "linked_intake_strategy_group_id": "RBR2-001",
+                    "next_checkpoint": (
+                        "RBR_RBR2_role_review_range_detector_classifier_merge_note"
+                    ),
+                }
+            ],
+            "no_action_attribution_queue": [
+                {
+                    "strategy_group_id": "BRF-001",
+                    "attribution_class": "market_structure_or_path_risk",
+                },
+                {
+                    "strategy_group_id": "BTPC-001",
+                    "attribution_class": "fact_source_or_freshness",
+                },
+                {
+                    "strategy_group_id": "LSR-001",
+                    "attribution_class": "side_specific_rewrite",
+                },
+                {
+                    "strategy_group_id": "VCB-001",
+                    "attribution_class": "classifier_or_threshold",
+                },
+            ],
             "interaction": {
                 "level": "L0_local_strategygroup_decision_ledger",
                 "remote_interaction_count": 0,
@@ -1135,9 +1183,29 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["strategy_experiment_candidate"]["decision"] == "promote"
     assert report["strategy_experiment_candidate"]["promotion_scope"] == "intake_only"
     assert report["strategy_experiment_candidate"]["tiny_live_ready"] is False
+    assert report["strategy_observation_layer"]["p0_5_state"] == "observation_active"
+    assert report["strategy_observation_layer"]["broader_would_enter_count"] == 1
+    assert report["strategy_observation_layer"]["high_priority_no_action_count"] == 4
+    assert report["strategy_observation_layer"]["latest_observe_only_would_enter"][
+        "strategy_group_id"
+    ] == "RBR-001"
+    assert report["strategy_observation_layer"]["latest_observe_only_would_enter"][
+        "symbol"
+    ] == "ADA/USDT:USDT"
+    assert report["strategy_observation_layer"]["selected_short_intake_candidate"] == (
+        "BRF2-001"
+    )
+    assert report["strategy_observation_layer"]["no_action_attribution_count"] == 4
+    assert report["strategy_observation_layer"]["role_review_count"] == 1
     assert report["checks"]["candidate_trade_selected_strategy_group_id"] == (
         "BRF2-001"
     )
+    assert report["checks"]["p0_5_observation_state"] == "observation_active"
+    assert report["checks"][
+        "p0_5_latest_observe_only_would_enter_strategy_group_id"
+    ] == "RBR-001"
+    assert report["checks"]["p0_5_no_action_attribution_count"] == 4
+    assert report["checks"]["p0_5_role_review_count"] == 1
     assert report["checks"]["short_experiment_candidate_promotion_scope"] == (
         "intake_only"
     )

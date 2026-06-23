@@ -21,6 +21,14 @@
     "owner_decision_required": false,
     "owner_notify": false,
     "owner_status": "waiting_for_opportunity",
+    "p0_5_broader_would_enter_count": 1,
+    "p0_5_high_priority_no_action_count": 4,
+    "p0_5_latest_observe_only_would_enter_side": "short",
+    "p0_5_latest_observe_only_would_enter_strategy_group_id": "RBR-001",
+    "p0_5_latest_observe_only_would_enter_symbol": "ADA/USDT:USDT",
+    "p0_5_no_action_attribution_count": 4,
+    "p0_5_observation_state": "observation_active",
+    "p0_5_role_review_count": 1,
     "refresh_required": true,
     "research_intake_candidates": [
       "BRF2-001",
@@ -34,7 +42,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-22T15:58:12.885000+00:00",
+  "generated_at_utc": "2026-06-23T01:05:16.760676+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -49,6 +57,40 @@
   "owner_status": "waiting_for_opportunity",
   "owner_summary": {
     "current_action": "刷新本地 runtime monitor 缓存",
+    "observation_layer": {
+      "actionable_now": false,
+      "broader_actionable_would_enter_count": 0,
+      "broader_would_enter_count": 1,
+      "high_priority_no_action_count": 4,
+      "latest_observe_only_would_enter": {
+        "confidence": "0.57",
+        "not_live_signal": true,
+        "side": "short",
+        "strategy_group_id": "RBR-001",
+        "symbol": "ADA/USDT:USDT"
+      },
+      "no_action_attribution_count": 4,
+      "no_action_attribution_strategy_group_ids": [
+        "BRF-001",
+        "BTPC-001",
+        "LSR-001",
+        "VCB-001"
+      ],
+      "p0_5_state": "observation_active",
+      "p0_state": "waiting_for_executable_fresh_signal",
+      "real_order_authority": false,
+      "role_review_count": 1,
+      "role_review_pairs": [
+        {
+          "linked_intake_strategy_group_id": "RBR2-001",
+          "next_checkpoint": "RBR_RBR2_role_review_range_detector_classifier_merge_note",
+          "source_observation_strategy_group_id": "RBR-001"
+        }
+      ],
+      "selected_short_intake_candidate": "BRF2-001",
+      "selected_short_intake_candidate_promotion_scope": "intake_only",
+      "selected_short_intake_candidate_tiny_live_ready": false
+    },
     "owner_intervention_required": false,
     "risk_level": "L0_local_monitor_sequence",
     "state": "等待机会",
@@ -655,6 +697,40 @@
     "status": "capital_trial_readiness_bridge_ready",
     "tiny_live_ready": false,
     "trial_packet_generated": true
+  },
+  "strategy_observation_layer": {
+    "actionable_now": false,
+    "broader_actionable_would_enter_count": 0,
+    "broader_would_enter_count": 1,
+    "high_priority_no_action_count": 4,
+    "latest_observe_only_would_enter": {
+      "confidence": "0.57",
+      "not_live_signal": true,
+      "side": "short",
+      "strategy_group_id": "RBR-001",
+      "symbol": "ADA/USDT:USDT"
+    },
+    "no_action_attribution_count": 4,
+    "no_action_attribution_strategy_group_ids": [
+      "BRF-001",
+      "BTPC-001",
+      "LSR-001",
+      "VCB-001"
+    ],
+    "p0_5_state": "observation_active",
+    "p0_state": "waiting_for_executable_fresh_signal",
+    "real_order_authority": false,
+    "role_review_count": 1,
+    "role_review_pairs": [
+      {
+        "linked_intake_strategy_group_id": "RBR2-001",
+        "next_checkpoint": "RBR_RBR2_role_review_range_detector_classifier_merge_note",
+        "source_observation_strategy_group_id": "RBR-001"
+      }
+    ],
+    "selected_short_intake_candidate": "BRF2-001",
+    "selected_short_intake_candidate_promotion_scope": "intake_only",
+    "selected_short_intake_candidate_tiny_live_ready": false
   },
   "strategy_research_intake": {
     "actionable_now": false,

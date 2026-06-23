@@ -66,6 +66,11 @@ def build_strategygroup_decision_ledger(
     research_intake_review_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     no_action_by_group = _high_priority_no_action_by_group(signal_coverage_packet)
+    no_action_attribution_queue = _no_action_attribution_queue(signal_coverage_packet)
+    role_review_rows = _role_review_rows(
+        signal_coverage_packet=signal_coverage_packet,
+        research_intake_review_packet=research_intake_review_packet or {},
+    )
     quality_rows = _dict_rows(
         _as_dict(opportunity_decision_loop_packet.get("strategy_quality_decisions")).get(
             "rows"
@@ -176,6 +181,10 @@ def build_strategygroup_decision_ledger(
             "strategy_group_count": len(ledger_rows),
             "current_row_count": len(ledger_rows),
             "high_priority_no_action_group_count": len(no_action_by_group),
+            "high_priority_no_action_attribution_count": len(
+                no_action_attribution_queue
+            ),
+            "role_review_row_count": len(role_review_rows),
             "capture_gap_audit_group_count": len(capture_gap_rows),
             "research_intake_group_count": len(research_intake_rows),
             "forbidden_effect_count": len(forbidden_effects),
@@ -194,6 +203,9 @@ def build_strategygroup_decision_ledger(
             "next_checkpoint",
         ],
         "ledger_rows": ledger_rows,
+        "observation_layer": _observation_layer_summary(signal_coverage_packet),
+        "role_review_rows": role_review_rows,
+        "no_action_attribution_queue": no_action_attribution_queue,
         "tier_review": {
             "status": "ready" if ledger_rows and not forbidden_effects else "empty",
             "basis": "decision_ledger_only",
@@ -213,6 +225,10 @@ def build_strategygroup_decision_ledger(
             "capture_gap_audit_is_decision_support_only": bool(capture_gap_rows),
             "research_intake_review_is_decision_support_only": bool(
                 research_intake_rows
+            ),
+            "role_review_is_decision_support_only": bool(role_review_rows),
+            "no_action_attribution_queue_recorded": bool(
+                no_action_attribution_queue
             ),
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
@@ -254,6 +270,8 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Status: `{packet.get('status')}`",
         f"- Current rows: `{counts.get('current_row_count', 0)}`",
         f"- High-priority no-action groups: `{counts.get('high_priority_no_action_group_count', 0)}`",
+        f"- No-action attribution rows: `{counts.get('high_priority_no_action_attribution_count', 0)}`",
+        f"- Role review rows: `{counts.get('role_review_row_count', 0)}`",
         f"- Research intake groups: `{counts.get('research_intake_group_count', 0)}`",
         "- Single main product: `true`",
         "- Real order authority: `false`",
@@ -262,6 +280,20 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## Current Decisions",
         "",
         _ledger_table(_dict_rows(packet.get("ledger_rows"))),
+        "",
+        "## Observation Layer",
+        "",
+        _observation_layer_table(_as_dict(packet.get("observation_layer"))),
+        "",
+        "## Role Review",
+        "",
+        _role_review_table(_dict_rows(packet.get("role_review_rows"))),
+        "",
+        "## No-Action Attribution",
+        "",
+        _no_action_attribution_table(
+            _dict_rows(packet.get("no_action_attribution_queue"))
+        ),
         "",
         "## Tier Review",
         "",
@@ -714,6 +746,158 @@ def _research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _observation_layer_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    broader = _as_dict(packet.get("broader_observation"))
+    checks = _as_dict(packet.get("checks"))
+    would_enter = _dict_rows(broader.get("would_enter_signals"))
+    high_priority_no_action = _dict_rows(
+        broader.get("high_priority_no_action_signals")
+    )
+    latest = would_enter[0] if would_enter else {}
+    return {
+        "p0_state": "waiting_for_executable_fresh_signal",
+        "p0_5_state": (
+            "observation_active"
+            if would_enter or high_priority_no_action
+            else "quiet"
+        ),
+        "mainline_ready_signal_count": _int(
+            checks.get("mainline_ready_signal_count")
+        ),
+        "broader_would_enter_count": len(would_enter),
+        "broader_actionable_would_enter_count": _int(
+            checks.get("broader_actionable_would_enter_signal_count")
+        ),
+        "high_priority_no_action_count": len(high_priority_no_action),
+        "latest_observe_only_would_enter": {
+            "strategy_group_id": str(latest.get("strategy_group_id") or ""),
+            "symbol": str(latest.get("symbol") or ""),
+            "side": str(latest.get("side") or ""),
+            "confidence": str(latest.get("confidence") or ""),
+            "not_live_signal": True,
+        }
+        if latest
+        else {},
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
+def _role_review_rows(
+    *,
+    signal_coverage_packet: dict[str, Any],
+    research_intake_review_packet: dict[str, Any],
+) -> list[dict[str, Any]]:
+    intake_groups = {
+        str(row.get("strategy_group_id") or "")
+        for row in _dict_rows(research_intake_review_packet.get("candidate_rows"))
+    }
+    intake_groups.update(
+        str(row.get("strategy_group_id") or "")
+        for row in _dict_rows(research_intake_review_packet.get("decision_ledger_rows"))
+    )
+    rows: list[dict[str, Any]] = []
+    for signal in _dict_rows(
+        _as_dict(signal_coverage_packet.get("broader_observation")).get(
+            "would_enter_signals"
+        )
+    ):
+        group = str(signal.get("strategy_group_id") or "")
+        if group != "RBR-001":
+            continue
+        linked = "RBR2-001" if "RBR2-001" in intake_groups else "RBR2-001"
+        rows.append(
+            {
+                "source_observation_strategy_group_id": group,
+                "source_observation_symbol": str(signal.get("symbol") or ""),
+                "source_observation_side": str(signal.get("side") or ""),
+                "source_observation_type": "observe_only_would_enter",
+                "linked_intake_strategy_group_id": linked,
+                "role_review_decision": "review_range_detector_role_not_live_candidate",
+                "required_next_evidence": (
+                    "compare_rbr001_observe_only_signal_with_rbr2_range_detector_role"
+                ),
+                "next_checkpoint": (
+                    "RBR_RBR2_role_review_range_detector_classifier_merge_note"
+                ),
+                "authority_boundary": (
+                    "role_review_only; actionable_now=false; "
+                    "real_order_authority=false; no_finalgate_no_operation_layer"
+                ),
+                "reason_codes": [
+                    str(item) for item in signal.get("reason_codes") or []
+                ],
+            }
+        )
+    return rows
+
+
+def _no_action_attribution_queue(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in _dict_rows(
+        _as_dict(packet.get("broader_observation")).get(
+            "high_priority_no_action_signals"
+        )
+    ):
+        group = str(row.get("strategy_group_id") or "unknown")
+        rows.append(
+            {
+                "strategy_group_id": group,
+                "symbol": str(row.get("symbol") or ""),
+                "side": str(row.get("side") or ""),
+                "confidence": str(row.get("confidence") or ""),
+                "attribution_class": _no_action_attribution_class(row),
+                "reason_codes": [
+                    str(item) for item in row.get("reason_codes") or []
+                ],
+                "required_next_evidence": _no_action_required_next_evidence(row),
+                "next_checkpoint": _no_action_next_checkpoint(row),
+                "authority_boundary": (
+                    "no_action_attribution_only; actionable_now=false; "
+                    "real_order_authority=false"
+                ),
+            }
+        )
+    return rows
+
+
+def _no_action_attribution_class(row: dict[str, Any]) -> str:
+    text = " ".join(
+        [
+            str(row.get("policy_l2_readiness") or ""),
+            str(row.get("policy_recommended_action") or ""),
+            " ".join(str(item) for item in row.get("reason_codes") or []),
+        ]
+    )
+    if "squeeze" in text or "rally" in text:
+        return "market_structure_or_path_risk"
+    if "rewrite" in text:
+        return "side_specific_rewrite"
+    if "classifier" in text or "volume" in text:
+        return "classifier_or_threshold"
+    if "fact" in text or "stale" in text:
+        return "fact_source_or_freshness"
+    return "review_required"
+
+
+def _no_action_required_next_evidence(row: dict[str, Any]) -> str:
+    klass = _no_action_attribution_class(row)
+    if klass == "fact_source_or_freshness":
+        return "freshness_and_fact_source_mapping"
+    if klass == "side_specific_rewrite":
+        return "side_specific_rewrite_review"
+    if klass == "classifier_or_threshold":
+        return "classifier_threshold_review"
+    if klass == "market_structure_or_path_risk":
+        return "market_structure_and_path_risk_review"
+    return "next_high_priority_replay_or_market_observation"
+
+
+def _no_action_next_checkpoint(row: dict[str, Any]) -> str:
+    group = str(row.get("strategy_group_id") or "unknown")
+    return f"{group}_{_no_action_required_next_evidence(row)}"
+
+
 def _high_priority_no_action_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = _dict_rows(
         _as_dict(packet.get("broader_observation")).get("high_priority_no_action_signals")
@@ -838,6 +1022,63 @@ def _tier_review_table(rows: list[dict[str, Any]]) -> str:
                 row.get("tier"),
                 row.get("tier_review_decision"),
                 row.get("basis_decision"),
+            )
+        )
+    return "\n".join(output)
+
+
+def _observation_layer_table(summary: dict[str, Any]) -> str:
+    latest = _as_dict(summary.get("latest_observe_only_would_enter"))
+    return "\n".join(
+        [
+            "| Layer | Value |",
+            "| --- | --- |",
+            f"| P0 | `{summary.get('p0_state', 'unknown')}` |",
+            f"| P0.5 | `{summary.get('p0_5_state', 'unknown')}` |",
+            f"| Broader would-enter | `{summary.get('broader_would_enter_count', 0)}` |",
+            f"| High-priority no-action | `{summary.get('high_priority_no_action_count', 0)}` |",
+            "| Latest observe-only would-enter | `{}` / `{}` / `{}` |".format(
+                latest.get("strategy_group_id") or "none",
+                latest.get("symbol") or "-",
+                latest.get("side") or "-",
+            ),
+        ]
+    )
+
+
+def _role_review_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "| Source | Linked Intake | Decision | Next |\n| --- | --- | --- | --- |\n| none | - | - | - |"
+    output = [
+        "| Source | Linked Intake | Decision | Next |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        output.append(
+            "| `{}` | `{}` | `{}` | `{}` |".format(
+                row.get("source_observation_strategy_group_id"),
+                row.get("linked_intake_strategy_group_id"),
+                row.get("role_review_decision"),
+                row.get("next_checkpoint"),
+            )
+        )
+    return "\n".join(output)
+
+
+def _no_action_attribution_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "| StrategyGroup | Symbol | Class | Next |\n| --- | --- | --- | --- |\n| none | - | - | - |"
+    output = [
+        "| StrategyGroup | Symbol | Class | Next |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        output.append(
+            "| `{}` | `{}` | `{}` | `{}` |".format(
+                row.get("strategy_group_id"),
+                row.get("symbol"),
+                row.get("attribution_class"),
+                row.get("next_checkpoint"),
             )
         )
     return "\n".join(output)

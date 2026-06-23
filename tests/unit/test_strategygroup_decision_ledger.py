@@ -572,6 +572,92 @@ def test_decision_ledger_integrates_research_intake_review_as_review_input_only(
     assert packet["safety_invariants"]["order_created"] is False
 
 
+def test_decision_ledger_records_observation_layer_role_review_and_no_action_queue():
+    module = _load_module()
+    signal = _signal_coverage()
+    signal["checks"] = {
+        "mainline_ready_signal_count": 0,
+        "broader_actionable_would_enter_signal_count": 0,
+    }
+    signal["broader_observation"]["would_enter_signals"] = [
+        {
+            "strategy_group_id": "RBR-001",
+            "symbol": "ADA/USDT:USDT",
+            "side": "short",
+            "confidence": "0.57",
+            "signal_type": "would_enter",
+            "reason_codes": [
+                "rbr_range_context",
+                "rbr_boundary_rejection_confirmed",
+            ],
+        }
+    ]
+    signal["broader_observation"]["high_priority_no_action_signals"].extend(
+        [
+            {
+                "strategy_group_id": "BRF-001",
+                "signal_type": "no_action",
+                "coverage_review_priority": "P0_5",
+                "symbol": "BTC/USDT:USDT",
+                "side": "none",
+                "confidence": "0.25",
+                "reason_codes": ["brf_no_action_no_rally_extension"],
+                "policy_l2_readiness": (
+                    "blocked_requiredfacts_and_squeeze_classifier_needed"
+                ),
+                "policy_recommended_action": (
+                    "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached"
+                ),
+            },
+            {
+                "strategy_group_id": "VCB-001",
+                "signal_type": "no_action",
+                "coverage_review_priority": "P1",
+                "symbol": "LINK/USDT:USDT",
+                "side": "none",
+                "confidence": "0.25",
+                "reason_codes": ["vcb_no_action_volume_expansion_missing"],
+                "policy_l2_readiness": "blocked_classifier_redesign_required",
+                "policy_recommended_action": (
+                    "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned"
+                ),
+            },
+        ]
+    )
+
+    packet = module.build_strategygroup_decision_ledger(
+        opportunity_decision_loop_packet=_opportunity_decision_loop(),
+        signal_coverage_packet=signal,
+        tier_policy=_tier_policy(),
+        research_intake_review_packet=_research_intake_review(),
+    )
+
+    assert packet["observation_layer"]["p0_state"] == (
+        "waiting_for_executable_fresh_signal"
+    )
+    assert packet["observation_layer"]["latest_observe_only_would_enter"] == {
+        "strategy_group_id": "RBR-001",
+        "symbol": "ADA/USDT:USDT",
+        "side": "short",
+        "confidence": "0.57",
+        "not_live_signal": True,
+    }
+    assert packet["counts"]["role_review_row_count"] == 1
+    assert packet["role_review_rows"][0]["linked_intake_strategy_group_id"] == (
+        "RBR2-001"
+    )
+    assert packet["counts"]["high_priority_no_action_attribution_count"] == 4
+    queue = {row["strategy_group_id"]: row for row in packet["no_action_attribution_queue"]}
+    assert queue["BRF-001"]["attribution_class"] == "market_structure_or_path_risk"
+    assert queue["BTPC-001"]["attribution_class"] == "fact_source_or_freshness"
+    assert queue["LSR-001"]["attribution_class"] == "side_specific_rewrite"
+    assert queue["VCB-001"]["attribution_class"] == "classifier_or_threshold"
+    assert packet["decision"]["role_review_is_decision_support_only"] is True
+    assert packet["decision"]["no_action_attribution_queue_recorded"] is True
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
 def test_decision_ledger_cli_writes_outputs(tmp_path, capsys):
     module = _load_module()
     opportunity_path = tmp_path / "opportunity.json"

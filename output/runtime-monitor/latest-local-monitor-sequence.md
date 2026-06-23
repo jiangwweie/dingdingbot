@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-22T15:58:12.885000+00:00
+- 报告时间: 2026-06-23T01:05:16.760676+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -9,6 +9,11 @@
 - 远端交互次数: 0
 - 服务器修改: 否
 - 接近真实订单: 否
+- P0.5 观察层状态: `observation_active`
+- P0.5 would-enter / no-action: `1` / `4`
+- 昨晚观察信号: `RBR-001` / `ADA/USDT:USDT` / `short`
+- No-action 归因队列: `4`
+- RBR/RBR2 role review: `1`
 - 策略 intake 状态: `research_intake_review_ready`
 - 策略 intake 候选: `BRF2-001, RBR2-001`
 - 小资金试验候选状态: `capital_trial_readiness_bridge_ready`

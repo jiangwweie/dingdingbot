@@ -1181,6 +1181,12 @@ def build_local_monitor_sequence_report(
     capital_trial_summary = _sequence_capital_trial_summary(
         packets.get("strategygroup_capital_trial_readiness_bridge", {})
     )
+    observation_layer_summary = _sequence_observation_layer_summary(
+        signal_coverage_packet=packets.get("signal_coverage", {}),
+        expansion_review_packet=packets.get("signal_coverage_expansion_review", {}),
+        decision_ledger_packet=packets.get("strategygroup_decision_ledger", {}),
+        capital_trial_summary=capital_trial_summary,
+    )
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -1196,11 +1202,13 @@ def build_local_monitor_sequence_report(
             "current_action": _owner_action(status),
             "owner_intervention_required": owner_decision_required,
             "risk_level": interaction["level"],
+            "observation_layer": observation_layer_summary,
             "strategy_research_intake": research_intake_summary,
             "strategy_candidate_trade": capital_trial_summary,
             "strategy_experiment_candidate": capital_trial_summary,
         },
         "interaction": interaction,
+        "strategy_observation_layer": observation_layer_summary,
         "strategy_research_intake": research_intake_summary,
         "strategy_candidate_trade": capital_trial_summary,
         "strategy_experiment_candidate": capital_trial_summary,
@@ -1209,6 +1217,36 @@ def build_local_monitor_sequence_report(
             "execution_blockers": execution_blockers,
             "non_market_gaps": non_market_gaps,
             "engineering_gaps": non_market_gaps,
+            "p0_5_observation_state": observation_layer_summary[
+                "p0_5_state"
+            ],
+            "p0_5_broader_would_enter_count": observation_layer_summary[
+                "broader_would_enter_count"
+            ],
+            "p0_5_high_priority_no_action_count": observation_layer_summary[
+                "high_priority_no_action_count"
+            ],
+            "p0_5_latest_observe_only_would_enter_strategy_group_id": (
+                observation_layer_summary["latest_observe_only_would_enter"].get(
+                    "strategy_group_id", ""
+                )
+            ),
+            "p0_5_latest_observe_only_would_enter_symbol": (
+                observation_layer_summary["latest_observe_only_would_enter"].get(
+                    "symbol", ""
+                )
+            ),
+            "p0_5_latest_observe_only_would_enter_side": (
+                observation_layer_summary["latest_observe_only_would_enter"].get(
+                    "side", ""
+                )
+            ),
+            "p0_5_no_action_attribution_count": observation_layer_summary[
+                "no_action_attribution_count"
+            ],
+            "p0_5_role_review_count": observation_layer_summary[
+                "role_review_count"
+            ],
             "research_intake_review_active": research_intake_summary["active"],
             "research_intake_candidates": research_intake_summary[
                 "strategy_group_ids"
@@ -1938,6 +1976,106 @@ def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sequence_observation_layer_summary(
+    *,
+    signal_coverage_packet: dict[str, Any],
+    expansion_review_packet: dict[str, Any],
+    decision_ledger_packet: dict[str, Any],
+    capital_trial_summary: dict[str, Any],
+) -> dict[str, Any]:
+    signal_observation = _as_dict(signal_coverage_packet.get("broader_observation"))
+    signal_checks = _as_dict(signal_coverage_packet.get("checks"))
+    expansion_observation = _as_dict(expansion_review_packet.get("observation_layer"))
+    ledger_observation = _as_dict(decision_ledger_packet.get("observation_layer"))
+
+    would_enter_rows = _dict_rows(signal_observation.get("would_enter_signals"))
+    no_action_rows = _dict_rows(
+        signal_observation.get("high_priority_no_action_signals")
+    )
+    latest = (
+        _as_dict(expansion_observation.get("latest_observe_only_would_enter"))
+        or _as_dict(ledger_observation.get("latest_observe_only_would_enter"))
+        or (would_enter_rows[0] if would_enter_rows else {})
+    )
+    no_action_queue = _dict_rows(
+        decision_ledger_packet.get("no_action_attribution_queue")
+    ) or _dict_rows(expansion_review_packet.get("no_action_attribution_queue"))
+    role_reviews = _dict_rows(decision_ledger_packet.get("role_review_rows")) or _dict_rows(
+        expansion_review_packet.get("role_review_rows")
+    )
+    broader_would_enter_count = _coalesce_int(
+        expansion_observation.get("broader_would_enter_count"),
+        ledger_observation.get("broader_would_enter_count"),
+        signal_checks.get("broader_current_signal_count")
+        if would_enter_rows
+        else None,
+        len(would_enter_rows),
+    )
+    high_priority_no_action_count = _coalesce_int(
+        expansion_observation.get("high_priority_no_action_count"),
+        ledger_observation.get("high_priority_no_action_count"),
+        signal_checks.get("broader_high_priority_no_action_signal_count"),
+        len(no_action_rows),
+    )
+    p0_5_state = (
+        "observation_active"
+        if broader_would_enter_count or high_priority_no_action_count
+        else "quiet"
+    )
+    return {
+        "p0_state": "waiting_for_executable_fresh_signal",
+        "p0_5_state": p0_5_state,
+        "broader_would_enter_count": broader_would_enter_count,
+        "broader_actionable_would_enter_count": _coalesce_int(
+            expansion_observation.get("broader_actionable_would_enter_count"),
+            ledger_observation.get("broader_actionable_would_enter_count"),
+            signal_checks.get("broader_actionable_would_enter_signal_count"),
+            0,
+        ),
+        "high_priority_no_action_count": high_priority_no_action_count,
+        "latest_observe_only_would_enter": {
+            "strategy_group_id": str(latest.get("strategy_group_id") or ""),
+            "symbol": str(latest.get("symbol") or ""),
+            "side": str(latest.get("side") or ""),
+            "confidence": str(latest.get("confidence") or ""),
+            "not_live_signal": True,
+        }
+        if latest
+        else {},
+        "selected_short_intake_candidate": capital_trial_summary.get(
+            "selected_short_strategy_group_id"
+        )
+        or "",
+        "selected_short_intake_candidate_promotion_scope": capital_trial_summary.get(
+            "promotion_scope"
+        )
+        or "not_applicable",
+        "selected_short_intake_candidate_tiny_live_ready": capital_trial_summary.get(
+            "tiny_live_ready"
+        )
+        is True,
+        "no_action_attribution_count": len(no_action_queue),
+        "no_action_attribution_strategy_group_ids": [
+            str(row.get("strategy_group_id") or "") for row in no_action_queue
+        ],
+        "role_review_count": len(role_reviews),
+        "role_review_pairs": [
+            {
+                "source_observation_strategy_group_id": str(
+                    row.get("source_observation_strategy_group_id") or ""
+                ),
+                "linked_intake_strategy_group_id": str(
+                    row.get("linked_intake_strategy_group_id") or ""
+                ),
+                "next_checkpoint": str(row.get("next_checkpoint") or ""),
+            }
+            for row in role_reviews
+        ],
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _packet_monitor_refresh_needed(packet: dict[str, Any]) -> bool:
     checks = packet.get("checks") if isinstance(packet, dict) else {}
     if not isinstance(checks, dict):
@@ -2028,6 +2166,12 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     owner = report["owner_summary"]
     interaction = report["interaction"]
     checks = report["checks"]
+    observation_layer = report.get("strategy_observation_layer") or {}
+    latest_observation = (
+        observation_layer.get("latest_observe_only_would_enter")
+        if isinstance(observation_layer.get("latest_observe_only_would_enter"), dict)
+        else {}
+    )
     research_intake = report.get("strategy_research_intake") or {}
     experiment_candidate = report.get("strategy_experiment_candidate") or {}
     lines = [
@@ -2042,6 +2186,15 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 远端交互次数: {interaction['remote_interaction_count']}",
         f"- 服务器修改: {_yes_no(bool(interaction['mutates_remote_files']))}",
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
+        f"- P0.5 观察层状态: `{observation_layer.get('p0_5_state', 'unknown')}`",
+        f"- P0.5 would-enter / no-action: `{observation_layer.get('broader_would_enter_count', 0)}` / `{observation_layer.get('high_priority_no_action_count', 0)}`",
+        "- 昨晚观察信号: `{}` / `{}` / `{}`".format(
+            latest_observation.get("strategy_group_id") or "none",
+            latest_observation.get("symbol") or "-",
+            latest_observation.get("side") or "-",
+        ),
+        f"- No-action 归因队列: `{observation_layer.get('no_action_attribution_count', 0)}`",
+        f"- RBR/RBR2 role review: `{observation_layer.get('role_review_count', 0)}`",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
         f"- 小资金试验候选状态: `{experiment_candidate.get('status', 'missing')}`",
@@ -2111,6 +2264,21 @@ def _interaction(packet: Any) -> dict[str, Any]:
         return {}
     interaction = packet.get("interaction")
     return interaction if isinstance(interaction, dict) else {}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _dict_rows(value: Any) -> list[dict[str, Any]]:
+    return [row for row in value or [] if isinstance(row, dict)]
+
+
+def _coalesce_int(*values: Any) -> int:
+    for value in values:
+        if value is not None:
+            return _int(value)
+    return 0
 
 
 def _int(value: Any) -> int:
