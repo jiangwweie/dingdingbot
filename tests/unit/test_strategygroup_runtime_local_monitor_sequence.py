@@ -593,9 +593,12 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
     _write_output(
         command,
         {
+            "schema": "brc.strategygroup_tradeability_verdict.v1",
+            "scope": "strategygroup_tradeability_verdict_read_model",
             "status": "tradeability_verdict_ready",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "summary": {
-                "row_count": 4,
+                "row_count": 2,
                 "tradable_now_count": 0,
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
@@ -637,9 +640,27 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                     "real_order_authority": False,
                 },
             ],
+            "owner_summary": {
+                "state": "交易资格已判定",
+                "top_strategy_group_id": "BRF2-001",
+                "top_verdict": "not_tradable_policy",
+                "top_first_blocker": (
+                    "owner_trial_scope_or_capital_policy_missing"
+                ),
+                "owner_policy_blocker_present": True,
+                "owner_intervention_required": False,
+                "real_order_authority": False,
+                "actionable_now": False,
+            },
             "checks": {
+                "row_count": 2,
+                "one_current_verdict_per_strategy_group": True,
                 "owner_policy_blocker_present": True,
                 "owner_decision_required": False,
+                "row_count_matches_verdict_rows": True,
+                "tradable_now_rows_have_authority": True,
+                "authority_rows_are_tradable_now": True,
+                "tradable_now_scoped_to_live_submit": True,
                 "market_wait_only_after_admission": True,
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
@@ -670,7 +691,10 @@ def _write_ready_trial_asset_admission_proposal(command: list[str]) -> None:
     _write_output(
         command,
         {
+            "schema": "brc.strategygroup_trial_asset_admission_proposal.v1",
+            "scope": "strategygroup_trial_asset_admission_proposal",
             "status": "trial_asset_admission_proposal_ready",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "proposal": {
                 "strategy_group_id": "BRF2-001",
                 "current_stage": "tiny_live_intake_candidate",
@@ -1380,6 +1404,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["checks"]["tradeability_top_verdict"] == (
         "not_tradable_policy"
     )
+    assert report["checks"]["tradeability_row_count"] == 2
+    assert report["checks"]["tradeability_verdict_rows_count"] == 2
+    assert report["checks"]["tradeability_row_count_matches_verdict_rows"] is True
     assert report["checks"]["tradeability_tradable_now_count"] == 0
     assert report["checks"]["tradeability_real_order_authority_count"] == 0
     assert report["checks"]["non_market_gaps"] == []

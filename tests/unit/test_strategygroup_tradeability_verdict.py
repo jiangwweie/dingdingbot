@@ -211,6 +211,26 @@ def _live_submit_readiness() -> dict:
     }
 
 
+def _live_submit_readiness_ready_for(strategy_group_id: str | None) -> dict:
+    packet = {
+        "status": "live_submit_ready",
+        "checks": {
+            "live_submit_ready": True,
+            "fresh_signal_state": "fresh_selected_strategygroup_signal",
+        },
+        "decision": {
+            "live_submit_ready": True,
+            "actionable_now": True,
+            "real_order_authority": True,
+        },
+    }
+    if strategy_group_id:
+        packet["selected_strategy_group_id"] = strategy_group_id
+        packet["runtime_scope"] = {"strategy_group_id": strategy_group_id}
+        packet["fresh_signal"] = {"strategy_group_id": strategy_group_id}
+    return packet
+
+
 def _trial_asset_admission_proposal() -> dict:
     return {
         "status": "trial_asset_admission_proposal_ready",
@@ -315,6 +335,61 @@ def test_tradeability_verdict_advances_brf2_to_policy_blocker_after_proposal():
     assert packet["checks"]["owner_decision_required"] is False
 
 
+def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness_ready_for("MPG-001"),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    assert rows["MPG-001"]["stage"] == "live_submit_ready"
+    assert rows["MPG-001"]["verdict"] == "tradable_now"
+    assert rows["MPG-001"]["actionable_now"] is True
+    assert rows["MPG-001"]["real_order_authority"] is True
+
+    assert rows["BRF2-001"]["verdict"] == "not_tradable_policy"
+    assert rows["BTPC-001"]["verdict"] != "tradable_now"
+    assert rows["RBR-001"]["verdict"] != "tradable_now"
+    assert rows["RBR2-001"]["verdict"] != "tradable_now"
+    assert packet["summary"]["tradable_now_count"] == 1
+    assert packet["summary"]["actionable_now_count"] == 1
+    assert packet["summary"]["real_order_authority_count"] == 1
+    assert packet["checks"]["tradable_now_rows_have_authority"] is True
+    assert packet["checks"]["authority_rows_are_tradable_now"] is True
+    assert packet["checks"]["tradable_now_scoped_to_live_submit"] is True
+
+
+def test_unscoped_live_submit_ready_does_not_make_any_row_tradable():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness_ready_for(None),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    assert rows["MPG-001"]["verdict"] != "tradable_now"
+    assert rows["BRF2-001"]["verdict"] == "not_tradable_policy"
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert packet["summary"]["actionable_now_count"] == 0
+    assert packet["summary"]["real_order_authority_count"] == 0
+    for row in packet["verdict_rows"]:
+        assert row["actionable_now"] is False
+        assert row["real_order_authority"] is False
+
+
 def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     module = _load_module()
     bridge_json = tmp_path / "bridge.json"
@@ -352,6 +427,15 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     assert exit_code == 0
     packet = json.loads(output_json.read_text(encoding="utf-8"))
     assert packet["status"] == "tradeability_verdict_ready"
+    assert packet["schema"] == module.SCHEMA
+    assert packet["scope"] == "strategygroup_tradeability_verdict_read_model"
+    assert packet["generated_at_utc"]
+    assert packet["owner_summary"]["real_order_authority"] is False
+    assert packet["summary"]["row_count"] == len(packet["verdict_rows"])
+    assert packet["checks"]["row_count_matches_verdict_rows"] is True
+    assert packet["checks"]["tradable_now_rows_have_authority"] is True
+    assert packet["checks"]["authority_rows_are_tradable_now"] is True
+    assert packet["checks"]["tradable_now_scoped_to_live_submit"] is True
     assert "StrategyGroup Tradeability Verdict" in output_md.read_text(
         encoding="utf-8"
     )

@@ -1396,6 +1396,12 @@ def build_local_monitor_sequence_report(
             ],
             "tradeability_top_next_action": tradeability_summary["top_next_action"],
             "tradeability_row_count": tradeability_summary["row_count"],
+            "tradeability_verdict_rows_count": tradeability_summary[
+                "verdict_rows_count"
+            ],
+            "tradeability_row_count_matches_verdict_rows": tradeability_summary[
+                "row_count_matches_verdict_rows"
+            ],
             "tradeability_tradable_now_count": tradeability_summary[
                 "tradable_now_count"
             ],
@@ -2140,14 +2146,19 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
     summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
     top_strategy_group_id = str(summary.get("top_strategy_group_id") or "")
     top_row = {}
-    for row in _dict_rows(packet.get("verdict_rows")):
+    verdict_rows = _dict_rows(packet.get("verdict_rows"))
+    for row in verdict_rows:
         if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
             top_row = row
             break
+    row_count = _int(summary.get("row_count"))
+    row_count_matches_verdict_rows = row_count == len(verdict_rows)
     return {
         "status": _status(packet) or "missing",
         "active": _status(packet) == "tradeability_verdict_ready",
-        "row_count": _int(summary.get("row_count")),
+        "row_count": row_count,
+        "verdict_rows_count": len(verdict_rows),
+        "row_count_matches_verdict_rows": row_count_matches_verdict_rows,
         "tradable_now_count": _int(summary.get("tradable_now_count")),
         "actionable_now_count": _int(summary.get("actionable_now_count")),
         "real_order_authority_count": _int(

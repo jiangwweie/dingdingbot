@@ -1,7 +1,7 @@
 ## StrategyGroup Tradeability Verdict
 
 - Status: `tradeability_verdict_ready`
-- Generated: `2026-06-23T02:06:30.207971+00:00`
+- Generated: `2026-06-23T02:39:28.848461+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-verdict.json`
 - Verdict rows: `13`
 - Tradable now: `0`

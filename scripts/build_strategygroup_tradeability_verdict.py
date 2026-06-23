@@ -188,9 +188,16 @@ def build_tradeability_verdict(
         for strategy_group_id in sorted(all_ids, key=_strategy_sort_key)
     ]
     summary = _summary(rows, selected_strategy_group_id=selected_strategy_group_id)
+    consistency_checks = _consistency_checks(
+        rows=rows,
+        summary=summary,
+        live_submit_readiness=live_submit_readiness,
+    )
     status = (
         "blocked_forbidden_effect"
         if forbidden_effects
+        else "blocked_internal_consistency"
+        if not all(consistency_checks.values())
         else "tradeability_verdict_ready"
         if rows
         else "tradeability_verdict_needs_input"
@@ -210,8 +217,8 @@ def build_tradeability_verdict(
             "top_first_blocker": summary["top_first_blocker_class"],
             "owner_policy_blocker_present": summary["owner_first_blocker_count"] > 0,
             "owner_intervention_required": False,
-            "real_order_authority": False,
-            "actionable_now": False,
+            "real_order_authority": summary["real_order_authority_count"] > 0,
+            "actionable_now": summary["actionable_now_count"] > 0,
         },
         "checks": {
             "row_count": summary["row_count"],
@@ -223,6 +230,7 @@ def build_tradeability_verdict(
             "forbidden_effects": forbidden_effects,
             "owner_policy_blocker_present": summary["owner_first_blocker_count"] > 0,
             "owner_decision_required": False,
+            **consistency_checks,
             "market_wait_only_after_admission": all(
                 row["verdict"] != "not_tradable_market_wait"
                 or row["stage"]
@@ -234,6 +242,8 @@ def build_tradeability_verdict(
         "safety_invariants": {
             "actionable_now": False,
             "real_order_authority": False,
+            "verdict_generator_actionable_now": False,
+            "verdict_generator_real_order_authority": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -277,6 +287,8 @@ def _verdict_row(
         live_submit_readiness=live_submit_readiness,
         forbidden_effects=forbidden_effects,
     )
+    actionable_now = classifier["verdict"] == "tradable_now"
+    real_order_authority = classifier["verdict"] == "tradable_now"
     policy_scope = _policy_scope(candidate)
     return {
         "strategy_group_id": strategy_group_id,
@@ -318,10 +330,12 @@ def _verdict_row(
             "latest_observe_only_symbol": str(observed_row.get("symbol") or ""),
             "latest_observe_only_side": str(observed_row.get("side") or ""),
         },
-        "actionable_now": False,
-        "real_order_authority": False,
+        "actionable_now": actionable_now,
+        "real_order_authority": real_order_authority,
         "authority_boundary": (
-            "tradeability_verdict_is_read_model_only; actionable_now=false; "
+            "runtime_scoped_live_submit_ready; official_chain_may_continue"
+            if actionable_now
+            else "tradeability_verdict_is_read_model_only; actionable_now=false; "
             "real_order_authority=false; no_finalgate_no_operation_layer"
         ),
     }
@@ -349,22 +363,6 @@ def _first_blocker(
             "remove_forbidden_authority_effect_before_any_tradeability_review",
             "safety_clear_for_tradeability_review",
         )
-    live_checks = _as_dict(live_submit_readiness.get("checks"))
-    live_decision = _as_dict(live_submit_readiness.get("decision"))
-    if (
-        live_checks.get("live_submit_ready") is True
-        and live_decision.get("actionable_now") is True
-        and live_decision.get("real_order_authority") is True
-    ):
-        return _classifier(
-            "tradable_now",
-            "official_runtime_chain_ready",
-            "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
-            "runtime",
-            "continue_official_live_submit_chain",
-            "live_submit_ready",
-        )
-
     if stage == "role_only_intake_candidate":
         return _classifier(
             "not_tradable_strategy_quality",
@@ -449,6 +447,18 @@ def _first_blocker(
             "wait_for_action_time_gate_after_signal_and_facts",
             "live_submit_ready",
         )
+    if _row_live_submit_ready(
+        strategy_group_id=strategy_group_id,
+        live_submit_readiness=live_submit_readiness,
+    ):
+        return _classifier(
+            "tradable_now",
+            "official_runtime_chain_ready",
+            "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
+            "runtime",
+            "continue_official_live_submit_chain",
+            "live_submit_ready",
+        )
     if "fresh_signal_absent" in text:
         return _classifier(
             "not_tradable_market_wait",
@@ -496,6 +506,11 @@ def _stage(
     admission_proposal: dict[str, Any],
     live_submit_readiness: dict[str, Any],
 ) -> str:
+    if _row_live_submit_ready(
+        strategy_group_id=strategy_group_id,
+        live_submit_readiness=live_submit_readiness,
+    ):
+        return "live_submit_ready"
     if admission_proposal:
         return "trial_asset_admission_candidate"
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
@@ -533,6 +548,56 @@ def _mpg_waits_for_market(
         and checks.get("live_submit_ready") is False
         and decision.get("live_submit_ready_false_reason") == "no_fresh_signal"
     )
+
+
+def _row_live_submit_ready(
+    *,
+    strategy_group_id: str,
+    live_submit_readiness: dict[str, Any],
+) -> bool:
+    checks = _as_dict(live_submit_readiness.get("checks"))
+    decision = _as_dict(live_submit_readiness.get("decision"))
+    scoped_strategy_group_ids = _live_submit_strategy_group_ids(
+        live_submit_readiness
+    )
+    return (
+        checks.get("live_submit_ready") is True
+        and decision.get("actionable_now") is True
+        and decision.get("real_order_authority") is True
+        and strategy_group_id in scoped_strategy_group_ids
+    )
+
+
+def _live_submit_strategy_group_ids(packet: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+    id_keys = {
+        "strategy_group_id",
+        "selected_strategy_group_id",
+        "selected_strategygroup_id",
+        "runtime_strategy_group_id",
+        "live_strategy_group_id",
+    }
+    ids_keys = {
+        "strategy_group_ids",
+        "selected_strategy_group_ids",
+        "runtime_strategy_group_ids",
+        "live_strategy_group_ids",
+    }
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in id_keys and isinstance(item, str) and item:
+                    ids.add(item)
+                elif key in ids_keys and isinstance(item, list):
+                    ids.update(str(entry) for entry in item if str(entry))
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(packet)
+    return ids
 
 
 def _candidate_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -655,6 +720,41 @@ def _class_for_blocker(blocker: str) -> str:
     return "review"
 
 
+def _consistency_checks(
+    *,
+    rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+    live_submit_readiness: dict[str, Any],
+) -> dict[str, bool]:
+    return {
+        "row_count_matches_verdict_rows": summary["row_count"] == len(rows),
+        "tradable_now_rows_have_authority": all(
+            row["verdict"] != "tradable_now"
+            or (
+                row.get("actionable_now") is True
+                and row.get("real_order_authority") is True
+            )
+            for row in rows
+        ),
+        "authority_rows_are_tradable_now": all(
+            not (
+                row.get("actionable_now") is True
+                or row.get("real_order_authority") is True
+            )
+            or row["verdict"] == "tradable_now"
+            for row in rows
+        ),
+        "tradable_now_scoped_to_live_submit": all(
+            row["verdict"] != "tradable_now"
+            or _row_live_submit_ready(
+                strategy_group_id=str(row.get("strategy_group_id") or ""),
+                live_submit_readiness=live_submit_readiness,
+            )
+            for row in rows
+        ),
+    }
+
+
 def _summary(
     rows: list[dict[str, Any]],
     *,
@@ -687,8 +787,12 @@ def _summary(
     return {
         "row_count": len(rows),
         "tradable_now_count": sum(row["verdict"] == "tradable_now" for row in rows),
-        "actionable_now_count": 0,
-        "real_order_authority_count": 0,
+        "actionable_now_count": sum(
+            row.get("actionable_now") is True for row in rows
+        ),
+        "real_order_authority_count": sum(
+            row.get("real_order_authority") is True for row in rows
+        ),
         "owner_first_blocker_count": by_owner.get("owner", 0),
         "engineering_first_blocker_count": by_owner.get("engineering", 0),
         "market_first_blocker_count": by_owner.get("market", 0),
