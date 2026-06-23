@@ -1,4 +1,17 @@
 {
+  "brf2_non_executing_candidate_packet": {
+    "actionable_now": false,
+    "active": true,
+    "candidate_packet_id": "",
+    "candidate_packet_ready": false,
+    "first_blocker_class": "fresh_brf2_short_signal_absent",
+    "first_blocker_owner": "market",
+    "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+    "real_order_authority": false,
+    "signal_state": "fresh_signal_absent",
+    "status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
+    "strategy_group_id": "BRF2-001"
+  },
   "brf2_owner_trial_policy": {
     "actionable_now": false,
     "active": true,
@@ -76,6 +89,9 @@
     "brf2_fresh_signal_rule_id": "brf2_short_rally_failure_fresh_signal_v1",
     "brf2_new_first_blocker": "required_facts_mapping_gap",
     "brf2_next_bottleneck": "fresh_signal_wait",
+    "brf2_non_executing_candidate_packet_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "brf2_non_executing_candidate_packet_ready": false,
+    "brf2_non_executing_candidate_packet_status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
     "brf2_owner_policy_recorded": true,
     "brf2_owner_policy_scope_missing": false,
     "brf2_real_order_authority": false,
@@ -156,7 +172,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-23T08:13:33.277561+00:00",
+  "generated_at_utc": "2026-06-23T08:34:15.554440+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -170,6 +186,19 @@
   "monitor_status": "needs_refresh",
   "owner_status": "waiting_for_opportunity",
   "owner_summary": {
+    "brf2_non_executing_candidate_packet": {
+      "actionable_now": false,
+      "active": true,
+      "candidate_packet_id": "",
+      "candidate_packet_ready": false,
+      "first_blocker_class": "fresh_brf2_short_signal_absent",
+      "first_blocker_owner": "market",
+      "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+      "real_order_authority": false,
+      "signal_state": "fresh_signal_absent",
+      "status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
+      "strategy_group_id": "BRF2-001"
+    },
     "brf2_owner_trial_policy": {
       "actionable_now": false,
       "active": true,
@@ -387,6 +416,7 @@
   "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
   "scope": "strategygroup_runtime_local_monitor_sequence",
   "source_paths": {
+    "brf2_non_executing_candidate_packet_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json",
     "brf2_required_facts_mapping_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
     "brf2_runtime_signal_capture_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
     "btpc_classifier_rule_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
@@ -577,6 +607,22 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
       "returncode": 0,
       "status": "brf2_runtime_signal_capture_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_brf2_non_executing_candidate_packet",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "brf2_non_executing_candidate_packet",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json",
+      "returncode": 0,
+      "status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal"
     },
     {
       "interaction": {

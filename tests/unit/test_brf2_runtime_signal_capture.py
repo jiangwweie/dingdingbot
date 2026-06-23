@@ -68,6 +68,13 @@ def _owner_policy() -> dict:
 
 def _fresh_facts() -> dict:
     return {
+        "signal_context": {
+            "signal_packet_id": "brf2-signal-001",
+            "runtime_instance_id": "runtime-brf2-001",
+            "symbol": "ADA/USDT:USDT",
+            "timeframe": "5m_closed",
+            "closed_at_utc": "2026-06-23T00:00:00+00:00",
+        },
         "facts": {
             "closed_1h_ohlcv": {"status": "ready"},
             "closed_5m_ohlcv": {"status": "ready"},
@@ -166,4 +173,6 @@ def test_brf2_runtime_signal_capture_cli_writes_artifacts(tmp_path: Path):
     assert packet["signal_detector_preview"]["current_signal_state"] == (
         "fresh_signal_present"
     )
+    assert packet["source_signal_context"]["signal_packet_id"] == "brf2-signal-001"
+    assert packet["source_signal_context"]["symbol"] == "ADA/USDT:USDT"
     assert "BRF2 Runtime Signal Capture" in output_md.read_text(encoding="utf-8")

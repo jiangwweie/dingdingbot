@@ -406,6 +406,46 @@ def _brf2_runtime_signal_capture(signal_state: str = "fresh_signal_absent") -> d
     }
 
 
+def _brf2_non_executing_candidate_packet() -> dict:
+    return {
+        "status": "brf2_non_executing_candidate_packet_ready",
+        "strategy_group_id": "BRF2-001",
+        "candidate_packet_ready": True,
+        "candidate_packet": {
+            "candidate_packet_id": "brf2-candidate:brf2-signal-001",
+            "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+            "strategy_group_id": "BRF2-001",
+            "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
+            "source_signal_packet_id": "brf2-signal-001",
+            "symbol": "ADA/USDT:USDT",
+            "side": "short",
+            "signal_state": "fresh_signal_present",
+        },
+        "first_blocker": {
+            "class": "candidate_authorization_evidence_not_created",
+            "owner": "runtime",
+            "next_action": "prepare_fresh_candidate_authorization_evidence",
+        },
+        "checks": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "authorization_evidence_created": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
 def test_tradeability_verdict_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -595,6 +635,49 @@ def test_tradeability_verdict_moves_brf2_to_candidate_packet_after_fresh_capture
         "build_brf2_non_executing_candidate_packet_for_action_time_chain"
     )
     assert brf2["after_next_state"] == "candidate_packet_ready"
+    assert brf2["actionable_now"] is False
+    assert brf2["real_order_authority"] is False
+    assert packet["summary"]["tradable_now_count"] == 0
+
+
+def test_tradeability_verdict_moves_brf2_past_candidate_packet_when_ready():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(
+            "fresh_signal_present"
+        ),
+        brf2_non_executing_candidate_packet=(
+            _brf2_non_executing_candidate_packet()
+        ),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    assert brf2["stage"] == "armed_observation"
+    assert brf2["verdict"] == "not_tradable_execution_gate"
+    assert brf2["first_blocker_class"] == (
+        "brf2_candidate_packet_ready_authorization_evidence_not_created"
+    )
+    assert brf2["blocker_owner"] == "runtime"
+    assert brf2["next_action"] == "prepare_fresh_candidate_authorization_evidence"
+    assert brf2["after_next_state"] == (
+        "candidate_authorization_evidence_pending_action_time_finalgate"
+    )
+    assert brf2["runtime_scope_status"][
+        "brf2_non_executing_candidate_packet_ready"
+    ] is True
     assert brf2["actionable_now"] is False
     assert brf2["real_order_authority"] is False
     assert packet["summary"]["tradable_now_count"] == 0

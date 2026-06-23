@@ -1,7 +1,7 @@
 ## BRF2 Runtime Signal Capture
 
 - Status: `brf2_runtime_signal_capture_ready`
-- Generated: `2026-06-23T08:13:30.580068+00:00`
+- Generated: `2026-06-23T08:34:12.918686+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-capture.json`
 - StrategyGroup: `BRF2-001`
 - Signal state: `fresh_signal_absent`

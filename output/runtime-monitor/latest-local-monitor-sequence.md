@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T08:13:33.277561+00:00
+- 报告时间: 2026-06-23T08:34:15.554440+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -34,6 +34,9 @@
 - BRF2 signal state: `fresh_signal_absent`
 - BRF2 signal first blocker: `fresh_brf2_short_signal_absent` / `market`
 - BRF2 candidate packet ready: `否`
+- BRF2 non-executing candidate packet: `brf2_non_executing_candidate_packet_waiting_for_fresh_signal`
+- BRF2 non-executing candidate ready: `否`
+- BRF2 candidate first blocker: `fresh_brf2_short_signal_absent` / `market`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
@@ -58,6 +61,7 @@
 | strategygroup_trial_asset_admission_proposal | trial_asset_admission_proposal_ready | 0 |
 | brf2_required_facts_mapping | brf2_required_facts_mapping_ready | 0 |
 | brf2_runtime_signal_capture | brf2_runtime_signal_capture_ready | 0 |
+| brf2_non_executing_candidate_packet | brf2_non_executing_candidate_packet_waiting_for_fresh_signal | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |

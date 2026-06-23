@@ -14,7 +14,7 @@
     "tradable_now_rows_have_authority": true,
     "tradable_now_scoped_to_live_submit": true
   },
-  "generated_at_utc": "2026-06-23T08:13:33.271696+00:00",
+  "generated_at_utc": "2026-06-23T08:34:15.548376+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -117,6 +117,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
@@ -204,6 +206,8 @@
       ],
       "runtime_scope_status": {
         "brf2_current_signal_state": "fresh_signal_absent",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
         "brf2_runtime_signal_capture_status": "brf2_runtime_signal_capture_ready",
         "brf2_trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "live_trial_portfolio_seat": true,
@@ -286,6 +290,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -349,6 +355,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -445,6 +453,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -537,6 +547,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -633,6 +645,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -741,6 +755,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -842,6 +858,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -940,6 +958,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -993,6 +1013,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,
@@ -1051,6 +1073,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": true,
@@ -1104,6 +1128,8 @@
       "resolved_blockers": [],
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
+        "brf2_non_executing_candidate_packet_ready": false,
+        "brf2_non_executing_candidate_packet_status": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
         "live_trial_portfolio_seat": false,

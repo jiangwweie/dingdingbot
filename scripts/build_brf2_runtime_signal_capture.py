@@ -158,6 +158,7 @@ def build_brf2_runtime_signal_capture(
     )
     policy = _as_dict((owner_policy or {}).get("policy"))
     fresh_signal_rule = _as_dict(required_facts_mapping.get("fresh_signal_rule"))
+    source_signal_context = _signal_context(fact_input or {})
     return {
         "schema": SCHEMA,
         "scope": "brf2_runtime_signal_capture_read_model",
@@ -181,6 +182,7 @@ def build_brf2_runtime_signal_capture(
             "freshness_window_ms": fresh_signal_rule.get("freshness_window_ms"),
             "source_mode": "runtime_watcher_read_only_fact_input",
         },
+        "source_signal_context": source_signal_context,
         "signal_detector_preview": {
             "detector_ready": detector_ready,
             "fresh_signal_present": fresh_signal_present,
@@ -307,6 +309,35 @@ def _facts_by_key(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 rows[fact_key] = item
         return rows
     return {}
+
+
+def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
+    context = _as_dict(packet.get("signal_context"))
+    if not context:
+        context = {
+            key: packet.get(key)
+            for key in (
+                "signal_packet_id",
+                "runtime_instance_id",
+                "symbol",
+                "exchange_symbol",
+                "market",
+                "timeframe",
+                "closed_at_utc",
+                "source",
+            )
+            if packet.get(key) not in {None, ""}
+        }
+    return {
+        "signal_packet_id": str(context.get("signal_packet_id") or ""),
+        "runtime_instance_id": str(context.get("runtime_instance_id") or ""),
+        "symbol": str(context.get("symbol") or ""),
+        "exchange_symbol": str(context.get("exchange_symbol") or ""),
+        "market": str(context.get("market") or ""),
+        "timeframe": str(context.get("timeframe") or ""),
+        "closed_at_utc": str(context.get("closed_at_utc") or ""),
+        "source": str(context.get("source") or "runtime_watcher_read_only_fact_input"),
+    }
 
 
 def _first_blocker(

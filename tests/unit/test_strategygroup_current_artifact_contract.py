@@ -174,6 +174,40 @@ def test_current_brf2_runtime_signal_capture_artifact_is_complete():
     )
 
 
+def test_current_brf2_non_executing_candidate_packet_artifact_is_complete():
+    packet = _read_json(
+        "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json"
+    )
+    monitor = _read_json("output/runtime-monitor/latest-local-monitor-sequence.json")
+    checks = monitor.get("checks") or {}
+    candidate = packet["candidate_packet"]
+
+    assert packet["schema"] == "brc.brf2_non_executing_candidate_packet.v1"
+    assert packet["scope"] == "brf2_non_executing_candidate_packet_read_model"
+    assert packet["status"] in {
+        "brf2_non_executing_candidate_packet_ready",
+        "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
+    }
+    assert packet["generated_at_utc"]
+    assert packet["strategy_group_id"] == "BRF2-001"
+    assert candidate["candidate_packet_type"] == (
+        "brf2_non_executing_short_signal_candidate"
+    )
+    assert candidate["side"] == "short"
+    assert "action_time_finalgate_packet_id" in candidate["required_next_chain"]
+    assert "operation_layer_submit_authorization_id" in candidate["required_next_chain"]
+    assert packet["checks"]["actionable_now"] is False
+    assert packet["checks"]["real_order_authority"] is False
+    assert packet["checks"]["calls_finalgate"] is False
+    assert packet["checks"]["calls_operation_layer"] is False
+    assert packet["checks"]["calls_exchange_write"] is False
+    assert packet["checks"]["places_order"] is False
+    assert checks["brf2_non_executing_candidate_packet_status"] == packet["status"]
+    assert checks["brf2_non_executing_candidate_packet_ready"] == (
+        packet["candidate_packet_ready"]
+    )
+
+
 def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     portfolio = _read_json(
         "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"

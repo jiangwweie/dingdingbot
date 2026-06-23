@@ -234,6 +234,12 @@ DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
 DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.md"
 )
+DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json"
+)
+DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.md"
+)
 DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
@@ -407,6 +413,12 @@ def main(argv: list[str] | None = None) -> int:
             args.brf2_runtime_signal_capture_json
         ),
         brf2_runtime_signal_capture_md=Path(args.brf2_runtime_signal_capture_md),
+        brf2_non_executing_candidate_packet_json=Path(
+            args.brf2_non_executing_candidate_packet_json
+        ),
+        brf2_non_executing_candidate_packet_md=Path(
+            args.brf2_non_executing_candidate_packet_md
+        ),
         three_strategy_live_trial_portfolio_json=Path(
             args.three_strategy_live_trial_portfolio_json
         ),
@@ -597,6 +609,12 @@ def build_local_monitor_sequence_report(
     brf2_required_facts_mapping_md: Path = DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD,
     brf2_runtime_signal_capture_json: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON,
     brf2_runtime_signal_capture_md: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD,
+    brf2_non_executing_candidate_packet_json: Path = (
+        DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON
+    ),
+    brf2_non_executing_candidate_packet_md: Path = (
+        DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD
+    ),
     three_strategy_live_trial_portfolio_json: Path = (
         DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON
     ),
@@ -800,6 +818,25 @@ def build_local_monitor_sequence_report(
             "brf2_runtime_signal_capture",
             brf2_runtime_signal_capture_command,
             brf2_runtime_signal_capture_json,
+            runner,
+        )
+    )
+
+    brf2_non_executing_candidate_packet_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_brf2_non_executing_candidate_packet.py"),
+        "--runtime-signal-capture-json",
+        str(brf2_runtime_signal_capture_json),
+        "--output-json",
+        str(brf2_non_executing_candidate_packet_json),
+        "--output-owner-progress",
+        str(brf2_non_executing_candidate_packet_md),
+    ]
+    steps.append(
+        _run_step(
+            "brf2_non_executing_candidate_packet",
+            brf2_non_executing_candidate_packet_command,
+            brf2_non_executing_candidate_packet_json,
             runner,
         )
     )
@@ -1372,6 +1409,8 @@ def build_local_monitor_sequence_report(
         str(three_strategy_live_trial_portfolio_json),
         "--brf2-runtime-signal-capture-json",
         str(brf2_runtime_signal_capture_json),
+        "--brf2-non-executing-candidate-packet-json",
+        str(brf2_non_executing_candidate_packet_json),
         "--output-json",
         str(strategygroup_tradeability_verdict_json),
         "--output-owner-progress",
@@ -1459,6 +1498,9 @@ def build_local_monitor_sequence_report(
     brf2_runtime_signal_capture_summary = _sequence_brf2_runtime_signal_capture_summary(
         packets.get("brf2_runtime_signal_capture", {})
     )
+    brf2_candidate_packet_summary = _sequence_brf2_candidate_packet_summary(
+        packets.get("brf2_non_executing_candidate_packet", {})
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         packets.get("three_strategy_live_trial_portfolio", {})
     )
@@ -1493,6 +1535,7 @@ def build_local_monitor_sequence_report(
             "trial_asset_admission": trial_admission_summary,
             "brf2_owner_trial_policy": brf2_policy_summary,
             "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
+            "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "tradeability_verdict": tradeability_summary,
         },
@@ -1505,6 +1548,7 @@ def build_local_monitor_sequence_report(
         "brf2_owner_trial_policy": brf2_policy_summary,
         "brf2_required_facts_mapping": brf2_required_facts_summary,
         "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
+        "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "strategy_tradeability_verdict": tradeability_summary,
         "checks": {
@@ -1619,6 +1663,15 @@ def build_local_monitor_sequence_report(
             ),
             "brf2_runtime_candidate_packet_ready": (
                 brf2_runtime_signal_capture_summary["candidate_packet_ready"]
+            ),
+            "brf2_non_executing_candidate_packet_status": (
+                brf2_candidate_packet_summary["status"]
+            ),
+            "brf2_non_executing_candidate_packet_ready": (
+                brf2_candidate_packet_summary["candidate_packet_ready"]
+            ),
+            "brf2_non_executing_candidate_packet_first_blocker_class": (
+                brf2_candidate_packet_summary["first_blocker_class"]
             ),
             "brf2_next_bottleneck": (
                 three_strategy_portfolio_summary["next_bottlenecks"].get(
@@ -1757,6 +1810,9 @@ def build_local_monitor_sequence_report(
             "brf2_required_facts_mapping_json": str(brf2_required_facts_mapping_json),
             "brf2_runtime_signal_capture_json": str(
                 brf2_runtime_signal_capture_json
+            ),
+            "brf2_non_executing_candidate_packet_json": str(
+                brf2_non_executing_candidate_packet_json
             ),
             "strategygroup_tradeability_verdict_json": str(
                 strategygroup_tradeability_verdict_json
@@ -2499,6 +2555,30 @@ def _sequence_brf2_runtime_signal_capture_summary(
     }
 
 
+def _sequence_brf2_candidate_packet_summary(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    first_blocker = _as_dict(packet.get("first_blocker"))
+    candidate = _as_dict(packet.get("candidate_packet"))
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet)
+        in {
+            "brf2_non_executing_candidate_packet_ready",
+            "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
+        },
+        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
+        "candidate_packet_ready": packet.get("candidate_packet_ready") is True,
+        "candidate_packet_id": str(candidate.get("candidate_packet_id") or ""),
+        "signal_state": str(candidate.get("signal_state") or "unknown"),
+        "first_blocker_class": str(first_blocker.get("class") or "missing"),
+        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
+        "next_runtime_step": str(packet.get("next_runtime_step") or ""),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
     seats = _as_dict(packet.get("seat_readiness"))
     selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
@@ -2773,6 +2853,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     brf2_policy = report.get("brf2_owner_trial_policy") or {}
     brf2_required_facts_mapping = report.get("brf2_required_facts_mapping") or {}
     brf2_runtime_signal_capture = report.get("brf2_runtime_signal_capture") or {}
+    brf2_candidate_packet = (
+        report.get("brf2_non_executing_candidate_packet") or {}
+    )
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -2818,6 +2901,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- BRF2 signal state: `{brf2_runtime_signal_capture.get('current_signal_state', 'unknown')}`",
         f"- BRF2 signal first blocker: `{brf2_runtime_signal_capture.get('first_blocker_class', 'missing')}` / `{brf2_runtime_signal_capture.get('first_blocker_owner', 'unknown')}`",
         f"- BRF2 candidate packet ready: `{_yes_no(brf2_runtime_signal_capture.get('candidate_packet_ready') is True)}`",
+        f"- BRF2 non-executing candidate packet: `{brf2_candidate_packet.get('status', 'missing')}`",
+        f"- BRF2 non-executing candidate ready: `{_yes_no(brf2_candidate_packet.get('candidate_packet_ready') is True)}`",
+        f"- BRF2 candidate first blocker: `{brf2_candidate_packet.get('first_blocker_class', 'missing')}` / `{brf2_candidate_packet.get('first_blocker_owner', 'unknown')}`",
         f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
@@ -3181,6 +3267,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--brf2-runtime-signal-capture-md",
         default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD),
+    )
+    parser.add_argument(
+        "--brf2-non-executing-candidate-packet-json",
+        default=str(DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON),
+    )
+    parser.add_argument(
+        "--brf2-non-executing-candidate-packet-md",
+        default=str(DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD),
     )
     parser.add_argument(
         "--three-strategy-live-trial-portfolio-json",

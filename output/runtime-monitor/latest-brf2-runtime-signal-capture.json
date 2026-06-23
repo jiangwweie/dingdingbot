@@ -54,7 +54,7 @@
     "signal_detector_preview_ready": true,
     "watcher_scope_ready": true
   },
-  "generated_at_utc": "2026-06-23T08:13:30.580068+00:00",
+  "generated_at_utc": "2026-06-23T08:34:12.918686+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -198,6 +198,16 @@
         "state": "missing"
       }
     ]
+  },
+  "source_signal_context": {
+    "closed_at_utc": "",
+    "exchange_symbol": "",
+    "market": "",
+    "runtime_instance_id": "",
+    "signal_packet_id": "",
+    "source": "runtime_watcher_read_only_fact_input",
+    "symbol": "",
+    "timeframe": ""
   },
   "status": "brf2_runtime_signal_capture_ready",
   "strategy_group_id": "BRF2-001",

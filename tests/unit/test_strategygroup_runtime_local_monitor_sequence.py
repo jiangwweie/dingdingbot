@@ -56,6 +56,37 @@ def _write_passed_post_revision_review(command: list[str]) -> None:
     )
 
 
+def _write_waiting_brf2_candidate_packet(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
+            "strategy_group_id": "BRF2-001",
+            "candidate_packet_ready": False,
+            "candidate_packet": {
+                "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+                "signal_state": "fresh_signal_absent",
+            },
+            "first_blocker": {
+                "class": "fresh_brf2_short_signal_absent",
+                "owner": "market",
+                "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+            },
+            "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+            "checks": {
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_brf2_non_executing_candidate_packet",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+            },
+        },
+    )
+
+
 def _write_ready_opportunity_decision_loop(command: list[str]) -> None:
     _write_output(
         command,
@@ -1494,6 +1525,43 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
+        elif script == "build_brf2_non_executing_candidate_packet.py":
+            _write_output(
+                command,
+                {
+                    "status": (
+                        "brf2_non_executing_candidate_packet_waiting_for_fresh_signal"
+                    ),
+                    "strategy_group_id": "BRF2-001",
+                    "candidate_packet_ready": False,
+                    "candidate_packet": {
+                        "candidate_packet_type": (
+                            "brf2_non_executing_short_signal_candidate"
+                        ),
+                        "signal_state": "fresh_signal_absent",
+                    },
+                    "first_blocker": {
+                        "class": "fresh_brf2_short_signal_absent",
+                        "owner": "market",
+                        "next_action": (
+                            "continue_brf2_armed_observation_until_fresh_signal"
+                        ),
+                    },
+                    "next_runtime_step": (
+                        "continue_brf2_armed_observation_until_fresh_signal"
+                    ),
+                    "checks": {
+                        "actionable_now": False,
+                        "real_order_authority": False,
+                    },
+                    "interaction": {
+                        "level": "L0_local_brf2_non_executing_candidate_packet",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
         else:
             assert script == "run_strategygroup_l2_tier_policy_review.py"
             _write_output(
@@ -1596,6 +1664,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
+        brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
+        brf2_non_executing_candidate_packet_md=tmp_path / "brf2-candidate.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -1616,6 +1686,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_trial_asset_admission_proposal.py",
         "build_brf2_required_facts_mapping.py",
         "build_brf2_runtime_signal_capture.py",
+        "build_brf2_non_executing_candidate_packet.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",
@@ -1963,6 +2034,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_brf2_non_executing_candidate_packet.py":
+            _write_waiting_brf2_candidate_packet(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
@@ -2061,6 +2136,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
+        brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
+        brf2_non_executing_candidate_packet_md=tmp_path / "brf2-candidate.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2284,6 +2361,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_brf2_non_executing_candidate_packet.py":
+            _write_waiting_brf2_candidate_packet(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
@@ -2385,6 +2466,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
+        brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
+        brf2_non_executing_candidate_packet_md=tmp_path / "brf2-candidate.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2562,6 +2645,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_brf2_non_executing_candidate_packet.py":
+            _write_waiting_brf2_candidate_packet(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
@@ -2666,6 +2753,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
+        brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
+        brf2_non_executing_candidate_packet_md=tmp_path / "brf2-candidate.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2834,6 +2923,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_brf2_non_executing_candidate_packet.py":
+            _write_waiting_brf2_candidate_packet(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
@@ -2935,6 +3028,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         brf2_required_facts_mapping_md=tmp_path / "brf2-required-facts.md",
         brf2_runtime_signal_capture_json=tmp_path / "brf2-signal-capture.json",
         brf2_runtime_signal_capture_md=tmp_path / "brf2-signal-capture.md",
+        brf2_non_executing_candidate_packet_json=tmp_path / "brf2-candidate.json",
+        brf2_non_executing_candidate_packet_md=tmp_path / "brf2-candidate.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
