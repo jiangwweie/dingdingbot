@@ -359,6 +359,7 @@ def _verdict_row(
             stage=stage,
             candidate=candidate,
             registry_row=registry_row,
+            portfolio_seat=portfolio_seat,
             blockers=blockers,
         ),
         "runtime_scope_status": {
@@ -457,16 +458,18 @@ def _first_blocker(
             "record_owner_trial_scope_policy",
             "admitted_trial_asset",
         )
-    if strategy_group_id == "BRF2-001" and owner_policy_recorded:
+    if _row_live_submit_ready(
+        strategy_group_id=strategy_group_id,
+        live_submit_readiness=live_submit_readiness,
+    ):
         return _classifier(
-            "not_tradable_facts",
-            "required_facts_mapping_gap",
-            "Owner trial policy is recorded; RequiredFacts mapping must close before armed observation",
-            "engineering",
-            "close_brf2_required_facts_mapping_for_armed_observation",
-            "armed_observation",
+            "tradable_now",
+            "official_runtime_chain_ready",
+            "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
+            "runtime",
+            "continue_official_live_submit_chain",
+            "live_submit_ready",
         )
-
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         live_submit_readiness=live_submit_readiness,
@@ -483,6 +486,16 @@ def _first_blocker(
     portfolio_blocker = _portfolio_first_blocker(portfolio_seat)
     if portfolio_blocker:
         return portfolio_blocker
+
+    if strategy_group_id == "BRF2-001" and owner_policy_recorded:
+        return _classifier(
+            "not_tradable_facts",
+            "required_facts_mapping_gap",
+            "Owner trial policy is recorded; RequiredFacts mapping must close before armed observation",
+            "engineering",
+            "close_brf2_required_facts_mapping_for_armed_observation",
+            "armed_observation",
+        )
 
     text = " ".join([stage, " ".join(blockers), str(candidate.get("identity_status") or "")]).lower()
     if (
@@ -525,18 +538,6 @@ def _first_blocker(
             "official action-time gate has not been reached",
             "runtime",
             "wait_for_action_time_gate_after_signal_and_facts",
-            "live_submit_ready",
-        )
-    if _row_live_submit_ready(
-        strategy_group_id=strategy_group_id,
-        live_submit_readiness=live_submit_readiness,
-    ):
-        return _classifier(
-            "tradable_now",
-            "official_runtime_chain_ready",
-            "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
-            "runtime",
-            "continue_official_live_submit_chain",
             "live_submit_ready",
         )
     if "fresh_signal_absent" in text:
@@ -597,6 +598,9 @@ def _stage(
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
     )
+    portfolio_stage = str(portfolio_seat.get("stage") or "")
+    if portfolio_stage == "armed_observation":
+        return "armed_observation"
     if admission_proposal:
         if owner_policy_recorded:
             return str(admission_proposal.get("proposed_stage") or "admitted_trial_asset")
@@ -851,8 +855,18 @@ def _required_facts_status(
     stage: str,
     candidate: dict[str, Any],
     registry_row: dict[str, Any],
+    portfolio_seat: dict[str, Any],
     blockers: list[str],
 ) -> str:
+    if (
+        strategy_group_id == "BRF2-001"
+        and _as_dict(portfolio_seat.get("runtime_readiness")).get(
+            "armed_observation_ready"
+        )
+        is True
+        and portfolio_seat.get("required_facts_mapping_ready") is True
+    ):
+        return "ready"
     text = " ".join(blockers).lower()
     if strategy_group_id == "MPG-001":
         return "action_time_only"

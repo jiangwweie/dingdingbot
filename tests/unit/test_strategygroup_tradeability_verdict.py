@@ -319,6 +319,49 @@ def _owner_policy_scope() -> dict:
     }
 
 
+def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
+    return {
+        "status": "three_strategy_live_trial_portfolio_ready",
+        "selected_strategy_groups": ["MPG-001", "BRF2-001", "SOR-001"],
+        "seat_readiness": {
+            "BRF2-001": {
+                "stage": "armed_observation",
+                "required_facts_mapping_ready": True,
+                "runtime_readiness": {
+                    "armed_observation_ready": True,
+                    "tiny_live_ready": False,
+                    "live_submit_ready": False,
+                },
+                "first_blocker": {
+                    "verdict": "not_tradable_market_wait",
+                    "first_blocker_class": "fresh_brf2_short_signal_absent",
+                    "blocker_owner": "market",
+                    "next_action": (
+                        "continue_brf2_armed_observation_until_fresh_signal"
+                    ),
+                },
+                "tradeability_projection": {
+                    "can_trade": False,
+                    "verdict": "not_tradable_market_wait",
+                    "next_state_after_blocker_removed": "live_submit_ready",
+                },
+            }
+        },
+        "checks": {
+            "actionable_now": False,
+            "real_order_authority": False,
+        },
+        "safety_invariants": {
+            "actionable_now": False,
+            "real_order_authority": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
 def test_tradeability_verdict_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -439,6 +482,40 @@ def test_tradeability_verdict_advances_brf2_to_facts_blocker_after_policy_record
     assert packet["summary"]["engineering_first_blocker_count"] >= 1
     assert brf2["actionable_now"] is False
     assert brf2["real_order_authority"] is False
+
+
+def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    assert brf2["stage"] == "armed_observation"
+    assert brf2["verdict"] == "not_tradable_market_wait"
+    assert brf2["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert brf2["blocker_owner"] == "market"
+    assert brf2["next_action"] == (
+        "continue_brf2_armed_observation_until_fresh_signal"
+    )
+    assert brf2["after_next_state"] == "live_submit_ready"
+    assert brf2["required_facts_status"] == "ready"
+    assert brf2["actionable_now"] is False
+    assert brf2["real_order_authority"] is False
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert packet["checks"]["market_wait_only_after_admission"] is True
 
 
 def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():

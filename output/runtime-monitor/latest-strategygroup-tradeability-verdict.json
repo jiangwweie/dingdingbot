@@ -14,7 +14,7 @@
     "tradable_now_rows_have_authority": true,
     "tradable_now_scoped_to_live_submit": true
   },
-  "generated_at_utc": "2026-06-23T06:16:36.853634+00:00",
+  "generated_at_utc": "2026-06-23T06:48:35.340522+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -31,9 +31,9 @@
     "owner_policy_blocker_present": false,
     "real_order_authority": false,
     "state": "交易资格已判定",
-    "top_first_blocker": "required_facts_mapping_gap",
+    "top_first_blocker": "fresh_brf2_short_signal_absent",
     "top_strategy_group_id": "BRF2-001",
-    "top_verdict": "not_tradable_facts"
+    "top_verdict": "not_tradable_market_wait"
   },
   "safety_invariants": {
     "actionable_now": false,
@@ -51,32 +51,32 @@
   "summary": {
     "actionable_now_count": 0,
     "by_blocker_owner": {
-      "engineering": 6,
-      "market": 2,
+      "engineering": 5,
+      "market": 3,
       "strategy_review": 5
     },
     "by_verdict": {
       "not_tradable_asset_admission": 2,
-      "not_tradable_facts": 4,
-      "not_tradable_market_wait": 2,
+      "not_tradable_facts": 3,
+      "not_tradable_market_wait": 3,
       "not_tradable_strategy_quality": 5
     },
-    "engineering_first_blocker_count": 6,
-    "market_first_blocker_count": 2,
+    "engineering_first_blocker_count": 5,
+    "market_first_blocker_count": 3,
     "owner_first_blocker_count": 0,
     "real_order_authority_count": 0,
     "row_count": 13,
     "runtime_first_blocker_count": 0,
-    "selected_candidate_first_blocker_class": "required_facts_mapping_gap",
-    "selected_candidate_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+    "selected_candidate_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "selected_candidate_next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "selected_candidate_strategy_group_id": "BRF2-001",
-    "selected_candidate_verdict": "not_tradable_facts",
+    "selected_candidate_verdict": "not_tradable_market_wait",
     "selected_strategy_group_id": "BRF2-001",
     "strategy_review_first_blocker_count": 5,
-    "top_first_blocker_class": "required_facts_mapping_gap",
-    "top_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+    "top_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "top_strategy_group_id": "BRF2-001",
-    "top_verdict": "not_tradable_facts",
+    "top_verdict": "not_tradable_market_wait",
     "tradable_now_count": 0
   },
   "verdict_rows": [
@@ -137,9 +137,9 @@
     },
     {
       "actionable_now": false,
-      "after_next_state": "armed_observation",
+      "after_next_state": "live_submit_ready",
       "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
-      "blocker_owner": "engineering",
+      "blocker_owner": "market",
       "evidence_snapshot": {
         "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
         "latest_observe_only_side": "",
@@ -150,9 +150,9 @@
         "trial_recommendation": "candidate_trade_prepare_pending_owner_policy",
         "would_enter_forward_positive_count": 8
       },
-      "first_blocker_class": "required_facts_mapping_gap",
-      "first_blocker_detail": "Owner trial policy is recorded; RequiredFacts mapping must close before armed observation",
-      "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+      "first_blocker_class": "fresh_brf2_short_signal_absent",
+      "first_blocker_detail": "fresh_brf2_short_signal_absent",
+      "next_action": "continue_brf2_armed_observation_until_fresh_signal",
       "policy_scope": {
         "attempt_cap": 3,
         "capital_scope": {
@@ -187,7 +187,7 @@
         "valid_until": "one_review_cycle"
       },
       "real_order_authority": false,
-      "required_facts_status": "missing",
+      "required_facts_status": "ready",
       "resolved_blockers": [
         {
           "blocker": "owner_capital_scope_not_confirmed",
@@ -203,7 +203,7 @@
       "runtime_scope_status": {
         "brf2_trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "live_trial_portfolio_seat": true,
-        "live_trial_portfolio_stage": "admitted_trial_asset",
+        "live_trial_portfolio_stage": "armed_observation",
         "observe_only_would_enter": false,
         "owner_policy_recorded": true,
         "owner_policy_scope_missing": false,
@@ -245,9 +245,9 @@
           "class": "execution_gate"
         }
       ],
-      "stage": "admitted_trial_asset",
+      "stage": "armed_observation",
       "strategy_group_id": "BRF2-001",
-      "verdict": "not_tradable_facts"
+      "verdict": "not_tradable_market_wait"
     },
     {
       "actionable_now": false,

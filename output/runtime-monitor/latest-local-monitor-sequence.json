@@ -35,15 +35,34 @@
     "symbol_scope": "brf2_research_supported_symbols_only",
     "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0"
   },
+  "brf2_required_facts_mapping": {
+    "actionable_now": false,
+    "active": true,
+    "after_next_state": "armed_observation",
+    "disable_fact_count": 5,
+    "first_blocker_after_mapping": "fresh_brf2_short_signal_absent",
+    "fresh_signal_rule_id": "brf2_short_rally_failure_fresh_signal_v1",
+    "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+    "ready": true,
+    "real_order_authority": false,
+    "required_fact_count": 8,
+    "status": "brf2_required_facts_mapping_ready",
+    "strategy_group_id": "BRF2-001"
+  },
   "checks": {
     "automation_notify": true,
     "blockers": [],
     "brf2_actionable_now": false,
+    "brf2_after_required_facts_mapping_state": "armed_observation",
+    "brf2_disable_fact_count": 5,
+    "brf2_fresh_signal_rule_id": "brf2_short_rally_failure_fresh_signal_v1",
     "brf2_new_first_blocker": "required_facts_mapping_gap",
-    "brf2_next_bottleneck": "required_facts_mapping_gap",
+    "brf2_next_bottleneck": "fresh_signal_wait",
     "brf2_owner_policy_recorded": true,
     "brf2_owner_policy_scope_missing": false,
     "brf2_real_order_authority": false,
+    "brf2_required_fact_count": 8,
+    "brf2_required_facts_mapping_ready": true,
     "brf2_stage_after_policy": "admitted_trial_asset",
     "candidate_trade_actionable_now": false,
     "candidate_trade_real_order_authority": false,
@@ -52,10 +71,10 @@
     "engineering_gaps": [],
     "execution_blockers": [],
     "goal_complete": false,
-    "live_trial_engineering_gap_count": 1,
-    "live_trial_market_wait_count": 2,
+    "live_trial_engineering_gap_count": 0,
+    "live_trial_market_wait_count": 3,
     "live_trial_next_bottlenecks": {
-      "BRF2-001": "required_facts_mapping_gap",
+      "BRF2-001": "fresh_signal_wait",
       "MPG-001": "fresh_signal_wait",
       "SOR-001": "fresh_signal_wait"
     },
@@ -100,10 +119,10 @@
     "tradeability_real_order_authority_count": 0,
     "tradeability_row_count": 13,
     "tradeability_row_count_matches_verdict_rows": true,
-    "tradeability_top_first_blocker_class": "required_facts_mapping_gap",
-    "tradeability_top_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+    "tradeability_top_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "tradeability_top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "tradeability_top_strategy_group_id": "BRF2-001",
-    "tradeability_top_verdict": "not_tradable_facts",
+    "tradeability_top_verdict": "not_tradable_market_wait",
     "tradeability_tradable_now_count": 0,
     "tradeability_verdict_rows_count": 13,
     "trial_asset_admission_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
@@ -113,7 +132,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-23T06:16:36.860207+00:00",
+  "generated_at_utc": "2026-06-23T06:48:35.347141+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -258,10 +277,10 @@
     },
     "three_strategy_live_trial_portfolio": {
       "actionable_now": false,
-      "engineering_gap_count": 1,
-      "market_wait_count": 2,
+      "engineering_gap_count": 0,
+      "market_wait_count": 3,
       "next_bottlenecks": {
-        "BRF2-001": "required_facts_mapping_gap",
+        "BRF2-001": "fresh_signal_wait",
         "MPG-001": "fresh_signal_wait",
         "SOR-001": "fresh_signal_wait"
       },
@@ -288,12 +307,12 @@
       "row_count": 13,
       "row_count_matches_verdict_rows": true,
       "status": "tradeability_verdict_ready",
-      "top_after_next_state": "armed_observation",
-      "top_blocker_owner": "engineering",
-      "top_first_blocker_class": "required_facts_mapping_gap",
-      "top_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+      "top_after_next_state": "live_submit_ready",
+      "top_blocker_owner": "market",
+      "top_first_blocker_class": "fresh_brf2_short_signal_absent",
+      "top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
       "top_strategy_group_id": "BRF2-001",
-      "top_verdict": "not_tradable_facts",
+      "top_verdict": "not_tradable_market_wait",
       "tradable_now_count": 0,
       "verdict_rows_count": 13
     },
@@ -326,6 +345,7 @@
   "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
   "scope": "strategygroup_runtime_local_monitor_sequence",
   "source_paths": {
+    "brf2_required_facts_mapping_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
     "btpc_classifier_rule_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
     "btpc_l2_keep_revise_fact_source_decision_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json",
     "btpc_l2_shadow_fact_quality_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
@@ -482,6 +502,22 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
       "returncode": 0,
       "status": "trial_asset_admission_proposal_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_brf2_required_facts_mapping",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "brf2_required_facts_mapping",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
+      "returncode": 0,
+      "status": "brf2_required_facts_mapping_ready"
     },
     {
       "interaction": {
@@ -993,12 +1029,12 @@
     "row_count": 13,
     "row_count_matches_verdict_rows": true,
     "status": "tradeability_verdict_ready",
-    "top_after_next_state": "armed_observation",
-    "top_blocker_owner": "engineering",
-    "top_first_blocker_class": "required_facts_mapping_gap",
-    "top_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+    "top_after_next_state": "live_submit_ready",
+    "top_blocker_owner": "market",
+    "top_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "top_strategy_group_id": "BRF2-001",
-    "top_verdict": "not_tradable_facts",
+    "top_verdict": "not_tradable_market_wait",
     "tradable_now_count": 0,
     "verdict_rows_count": 13
   },
@@ -1028,10 +1064,10 @@
   },
   "three_strategy_live_trial_portfolio": {
     "actionable_now": false,
-    "engineering_gap_count": 1,
-    "market_wait_count": 2,
+    "engineering_gap_count": 0,
+    "market_wait_count": 3,
     "next_bottlenecks": {
-      "BRF2-001": "required_facts_mapping_gap",
+      "BRF2-001": "fresh_signal_wait",
       "MPG-001": "fresh_signal_wait",
       "SOR-001": "fresh_signal_wait"
     },

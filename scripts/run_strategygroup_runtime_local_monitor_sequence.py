@@ -222,6 +222,12 @@ DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
 DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.md"
 )
+DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.json"
+)
+DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.md"
+)
 DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
@@ -387,6 +393,10 @@ def main(argv: list[str] | None = None) -> int:
         brf2_owner_trial_policy_scope_md=Path(
             args.brf2_owner_trial_policy_scope_md
         ),
+        brf2_required_facts_mapping_json=Path(
+            args.brf2_required_facts_mapping_json
+        ),
+        brf2_required_facts_mapping_md=Path(args.brf2_required_facts_mapping_md),
         three_strategy_live_trial_portfolio_json=Path(
             args.three_strategy_live_trial_portfolio_json
         ),
@@ -573,6 +583,8 @@ def build_local_monitor_sequence_report(
     brf2_owner_trial_policy_scope_md: Path = (
         DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD
     ),
+    brf2_required_facts_mapping_json: Path = DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON,
+    brf2_required_facts_mapping_md: Path = DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD,
     three_strategy_live_trial_portfolio_json: Path = (
         DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON
     ),
@@ -734,6 +746,27 @@ def build_local_monitor_sequence_report(
             "strategygroup_trial_asset_admission_proposal",
             strategygroup_trial_asset_admission_proposal_command,
             strategygroup_trial_asset_admission_proposal_json,
+            runner,
+        )
+    )
+
+    brf2_required_facts_mapping_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_brf2_required_facts_mapping.py"),
+        "--trial-asset-admission-proposal-json",
+        str(strategygroup_trial_asset_admission_proposal_json),
+        "--brf2-owner-trial-policy-scope-json",
+        str(brf2_owner_trial_policy_scope_json),
+        "--output-json",
+        str(brf2_required_facts_mapping_json),
+        "--output-owner-progress",
+        str(brf2_required_facts_mapping_md),
+    ]
+    steps.append(
+        _run_step(
+            "brf2_required_facts_mapping",
+            brf2_required_facts_mapping_command,
+            brf2_required_facts_mapping_json,
             runner,
         )
     )
@@ -1261,6 +1294,8 @@ def build_local_monitor_sequence_report(
         str(strategygroup_trial_asset_admission_proposal_json),
         "--brf2-owner-trial-policy-scope-json",
         str(brf2_owner_trial_policy_scope_json),
+        "--brf2-required-facts-mapping-json",
+        str(brf2_required_facts_mapping_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
         "--output-json",
@@ -1383,6 +1418,9 @@ def build_local_monitor_sequence_report(
     brf2_policy_summary = _sequence_brf2_owner_trial_policy_summary(
         packets.get("brf2_owner_trial_policy_scope", {})
     )
+    brf2_required_facts_summary = _sequence_brf2_required_facts_mapping_summary(
+        packets.get("brf2_required_facts_mapping", {})
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         packets.get("three_strategy_live_trial_portfolio", {})
     )
@@ -1426,6 +1464,7 @@ def build_local_monitor_sequence_report(
         "strategy_experiment_candidate": capital_trial_summary,
         "strategy_trial_asset_admission": trial_admission_summary,
         "brf2_owner_trial_policy": brf2_policy_summary,
+        "brf2_required_facts_mapping": brf2_required_facts_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "strategy_tradeability_verdict": tradeability_summary,
         "checks": {
@@ -1507,6 +1546,21 @@ def build_local_monitor_sequence_report(
             ],
             "brf2_new_first_blocker": brf2_policy_summary[
                 "brf2_new_first_blocker"
+            ],
+            "brf2_required_facts_mapping_ready": brf2_required_facts_summary[
+                "ready"
+            ],
+            "brf2_after_required_facts_mapping_state": (
+                brf2_required_facts_summary["after_next_state"]
+            ),
+            "brf2_fresh_signal_rule_id": brf2_required_facts_summary[
+                "fresh_signal_rule_id"
+            ],
+            "brf2_required_fact_count": brf2_required_facts_summary[
+                "required_fact_count"
+            ],
+            "brf2_disable_fact_count": brf2_required_facts_summary[
+                "disable_fact_count"
             ],
             "brf2_next_bottleneck": (
                 three_strategy_portfolio_summary["next_bottlenecks"].get(
@@ -1642,6 +1696,7 @@ def build_local_monitor_sequence_report(
             "strategygroup_trial_asset_admission_proposal_json": str(
                 strategygroup_trial_asset_admission_proposal_json
             ),
+            "brf2_required_facts_mapping_json": str(brf2_required_facts_mapping_json),
             "strategygroup_tradeability_verdict_json": str(
                 strategygroup_tradeability_verdict_json
             ),
@@ -2318,6 +2373,34 @@ def _sequence_brf2_owner_trial_policy_summary(packet: dict[str, Any]) -> dict[st
     }
 
 
+def _sequence_brf2_required_facts_mapping_summary(
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    fresh_signal_rule = _as_dict(packet.get("fresh_signal_rule"))
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "brf2_required_facts_mapping_ready",
+        "ready": packet.get("required_facts_mapping_ready") is True,
+        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
+        "fresh_signal_rule_id": str(fresh_signal_rule.get("signal_id") or ""),
+        "required_fact_count": _int(
+            _as_dict(packet.get("checks")).get("required_fact_count")
+            or len(packet.get("required_fact_keys") or [])
+        ),
+        "disable_fact_count": _int(
+            _as_dict(packet.get("checks")).get("disable_fact_count")
+            or len(packet.get("disable_fact_keys") or [])
+        ),
+        "after_next_state": str(packet.get("after_next_state") or ""),
+        "first_blocker_after_mapping": str(
+            packet.get("first_blocker_after_mapping") or ""
+        ),
+        "next_action": str(packet.get("next_action") or ""),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
     seats = _as_dict(packet.get("seat_readiness"))
     selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
@@ -2590,6 +2673,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     experiment_candidate = report.get("strategy_experiment_candidate") or {}
     trial_admission = report.get("strategy_trial_asset_admission") or {}
     brf2_policy = report.get("brf2_owner_trial_policy") or {}
+    brf2_required_facts_mapping = report.get("brf2_required_facts_mapping") or {}
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -2628,6 +2712,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Owner policy required: `{_yes_no(trial_admission.get('owner_policy_required') is True)}`",
         f"- BRF2 Owner policy recorded: `{_yes_no(brf2_policy.get('owner_policy_recorded') is True)}`",
         f"- BRF2 next blocker: `{brf2_policy.get('brf2_new_first_blocker', 'missing')}`",
+        f"- BRF2 RequiredFacts mapping: `{brf2_required_facts_mapping.get('status', 'missing')}`",
+        f"- BRF2 fresh signal rule: `{brf2_required_facts_mapping.get('fresh_signal_rule_id') or 'none'}`",
+        f"- BRF2 after mapping state: `{brf2_required_facts_mapping.get('after_next_state') or 'none'}`",
         f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
@@ -2975,6 +3062,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--brf2-owner-trial-policy-scope-md",
         default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD),
+    )
+    parser.add_argument(
+        "--brf2-required-facts-mapping-json",
+        default=str(DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON),
+    )
+    parser.add_argument(
+        "--brf2-required-facts-mapping-md",
+        default=str(DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_MD),
     )
     parser.add_argument(
         "--three-strategy-live-trial-portfolio-json",
