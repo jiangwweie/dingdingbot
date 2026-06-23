@@ -821,11 +821,19 @@ def _attach_trial_grade_standby(
         )
         blocker = _as_dict(seat.get("first_blocker"))
         runtime_readiness = _as_dict(seat.get("runtime_readiness"))
+        required_facts_ready = _standby_required_facts_ready(
+            seat=seat,
+            runtime_readiness=runtime_readiness,
+            blocker=blocker,
+        )
         standby_ready = (
             signal_status["trial_grade_audit_ready"]
+            and signal_status["trial_grade_policy_scope"] == "30U_bounded_trial_only"
+            and signal_status["trial_grade_signal_can_prepare_30u_trial"]
+            and not signal_status["production_grade_authority_changed"]
             and seat.get("admitted_or_selected_as_live_trial_asset") is True
             and seat.get("owner_policy_required") is False
-            and bool(seat.get("required_facts"))
+            and required_facts_ready
             and seat.get("loss_envelope_expressed") is True
             and blocker.get("blocker_owner") == "market"
             and not hard_safety_gates_relaxed
@@ -872,6 +880,25 @@ def _attach_trial_grade_standby(
         "calls_exchange_write": False,
         "places_order": False,
     }
+
+
+def _standby_required_facts_ready(
+    *,
+    seat: dict[str, Any],
+    runtime_readiness: dict[str, Any],
+    blocker: dict[str, Any],
+) -> bool:
+    if not seat.get("required_facts"):
+        return False
+    if runtime_readiness.get("armed_observation_ready") is not True:
+        return False
+    if blocker.get("blocker_owner") != "market":
+        return False
+    if seat.get("required_facts_mapping_ready") is False:
+        return False
+    if str(runtime_readiness.get("blocked_by") or "").endswith("_mapping_gap"):
+        return False
+    return True
 
 
 def _trial_grade_signal_status(

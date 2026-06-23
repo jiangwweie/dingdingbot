@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -219,6 +220,27 @@ def _trial_grade_signal_gate_audit() -> dict:
     }
 
 
+def _portfolio_with_trial_grade_audit(
+    module,
+    audit: dict,
+    *,
+    brf2_required_facts_mapping: dict | None = None,
+) -> dict:
+    return module.build_three_strategy_live_trial_portfolio(
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        capital_trial_bridge=_capital_trial_bridge(),
+        trial_asset_admission_proposal=_trial_admission_proposal(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        brf2_required_facts_mapping=(
+            brf2_required_facts_mapping or _brf2_required_facts_mapping()
+        ),
+        trial_grade_signal_gate_audit=audit,
+        signal_coverage={"events": [{"strategy_group_id": "SOR-001"}]},
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+
 def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     module = _load_module()
 
@@ -365,6 +387,88 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
     assert packet["checks"]["stage_5_waiting_live_opportunity"] is True
     assert packet["checks"]["action_time_preflight_pending_fresh_signal"] is True
     assert packet["checks"]["hard_safety_gates_relaxed"] is False
+
+
+def test_three_strategy_portfolio_blocks_stage_5_when_production_authority_changes():
+    module = _load_module()
+    audit = copy.deepcopy(_trial_grade_signal_gate_audit())
+    audit["live_trial_policy_update"][
+        "does_not_change_production_grade_authority"
+    ] = False
+
+    packet = _portfolio_with_trial_grade_audit(module, audit)
+
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is False
+    assert packet["stage_5_live_opportunity_standby"]["standby_count"] == 0
+    assert packet["checks"]["trial_grade_30u_standby_ready"] is False
+    assert packet["seat_readiness"]["BRF2-001"]["trial_grade_signal_status"][
+        "production_grade_authority_changed"
+    ] is True
+
+
+def test_three_strategy_portfolio_blocks_stage_5_when_hard_safety_bypass_allowed():
+    module = _load_module()
+    audit = copy.deepcopy(_trial_grade_signal_gate_audit())
+    audit["strategy_group_rows"]["BRF2-001"]["authority_boundary"][
+        "trial_grade_signal_can_bypass_hard_safety_gates"
+    ] = True
+
+    packet = _portfolio_with_trial_grade_audit(module, audit)
+
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is False
+    assert "BRF2-001" not in packet["stage_5_live_opportunity_standby"][
+        "standby_strategy_groups"
+    ]
+    assert packet["seat_readiness"]["BRF2-001"]["runtime_readiness"][
+        "trial_grade_30u_standby_ready"
+    ] is False
+
+
+def test_three_strategy_portfolio_blocks_stage_5_when_brf2_mapping_not_ready():
+    module = _load_module()
+    mapping = copy.deepcopy(_brf2_required_facts_mapping())
+    mapping["required_facts_mapping_ready"] = False
+
+    packet = _portfolio_with_trial_grade_audit(
+        module,
+        _trial_grade_signal_gate_audit(),
+        brf2_required_facts_mapping=mapping,
+    )
+
+    brf2 = packet["seat_readiness"]["BRF2-001"]
+    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is False
+    assert brf2["runtime_readiness"]["armed_observation_ready"] is False
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is False
+
+
+def test_three_strategy_portfolio_blocks_stage_5_when_audit_row_missing():
+    module = _load_module()
+    audit = copy.deepcopy(_trial_grade_signal_gate_audit())
+    del audit["strategy_group_rows"]["SOR-001"]
+
+    packet = _portfolio_with_trial_grade_audit(module, audit)
+
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is False
+    assert "SOR-001" not in packet["stage_5_live_opportunity_standby"][
+        "standby_strategy_groups"
+    ]
+    assert packet["seat_readiness"]["SOR-001"]["trial_grade_signal_status"][
+        "trial_grade_audit_ready"
+    ] is False
+
+
+def test_three_strategy_portfolio_blocks_stage_5_when_policy_scope_is_not_30u():
+    module = _load_module()
+    audit = copy.deepcopy(_trial_grade_signal_gate_audit())
+    audit["live_trial_policy_update"]["scope"] = "production_trial"
+
+    packet = _portfolio_with_trial_grade_audit(module, audit)
+
+    assert packet["stage_5_live_opportunity_standby"]["ready"] is False
+    assert packet["stage_5_live_opportunity_standby"][
+        "trial_grade_policy_scope"
+    ] == "production_trial"
+    assert packet["checks"]["trial_grade_30u_standby_count"] == 0
 
 
 def test_three_strategy_portfolio_surfaces_brf2_fact_input_gap_after_mapping():
