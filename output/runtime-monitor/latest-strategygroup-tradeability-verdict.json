@@ -1,1 +1,1001 @@
-{"schema": "brc.strategygroup_tradeability_verdict.v1", "scope": "strategygroup_tradeability_verdict_read_model", "status": "tradeability_verdict_ready", "generated_at_utc": "2026-06-23T00:00:00+00:00", "summary": {"row_count": 2, "tradable_now_count": 0, "actionable_now_count": 0, "real_order_authority_count": 0, "owner_first_blocker_count": 1, "engineering_first_blocker_count": 1, "market_first_blocker_count": 1, "runtime_first_blocker_count": 0, "strategy_review_first_blocker_count": 1, "top_strategy_group_id": "BRF2-001", "top_verdict": "not_tradable_policy", "top_first_blocker_class": "owner_trial_scope_or_capital_policy_missing", "top_next_action": "record_owner_trial_scope_policy"}, "verdict_rows": [{"strategy_group_id": "BRF2-001", "stage": "trial_asset_admission_candidate", "verdict": "not_tradable_policy", "first_blocker_class": "owner_trial_scope_or_capital_policy_missing", "blocker_owner": "owner", "next_action": "record_owner_trial_scope_policy", "after_next_state": "admitted_trial_asset", "actionable_now": false, "real_order_authority": false}, {"strategy_group_id": "MPG-001", "stage": "armed_observation", "verdict": "not_tradable_market_wait", "first_blocker_class": "fresh_executable_signal_absent", "blocker_owner": "market", "next_action": "continue_armed_observation_until_fresh_signal", "after_next_state": "live_submit_ready", "actionable_now": false, "real_order_authority": false}], "owner_summary": {"state": "\u4ea4\u6613\u8d44\u683c\u5df2\u5224\u5b9a", "top_strategy_group_id": "BRF2-001", "top_verdict": "not_tradable_policy", "top_first_blocker": "owner_trial_scope_or_capital_policy_missing", "owner_policy_blocker_present": true, "owner_intervention_required": false, "real_order_authority": false, "actionable_now": false}, "checks": {"row_count": 2, "one_current_verdict_per_strategy_group": true, "owner_policy_blocker_present": true, "owner_decision_required": false, "row_count_matches_verdict_rows": true, "tradable_now_rows_have_authority": true, "authority_rows_are_tradable_now": true, "tradable_now_scoped_to_live_submit": true, "market_wait_only_after_admission": true, "actionable_now_count": 0, "real_order_authority_count": 0}, "interaction": {"level": "L0_local_tradeability_verdict", "remote_interaction_count": 0, "mutates_remote_files": false, "approaches_real_order": false, "calls_finalgate": false, "calls_operation_layer": false, "calls_exchange_write": false, "places_order": false}, "safety_invariants": {"actionable_now": false, "real_order_authority": false, "calls_finalgate": false, "calls_operation_layer": false, "calls_exchange_write": false, "places_order": false}}
+{
+  "checks": {
+    "actionable_now_count": 0,
+    "authority_rows_are_tradable_now": true,
+    "forbidden_effects": [],
+    "market_wait_only_after_admission": true,
+    "one_current_verdict_per_strategy_group": true,
+    "owner_decision_required": false,
+    "owner_policy_blocker_present": true,
+    "real_order_authority_count": 0,
+    "row_count": 13,
+    "row_count_matches_verdict_rows": true,
+    "tradable_now_count": 0,
+    "tradable_now_rows_have_authority": true,
+    "tradable_now_scoped_to_live_submit": true
+  },
+  "generated_at_utc": "2026-06-23T03:09:48.855789+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_tradeability_verdict",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "owner_summary": {
+    "actionable_now": false,
+    "owner_intervention_required": false,
+    "owner_policy_blocker_present": true,
+    "real_order_authority": false,
+    "state": "交易资格已判定",
+    "top_first_blocker": "owner_trial_scope_or_capital_policy_missing",
+    "top_strategy_group_id": "BRF2-001",
+    "top_verdict": "not_tradable_policy"
+  },
+  "safety_invariants": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "places_order": false,
+    "real_order_authority": false,
+    "verdict_generator_actionable_now": false,
+    "verdict_generator_real_order_authority": false
+  },
+  "schema": "brc.strategygroup_tradeability_verdict.v1",
+  "scope": "strategygroup_tradeability_verdict_read_model",
+  "status": "tradeability_verdict_ready",
+  "summary": {
+    "actionable_now_count": 0,
+    "by_blocker_owner": {
+      "engineering": 5,
+      "market": 1,
+      "owner": 1,
+      "strategy_review": 6
+    },
+    "by_verdict": {
+      "not_tradable_asset_admission": 2,
+      "not_tradable_facts": 3,
+      "not_tradable_market_wait": 1,
+      "not_tradable_policy": 1,
+      "not_tradable_strategy_quality": 6
+    },
+    "engineering_first_blocker_count": 5,
+    "market_first_blocker_count": 1,
+    "owner_first_blocker_count": 1,
+    "real_order_authority_count": 0,
+    "row_count": 13,
+    "runtime_first_blocker_count": 0,
+    "selected_candidate_first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+    "selected_candidate_next_action": "record_owner_trial_scope_policy",
+    "selected_candidate_strategy_group_id": "BRF2-001",
+    "selected_candidate_verdict": "not_tradable_policy",
+    "selected_strategy_group_id": "BRF2-001",
+    "strategy_review_first_blocker_count": 6,
+    "top_first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+    "top_next_action": "record_owner_trial_scope_policy",
+    "top_strategy_group_id": "BRF2-001",
+    "top_verdict": "not_tradable_policy",
+    "tradable_now_count": 0
+  },
+  "verdict_rows": [
+    {
+      "actionable_now": false,
+      "after_next_state": "live_submit_ready",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "market",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "fresh_executable_signal_absent",
+      "first_blocker_detail": "MPG is the admitted live lane, but no fresh executable signal exists",
+      "next_action": "continue_armed_observation_until_fresh_signal",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L4",
+        "tier_policy_mode": "tiny_real_order_eligible",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L4",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": true
+      },
+      "secondary_blockers": [],
+      "stage": "armed_observation",
+      "strategy_group_id": "MPG-001",
+      "verdict": "not_tradable_market_wait"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "admitted_trial_asset",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "owner",
+      "evidence_snapshot": {
+        "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 597,
+        "recent_opportunity_count": 11,
+        "tradable_forward_count": 8,
+        "trial_recommendation": "candidate_trade_prepare_pending_owner_policy",
+        "would_enter_forward_positive_count": 8
+      },
+      "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+      "first_blocker_detail": "trial asset admission proposal is ready; Owner trial policy is missing",
+      "next_action": "record_owner_trial_scope_policy",
+      "policy_scope": {
+        "attempt_cap": 3,
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": 1,
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "short"
+        ],
+        "symbol_scope": [
+          "owner_policy_required"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": false,
+        "registry_default_tier": "unknown",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": true,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "3_of_11_cap4_events_hit_5m_stop",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "symbol/date filters that fully remove stop hits are high overfit risk",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "source_tiny_live_ready_false",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "owner_trial_identity_not_confirmed",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "BRF2-001",
+      "verdict": "not_tradable_policy"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "short",
+        "latest_observe_only_symbol": "ADA/USDT:USDT",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "observe_only_signal_not_trial_candidate",
+      "first_blocker_detail": "latest would-enter is observe-only and lacks trial/live scope",
+      "next_action": "complete_observe_only_role_review_before_trial_admission",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": true,
+        "registry_admitted": true,
+        "registry_default_tier": "L1",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [],
+      "stage": "observe_only_would_enter",
+      "strategy_group_id": "RBR-001",
+      "verdict": "not_tradable_strategy_quality"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "classifier_or_role_support_asset",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "role_only_short_candidate_trade_watchlist",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 390,
+        "recent_opportunity_count": 78,
+        "tradable_forward_count": 32,
+        "trial_recommendation": "role_only_short_candidate_trade_watchlist",
+        "would_enter_forward_positive_count": 32
+      },
+      "first_blocker_class": "role_only_or_classifier_asset_not_trial_candidate",
+      "first_blocker_detail": "candidate is useful for role/classifier review, not a trade candidate",
+      "next_action": "complete_role_merge_or_classifier_review",
+      "policy_scope": {
+        "attempt_cap": 3,
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": 1,
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "short"
+        ],
+        "symbol_scope": [
+          "owner_policy_required"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": false,
+        "registry_default_tier": "unknown",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "5m_stop_hit_rate_is_high",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "time_stop_only_overstates_realistic_structural_stop_behavior",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "best role is filler not main right-tail engine",
+          "class": "strategy_quality"
+        },
+        {
+          "blocker": "source_tiny_live_ready_false",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "owner_trial_identity_not_confirmed",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "role_only_intake_candidate",
+      "strategy_group_id": "RBR2-001",
+      "verdict": "not_tradable_strategy_quality"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "armed_observation",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "engineering",
+      "evidence_snapshot": {
+        "candidate_status": "revise_before_trial_prepare",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": -90,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "defer_until_fact_source_classifier_closed",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "required_facts_or_classifier_mapping_unclosed",
+      "first_blocker_detail": "facts, freshness, classifier, or side-specific review is not closed",
+      "next_action": "close_requiredfacts_classifier_and_replay_mapping",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L2",
+        "tier_policy_mode": "shadow_candidate",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L2",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "no_action_or_classifier_attribution_needs_closure",
+          "class": "facts"
+        },
+        {
+          "blocker": "stale_fact_source_classifier_blocker_unclosed",
+          "class": "facts"
+        },
+        {
+          "blocker": "no_recent_would_enter",
+          "class": "review"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "BTPC-001",
+      "verdict": "not_tradable_facts"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "armed_observation",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "engineering",
+      "evidence_snapshot": {
+        "candidate_status": "trial_prepare_watchlist_after_revision",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 44,
+        "recent_opportunity_count": 2,
+        "tradable_forward_count": 2,
+        "trial_recommendation": "defer_until_rewrite_and_range_facts_closed",
+        "would_enter_forward_positive_count": 2
+      },
+      "first_blocker_class": "required_facts_or_classifier_mapping_unclosed",
+      "first_blocker_detail": "facts, freshness, classifier, or side-specific review is not closed",
+      "next_action": "close_requiredfacts_classifier_and_replay_mapping",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "short"
+        ],
+        "symbol_scope": [
+          "XRP/USDT:USDT"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L1",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "would_enter_forward_outcome_pending:24h",
+          "class": "facts"
+        },
+        {
+          "blocker": "no_action_or_classifier_attribution_needs_closure",
+          "class": "facts"
+        },
+        {
+          "blocker": "side_specific_rewrite_not_closed",
+          "class": "facts"
+        },
+        {
+          "blocker": "range_context_required",
+          "class": "facts"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "LSR-001",
+      "verdict": "not_tradable_facts"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "armed_observation",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "engineering",
+      "evidence_snapshot": {
+        "candidate_status": "promote_review_before_trial_prepare",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 13,
+        "recent_opportunity_count": 1,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "defer_until_squeeze_requiredfacts_forward_completed",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "required_facts_or_classifier_mapping_unclosed",
+      "first_blocker_detail": "facts, freshness, classifier, or side-specific review is not closed",
+      "next_action": "close_requiredfacts_classifier_and_replay_mapping",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "short"
+        ],
+        "symbol_scope": [
+          "BTC/USDT:USDT"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L1",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "would_enter_forward_outcome_pending:12h",
+          "class": "facts"
+        },
+        {
+          "blocker": "would_enter_forward_outcome_pending:24h",
+          "class": "facts"
+        },
+        {
+          "blocker": "would_enter_forward_outcome_pending:4h",
+          "class": "facts"
+        },
+        {
+          "blocker": "promote_review_forward_positive_not_completed",
+          "class": "facts"
+        },
+        {
+          "blocker": "owner_policy_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "squeeze_classifier_required",
+          "class": "facts"
+        },
+        {
+          "blocker": "requiredfacts_review_required",
+          "class": "facts"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "BRF-001",
+      "verdict": "not_tradable_facts"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "engineering",
+      "evidence_snapshot": {
+        "candidate_status": "trial_prepare_candidate_pending_owner_policy",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 307,
+        "recent_opportunity_count": 23,
+        "tradable_forward_count": 22,
+        "trial_recommendation": "trial_prepare_after_owner_identity_and_capital_policy",
+        "would_enter_forward_positive_count": 22
+      },
+      "first_blocker_class": "strategy_group_not_admitted_as_final_trial_asset",
+      "first_blocker_detail": "candidate is visible but not admitted into registry/tier/runtime trial scope",
+      "next_action": "build_trial_asset_admission_proposal",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "long"
+        ],
+        "symbol_scope": [
+          "SOL/USDT:USDT"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": false,
+        "registry_default_tier": "unknown",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "registry_identity_or_registry_row_missing",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "execution_tier_not_in_policy_or_registry",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
+          "class": "review"
+        },
+        {
+          "blocker": "owner_policy_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "registry_identity_unresolved",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "MI-001",
+      "verdict": "not_tradable_asset_admission"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "engineering",
+      "evidence_snapshot": {
+        "candidate_status": "identity_review_before_trial_prepare",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 161,
+        "recent_opportunity_count": 18,
+        "tradable_forward_count": 13,
+        "trial_recommendation": "defer_until_identity_or_merge_review_closed",
+        "would_enter_forward_positive_count": 13
+      },
+      "first_blocker_class": "strategy_group_not_admitted_as_final_trial_asset",
+      "first_blocker_detail": "candidate is visible but not admitted into registry/tier/runtime trial scope",
+      "next_action": "build_trial_asset_admission_proposal",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "owner_policy_required",
+        "leverage_scenario": "owner_policy_required",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [
+          "capital_scope",
+          "max_notional",
+          "valid_until",
+          "slippage_limit",
+          "trial_identity"
+        ],
+        "profile": "owner_policy_required",
+        "side_scope": [
+          "short",
+          "long"
+        ],
+        "symbol_scope": [
+          "ETH/USDT:USDT"
+        ]
+      },
+      "real_order_authority": false,
+      "required_facts_status": "missing",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": false,
+        "registry_default_tier": "unknown",
+        "tier_policy_mode": "unknown",
+        "tier_policy_present": false,
+        "tier_policy_tier": "unknown",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [
+        {
+          "blocker": "registry_identity_or_registry_row_missing",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "execution_tier_not_in_policy_or_registry",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "would_enter_forward_outcome_pending:12h",
+          "class": "facts"
+        },
+        {
+          "blocker": "would_enter_forward_outcome_pending:24h",
+          "class": "facts"
+        },
+        {
+          "blocker": "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
+          "class": "review"
+        },
+        {
+          "blocker": "owner_policy_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "registry_identity_unresolved",
+          "class": "asset_admission"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy"
+        },
+        {
+          "blocker": "fresh_signal_absent",
+          "class": "market"
+        },
+        {
+          "blocker": "action_time_finalgate_not_reached",
+          "class": "execution_gate"
+        },
+        {
+          "blocker": "official_operation_layer_not_reached",
+          "class": "execution_gate"
+        }
+      ],
+      "stage": "trial_asset_admission_candidate",
+      "strategy_group_id": "CPM-RO-001",
+      "verdict": "not_tradable_asset_admission"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "experiment_worthiness_or_loss_envelope_unclosed",
+      "first_blocker_detail": "experiment thesis or loss envelope is not closed enough for trial",
+      "next_action": "complete_experiment_worthiness_and_loss_envelope_review",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L3",
+        "tier_policy_mode": "armed_observation",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L3",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [],
+      "stage": "admitted_trial_asset",
+      "strategy_group_id": "FBS-001",
+      "verdict": "not_tradable_strategy_quality"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "experiment_worthiness_or_loss_envelope_unclosed",
+      "first_blocker_detail": "experiment thesis or loss envelope is not closed enough for trial",
+      "next_action": "complete_experiment_worthiness_and_loss_envelope_review",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L1",
+        "tier_policy_mode": "observe_only",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L1",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [],
+      "stage": "admitted_trial_asset",
+      "strategy_group_id": "PMR-001",
+      "verdict": "not_tradable_strategy_quality"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "experiment_worthiness_or_loss_envelope_unclosed",
+      "first_blocker_detail": "experiment thesis or loss envelope is not closed enough for trial",
+      "next_action": "complete_experiment_worthiness_and_loss_envelope_review",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L3",
+        "tier_policy_mode": "conditional_armed_observation",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L3",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [],
+      "stage": "admitted_trial_asset",
+      "strategy_group_id": "SOR-001",
+      "verdict": "not_tradable_strategy_quality"
+    },
+    {
+      "actionable_now": false,
+      "after_next_state": "trial_asset_admission_candidate",
+      "authority_boundary": "tradeability_verdict_is_read_model_only; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer",
+      "blocker_owner": "strategy_review",
+      "evidence_snapshot": {
+        "candidate_status": "",
+        "latest_observe_only_side": "",
+        "latest_observe_only_symbol": "",
+        "ranking_score": 0,
+        "recent_opportunity_count": 0,
+        "tradable_forward_count": 0,
+        "trial_recommendation": "",
+        "would_enter_forward_positive_count": 0
+      },
+      "first_blocker_class": "experiment_worthiness_or_loss_envelope_unclosed",
+      "first_blocker_detail": "experiment thesis or loss envelope is not closed enough for trial",
+      "next_action": "complete_experiment_worthiness_and_loss_envelope_review",
+      "policy_scope": {
+        "attempt_cap": "owner_policy_required",
+        "capital_scope": "not_applicable",
+        "leverage_scenario": "not_applicable",
+        "loss_unit": "owner_policy_required",
+        "missing_policy_fields": [],
+        "profile": "not_applicable",
+        "side_scope": [],
+        "symbol_scope": []
+      },
+      "real_order_authority": false,
+      "required_facts_status": "action_time_only",
+      "runtime_scope_status": {
+        "observe_only_would_enter": false,
+        "registry_admitted": true,
+        "registry_default_tier": "L2",
+        "tier_policy_mode": "shadow_candidate",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L2",
+        "trial_asset_admission_proposal_ready": false,
+        "trial_eligible": false
+      },
+      "secondary_blockers": [],
+      "stage": "admitted_trial_asset",
+      "strategy_group_id": "TEQ-001",
+      "verdict": "not_tradable_strategy_quality"
+    }
+  ]
+}

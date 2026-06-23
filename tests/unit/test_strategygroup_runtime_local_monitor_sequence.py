@@ -1675,6 +1675,12 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "research-intake-review.json",
         strategygroup_research_intake_review_md=tmp_path
         / "research-intake-review.md",
+        strategygroup_trial_asset_admission_proposal_json=tmp_path
+        / "trial-admission-proposal.json",
+        strategygroup_trial_asset_admission_proposal_md=tmp_path
+        / "trial-admission-proposal.md",
+        strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
+        strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
     )
 
@@ -1983,6 +1989,12 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "research-intake-review.json",
         strategygroup_research_intake_review_md=tmp_path
         / "research-intake-review.md",
+        strategygroup_trial_asset_admission_proposal_json=tmp_path
+        / "trial-admission-proposal.json",
+        strategygroup_trial_asset_admission_proposal_md=tmp_path
+        / "trial-admission-proposal.md",
+        strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
+        strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
     )
 
@@ -2248,6 +2260,12 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "research-intake-review.json",
         strategygroup_research_intake_review_md=tmp_path
         / "research-intake-review.md",
+        strategygroup_trial_asset_admission_proposal_json=tmp_path
+        / "trial-admission-proposal.json",
+        strategygroup_trial_asset_admission_proposal_md=tmp_path
+        / "trial-admission-proposal.md",
+        strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
+        strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
     )
 
@@ -2501,6 +2519,12 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "research-intake-review.json",
         strategygroup_research_intake_review_md=tmp_path
         / "research-intake-review.md",
+        strategygroup_trial_asset_admission_proposal_json=tmp_path
+        / "trial-admission-proposal.json",
+        strategygroup_trial_asset_admission_proposal_md=tmp_path
+        / "trial-admission-proposal.md",
+        strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
+        strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
     )
 

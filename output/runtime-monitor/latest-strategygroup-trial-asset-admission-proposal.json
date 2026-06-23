@@ -1,1 +1,156 @@
-{"schema": "brc.strategygroup_trial_asset_admission_proposal.v1", "scope": "strategygroup_trial_asset_admission_proposal", "status": "trial_asset_admission_proposal_ready", "generated_at_utc": "2026-06-23T00:00:00+00:00", "proposal": {"strategy_group_id": "BRF2-001", "current_stage": "tiny_live_intake_candidate", "proposed_stage": "trial_asset_admission_candidate", "next_action": "record_owner_trial_scope_policy", "after_next_state": "admitted_trial_asset", "actionable_now": false, "real_order_authority": false}, "owner_policy_checkpoint": {"owner_policy_required": true, "owner_policy_fields": ["capital_scope", "max_notional", "valid_until", "slippage_limit", "trial_identity"], "owner_decision_required_now": false, "owner_intervention_required": false}, "checks": {"proposal_generated": true, "owner_policy_required": true, "owner_decision_required": false, "actionable_now": false, "real_order_authority": false}, "interaction": {"level": "L0_local_trial_asset_admission_proposal", "remote_interaction_count": 0, "mutates_remote_files": false, "approaches_real_order": false, "calls_finalgate": false, "calls_operation_layer": false, "calls_exchange_write": false, "places_order": false}, "safety_invariants": {"actionable_now": false, "real_order_authority": false, "calls_finalgate": false, "calls_operation_layer": false, "calls_exchange_write": false, "places_order": false}}
+{
+  "checks": {
+    "actionable_now": false,
+    "forbidden_effects": [],
+    "order_sizing_mutated": false,
+    "owner_decision_required": false,
+    "owner_policy_required": true,
+    "proposal_generated": true,
+    "real_order_authority": false,
+    "registry_policy_mutated": false,
+    "runtime_profile_mutated": false,
+    "tier_policy_mutated": false
+  },
+  "generated_at_utc": "2026-06-23T03:09:46.015640+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_trial_asset_admission_proposal",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "owner_policy_checkpoint": {
+    "owner_decision_required_now": false,
+    "owner_intervention_required": false,
+    "owner_policy_fields": [
+      "capital_scope",
+      "max_notional",
+      "valid_until",
+      "slippage_limit",
+      "trial_identity",
+      "symbol_scope",
+      "side_scope",
+      "leverage_scenario",
+      "attempt_cap",
+      "loss_unit"
+    ],
+    "owner_policy_required": true
+  },
+  "proposal": {
+    "actionable_now": false,
+    "after_next_state": "admitted_trial_asset",
+    "current_stage": "tiny_live_intake_candidate",
+    "next_action": "record_owner_trial_scope_policy",
+    "owner_policy_defaults": {
+      "attempt_cap": 3,
+      "capital_scope": "owner_policy_required",
+      "leverage_scenario": "owner_policy_required",
+      "loss_unit": 1,
+      "max_notional": "owner_policy_required",
+      "side_scope": [
+        "short"
+      ],
+      "slippage_limit": "owner_policy_required",
+      "symbol_scope": [
+        "owner_policy_required"
+      ],
+      "trial_identity": "owner_policy_required",
+      "valid_until": "owner_policy_required"
+    },
+    "owner_policy_fields": [
+      "capital_scope",
+      "max_notional",
+      "valid_until",
+      "slippage_limit",
+      "trial_identity",
+      "symbol_scope",
+      "side_scope",
+      "leverage_scenario",
+      "attempt_cap",
+      "loss_unit"
+    ],
+    "owner_policy_required": true,
+    "proposal_type": "non_applying_registry_tier_runtime_admission_draft",
+    "proposed_registry_row": {
+      "authority_boundary": "proposal_only; not_registry_authority; not_runtime_admission; actionable_now=false; real_order_authority=false",
+      "default_tier": "trial_admission",
+      "evidence_status": "trial_asset_admission_proposal",
+      "required_facts_summary": {
+        "disable_or_review": [
+          "disable_strong_reclaim_proxy",
+          "disable_low_structure_loss_atr_lt_0_15",
+          "disable_trend_flip_proxy"
+        ],
+        "strategy": [
+          "closed_1h_ohlcv",
+          "closed_4h_trend",
+          "ema_20",
+          "ema_48",
+          "rally_depth_24h",
+          "squeeze_risk_state"
+        ]
+      },
+      "risk_envelope": {
+        "attempt_cap_per_review_cycle": 3,
+        "daily_loss_cap_units": 1,
+        "max_consecutive_losses": 2,
+        "pause_conditions": [
+          "any_path_stop_without_post_trade_review",
+          "two_consecutive_losses",
+          "symbol_specific_loss_until_symbol_review",
+          "missing_required_path_or_liquidation_buffer_evidence"
+        ]
+      },
+      "strategy_group_id": "BRF2-001",
+      "supported_sides": [
+        "short"
+      ],
+      "trial_eligible": false
+    },
+    "proposed_stage": "trial_asset_admission_candidate",
+    "proposed_tier_policy_row": {
+      "mode": "trial_asset_admission_candidate",
+      "reason": "Owner policy and scoped risk boundary required before armed observation",
+      "tier": "trial_admission"
+    },
+    "real_order_authority": false,
+    "runtime_admission_plan": {
+      "disable_or_review_facts_draft": [
+        "disable_strong_reclaim_proxy",
+        "disable_low_structure_loss_atr_lt_0_15",
+        "disable_trend_flip_proxy"
+      ],
+      "fresh_signal_source": "future_runtime_observation_only",
+      "protection_plan_required": true,
+      "required_facts_draft": [
+        "closed_1h_ohlcv",
+        "closed_4h_trend",
+        "ema_20",
+        "ema_48",
+        "rally_depth_24h",
+        "squeeze_risk_state"
+      ],
+      "review_ledger_required": true,
+      "watcher_scope": "short_read_only_or_armed_observation_after_policy"
+    },
+    "strategy_group_id": "BRF2-001"
+  },
+  "safety_invariants": {
+    "actionable_now": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "real_order_authority": false,
+    "registry_authority_changed": false,
+    "tier_policy_changed": false
+  },
+  "schema": "brc.strategygroup_trial_asset_admission_proposal.v1",
+  "scope": "strategygroup_trial_asset_admission_proposal_non_applying",
+  "status": "trial_asset_admission_proposal_ready"
+}

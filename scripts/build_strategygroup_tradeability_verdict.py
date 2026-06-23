@@ -760,7 +760,7 @@ def _summary(
     *,
     selected_strategy_group_id: str = "",
 ) -> dict[str, Any]:
-    selected_top = next(
+    selected_candidate_top = next(
         (
             row
             for row in rows
@@ -768,7 +768,20 @@ def _summary(
         ),
         {},
     )
-    top = selected_top or (
+    tradable_top = next(
+        (
+            row
+            for row in sorted(
+                rows,
+                key=lambda row: _strategy_sort_key(
+                    str(row.get("strategy_group_id") or "")
+                ),
+            )
+            if row.get("verdict") == "tradable_now"
+        ),
+        {},
+    )
+    fallback_top = (
         sorted(
             rows,
             key=lambda row: (
@@ -779,6 +792,7 @@ def _summary(
         if rows
         else {}
     )
+    top = tradable_top or selected_candidate_top or fallback_top
     by_verdict: dict[str, int] = {}
     by_owner: dict[str, int] = {}
     for row in rows:
@@ -801,6 +815,18 @@ def _summary(
         "by_verdict": by_verdict,
         "by_blocker_owner": by_owner,
         "selected_strategy_group_id": selected_strategy_group_id,
+        "selected_candidate_strategy_group_id": str(
+            selected_candidate_top.get("strategy_group_id") or ""
+        ),
+        "selected_candidate_verdict": str(
+            selected_candidate_top.get("verdict") or "none"
+        ),
+        "selected_candidate_first_blocker_class": str(
+            selected_candidate_top.get("first_blocker_class") or "none"
+        ),
+        "selected_candidate_next_action": str(
+            selected_candidate_top.get("next_action") or "none"
+        ),
         "top_strategy_group_id": str(top.get("strategy_group_id") or ""),
         "top_verdict": str(top.get("verdict") or "none"),
         "top_first_blocker_class": str(top.get("first_blocker_class") or "none"),

@@ -359,6 +359,10 @@ def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
     assert rows["RBR-001"]["verdict"] != "tradable_now"
     assert rows["RBR2-001"]["verdict"] != "tradable_now"
     assert packet["summary"]["tradable_now_count"] == 1
+    assert packet["summary"]["top_strategy_group_id"] == "MPG-001"
+    assert packet["summary"]["top_verdict"] == "tradable_now"
+    assert packet["summary"]["selected_candidate_strategy_group_id"] == "BRF2-001"
+    assert packet["summary"]["selected_candidate_verdict"] == "not_tradable_policy"
     assert packet["summary"]["actionable_now_count"] == 1
     assert packet["summary"]["real_order_authority_count"] == 1
     assert packet["checks"]["tradable_now_rows_have_authority"] is True
