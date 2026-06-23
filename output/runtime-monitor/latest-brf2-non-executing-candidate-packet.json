@@ -35,6 +35,18 @@
         "state": "clear"
       }
     ],
+    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "fact_authority_boundary": {
+      "action_time_required_facts_satisfied": false,
+      "fact_authority": "readonly_proxy_not_action_time_required_fact",
+      "notes": "BRF reference rows are read-only observation proxies; action-time RequiredFacts must be rebuilt from live runtime/exchange facts.",
+      "source_is_brf_reference_row": true,
+      "usable_for_armed_observation": true,
+      "usable_for_exchange_write": false,
+      "usable_for_finalgate": false,
+      "usable_for_market_wait_classification": true,
+      "usable_for_operation_layer": false
+    },
     "forbidden_until_action_time": [
       "actionable_now",
       "real_order_authority",
@@ -104,13 +116,17 @@
     "side": "short",
     "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
     "signal_state": "fresh_signal_absent",
-    "source_signal_packet_id": "",
+    "source_candidate_id": "BRF-001-BTC-SHORT",
+    "source_signal_packet_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
+    "source_signal_type": "no_action",
+    "source_strategy_group_id": "BRF-001",
     "strategy_group_id": "BRF2-001",
-    "symbol": "",
-    "symbol_binding_status": "symbol_scope_only_requires_action_time_binding"
+    "symbol": "BTC/USDT:USDT",
+    "symbol_binding_status": "actual_symbol_bound"
   },
   "candidate_packet_ready": false,
   "checks": {
+    "action_time_required_facts_satisfied": false,
     "actionable_now": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
@@ -128,7 +144,7 @@
     "next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "owner": "market"
   },
-  "generated_at_utc": "2026-06-23T10:22:09.556983+00:00",
+  "generated_at_utc": "2026-06-23T10:44:12.132801+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

@@ -35,6 +35,8 @@ DEFAULT_OUTPUT_MD = (
 SCHEMA = "brc.brf2_runtime_signal_facts.v1"
 READY_STATUS = "brf2_runtime_signal_facts_ready"
 MISSING_STATUS = "brf2_runtime_signal_facts_missing_watcher_input"
+READONLY_PROXY_FACT_AUTHORITY = "readonly_proxy_not_action_time_required_fact"
+RUNTIME_READONLY_FACT_AUTHORITY = "runtime_watcher_readonly_not_action_time_required_fact"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -89,6 +91,12 @@ def build_brf2_runtime_signal_facts(
     fact_packet = explicit_facts or derived_facts
     fact_input_present = bool(fact_packet)
     watcher_tick_present = fact_input_present or bool(source_row)
+    source_is_brf_reference_row = _is_brf_reference_row(source_row)
+    fact_authority = _fact_authority(
+        fact_packet=fact_packet,
+        source_is_brf_reference_row=source_is_brf_reference_row,
+    )
+    source_signal_context = _signal_context(fact_packet, source_row)
     first_blocker = (
         {
             "class": "none",
@@ -113,7 +121,13 @@ def build_brf2_runtime_signal_facts(
         "watcher_tick_present": watcher_tick_present,
         "source_status": str(source_packet.get("status") or "missing"),
         "source_path": str(source_path or ""),
-        "source_signal_context": _signal_context(fact_packet, source_row),
+        "source_signal_context": source_signal_context,
+        "signal_context": source_signal_context,
+        "fact_authority": fact_authority,
+        "fact_authority_boundary": _fact_authority_boundary(
+            fact_authority=fact_authority,
+            source_is_brf_reference_row=source_is_brf_reference_row,
+        ),
         "facts": _facts(fact_packet),
         "first_blocker": first_blocker,
         "next_action": first_blocker["next_action"],
@@ -122,10 +136,14 @@ def build_brf2_runtime_signal_facts(
             "watcher_tick_present": watcher_tick_present,
             "brf2_source_row_present": bool(source_row),
             "source_strategy_group_id": str(source_row.get("strategy_group_id") or ""),
-            "source_is_brf_reference_row": _is_brf_reference_row(source_row),
+            "source_is_brf_reference_row": source_is_brf_reference_row,
             "missing_watcher_input": not fact_input_present,
             "actionable_now": False,
             "real_order_authority": False,
+            "action_time_required_facts_satisfied": False,
+            "derived_proxy_not_action_time_authority": (
+                fact_authority == READONLY_PROXY_FACT_AUTHORITY
+            ),
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -311,10 +329,54 @@ def _closed_5m_fact(five_minute: list[dict[str, Any]], row: dict[str, Any]) -> d
         detail={
             "timeframe": "5m",
             "proxy_source": "latest_closed_strategy_observation_tick",
+            "authority": READONLY_PROXY_FACT_AUTHORITY,
             "proxy_is_not_action_time_live_required_fact": True,
             "market_bar_timestamp_ms": row.get("market_bar_timestamp_ms"),
         },
     )
+
+
+def _fact_authority(
+    *,
+    fact_packet: dict[str, Any],
+    source_is_brf_reference_row: bool,
+) -> str:
+    if not fact_packet:
+        return ""
+    if source_is_brf_reference_row:
+        return READONLY_PROXY_FACT_AUTHORITY
+    return str(fact_packet.get("fact_authority") or RUNTIME_READONLY_FACT_AUTHORITY)
+
+
+def _fact_authority_boundary(
+    *,
+    fact_authority: str,
+    source_is_brf_reference_row: bool,
+) -> dict[str, Any]:
+    if not fact_authority:
+        return {
+            "action_time_required_facts_satisfied": False,
+            "usable_for_armed_observation": False,
+            "usable_for_finalgate": False,
+            "usable_for_operation_layer": False,
+            "usable_for_exchange_write": False,
+        }
+    return {
+        "fact_authority": fact_authority,
+        "source_is_brf_reference_row": source_is_brf_reference_row,
+        "usable_for_armed_observation": True,
+        "usable_for_market_wait_classification": True,
+        "action_time_required_facts_satisfied": False,
+        "usable_for_finalgate": False,
+        "usable_for_operation_layer": False,
+        "usable_for_exchange_write": False,
+        "notes": (
+            "BRF reference rows are read-only observation proxies; action-time "
+            "RequiredFacts must be rebuilt from live runtime/exchange facts."
+            if source_is_brf_reference_row
+            else "Runtime read-only facts can arm observation but do not satisfy action-time submit authority."
+        ),
+    }
 
 
 def _fact(
@@ -401,10 +463,13 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Fact input present: `{_yes_no(packet['fact_input_present'])}`",
         f"- Watcher tick present: `{_yes_no(packet['watcher_tick_present'])}`",
         f"- First blocker: `{first_blocker.get('class', 'missing')}` / `{first_blocker.get('owner', 'unknown')}`",
+        f"- Fact authority: `{packet.get('fact_authority') or 'none'}`",
+        "- Action-time RequiredFacts satisfied: `否`",
         "",
         "## Boundary",
         "",
         "- This packet is local/read-only and non-executing.",
+        "- BRF reference derived facts are observation proxies, not action-time live RequiredFacts.",
         "- Missing watcher fact input is an engineering gap, not a market signal absence.",
         "- It does not call FinalGate, Operation Layer, exchange write, or order creation.",
     ]

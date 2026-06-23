@@ -156,10 +156,21 @@ def test_brf2_runtime_signal_facts_derives_from_brf_reference_watcher_row():
     assert packet["strategy_group_id"] == "BRF2-001"
     assert packet["fact_input_present"] is True
     assert packet["watcher_tick_present"] is True
+    assert packet["fact_authority"] == module.READONLY_PROXY_FACT_AUTHORITY
+    assert packet["fact_authority_boundary"]["usable_for_armed_observation"] is True
+    assert packet["fact_authority_boundary"][
+        "action_time_required_facts_satisfied"
+    ] is False
+    assert packet["fact_authority_boundary"]["usable_for_finalgate"] is False
+    assert packet["fact_authority_boundary"]["usable_for_operation_layer"] is False
     assert packet["source_signal_context"]["source_strategy_group_id"] == "BRF-001"
     assert packet["source_signal_context"]["symbol"] == "BTC/USDT:USDT"
+    assert packet["signal_context"] == packet["source_signal_context"]
     assert facts["closed_1h_ohlcv"]["status"] == "ready"
     assert facts["closed_5m_ohlcv"]["status"] == "ready"
+    assert facts["closed_5m_ohlcv"]["detail"]["authority"] == (
+        module.READONLY_PROXY_FACT_AUTHORITY
+    )
     assert facts["closed_5m_ohlcv"]["detail"][
         "proxy_is_not_action_time_live_required_fact"
     ] is True
@@ -169,6 +180,8 @@ def test_brf2_runtime_signal_facts_derives_from_brf_reference_watcher_row():
     assert facts["strong_reclaim_disable_state"]["status"] == "false"
     assert packet["first_blocker"]["class"] == "none"
     assert packet["checks"]["source_is_brf_reference_row"] is True
+    assert packet["checks"]["action_time_required_facts_satisfied"] is False
+    assert packet["checks"]["derived_proxy_not_action_time_authority"] is True
     assert packet["checks"]["actionable_now"] is False
     assert packet["checks"]["real_order_authority"] is False
 
@@ -185,6 +198,10 @@ def test_brf2_runtime_signal_facts_accepts_explicit_brf2_fact_packet():
     assert packet["status"] == module.READY_STATUS
     assert packet["fact_input_present"] is True
     assert packet["watcher_tick_present"] is True
+    assert packet["fact_authority"] == module.RUNTIME_READONLY_FACT_AUTHORITY
+    assert packet["fact_authority_boundary"][
+        "action_time_required_facts_satisfied"
+    ] is False
     assert packet["source_signal_context"]["signal_packet_id"] == "brf2-signal-001"
     assert packet["source_signal_context"]["symbol"] == "ADA/USDT:USDT"
     assert packet["facts"]["closed_1h_ohlcv"]["status"] == "ready"

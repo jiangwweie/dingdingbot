@@ -117,6 +117,22 @@ def test_strategy_uncertainty_is_not_execution_blocker() -> None:
         ]
 
 
+def test_brf_promote_review_is_scoped_review_only() -> None:
+    registry, tier_policy, decision_ledger = _inputs()
+
+    packet = build_tier_review_packet(registry, tier_policy, decision_ledger)
+    rows = {row["strategy_group_id"]: row for row in packet["rows"]}
+    brf = rows["BRF-001"]
+
+    assert brf["current_decision"] == "promote_review_only"
+    assert brf["recommended_next_action"] == "promote_review_only"
+    assert brf["promotion_scope"] == "review_only"
+    assert brf["promotion_target"] == "promotion_evidence_review_only"
+    assert brf["owner_decision_needed"] is False
+    assert brf["actionable_now"] is False
+    assert brf["safety_invariants"]["real_order_authority"] is False
+
+
 def test_owner_markdown_includes_groups_without_primary_internal_gate_labels() -> None:
     result = subprocess.run(
         [sys.executable, "scripts/build_strategygroup_tier_review.py"],

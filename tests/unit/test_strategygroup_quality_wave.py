@@ -84,6 +84,18 @@ def test_quality_wave_classifies_current_gap_matrix() -> None:
     assert rows["RBR-001"]["system_can_continue"] is False
 
 
+def test_quality_wave_keeps_brf_promote_review_scoped() -> None:
+    packet = _packet()
+    rows = {row["strategy_group_id"]: row for row in packet["rows"]}
+    brf = rows["BRF-001"]
+
+    assert brf["current_decision"] == "promote_review_only"
+    assert brf["promotion_scope"] == "review_only"
+    assert brf["promotion_target"] == "promotion_evidence_review_only"
+    assert brf["actionable_now"] is False
+    assert brf["real_order_authority"] is False
+
+
 def test_gap_closures_span_three_findings_and_two_groups_with_shared_guard() -> None:
     packet = _packet()
 

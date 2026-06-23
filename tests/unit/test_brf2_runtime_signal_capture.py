@@ -89,6 +89,51 @@ def _fresh_facts() -> dict:
     }
 
 
+def _derived_source_signal_context_facts() -> dict:
+    return {
+        "status": "brf2_runtime_signal_facts_ready",
+        "fact_input_present": True,
+        "watcher_tick_present": True,
+        "fact_authority": "readonly_proxy_not_action_time_required_fact",
+        "fact_authority_boundary": {
+            "usable_for_armed_observation": True,
+            "action_time_required_facts_satisfied": False,
+            "usable_for_finalgate": False,
+            "usable_for_operation_layer": False,
+        },
+        "source_signal_context": {
+            "signal_packet_id": "BRF-001-BTC-SHORT:brf-signal:1782097200000",
+            "runtime_instance_id": "",
+            "symbol": "BTC/USDT:USDT",
+            "exchange_symbol": "BTC/USDT:USDT",
+            "market": "binance_usdm",
+            "timeframe": "1h_closed_observation_with_5m_proxy",
+            "closed_at_utc": "2026-06-23T00:00:00+00:00",
+            "source": "brf_reference_readonly_preview_derived_brf2_fact_input",
+            "source_strategy_group_id": "BRF-001",
+            "source_candidate_id": "BRF-001-BTC-SHORT",
+            "source_signal_type": "no_action",
+        },
+        "facts": {
+            "closed_1h_ohlcv": {"status": "ready", "fresh": True},
+            "closed_5m_ohlcv": {"status": "ready", "fresh": True},
+            "rally_context": {"status": "not_satisfied", "fresh": True},
+            "rally_failure_trigger_state": {
+                "status": "not_confirmed",
+                "fresh": True,
+            },
+            "short_squeeze_risk_state": {"status": "bounded", "fresh": True},
+            "strong_reclaim_disable_state": {"status": "false", "fresh": True},
+            "rally_extension_invalidates_failure_state": {
+                "status": "false",
+                "fresh": True,
+            },
+            "liquidity_downshift_state": {"status": "false", "fresh": True},
+            "spread_liquidity_state": {"status": "acceptable", "fresh": True},
+        },
+    }
+
+
 def test_brf2_runtime_signal_capture_exposes_missing_fact_input():
     module = _load_module()
 
@@ -143,6 +188,39 @@ def test_brf2_runtime_signal_capture_builds_non_executing_candidate_shape():
     assert "operation_layer_submit_authorization_id" in candidate["required_next_chain"]
     assert packet["checks"]["actionable_now"] is False
     assert packet["checks"]["real_order_authority"] is False
+
+
+def test_brf2_runtime_signal_capture_preserves_source_signal_context():
+    module = _load_module()
+
+    packet = module.build_brf2_runtime_signal_capture(
+        required_facts_mapping=_mapping(),
+        owner_policy=_owner_policy(),
+        fact_input=_derived_source_signal_context_facts(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    context = packet["source_signal_context"]
+    preview = packet["signal_detector_preview"]
+    candidate = packet["candidate_packet_shape"]
+    assert packet["fact_input_present"] is True
+    assert packet["watcher_tick_present"] is True
+    assert preview["current_signal_state"] == "fresh_signal_absent"
+    assert preview["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert context["symbol"] == "BTC/USDT:USDT"
+    assert context["exchange_symbol"] == "BTC/USDT:USDT"
+    assert context["signal_packet_id"] == (
+        "BRF-001-BTC-SHORT:brf-signal:1782097200000"
+    )
+    assert context["source_strategy_group_id"] == "BRF-001"
+    assert context["source_candidate_id"] == "BRF-001-BTC-SHORT"
+    assert context["source_signal_type"] == "no_action"
+    assert packet["fact_authority"] == "readonly_proxy_not_action_time_required_fact"
+    assert packet["fact_authority_boundary"][
+        "action_time_required_facts_satisfied"
+    ] is False
+    assert candidate["fact_authority"] == packet["fact_authority"]
+    assert packet["checks"]["action_time_required_facts_satisfied"] is False
 
 
 def test_brf2_runtime_signal_capture_cli_writes_artifacts(tmp_path: Path):

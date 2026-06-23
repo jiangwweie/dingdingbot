@@ -56,6 +56,8 @@ REQUIRED_ROW_FIELDS = [
     "registry_trial_eligible",
     "actionable_now",
     "current_decision",
+    "promotion_scope",
+    "promotion_target",
     "decision_source",
     "recommended_next_action",
     "owner_decision_needed",
@@ -236,12 +238,17 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
             "keep",
             "revise",
             "promote",
+            "promote_review_only",
             "park",
             "kill",
             "do_not_go_live",
             "wait_for_live_outcome",
         }:
             errors.append(f"{group}.unexpected_recommended_next_action")
+        if row.get("current_decision") in {"promote", "promote_review_only"}:
+            scope = str(row.get("promotion_scope") or "not_applicable")
+            if scope == "not_applicable":
+                errors.append(f"{group}.missing_promotion_scope")
         row_safety = _as_dict(row.get("safety_invariants"))
         for key in (
             "real_order_authority",
@@ -317,12 +324,17 @@ def _row_from_ledger(
     current_tier: str,
 ) -> dict[str, Any]:
     decision = str(ledger_row.get("decision") or "")
+    promotion_target = str(ledger_row.get("promotion_target") or "not_applicable")
+    promotion_scope = _display_promotion_scope(ledger_row)
+    display_decision = _display_decision(decision, promotion_target)
     action = {
         "keep_observing": "keep",
         "revise": "revise",
         "park": "park",
         "kill": "kill",
-        "promote": "promote",
+        "promote": "promote_review_only"
+        if promotion_target == "promotion_evidence_review_only"
+        else "promote",
         "go_live": "promote",
         "do_not_go_live": "do_not_go_live",
         "block_for_safety": "do_not_go_live",
@@ -338,7 +350,9 @@ def _row_from_ledger(
     return _base_row(
         registry_row,
         current_tier,
-        current_decision=decision,
+        current_decision=display_decision,
+        promotion_scope=promotion_scope,
+        promotion_target=promotion_target,
         decision_source="decision_ledger",
         recommended_next_action=action,
         owner_decision_needed=action == "promote",
@@ -363,6 +377,8 @@ def _base_row(
     owner_decision_needed: bool,
     required_next_evidence: str,
     do_not_promote_reason: str,
+    promotion_scope: str = "not_applicable",
+    promotion_target: str = "not_applicable",
     ledger_reason: str = "",
     next_checkpoint: str = "",
 ) -> dict[str, Any]:
@@ -373,6 +389,8 @@ def _base_row(
         "registry_trial_eligible": bool(registry_row.get("trial_eligible")),
         "actionable_now": False,
         "current_decision": current_decision,
+        "promotion_scope": promotion_scope,
+        "promotion_target": promotion_target,
         "decision_source": decision_source,
         "recommended_next_action": recommended_next_action,
         "owner_decision_needed": owner_decision_needed,
@@ -394,6 +412,19 @@ def _base_row(
             "places_order": False,
         },
     }
+
+
+def _display_decision(decision: str, promotion_target: str) -> str:
+    if decision == "promote" and promotion_target == "promotion_evidence_review_only":
+        return "promote_review_only"
+    return decision
+
+
+def _display_promotion_scope(ledger_row: dict[str, Any]) -> str:
+    promotion_target = str(ledger_row.get("promotion_target") or "")
+    if promotion_target == "promotion_evidence_review_only":
+        return "review_only"
+    return str(ledger_row.get("promotion_scope") or "not_applicable")
 
 
 def _ledger_rows_and_status(
@@ -440,6 +471,8 @@ def _row_section(row: dict[str, Any]) -> list[str]:
         "",
         f"- 当前层级: `{row.get('current_tier')}`",
         f"- 当前判断: `{row.get('current_decision')}`",
+        f"- 晋级范围: `{row.get('promotion_scope')}`",
+        f"- 晋级目标: `{row.get('promotion_target')}`",
         f"- 推荐动作: `{row.get('recommended_next_action')}`",
         f"- 判断来源: `{row.get('decision_source')}`",
         f"- Owner 需决策: `{str(row.get('owner_decision_needed')).lower()}`",

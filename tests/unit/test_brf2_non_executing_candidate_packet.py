@@ -41,6 +41,16 @@ def _capture(*, fresh_signal_present: bool) -> dict:
             "symbol": "ADA/USDT:USDT",
             "timeframe": "5m_closed",
             "closed_at_utc": "2026-06-23T00:00:00+00:00",
+            "source_strategy_group_id": "BRF-001",
+            "source_candidate_id": "BRF-001-BTC-SHORT",
+            "source_signal_type": "would_enter",
+        },
+        "fact_authority": "readonly_proxy_not_action_time_required_fact",
+        "fact_authority_boundary": {
+            "usable_for_armed_observation": True,
+            "action_time_required_facts_satisfied": False,
+            "usable_for_finalgate": False,
+            "usable_for_operation_layer": False,
         },
         "signal_detector_preview": {
             "current_signal_state": (
@@ -112,6 +122,9 @@ def test_brf2_candidate_packet_waits_without_fresh_signal():
     assert packet["schema"] == module.SCHEMA
     assert packet["status"] == module.WAITING_STATUS
     assert packet["candidate_packet_ready"] is False
+    assert packet["candidate_packet"]["candidate_packet_id"] == ""
+    assert packet["candidate_packet"]["source_signal_packet_id"] == "brf2-signal-001"
+    assert packet["candidate_packet"]["symbol"] == "ADA/USDT:USDT"
     assert packet["first_blocker"]["class"] == "fresh_brf2_short_signal_absent"
     assert packet["first_blocker"]["owner"] == "market"
     assert packet["checks"]["actionable_now"] is False
@@ -156,7 +169,14 @@ def test_brf2_candidate_packet_ready_from_fresh_signal_without_authority():
     assert packet["candidate_packet_ready"] is True
     assert candidate["candidate_packet_id"] == "brf2-candidate:brf2-signal-001"
     assert candidate["symbol"] == "ADA/USDT:USDT"
+    assert candidate["source_strategy_group_id"] == "BRF-001"
+    assert candidate["source_candidate_id"] == "BRF-001-BTC-SHORT"
+    assert candidate["source_signal_type"] == "would_enter"
     assert candidate["side"] == "short"
+    assert candidate["fact_authority"] == "readonly_proxy_not_action_time_required_fact"
+    assert candidate["fact_authority_boundary"][
+        "action_time_required_facts_satisfied"
+    ] is False
     assert packet["first_blocker"]["class"] == (
         "candidate_authorization_evidence_not_created"
     )
@@ -166,6 +186,7 @@ def test_brf2_candidate_packet_ready_from_fresh_signal_without_authority():
     assert packet["checks"]["candidate_packet_ready"] is True
     assert packet["checks"]["actionable_now"] is False
     assert packet["checks"]["real_order_authority"] is False
+    assert packet["checks"]["action_time_required_facts_satisfied"] is False
 
 
 def test_brf2_candidate_packet_cli_writes_artifacts(tmp_path: Path):

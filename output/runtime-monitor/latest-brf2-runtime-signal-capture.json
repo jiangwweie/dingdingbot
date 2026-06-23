@@ -2,6 +2,18 @@
   "candidate_packet_shape": {
     "candidate_packet_ready": false,
     "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "fact_authority_boundary": {
+      "action_time_required_facts_satisfied": false,
+      "fact_authority": "readonly_proxy_not_action_time_required_fact",
+      "notes": "BRF reference rows are read-only observation proxies; action-time RequiredFacts must be rebuilt from live runtime/exchange facts.",
+      "source_is_brf_reference_row": true,
+      "usable_for_armed_observation": true,
+      "usable_for_exchange_write": false,
+      "usable_for_finalgate": false,
+      "usable_for_market_wait_classification": true,
+      "usable_for_operation_layer": false
+    },
     "forbidden_until_action_time": [
       "actionable_now",
       "real_order_authority",
@@ -39,6 +51,7 @@
     ]
   },
   "checks": {
+    "action_time_required_facts_satisfied": false,
     "actionable_now": false,
     "active_disable_fact_count": 0,
     "calls_exchange_write": false,
@@ -57,9 +70,21 @@
     "watcher_scope_ready": true,
     "watcher_tick_present": true
   },
+  "fact_authority": "readonly_proxy_not_action_time_required_fact",
+  "fact_authority_boundary": {
+    "action_time_required_facts_satisfied": false,
+    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "notes": "BRF reference rows are read-only observation proxies; action-time RequiredFacts must be rebuilt from live runtime/exchange facts.",
+    "source_is_brf_reference_row": true,
+    "usable_for_armed_observation": true,
+    "usable_for_exchange_write": false,
+    "usable_for_finalgate": false,
+    "usable_for_market_wait_classification": true,
+    "usable_for_operation_layer": false
+  },
   "fact_input_present": true,
   "fact_input_status": "brf2_runtime_signal_facts_ready",
-  "generated_at_utc": "2026-06-23T10:22:09.505727+00:00",
+  "generated_at_utc": "2026-06-23T10:44:12.085537+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -196,14 +221,17 @@
     "watcher_tick_present": true
   },
   "source_signal_context": {
-    "closed_at_utc": "",
-    "exchange_symbol": "",
-    "market": "",
+    "closed_at_utc": "2026-05-20T23:00:00+00:00",
+    "exchange_symbol": "BTC/USDT:USDT",
+    "market": "binance_usdm",
     "runtime_instance_id": "",
-    "signal_packet_id": "",
-    "source": "runtime_watcher_read_only_fact_input",
-    "symbol": "",
-    "timeframe": ""
+    "signal_packet_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
+    "source": "brf_reference_readonly_preview_derived_brf2_fact_input",
+    "source_candidate_id": "BRF-001-BTC-SHORT",
+    "source_signal_type": "no_action",
+    "source_strategy_group_id": "BRF-001",
+    "symbol": "BTC/USDT:USDT",
+    "timeframe": "1h_closed_observation_with_5m_proxy"
   },
   "status": "brf2_runtime_signal_capture_ready",
   "strategy_group_id": "BRF2-001",

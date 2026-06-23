@@ -173,6 +173,8 @@ def build_brf2_runtime_signal_capture(
     policy = _as_dict((owner_policy or {}).get("policy"))
     fresh_signal_rule = _as_dict(required_facts_mapping.get("fresh_signal_rule"))
     source_signal_context = _signal_context(fact_input or {})
+    fact_authority = str(fact_input.get("fact_authority") or "")
+    fact_authority_boundary = _as_dict(fact_input.get("fact_authority_boundary"))
     return {
         "schema": SCHEMA,
         "scope": "brf2_runtime_signal_capture_read_model",
@@ -200,6 +202,8 @@ def build_brf2_runtime_signal_capture(
             "source_mode": "runtime_watcher_read_only_fact_input",
         },
         "source_signal_context": source_signal_context,
+        "fact_authority": fact_authority,
+        "fact_authority_boundary": fact_authority_boundary,
         "signal_detector_preview": {
             "detector_ready": detector_ready,
             "fact_input_present": fact_input_present,
@@ -247,6 +251,8 @@ def build_brf2_runtime_signal_capture(
                 "exchange_write",
                 "order_creation",
             ],
+            "fact_authority": fact_authority,
+            "fact_authority_boundary": fact_authority_boundary,
         },
         "checks": {
             "mapping_ready": mapping_ready,
@@ -263,6 +269,7 @@ def build_brf2_runtime_signal_capture(
             "active_disable_fact_count": len(active_disable),
             "actionable_now": False,
             "real_order_authority": False,
+            "action_time_required_facts_satisfied": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -347,7 +354,9 @@ def _fact_input_present(
 
 
 def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
-    context = _as_dict(packet.get("signal_context"))
+    context = _as_dict(packet.get("source_signal_context"))
+    if not context:
+        context = _as_dict(packet.get("signal_context"))
     if not context:
         context = {
             key: packet.get(key)
@@ -360,6 +369,9 @@ def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
                 "timeframe",
                 "closed_at_utc",
                 "source",
+                "source_strategy_group_id",
+                "source_candidate_id",
+                "source_signal_type",
             )
             if packet.get(key) not in {None, ""}
         }
@@ -372,6 +384,9 @@ def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
         "timeframe": str(context.get("timeframe") or ""),
         "closed_at_utc": str(context.get("closed_at_utc") or ""),
         "source": str(context.get("source") or "runtime_watcher_read_only_fact_input"),
+        "source_strategy_group_id": str(context.get("source_strategy_group_id") or ""),
+        "source_candidate_id": str(context.get("source_candidate_id") or ""),
+        "source_signal_type": str(context.get("source_signal_type") or ""),
     }
 
 
@@ -427,6 +442,8 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Signal state: `{preview['current_signal_state']}`",
         f"- First blocker: `{preview['first_blocker_class']}`",
         f"- Candidate packet ready: `{_yes_no(packet['candidate_packet_shape']['candidate_packet_ready'])}`",
+        f"- Fact authority: `{packet.get('fact_authority') or 'none'}`",
+        "- Action-time RequiredFacts satisfied: `否`",
         f"- Actionable now: `{_yes_no(False)}`",
         f"- Real order authority: `{_yes_no(False)}`",
         "",
@@ -438,6 +455,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         "## Boundary",
         "",
         "- This packet is watcher-facing and non-executing.",
+        "- Read-only observation facts can classify armed observation, but cannot satisfy action-time submit facts.",
         "- It does not call FinalGate, Operation Layer, or exchange write.",
         "- A fresh signal here can only prepare the next non-executing candidate packet shape.",
     ]

@@ -80,6 +80,10 @@ def build_brf2_non_executing_candidate_packet(
     watcher_scope = _as_dict(runtime_signal_capture.get("watcher_scope"))
     source_context = _as_dict(runtime_signal_capture.get("source_signal_context"))
     candidate_shape = _as_dict(runtime_signal_capture.get("candidate_packet_shape"))
+    fact_authority = str(runtime_signal_capture.get("fact_authority") or "")
+    fact_authority_boundary = _as_dict(
+        runtime_signal_capture.get("fact_authority_boundary")
+    )
     signal_state = str(preview.get("current_signal_state") or "unknown")
     fresh_signal_present = preview.get("fresh_signal_present") is True
     required_fact_status = [_as_dict(row) for row in preview.get("required_fact_status") or []]
@@ -117,7 +121,7 @@ def build_brf2_non_executing_candidate_packet(
     signal_packet_id = str(source_context.get("signal_packet_id") or "")
     candidate_packet_id = (
         f"brf2-candidate:{signal_packet_id}"
-        if signal_packet_id
+        if candidate_packet_ready and signal_packet_id
         else f"brf2-candidate:{signal_id}:{generated}"
         if candidate_packet_ready
         else ""
@@ -137,6 +141,11 @@ def build_brf2_non_executing_candidate_packet(
             "strategy_group_id": "BRF2-001",
             "signal_id": signal_id,
             "source_signal_packet_id": signal_packet_id,
+            "source_strategy_group_id": str(
+                source_context.get("source_strategy_group_id") or ""
+            ),
+            "source_candidate_id": str(source_context.get("source_candidate_id") or ""),
+            "source_signal_type": str(source_context.get("source_signal_type") or ""),
             "symbol": symbol,
             "symbol_binding_status": (
                 "actual_symbol_bound"
@@ -163,6 +172,8 @@ def build_brf2_non_executing_candidate_packet(
                 "exchange_write",
                 "order_creation",
             ],
+            "fact_authority": fact_authority,
+            "fact_authority_boundary": fact_authority_boundary,
         },
         "first_blocker": first_blocker,
         "next_runtime_step": (
@@ -183,6 +194,7 @@ def build_brf2_non_executing_candidate_packet(
             "disable_facts_clear": _all_disable_clear(disable_fact_status),
             "actionable_now": False,
             "real_order_authority": False,
+            "action_time_required_facts_satisfied": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -216,12 +228,15 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Signal state: `{candidate.get('signal_state', 'unknown')}`",
         f"- First blocker: `{first_blocker.get('class', 'missing')}` / `{first_blocker.get('owner', 'unknown')}`",
         f"- Next runtime step: `{packet['next_runtime_step']}`",
+        f"- Fact authority: `{candidate.get('fact_authority') or 'none'}`",
+        "- Action-time RequiredFacts satisfied: `否`",
         f"- Actionable now: `{_yes_no(False)}`",
         f"- Real order authority: `{_yes_no(False)}`",
         "",
         "## Boundary",
         "",
         "- This packet is non-executing and local/read-model only.",
+        "- It preserves read-only signal context without converting it into action-time RequiredFacts.",
         "- It does not call FinalGate, Operation Layer, or exchange write.",
         "- It can only prepare the next official candidate/authorization evidence step.",
     ]

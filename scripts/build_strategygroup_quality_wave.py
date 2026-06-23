@@ -63,6 +63,8 @@ REQUIRED_ROW_FIELDS = [
     "eats",
     "current_tier",
     "current_decision",
+    "promotion_scope",
+    "promotion_target",
     "system_can_continue",
     "owner_policy_action_required",
     "primary_gap_class",
@@ -270,6 +272,10 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
             errors.append(f"{group}.actionable_now_true")
         if row.get("owner_policy_action_required") is True:
             errors.append(f"{group}.unexpected_owner_operator_requirement")
+        if row.get("current_decision") in {"promote", "promote_review_only"}:
+            scope = str(row.get("promotion_scope") or "not_applicable")
+            if scope == "not_applicable":
+                errors.append(f"{group}.missing_promotion_scope")
         for field in ("primary_gap_class", "secondary_gap_class"):
             if row.get(field) not in GAP_CLASSES:
                 errors.append(f"{group}.{field}_unknown:{row.get(field)}")
@@ -334,6 +340,12 @@ def _build_quality_row(
 ) -> dict[str, Any]:
     primary_gap, secondary_gap = _gap_classes(group, coverage, ledger_row, tier_row)
     decision = str(tier_row.get("current_decision") or ledger_row.get("decision") or "")
+    promotion_scope = str(
+        tier_row.get("promotion_scope") or ledger_row.get("promotion_scope") or "not_applicable"
+    )
+    promotion_target = str(
+        tier_row.get("promotion_target") or ledger_row.get("promotion_target") or "not_applicable"
+    )
     system_can_continue = primary_gap != "parked_low_priority_gap" or group != "RBR-001"
     required_next_evidence = str(
         tier_row.get("required_next_evidence")
@@ -347,6 +359,8 @@ def _build_quality_row(
         "eats": str(registry_row.get("edge_thesis") or ""),
         "current_tier": str(tier_row.get("current_tier") or registry_row.get("default_tier") or ""),
         "current_decision": decision,
+        "promotion_scope": promotion_scope,
+        "promotion_target": promotion_target,
         "system_can_continue": system_can_continue,
         "owner_policy_action_required": False,
         "primary_gap_class": primary_gap,
@@ -596,6 +610,7 @@ def _row_section(row: dict[str, Any]) -> list[str]:
         "",
         f"- 吃的机会: {row['eats']}",
         f"- 当前层级 / 决策: `{row['current_tier']}` / `{row['current_decision']}`",
+        f"- 晋级范围 / 目标: `{row['promotion_scope']}` / `{row['promotion_target']}`",
         f"- 系统可继续工程化: `{str(row['system_can_continue']).lower()}`",
         f"- Owner policy action required: `{str(row['owner_policy_action_required']).lower()}`",
         f"- 主要 gap / 次要 gap: `{row['primary_gap_class']}` / `{row['secondary_gap_class']}`",

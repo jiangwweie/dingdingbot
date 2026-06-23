@@ -19,8 +19,8 @@ last_verified: 2026-06-20
 | --- | --- | --- | --- | --- | --- |
 | `BTPC-001` | `L2` | `revise` | `true` | `fact_source_gap` | `complete_fact_source_and_classifier_revision_guard` |
 | `VCB-001` | `L1` | `keep_observing` | `true` | `stale_or_missing_artifact_gap` | `create_or_accept_explicit_missing_handoff_boundary_for_VCB-001` |
-| `LSR-001` | `L1` | `keep_observing` | `true` | `stale_or_missing_artifact_gap` | `create_or_accept_explicit_missing_handoff_boundary_for_LSR-001` |
-| `BRF-001` | `L1` | `keep_observing` | `true` | `stale_or_missing_artifact_gap` | `create_or_accept_explicit_missing_handoff_boundary_for_BRF-001` |
+| `LSR-001` | `L1` | `revise` | `true` | `stale_or_missing_artifact_gap` | `create_or_accept_explicit_missing_handoff_boundary_for_LSR-001` |
+| `BRF-001` | `L1` | `promote_review_only` | `true` | `stale_or_missing_artifact_gap` | `create_or_accept_explicit_missing_handoff_boundary_for_BRF-001` |
 | `RBR-001` | `L1` | `park` | `false` | `parked_low_priority_gap` | `keep_parked_until_material_new_edge_evidence` |
 
 ## 关闭或测试守护的 gap findings
@@ -38,10 +38,11 @@ last_verified: 2026-06-20
 
 - 吃的机会: Capture bear-trend pullback continuation when weak rally loses structure and derivatives/crowding context is reviewable.
 - 当前层级 / 决策: `L2` / `revise`
+- 晋级范围 / 目标: `not_applicable` / `not_applicable`
 - 系统可继续工程化: `true`
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `fact_source_gap` / `classifier_gap`
-- 下一证据: feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision
+- 下一证据: classifier_fact_source_revision_review:BTPC-001_classifier_fact_source_revision_review
 - 不晋级原因: current ledger requires revision before any tier change
 - 下一工程 checkpoint: `complete_fact_source_and_classifier_revision_guard`
 
@@ -49,43 +50,47 @@ last_verified: 2026-06-20
 
 - 吃的机会: Capture compression breakout when true breakout evidence survives false-breakout disable review.
 - 当前层级 / 决策: `L1` / `keep_observing`
+- 晋级范围 / 目标: `not_applicable` / `not_applicable`
 - 系统可继续工程化: `true`
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
-- 下一证据: tier_review_after_post_revision_quality
+- 下一证据: VCB-001_continue_observe_only
 - 不晋级原因: current ledger supports continued observation, not tier promotion
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_VCB-001`
 
 ### `LSR-001` 流动性扫盘/短线复活
 
 - 吃的机会: Capture liquidity sweep or short-revival setups after side-specific rewrite quality is proven.
-- 当前层级 / 决策: `L1` / `keep_observing`
+- 当前层级 / 决策: `L1` / `revise`
+- 晋级范围 / 目标: `not_applicable` / `not_applicable`
 - 系统可继续工程化: `true`
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
-- 下一证据: tier_review_after_post_revision_quality
-- 不晋级原因: current ledger supports continued observation, not tier promotion
+- 下一证据: classifier_fact_source_revision_review:LSR-001_classifier_fact_source_revision_review
+- 不晋级原因: current ledger requires revision before any tier change
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_LSR-001`
 
 ### `BRF-001` 熊市反弹失败
 
 - 吃的机会: Capture short continuation after a bear-market rally fails instead of shorting early breakdowns.
-- 当前层级 / 决策: `L1` / `keep_observing`
+- 当前层级 / 决策: `L1` / `promote_review_only`
+- 晋级范围 / 目标: `review_only` / `promotion_evidence_review_only`
 - 系统可继续工程化: `true`
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
-- 下一证据: tier_review_after_post_revision_quality
-- 不晋级原因: current ledger supports continued observation, not tier promotion
+- 下一证据: promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review
+- 不晋级原因: current ledger does not provide live-scope authority
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_BRF-001`
 
 ### `RBR-001` 区间边界回归
 
 - 吃的机会: Range-boundary reversion vocabulary kept only if materially new edge evidence appears.
 - 当前层级 / 决策: `L1` / `park`
+- 晋级范围 / 目标: `not_applicable` / `not_applicable`
 - 系统可继续工程化: `false`
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `parked_low_priority_gap` / `replay_quality_gap`
-- 下一证据: material_new_edge_evidence
+- 下一证据: material_new_edge_evidence_before_reactivation
 - 不晋级原因: current ledger parks this StrategyGroup until new evidence
 - 下一工程 checkpoint: `keep_parked_until_material_new_edge_evidence`
 
