@@ -1,11 +1,11 @@
 ## BRF2 Runtime Signal Facts
 
-- Status: `brf2_runtime_signal_facts_missing_watcher_input`
-- Generated: `2026-06-23T09:42:54.571142+00:00`
+- Status: `brf2_runtime_signal_facts_ready`
+- Generated: `2026-06-23T10:22:09.272660+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-facts.json`
-- Fact input present: `否`
-- Watcher tick present: `否`
-- First blocker: `brf2_watcher_fact_input_missing` / `engineering`
+- Fact input present: `是`
+- Watcher tick present: `是`
+- First blocker: `none` / `runtime`
 
 ## Boundary
 

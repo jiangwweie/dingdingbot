@@ -13,7 +13,7 @@
     "seat_count": 3
   },
   "final_evidence_packet": {
-    "brf2_new_first_blocker": "brf2_watcher_fact_input_missing",
+    "brf2_new_first_blocker": "fresh_brf2_short_signal_absent",
     "brf2_policy_scope_recorded": true,
     "brf2_stage_after_policy": "armed_observation",
     "capability_unlocked": "main control can display at least three StrategyGroup trial seats with first blocker, next action, policy scope, RequiredFacts, authority boundary, and review hooks",
@@ -37,10 +37,10 @@
     "next_live_submit_condition": "fresh seat-scoped signal plus RequiredFacts, candidate evidence, action-time FinalGate, and official Operation Layer",
     "remaining_first_blockers": {
       "BRF2-001": {
-        "blocker_owner": "engineering",
-        "first_blocker_class": "brf2_watcher_fact_input_missing",
-        "next_action": "attach_brf2_watcher_fact_input_producer",
-        "verdict": "not_tradable_facts"
+        "blocker_owner": "market",
+        "first_blocker_class": "fresh_brf2_short_signal_absent",
+        "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+        "verdict": "not_tradable_market_wait"
       },
       "MPG-001": {
         "blocker_owner": "market",
@@ -171,10 +171,10 @@
         ],
         "experiment_worthiness_review_closed": true,
         "first_blocker": {
-          "blocker_owner": "engineering",
-          "first_blocker_class": "brf2_watcher_fact_input_missing",
-          "next_action": "attach_brf2_watcher_fact_input_producer",
-          "verdict": "not_tradable_facts"
+          "blocker_owner": "market",
+          "first_blocker_class": "fresh_brf2_short_signal_absent",
+          "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+          "verdict": "not_tradable_market_wait"
         },
         "kill_conditions": [
           "attempt_cap_exhausted_without_review_positive_edge",
@@ -188,7 +188,7 @@
           "basis": "30U / 3 attempts",
           "currency": "USDT"
         },
-        "next_bottleneck": "brf2_watcher_fact_input_missing",
+        "next_bottleneck": "fresh_signal_wait",
         "owner_policy_recorded": true,
         "owner_policy_required": false,
         "owner_policy_scope_missing": false,
@@ -331,8 +331,8 @@
         ],
         "runtime_readiness": {
           "armed_observation_plan_ready": true,
-          "armed_observation_ready": false,
-          "blocked_by": "brf2_watcher_fact_input_missing",
+          "armed_observation_ready": true,
+          "blocked_by": "fresh_brf2_short_signal_absent",
           "live_submit_ready": false,
           "tiny_live_ready": false
         },
@@ -350,8 +350,8 @@
         "tier_policy_mode": "trial_asset_admission_candidate",
         "tradeability_projection": {
           "can_trade": false,
-          "next_state_after_blocker_removed": "armed_observation",
-          "verdict": "not_tradable_facts"
+          "next_state_after_blocker_removed": "live_submit_ready",
+          "verdict": "not_tradable_market_wait"
         },
         "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "trial_policy_proposal_ready": true
@@ -473,10 +473,10 @@
   },
   "first_blockers": {
     "BRF2-001": {
-      "blocker_owner": "engineering",
-      "first_blocker_class": "brf2_watcher_fact_input_missing",
-      "next_action": "attach_brf2_watcher_fact_input_producer",
-      "verdict": "not_tradable_facts"
+      "blocker_owner": "market",
+      "first_blocker_class": "fresh_brf2_short_signal_absent",
+      "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+      "verdict": "not_tradable_market_wait"
     },
     "MPG-001": {
       "blocker_owner": "market",
@@ -491,7 +491,7 @@
       "verdict": "not_tradable_market_wait"
     }
   },
-  "generated_at_utc": "2026-06-23T09:42:57.542964+00:00",
+  "generated_at_utc": "2026-06-23T10:22:13.045849+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -503,7 +503,7 @@
     "remote_interaction_count": 0
   },
   "next_engineering_bottleneck": {
-    "BRF2-001": "brf2_watcher_fact_input_missing",
+    "BRF2-001": "fresh_signal_wait",
     "MPG-001": "fresh_signal_wait",
     "SOR-001": "fresh_signal_wait"
   },
@@ -579,10 +579,10 @@
       ],
       "experiment_worthiness_review_closed": true,
       "first_blocker": {
-        "blocker_owner": "engineering",
-        "first_blocker_class": "brf2_watcher_fact_input_missing",
-        "next_action": "attach_brf2_watcher_fact_input_producer",
-        "verdict": "not_tradable_facts"
+        "blocker_owner": "market",
+        "first_blocker_class": "fresh_brf2_short_signal_absent",
+        "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+        "verdict": "not_tradable_market_wait"
       },
       "kill_conditions": [
         "attempt_cap_exhausted_without_review_positive_edge",
@@ -596,7 +596,7 @@
         "basis": "30U / 3 attempts",
         "currency": "USDT"
       },
-      "next_bottleneck": "brf2_watcher_fact_input_missing",
+      "next_bottleneck": "fresh_signal_wait",
       "owner_policy_recorded": true,
       "owner_policy_required": false,
       "owner_policy_scope_missing": false,
@@ -739,8 +739,8 @@
       ],
       "runtime_readiness": {
         "armed_observation_plan_ready": true,
-        "armed_observation_ready": false,
-        "blocked_by": "brf2_watcher_fact_input_missing",
+        "armed_observation_ready": true,
+        "blocked_by": "fresh_brf2_short_signal_absent",
         "live_submit_ready": false,
         "tiny_live_ready": false
       },
@@ -758,8 +758,8 @@
       "tier_policy_mode": "trial_asset_admission_candidate",
       "tradeability_projection": {
         "can_trade": false,
-        "next_state_after_blocker_removed": "armed_observation",
-        "verdict": "not_tradable_facts"
+        "next_state_after_blocker_removed": "live_submit_ready",
+        "verdict": "not_tradable_market_wait"
       },
       "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
       "trial_policy_proposal_ready": true
@@ -984,8 +984,8 @@
   "tradeability_summary": {
     "BRF2-001": {
       "can_trade": false,
-      "next_state_after_blocker_removed": "armed_observation",
-      "verdict": "not_tradable_facts"
+      "next_state_after_blocker_removed": "live_submit_ready",
+      "verdict": "not_tradable_market_wait"
     },
     "MPG-001": {
       "can_trade": false,

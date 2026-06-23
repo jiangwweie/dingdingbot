@@ -816,6 +816,8 @@ def build_local_monitor_sequence_report(
     brf2_runtime_signal_facts_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_brf2_runtime_signal_facts.py"),
+        "--strategy-source",
+        signal_coverage_source,
         "--output-json",
         str(brf2_runtime_signal_facts_json),
         "--output-owner-progress",

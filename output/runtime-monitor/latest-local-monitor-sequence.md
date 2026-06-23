@@ -1,8 +1,8 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T09:42:57.604572+00:00
-- 当前阶段: 需要修复
-- 当前动作: 修复本地监控或非市场证据缺口
+- 报告时间: 2026-06-23T10:22:13.119548+00:00
+- 当前阶段: 等待机会
+- 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
 - Owner 介入: 否
 - 交互等级: L0_local_monitor_sequence
@@ -30,23 +30,23 @@
 - BRF2 RequiredFacts mapping: `brf2_required_facts_mapping_ready`
 - BRF2 fresh signal rule: `brf2_short_rally_failure_fresh_signal_v1`
 - BRF2 after mapping state: `armed_observation`
-- BRF2 runtime signal facts: `brf2_runtime_signal_facts_missing_watcher_input`
-- BRF2 fact input / watcher tick: `否` / `否`
+- BRF2 runtime signal facts: `brf2_runtime_signal_facts_ready`
+- BRF2 fact input / watcher tick: `是` / `是`
 - BRF2 runtime signal capture: `brf2_runtime_signal_capture_ready`
-- BRF2 signal state: `fact_input_missing`
-- BRF2 signal first blocker: `brf2_watcher_fact_input_missing` / `engineering`
+- BRF2 signal state: `fresh_signal_absent`
+- BRF2 signal first blocker: `fresh_brf2_short_signal_absent` / `market`
 - BRF2 candidate packet ready: `否`
 - BRF2 non-executing candidate packet: `brf2_non_executing_candidate_packet_waiting_for_fresh_signal`
 - BRF2 non-executing candidate ready: `否`
-- BRF2 candidate first blocker: `brf2_watcher_fact_input_missing` / `engineering`
+- BRF2 candidate first blocker: `fresh_brf2_short_signal_absent` / `market`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
-- 组合第一阻断统计 market/owner/engineering: `2` / `0` / `1`
+- 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - 交易资格状态: `tradeability_verdict_ready`
-- 交易资格 Top: `BRF2-001` / `not_tradable_facts`
-- 第一阻断: `brf2_watcher_fact_input_missing` / `engineering`
-- 下一动作: `attach_brf2_watcher_fact_input_producer`
+- 交易资格 Top: `BRF2-001` / `not_tradable_market_wait`
+- 第一阻断: `fresh_brf2_short_signal_absent` / `market`
+- 下一动作: `continue_brf2_armed_observation_until_fresh_signal`
 - 当前可交易数量: `0`
 
 ## Steps
@@ -62,7 +62,7 @@
 | brf2_owner_trial_policy_scope | brf2_owner_trial_policy_scope_recorded | 0 |
 | strategygroup_trial_asset_admission_proposal | trial_asset_admission_proposal_ready | 0 |
 | brf2_required_facts_mapping | brf2_required_facts_mapping_ready | 0 |
-| brf2_runtime_signal_facts | brf2_runtime_signal_facts_missing_watcher_input | 0 |
+| brf2_runtime_signal_facts | brf2_runtime_signal_facts_ready | 0 |
 | brf2_runtime_signal_capture | brf2_runtime_signal_capture_ready | 0 |
 | brf2_non_executing_candidate_packet | brf2_non_executing_candidate_packet_waiting_for_fresh_signal | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
@@ -95,4 +95,4 @@
 ## Checks
 
 - Blockers: none
-- Non-market gaps: {"class": "missing_fact", "gap": "brf2_watcher_fact_input_missing", "missing_or_false": ["brf2_runtime_signal_fact_input_present", "brf2_runtime_signal_watcher_tick_present"], "next_action": "attach_brf2_watcher_fact_input_producer", "owner": "engineering", "requirement": "BRF2 armed observation must have watcher fact input before it can be classified as market wait", "source": "brf2_runtime_signal_facts", "strategy_group_id": "BRF2-001"}
+- Non-market gaps: none

@@ -930,6 +930,28 @@ def _expected_brf2_fact_input_gap() -> dict:
     }
 
 
+def test_brf2_fact_input_gap_clears_when_watcher_facts_are_present():
+    module = _load_module()
+
+    gap = module._brf2_fact_input_non_market_gap(
+        {
+            "status": "brf2_runtime_signal_facts_ready",
+            "fact_input_present": True,
+            "watcher_tick_present": True,
+        },
+        {
+            "status": "brf2_runtime_signal_capture_ready",
+            "signal_detector_preview": {
+                "current_signal_state": "fresh_signal_absent",
+                "first_blocker_class": "fresh_brf2_short_signal_absent",
+                "first_blocker_owner": "market",
+            },
+        },
+    )
+
+    assert gap is None
+
+
 def _write_ready_brf2_runtime_signal_capture(command: list[str]) -> None:
     _write_output(
         command,
