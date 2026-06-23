@@ -139,6 +139,10 @@ def test_research_intake_review_maps_real_fields_without_authority():
     assert rows["BRF2-001"]["main_control_intake_position"] == (
         "paper_observation_admission_candidate"
     )
+    assert rows["BRF2-001"]["promotion_scope"] == "intake_only"
+    assert rows["BRF2-001"]["promotion_target"] == (
+        "paper_observation_or_candidate_trade_packet"
+    )
     assert rows["BRF2-001"]["paper_observation_ready"] is True
     assert rows["BRF2-001"]["tiny_live_ready"] is False
     assert rows["BRF2-001"]["finalgate_input"] is False
@@ -146,16 +150,28 @@ def test_research_intake_review_maps_real_fields_without_authority():
     assert "FinalGate" in rows["BRF2-001"]["paper_observation_packet_shape"][
         "must_not_feed"
     ]
+    assert rows["BRF2-001"]["source_reports"] == [
+        "brf2-right-tail-trial-envelope.json"
+    ]
     assert rows["RBR2-001"]["main_control_intake_position"] == (
         "role_only_intake_candidate"
     )
+    assert rows["RBR2-001"]["promotion_scope"] == "not_applicable"
 
     ledger_rows = {
         row["strategy_group_id"]: row for row in packet["decision_ledger_rows"]
     }
     assert ledger_rows["BRF2-001"]["decision"] == "promote"
+    assert ledger_rows["BRF2-001"]["promotion_scope"] == "intake_only"
+    assert ledger_rows["BRF2-001"]["promotion_target"] == (
+        "paper_observation_or_candidate_trade_packet"
+    )
     assert ledger_rows["RBR2-001"]["decision"] == "keep_observing"
+    assert ledger_rows["RBR2-001"]["promotion_scope"] == "not_applicable"
     assert "real_order_authority=false" in ledger_rows["BRF2-001"][
+        "authority_boundary"
+    ]
+    assert "promotion_scope=intake_only" in ledger_rows["BRF2-001"][
         "authority_boundary"
     ]
     assert packet["interaction"]["calls_finalgate"] is False
@@ -208,3 +224,13 @@ def test_research_intake_review_cli_writes_outputs(tmp_path, capsys):
     assert "StrategyGroup Research Intake Review" in md_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_research_intake_review_default_input_is_final_owned_snapshot():
+    module = _load_module()
+
+    default_path = module.DEFAULT_RESEARCH_INTAKE_JSON
+
+    assert str(default_path).startswith(str(module.REPO_ROOT))
+    assert "final-strategy-research" not in str(default_path)
+    assert default_path.name == "tiny-live-intake-candidates.json"

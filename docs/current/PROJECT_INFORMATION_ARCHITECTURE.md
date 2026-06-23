@@ -2,7 +2,7 @@
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
 authority: docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # Project Information Architecture
@@ -52,6 +52,8 @@ RequiredFacts, replay rows, no-action rows, FinalGate evidence, Operation Layer
 evidence, or ordinary in-boundary execution steps.
 
 `trial_eligible` is a strategy-governance and policy outcome.
+`tradeability_verdict` is a generated read model that explains whether a
+StrategyGroup can trade now and, if not, names the first blocker.
 `actionable_now` is runtime-only and must be derived from current fresh signal,
 RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account,
 and exchange facts.
@@ -88,6 +90,8 @@ Owner decisions.
 | Concern | Source |
 | --- | --- |
 | Product objective and Owner role | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
+| Strategy experiment evaluation semantics | `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` |
+| Tradeability verdict semantics | `docs/current/TRADEABILITY_VERDICT_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
 | Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
 | Agent boundaries and goal-mode execution | `docs/current/AI_AGENT_CONSTRAINTS.md` |
@@ -101,6 +105,7 @@ Owner decisions.
 | Machine tier mapping | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` |
 | RequiredFacts classes | `docs/current/strategy-group-handoffs/main-control-required-facts-map.md` |
 | Pre-live strategy decision ledger | `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` |
+| Tradeability verdict generated view | `output/runtime-monitor/latest-strategygroup-tradeability-verdict.json` and `output/runtime-monitor/latest-strategygroup-tradeability-verdict.md` |
 | Current goal audit | `docs/current/STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md` |
 | Monitor baseline config | `docs/current/RUNTIME_MONITOR_BASELINE.json` |
 
@@ -169,6 +174,22 @@ generated view -> hand-edited source of truth
 If a generated view and a roadmap disagree, regenerate or update the roadmap to
 reference the generated source. Do not let the stale roadmap redefine current
 state.
+
+The Tradeability Verdict generated view has one narrow role: it summarizes
+registry, policy, runtime, research-intake, and ledger inputs into a current
+answer for each candidate:
+
+```text
+can trade now
+or
+cannot trade because of first blocker X
+```
+
+It must not become an authority source for strategy semantics, Owner policy,
+action-time facts, FinalGate, Operation Layer, or exchange writes. If the
+verdict says `asset_admission`, the next source is the registry or admission
+proposal. If it says `policy`, the next source is an explicit Owner decision. If
+it says `execution_gate`, the next source is runtime state.
 
 ## Owner Policy Direction
 

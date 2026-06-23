@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # Owner Runtime Operating Model
@@ -106,6 +106,33 @@ unauthorized live-profile/sizing mutation. They are not generic reasons to make
 the system reduce leverage, shrink notional, slow eligible submits, or avoid
 right-tail opportunities after the Owner has allocated loss-capable capital.
 
+Strategy evaluation follows
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`. High-return numbers
+such as `100%` are right-tail aspiration anchors, not hard intake gates.
+Leverage values such as `5x` are leverage scenarios, not automatic live
+authorization and not automatic strategy disqualification. The system should
+advance experiment-worthy strategy assets when their thesis, failure modes, risk
+envelope, replay or paper evidence, and main-control absorption route are clear.
+
+Strategy tradeability follows `docs/current/TRADEABILITY_VERDICT_CONTRACT.md`.
+The Owner-facing system must make the difference between these states explicit:
+
+| State | Meaning | Owner role |
+| --- | --- | --- |
+| `can_trade_now` | Runtime has a current actionable signal and official gates may proceed | Supervise status |
+| `market_wait` | Strategy is admitted and ready enough, but no fresh signal exists | No action |
+| `asset_admission_gap` | Strategy is promising but not yet a final-owned trial/runtime asset | Review admission only when policy is needed |
+| `policy_gap` | Capital, profile, symbol/side, leverage scenario, attempt cap, or tier decision is missing | Decide scoped policy |
+| `facts_gap` | Fact source, RequiredFacts mapping, or freshness path is incomplete | No normal Owner action |
+| `execution_gate_gap` | Runtime gate, protection, account, exchange, order, or position state blocks real submit | Usually no Owner action unless abnormal recovery is requested |
+| `strategy_quality_gap` | Strategy is not experiment-worthy or its risk envelope cannot be expressed | Decide park, revise, or kill only at review level |
+| `safety_stop` | A hard authority or safety boundary forbids execution | Intervene only if recovery or policy change is required |
+
+The system should not show a promising short or mean-reversion candidate as
+merely "waiting for market" when it has not yet passed asset admission or scoped
+policy. It should say that it is pending admission, policy, facts, execution
+gate, quality review, or safety resolution.
+
 ## Strategy Learning Mode
 
 When the live path is healthy but waiting for a fresh market signal, the system
@@ -163,6 +190,20 @@ and what would promote, downshift, park, or kill it.
 
 No fresh signal makes `actionable_now=false`. It does not automatically make
 the StrategyGroup a bad strategy or remove its trial eligibility.
+
+`tiny_live_intake_candidate` and `tiny_live_ready` must also stay separate:
+
+| Field | Owner meaning |
+| --- | --- |
+| `tiny_live_intake_candidate` | Main control may review this as a small-capital experimental asset |
+| `trial_asset_admission_candidate` | Main control is preparing registry, policy, facts, and risk-envelope admission |
+| `admitted_trial_asset` | The strategy exists as a final-owned trial asset, still without action-time order authority |
+| `armed_observation` | The system may observe it under scoped runtime rules |
+| `tiny_live_ready` | Non-executing readiness is closed; a future fresh signal still needs action-time gates |
+
+Owner approval may move a strategy through policy-dependent stages. It cannot
+turn research evidence, intake status, or tiny-live readiness into current
+`actionable_now`.
 
 ## Runtime Product State
 

@@ -208,6 +208,20 @@ DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON = (
 DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.md"
 )
+DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
+)
+DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.md"
+)
+DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
+)
+DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -346,6 +360,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_research_intake_review_md=Path(
             args.strategygroup_research_intake_review_md
+        ),
+        strategygroup_trial_asset_admission_proposal_json=Path(
+            args.strategygroup_trial_asset_admission_proposal_json
+        ),
+        strategygroup_trial_asset_admission_proposal_md=Path(
+            args.strategygroup_trial_asset_admission_proposal_md
+        ),
+        strategygroup_tradeability_verdict_json=Path(
+            args.strategygroup_tradeability_verdict_json
+        ),
+        strategygroup_tradeability_verdict_md=Path(
+            args.strategygroup_tradeability_verdict_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -509,6 +535,18 @@ def build_local_monitor_sequence_report(
     strategygroup_research_intake_review_md: Path = (
         DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD
     ),
+    strategygroup_trial_asset_admission_proposal_json: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON
+    ),
+    strategygroup_trial_asset_admission_proposal_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD
+    ),
+    strategygroup_tradeability_verdict_json: Path = (
+        DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON
+    ),
+    strategygroup_tradeability_verdict_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -615,6 +653,30 @@ def build_local_monitor_sequence_report(
             "strategygroup_capital_trial_readiness_bridge",
             strategygroup_capital_trial_readiness_bridge_command,
             strategygroup_capital_trial_readiness_bridge_json,
+            runner,
+        )
+    )
+
+    strategygroup_trial_asset_admission_proposal_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_trial_asset_admission_proposal.py"
+        ),
+        "--capital-trial-readiness-bridge-json",
+        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--trial-packet-json",
+        str(strategygroup_capital_trial_packet_json),
+        "--output-json",
+        str(strategygroup_trial_asset_admission_proposal_json),
+        "--output-owner-progress",
+        str(strategygroup_trial_asset_admission_proposal_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_trial_asset_admission_proposal",
+            strategygroup_trial_asset_admission_proposal_command,
+            strategygroup_trial_asset_admission_proposal_json,
             runner,
         )
     )
@@ -1120,6 +1182,41 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategygroup_tradeability_verdict_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_tradeability_verdict.py"),
+        "--capital-trial-readiness-bridge-json",
+        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--registry-json",
+        str(
+            REPO_ROOT
+            / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
+        ),
+        "--tier-policy-json",
+        str(
+            REPO_ROOT
+            / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        ),
+        "--signal-coverage-json",
+        str(signal_coverage_json),
+        "--live-submit-readiness-json",
+        str(strategygroup_live_submit_readiness_bridge_json),
+        "--trial-asset-admission-proposal-json",
+        str(strategygroup_trial_asset_admission_proposal_json),
+        "--output-json",
+        str(strategygroup_tradeability_verdict_json),
+        "--output-owner-progress",
+        str(strategygroup_tradeability_verdict_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategygroup_tradeability_verdict",
+            strategygroup_tradeability_verdict_command,
+            strategygroup_tradeability_verdict_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -1181,11 +1278,17 @@ def build_local_monitor_sequence_report(
     capital_trial_summary = _sequence_capital_trial_summary(
         packets.get("strategygroup_capital_trial_readiness_bridge", {})
     )
+    trial_admission_summary = _sequence_trial_admission_summary(
+        packets.get("strategygroup_trial_asset_admission_proposal", {})
+    )
     observation_layer_summary = _sequence_observation_layer_summary(
         signal_coverage_packet=packets.get("signal_coverage", {}),
         expansion_review_packet=packets.get("signal_coverage_expansion_review", {}),
         decision_ledger_packet=packets.get("strategygroup_decision_ledger", {}),
         capital_trial_summary=capital_trial_summary,
+    )
+    tradeability_summary = _sequence_tradeability_summary(
+        packets.get("strategygroup_tradeability_verdict", {})
     )
 
     return {
@@ -1206,12 +1309,16 @@ def build_local_monitor_sequence_report(
             "strategy_research_intake": research_intake_summary,
             "strategy_candidate_trade": capital_trial_summary,
             "strategy_experiment_candidate": capital_trial_summary,
+            "trial_asset_admission": trial_admission_summary,
+            "tradeability_verdict": tradeability_summary,
         },
         "interaction": interaction,
         "strategy_observation_layer": observation_layer_summary,
         "strategy_research_intake": research_intake_summary,
         "strategy_candidate_trade": capital_trial_summary,
         "strategy_experiment_candidate": capital_trial_summary,
+        "strategy_trial_asset_admission": trial_admission_summary,
+        "strategy_tradeability_verdict": tradeability_summary,
         "checks": {
             "blockers": execution_blockers,
             "execution_blockers": execution_blockers,
@@ -1268,6 +1375,33 @@ def build_local_monitor_sequence_report(
             "short_experiment_candidate_tiny_live_ready": (
                 capital_trial_summary["tiny_live_ready"]
             ),
+            "trial_asset_admission_proposal_status": trial_admission_summary[
+                "status"
+            ],
+            "trial_asset_admission_strategy_group_id": trial_admission_summary[
+                "strategy_group_id"
+            ],
+            "trial_asset_admission_owner_policy_required": trial_admission_summary[
+                "owner_policy_required"
+            ],
+            "trial_asset_admission_next_action": trial_admission_summary[
+                "next_action"
+            ],
+            "tradeability_top_strategy_group_id": tradeability_summary[
+                "top_strategy_group_id"
+            ],
+            "tradeability_top_verdict": tradeability_summary["top_verdict"],
+            "tradeability_top_first_blocker_class": tradeability_summary[
+                "top_first_blocker_class"
+            ],
+            "tradeability_top_next_action": tradeability_summary["top_next_action"],
+            "tradeability_row_count": tradeability_summary["row_count"],
+            "tradeability_tradable_now_count": tradeability_summary[
+                "tradable_now_count"
+            ],
+            "tradeability_real_order_authority_count": tradeability_summary[
+                "real_order_authority_count"
+            ],
             "runtime_status": runtime_status,
             "monitor_status": monitor_status,
             "owner_status": owner_status,
@@ -1351,6 +1485,12 @@ def build_local_monitor_sequence_report(
             ),
             "strategygroup_research_intake_review_json": str(
                 strategygroup_research_intake_review_json
+            ),
+            "strategygroup_trial_asset_admission_proposal_json": str(
+                strategygroup_trial_asset_admission_proposal_json
+            ),
+            "strategygroup_tradeability_verdict_json": str(
+                strategygroup_tradeability_verdict_json
             ),
         },
     }
@@ -1976,6 +2116,60 @@ def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    proposal = _as_dict(packet.get("proposal"))
+    checkpoint = _as_dict(packet.get("owner_policy_checkpoint"))
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "trial_asset_admission_proposal_ready",
+        "strategy_group_id": str(proposal.get("strategy_group_id") or ""),
+        "current_stage": str(proposal.get("current_stage") or ""),
+        "proposed_stage": str(proposal.get("proposed_stage") or ""),
+        "owner_policy_required": checkpoint.get("owner_policy_required") is True,
+        "owner_policy_fields": [
+            str(item) for item in checkpoint.get("owner_policy_fields") or []
+        ],
+        "next_action": str(proposal.get("next_action") or ""),
+        "after_next_state": str(proposal.get("after_next_state") or ""),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
+def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
+    top_strategy_group_id = str(summary.get("top_strategy_group_id") or "")
+    top_row = {}
+    for row in _dict_rows(packet.get("verdict_rows")):
+        if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
+            top_row = row
+            break
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "tradeability_verdict_ready",
+        "row_count": _int(summary.get("row_count")),
+        "tradable_now_count": _int(summary.get("tradable_now_count")),
+        "actionable_now_count": _int(summary.get("actionable_now_count")),
+        "real_order_authority_count": _int(
+            summary.get("real_order_authority_count")
+        ),
+        "top_strategy_group_id": top_strategy_group_id,
+        "top_verdict": str(summary.get("top_verdict") or "missing"),
+        "top_first_blocker_class": str(
+            summary.get("top_first_blocker_class") or "missing"
+        ),
+        "top_next_action": str(summary.get("top_next_action") or "missing"),
+        "top_blocker_owner": str(top_row.get("blocker_owner") or "unknown"),
+        "top_after_next_state": str(top_row.get("after_next_state") or "unknown"),
+        "owner_decision_required": _as_dict(packet.get("checks")).get(
+            "owner_decision_required"
+        )
+        is True,
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_observation_layer_summary(
     *,
     signal_coverage_packet: dict[str, Any],
@@ -2174,6 +2368,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     )
     research_intake = report.get("strategy_research_intake") or {}
     experiment_candidate = report.get("strategy_experiment_candidate") or {}
+    trial_admission = report.get("strategy_trial_asset_admission") or {}
+    tradeability = report.get("strategy_tradeability_verdict") or {}
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
         "",
@@ -2202,6 +2398,15 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 做空试验候选策略组: `{experiment_candidate.get('selected_short_strategy_group_id') or 'none'}`",
         f"- 晋级范围: `{experiment_candidate.get('promotion_scope') or 'not_applicable'}`",
         f"- tiny-live ready: `{_yes_no(experiment_candidate.get('tiny_live_ready') is True)}`",
+        f"- 准入提案状态: `{trial_admission.get('status', 'missing')}`",
+        f"- 准入提案策略组: `{trial_admission.get('strategy_group_id') or 'none'}`",
+        f"- 准入提案下一状态: `{trial_admission.get('after_next_state') or 'none'}`",
+        f"- Owner policy required: `{_yes_no(trial_admission.get('owner_policy_required') is True)}`",
+        f"- 交易资格状态: `{tradeability.get('status', 'missing')}`",
+        f"- 交易资格 Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_verdict', 'missing')}`",
+        f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
+        f"- 下一动作: `{tradeability.get('top_next_action', 'missing')}`",
+        f"- 当前可交易数量: `{tradeability.get('tradable_now_count', 0)}`",
         "",
         "## Steps",
         "",
@@ -2524,6 +2729,22 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-research-intake-review-md",
         default=str(DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-trial-asset-admission-proposal-json",
+        default=str(DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-trial-asset-admission-proposal-md",
+        default=str(DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-tradeability-verdict-json",
+        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-tradeability-verdict-md",
+        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

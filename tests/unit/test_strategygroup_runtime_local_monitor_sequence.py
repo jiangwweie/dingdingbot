@@ -589,6 +589,138 @@ def _write_ready_live_submit_readiness_bridge(command: list[str]) -> None:
     )
 
 
+def _write_ready_tradeability_verdict(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "tradeability_verdict_ready",
+            "summary": {
+                "row_count": 4,
+                "tradable_now_count": 0,
+                "actionable_now_count": 0,
+                "real_order_authority_count": 0,
+                "owner_first_blocker_count": 1,
+                "engineering_first_blocker_count": 1,
+                "market_first_blocker_count": 1,
+                "runtime_first_blocker_count": 0,
+                "strategy_review_first_blocker_count": 1,
+                "top_strategy_group_id": "BRF2-001",
+                "top_verdict": "not_tradable_policy",
+                "top_first_blocker_class": (
+                    "owner_trial_scope_or_capital_policy_missing"
+                ),
+                "top_next_action": "record_owner_trial_scope_policy",
+            },
+            "verdict_rows": [
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "stage": "trial_asset_admission_candidate",
+                    "verdict": "not_tradable_policy",
+                    "first_blocker_class": (
+                        "owner_trial_scope_or_capital_policy_missing"
+                    ),
+                    "blocker_owner": "owner",
+                    "next_action": "record_owner_trial_scope_policy",
+                    "after_next_state": "admitted_trial_asset",
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                },
+                {
+                    "strategy_group_id": "MPG-001",
+                    "stage": "armed_observation",
+                    "verdict": "not_tradable_market_wait",
+                    "first_blocker_class": "fresh_executable_signal_absent",
+                    "blocker_owner": "market",
+                    "next_action": "continue_armed_observation_until_fresh_signal",
+                    "after_next_state": "live_submit_ready",
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                },
+            ],
+            "checks": {
+                "owner_policy_blocker_present": True,
+                "owner_decision_required": False,
+                "market_wait_only_after_admission": True,
+                "actionable_now_count": 0,
+                "real_order_authority_count": 0,
+            },
+            "interaction": {
+                "level": "L0_local_tradeability_verdict",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _write_ready_trial_asset_admission_proposal(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "trial_asset_admission_proposal_ready",
+            "proposal": {
+                "strategy_group_id": "BRF2-001",
+                "current_stage": "tiny_live_intake_candidate",
+                "proposed_stage": "trial_asset_admission_candidate",
+                "next_action": "record_owner_trial_scope_policy",
+                "after_next_state": "admitted_trial_asset",
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "owner_policy_checkpoint": {
+                "owner_policy_required": True,
+                "owner_policy_fields": [
+                    "capital_scope",
+                    "max_notional",
+                    "valid_until",
+                    "slippage_limit",
+                    "trial_identity",
+                ],
+                "owner_decision_required_now": False,
+                "owner_intervention_required": False,
+            },
+            "checks": {
+                "proposal_generated": True,
+                "owner_policy_required": True,
+                "owner_decision_required": False,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_trial_asset_admission_proposal",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
 def _write_ready_strategygroup_portfolio_board(command: list[str]) -> None:
     _write_output(
         command,
@@ -846,11 +978,17 @@ def _maybe_write_strategygroup_closure_step(
     if script == "build_strategygroup_live_submit_readiness_bridge.py":
         _write_ready_live_submit_readiness_bridge(command)
         return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_tradeability_verdict.py":
+        _write_ready_tradeability_verdict(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_portfolio_board.py":
         _write_ready_strategygroup_portfolio_board(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_capital_trial_readiness_bridge.py":
         _write_ready_capital_trial_bridge(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_trial_asset_admission_proposal.py":
+        _write_ready_trial_asset_admission_proposal(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_research_intake_review.py":
         _write_ready_strategygroup_research_intake_review(command)
@@ -1114,6 +1252,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "research-intake-review.json",
         strategygroup_research_intake_review_md=tmp_path
         / "research-intake-review.md",
+        strategygroup_trial_asset_admission_proposal_json=tmp_path
+        / "trial-admission-proposal.json",
+        strategygroup_trial_asset_admission_proposal_md=tmp_path
+        / "trial-admission-proposal.md",
+        strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
+        strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
     )
 
@@ -1124,6 +1268,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_portfolio_board.py",
         "build_strategygroup_research_intake_review.py",
         "build_strategygroup_capital_trial_readiness_bridge.py",
+        "build_strategygroup_trial_asset_admission_proposal.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",
@@ -1148,6 +1293,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_lifecycle_rehearsal.py",
         "build_strategygroup_pre_live_rehearsal_readiness.py",
         "build_strategygroup_live_submit_readiness_bridge.py",
+        "build_strategygroup_tradeability_verdict.py",
     ]
     assert len(decision_loop_commands) == 2
     assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
@@ -1211,6 +1357,31 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     )
     assert report["checks"]["short_experiment_candidate_tiny_live_ready"] is False
     assert report["checks"]["candidate_trade_real_order_authority"] is False
+    assert report["strategy_tradeability_verdict"]["top_strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["strategy_trial_asset_admission"]["status"] == (
+        "trial_asset_admission_proposal_ready"
+    )
+    assert report["strategy_trial_asset_admission"]["strategy_group_id"] == (
+        "BRF2-001"
+    )
+    assert report["strategy_trial_asset_admission"]["owner_policy_required"] is True
+    assert report["strategy_tradeability_verdict"]["top_verdict"] == (
+        "not_tradable_policy"
+    )
+    assert report["strategy_tradeability_verdict"]["top_first_blocker_class"] == (
+        "owner_trial_scope_or_capital_policy_missing"
+    )
+    assert report["strategy_tradeability_verdict"]["top_next_action"] == (
+        "record_owner_trial_scope_policy"
+    )
+    assert report["checks"]["tradeability_top_strategy_group_id"] == "BRF2-001"
+    assert report["checks"]["tradeability_top_verdict"] == (
+        "not_tradable_policy"
+    )
+    assert report["checks"]["tradeability_tradable_now_count"] == 0
+    assert report["checks"]["tradeability_real_order_authority_count"] == 0
     assert report["checks"]["non_market_gaps"] == []
 
 

@@ -18,9 +18,9 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RESEARCH_INTAKE_JSON = Path(
-    "/Users/jiangwei/Documents/final-strategy-research/"
-    "research/range-short-righttail/reports/tiny-live-intake-candidates.json"
+DEFAULT_RESEARCH_INTAKE_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.json"
@@ -61,6 +61,8 @@ MAIN_CONTROL_POSITIONS = {
     "BRF2-001": {
         "position": "paper_observation_admission_candidate",
         "ledger_decision": "promote",
+        "promotion_scope": "intake_only",
+        "promotion_target": "paper_observation_or_candidate_trade_packet",
         "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
         "required_next_evidence": (
             "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping"
@@ -191,6 +193,8 @@ def _candidate_row(candidate: dict[str, Any]) -> dict[str, Any]:
     position = MAIN_CONTROL_POSITIONS.get(strategy_id, {})
     required_facts = _string_list(candidate.get("required_facts_draft"))
     disable_facts = _string_list(candidate.get("disable_or_review_facts_draft"))
+    promotion_scope = str(position.get("promotion_scope") or "not_applicable")
+    promotion_target = str(position.get("promotion_target") or "not_applicable")
     return {
         "strategy_group_id": strategy_id,
         "strategy_direction": str(candidate.get("strategy_direction") or "unknown"),
@@ -201,6 +205,8 @@ def _candidate_row(candidate: dict[str, Any]) -> dict[str, Any]:
         "main_control_intake_position": str(
             position.get("position") or "research_intake_candidate_review"
         ),
+        "promotion_scope": promotion_scope,
+        "promotion_target": promotion_target,
         "intake_reason": str(
             position.get("intake_reason")
             or "main_control_review_required_before_any_authority_change"
@@ -222,7 +228,7 @@ def _candidate_row(candidate: dict[str, Any]) -> dict[str, Any]:
         "risk_envelope": _as_dict(candidate.get("risk_envelope")),
         "path_risk_evidence": _as_dict(candidate.get("evidence")),
         "known_risks": _string_list(candidate.get("known_risks")),
-        "source_reports": _string_list(candidate.get("source_reports")),
+        "source_reports": _source_report_refs(candidate.get("source_reports")),
         "paper_observation_packet_shape": _paper_observation_packet_shape(
             strategy_id=strategy_id,
             required_facts=required_facts,
@@ -232,6 +238,7 @@ def _candidate_row(candidate: dict[str, Any]) -> dict[str, Any]:
             "records_would_enter": True,
             "records_paper_outcome": True,
             "allowed_decisions": ["keep_observing", "revise", "promote", "park"],
+            "promote_requires_promotion_scope": True,
             "live_outcome_required": False,
             "live_permission_change": False,
         },
@@ -240,18 +247,24 @@ def _candidate_row(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _decision_ledger_row(row: dict[str, Any]) -> dict[str, Any]:
     position = MAIN_CONTROL_POSITIONS.get(str(row.get("strategy_group_id")), {})
+    decision = str(position.get("ledger_decision") or "keep_observing")
+    promotion_scope = str(row.get("promotion_scope") or "not_applicable")
+    promotion_target = str(row.get("promotion_target") or "not_applicable")
     return {
         "strategy_group_id": row["strategy_group_id"],
         "tier": "unknown",
         "opportunity_type": "research_intake",
-        "decision": str(position.get("ledger_decision") or "keep_observing"),
+        "decision": decision,
+        "promotion_scope": promotion_scope,
+        "promotion_target": promotion_target,
         "reason": (
             "research_intake:{}; direction:{}; source_tiny_live_ready:{}; "
-            "main_control_absorbs_asset_not_execution_authority"
+            "main_control_absorbs_asset_not_execution_authority; promotion_scope:{}"
         ).format(
             row["main_control_intake_position"],
             row["strategy_direction"],
             str(row["source_tiny_live_ready"]).lower(),
+            promotion_scope,
         ),
         "required_next_evidence": str(
             position.get("required_next_evidence")
@@ -259,6 +272,7 @@ def _decision_ledger_row(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "authority_boundary": (
             "main_control_research_intake_review_only; research_input_not_execution_authority; "
+            f"promotion_scope={promotion_scope}; promotion_target={promotion_target}; "
             "tiny_live_ready=false; actionable_now=false; real_order_authority=false; "
             "no_finalgate_no_operation_layer_no_exchange_write"
         ),
@@ -397,8 +411,8 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "",
         "## Candidate Rows",
         "",
-        "| StrategyGroup | Direction | Intake Position | Paper Observation | Tiny-Live Ready | Next |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| StrategyGroup | Direction | Intake Position | Promotion Scope | Paper Observation | Tiny-Live Ready | Next |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     by_next = {
         row["strategy_group_id"]: ledger["next_checkpoint"]
@@ -410,10 +424,11 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
     }
     for row in _dict_rows(packet.get("candidate_rows")):
         lines.append(
-            "| `{}` | `{}` | `{}` | `{}` | `false` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `false` | `{}` |".format(
                 row.get("strategy_group_id"),
                 row.get("strategy_direction"),
                 row.get("main_control_intake_position"),
+                row.get("promotion_scope"),
                 str(row.get("paper_observation_ready")).lower(),
                 by_next.get(str(row.get("strategy_group_id")), "continue_review"),
             )
@@ -481,6 +496,14 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item)]
+
+
+def _source_report_refs(value: Any) -> list[str]:
+    refs: list[str] = []
+    for item in _string_list(value):
+        path = Path(item)
+        refs.append(path.name if path.name else item)
+    return refs
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-20
+Last updated: 2026-06-23
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Current Document Authority
@@ -19,6 +19,8 @@ Start from:
 docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
+docs/current/TRADEABILITY_VERDICT_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
@@ -83,6 +85,21 @@ slowing eligible submits merely because the trade is risky. Hard stops protect
 operational authority and mechanical correctness; they are not generic reasons
 to avoid in-boundary right-tail opportunities.
 
+Strategy evaluation follows
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`: high-return numbers
+such as `100%` are aspiration anchors, not hard intake gates; leverage values
+such as `5x` are scenarios, not automatic disqualification or authorization.
+Advance strategies by experiment value, known risk envelope, replay/paper
+evidence, and main-control absorbability, not by perfect-profit proof.
+
+Strategy tradeability follows
+`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`: every active or newly absorbed
+StrategyGroup candidate must answer whether it can trade now. If it cannot, the
+system must identify the first blocker, blocker owner, next action, and
+post-action state. Do not compress asset-admission, Owner-policy, fact-mapping,
+execution-gate, strategy-quality, or safety blockers into generic
+`waiting_for_market`.
+
 Current planning must use this operating loop:
 
 ```text
@@ -107,6 +124,12 @@ StrategyGroup decision: keep observing, revise, promote, park, kill, go live,
 do not go live, or block for safety. It complements the post-action Review
 Ledger; it does not replace FinalGate, Operation Layer, live RequiredFacts, or
 real lifecycle review.
+
+Promotion language must be scoped. A research-side short candidate such as
+`BRF2-001` may be promoted for `intake_only` or `trial_admission` without being
+promoted to live readiness. Generic `promote` wording is invalid when it hides
+whether the scope is intake, armed observation, tiny-live readiness, or L4
+eligibility.
 
 The Owner is not an operator. Owner-facing product surfaces must not turn
 internal execution gates, evidence objects, API routes, proof chains, or blocker
@@ -201,6 +224,8 @@ Every blocker must classify itself as one of:
 | Class | Meaning |
 | --- | --- |
 | `waiting_for_market` | No fresh signal exists |
+| `asset_admission` | StrategyGroup is not yet a final-owned admitted trial/runtime asset |
+| `owner_policy_required` | Owner capital, profile, risk, scope, promotion, pause, park, or kill decision is required |
 | `missing_fact` | Required fact or evidence is absent or stale |
 | `deployment_issue` | Tokyo or local deployment is behind current code |
 | `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
@@ -245,6 +270,7 @@ Current target chain:
 
 ```text
 StrategyGroup selection
+-> trial asset admission when needed
 -> runtime admission
 -> armed observation
 -> fresh strategy signal

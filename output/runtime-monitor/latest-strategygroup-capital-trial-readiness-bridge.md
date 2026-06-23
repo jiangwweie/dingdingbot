@@ -1,7 +1,7 @@
 ## StrategyGroup Capital Trial Readiness Bridge
 
 - Status: capital_trial_readiness_bridge_ready
-- Generated: 2026-06-22T15:58:09.910172+00:00
+- Generated: 2026-06-23T02:06:27.493303+00:00
 - Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json
 - Trial Packet v0 JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json
 - Selected non-MPG candidate: BRF2-001

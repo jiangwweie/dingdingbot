@@ -694,7 +694,7 @@
       ]
     }
   ],
-  "generated_at_utc": "2026-06-22T15:58:09.910172+00:00",
+  "generated_at_utc": "2026-06-23T02:06:27.493303+00:00",
   "goal_progress_projection": {
     "no_live_permission": true,
     "owner_intervention_required": false,
@@ -1492,7 +1492,7 @@
       "tradable_forward_count": 8,
       "would_enter_forward_positive_count": 8
     },
-    "generated_at_utc": "2026-06-22T15:58:09.910172+00:00",
+    "generated_at_utc": "2026-06-23T02:06:27.493303+00:00",
     "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as a non-executing candidate-trade packet, pending Owner policy scope and future official live gates.",
     "kill_conditions": [
       "owner_policy_not_accepted",

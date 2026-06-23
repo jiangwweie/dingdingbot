@@ -55,6 +55,14 @@ ALLOWED_DECISIONS = {
     "block_for_safety",
 }
 
+ALLOWED_PROMOTION_SCOPES = {
+    "intake_only",
+    "trial_admission",
+    "armed_observation",
+    "tiny_live_ready_review",
+    "l4_eligibility_review",
+}
+
 
 def build_strategygroup_decision_ledger(
     *,
@@ -146,6 +154,8 @@ def build_strategygroup_decision_ledger(
         capture_gap_audit_packet or {},
         research_intake_review_packet or {},
     )
+    forbidden_effects.extend(_unscoped_promote_effects(ledger_rows))
+    forbidden_effects = sorted(set(forbidden_effects))
     decision_counts = Counter(str(row.get("decision") or "unknown") for row in ledger_rows)
     tier_review_rows = [_tier_review_row(row) for row in ledger_rows]
     status = (
@@ -197,6 +207,8 @@ def build_strategygroup_decision_ledger(
             "tier",
             "opportunity_type",
             "decision",
+            "promotion_scope",
+            "promotion_target",
             "reason",
             "required_next_evidence",
             "authority_boundary",
@@ -332,6 +344,8 @@ def _ledger_row_from_quality(
             else "would_enter"
         ),
         "decision": decision,
+        "promotion_scope": _promotion_scope_for_quality_decision(decision, quality_decision),
+        "promotion_target": _promotion_target_for_quality_decision(decision, quality_decision),
         "reason": reason,
         "required_next_evidence": _required_next_evidence(
             decision=decision,
@@ -355,6 +369,8 @@ def _ledger_row_from_no_action(
         "tier": tier,
         "opportunity_type": "no_action",
         "decision": decision,
+        "promotion_scope": "not_applicable",
+        "promotion_target": "not_applicable",
         "reason": _no_action_reason(row) or "high_priority_no_action_requires_review",
         "required_next_evidence": _required_next_evidence_from_no_action(row),
         "authority_boundary": "local_decision_support_only; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
@@ -388,6 +404,28 @@ def _decision_from_no_action(row: dict[str, Any]) -> str:
     if any(token in action + " " + readiness + " " + reasons for token in ("rewrite", "redesign", "classifier", "facts")):
         return "revise"
     return "keep_observing"
+
+
+def _promotion_scope_for_quality_decision(
+    decision: str,
+    quality_decision: str,
+) -> str:
+    if decision != "promote":
+        return "not_applicable"
+    if quality_decision == "prepare_l2_intake_review_without_promotion":
+        return "armed_observation"
+    return "trial_admission"
+
+
+def _promotion_target_for_quality_decision(
+    decision: str,
+    quality_decision: str,
+) -> str:
+    if decision != "promote":
+        return "not_applicable"
+    if quality_decision == "prepare_l2_intake_review_without_promotion":
+        return "shadow_or_armed_observation_review"
+    return "strategygroup_trial_admission_review"
 
 
 def _required_next_evidence(
@@ -457,6 +495,8 @@ def _normalize_ledger_row(row: dict[str, Any]) -> dict[str, Any]:
         "tier": str(row.get("tier") or "unknown"),
         "opportunity_type": str(row.get("opportunity_type") or "no_action"),
         "decision": str(row.get("decision") or "keep_observing"),
+        "promotion_scope": str(row.get("promotion_scope") or "not_applicable"),
+        "promotion_target": str(row.get("promotion_target") or "not_applicable"),
         "reason": str(row.get("reason") or "decision_required"),
         "required_next_evidence": str(row.get("required_next_evidence") or "none"),
         "authority_boundary": str(row.get("authority_boundary") or ""),
@@ -464,6 +504,8 @@ def _normalize_ledger_row(row: dict[str, Any]) -> dict[str, Any]:
     }
     if normalized["decision"] not in ALLOWED_DECISIONS:
         normalized["decision"] = "keep_observing"
+        normalized["promotion_scope"] = "not_applicable"
+        normalized["promotion_target"] = "not_applicable"
     return normalized
 
 
@@ -561,12 +603,19 @@ def _capture_gap_ledger_rows(
                     else "no_action"
                 ),
                 "decision": mapped_decision,
+                "promotion_scope": _promotion_scope_from_capture_gap(
+                    recommendation
+                ),
+                "promotion_target": _promotion_target_from_capture_gap(
+                    recommendation
+                ),
                 "reason": _capture_gap_reason(recommendation, closure),
                 "required_next_evidence": _capture_gap_required_next_evidence(
                     recommendation
                 ),
                 "authority_boundary": (
                     "local_decision_support_only; source=capture_gap_audit; "
+                    f"promotion_scope={_promotion_scope_from_capture_gap(recommendation)}; "
                     "real_order_authority=false; no_tier_policy_change; "
                     "no_finalgate_no_operation_layer_no_exchange_write"
                 ),
@@ -599,6 +648,20 @@ def _decision_from_capture_gap(row: dict[str, Any]) -> str:
     if recommendation == "park":
         return "park"
     return "keep_observing"
+
+
+def _promotion_scope_from_capture_gap(row: dict[str, Any]) -> str:
+    recommendation = str(row.get("decision") or "")
+    if recommendation == "promote_review":
+        return "trial_admission"
+    return "not_applicable"
+
+
+def _promotion_target_from_capture_gap(row: dict[str, Any]) -> str:
+    recommendation = str(row.get("decision") or "")
+    if recommendation == "promote_review":
+        return "promotion_evidence_review_only"
+    return "not_applicable"
 
 
 def _capture_gap_reason(
@@ -681,17 +744,23 @@ def _research_intake_ledger_rows(
     rows = []
     for row in _dict_rows(packet.get("decision_ledger_rows")):
         group = str(row.get("strategy_group_id") or "unknown")
+        decision = str(row.get("decision") or "keep_observing")
+        promotion_scope = str(row.get("promotion_scope") or "not_applicable")
+        promotion_target = str(row.get("promotion_target") or "not_applicable")
         rows.append(
             {
                 "strategy_group_id": group,
                 "tier": current_tier_by_group.get(group, str(row.get("tier") or "unknown")),
                 "opportunity_type": str(row.get("opportunity_type") or "research_intake"),
-                "decision": str(row.get("decision") or "keep_observing"),
+                "decision": decision,
+                "promotion_scope": promotion_scope,
+                "promotion_target": promotion_target,
                 "reason": _join_reason_parts(
                     [
                         "research_intake_review:{}".format(
                             row.get("reason") or "main_control_intake_review"
                         ),
+                        f"promotion_scope:{promotion_scope}",
                         "source=final_main_control_adapter",
                     ]
                 ),
@@ -701,6 +770,7 @@ def _research_intake_ledger_rows(
                 ),
                 "authority_boundary": (
                     "local_decision_support_only; source=research_intake_review; "
+                    f"promotion_scope={promotion_scope}; promotion_target={promotion_target}; "
                     "tiny_live_ready=false; actionable_now=false; "
                     "real_order_authority=false; no_tier_policy_change; "
                     "no_live_profile_change; no_finalgate_no_operation_layer_no_exchange_write"
@@ -735,6 +805,12 @@ def _research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "role_only_intake_candidate_count": summary.get(
             "role_only_intake_candidate_count",
             0,
+        ),
+        "scoped_promote_count": sum(
+            1
+            for row in _dict_rows(packet.get("decision_ledger_rows"))
+            if row.get("decision") == "promote"
+            and row.get("promotion_scope") in ALLOWED_PROMOTION_SCOPES
         ),
         "owner_decision_required_now": False,
         "live_permission_change_recommended_now": False,
@@ -983,6 +1059,22 @@ def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
+def _unscoped_promote_effects(rows: list[dict[str, Any]]) -> list[str]:
+    effects: list[str] = []
+    for row in rows:
+        if row.get("decision") != "promote":
+            continue
+        scope = str(row.get("promotion_scope") or "not_applicable")
+        if scope not in ALLOWED_PROMOTION_SCOPES:
+            effects.append(
+                "ledger_rows.{}.unscoped_promote:{}".format(
+                    row.get("strategy_group_id") or "unknown",
+                    scope,
+                )
+            )
+    return effects
+
+
 def _one_row_per_group(rows: list[dict[str, Any]]) -> bool:
     groups = [str(row.get("strategy_group_id") or "unknown") for row in rows]
     return len(groups) == len(set(groups))
@@ -990,18 +1082,19 @@ def _one_row_per_group(rows: list[dict[str, Any]]) -> bool:
 
 def _ledger_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Tier | Type | Decision | Next |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+        return "| StrategyGroup | Tier | Type | Decision | Scope | Next |\n| --- | --- | --- | --- | --- | --- |\n| none | - | - | - | - | - |"
     output = [
-        "| StrategyGroup | Tier | Type | Decision | Next |",
-        "| --- | --- | --- | --- | --- |",
+        "| StrategyGroup | Tier | Type | Decision | Scope | Next |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 row.get("strategy_group_id"),
                 row.get("tier"),
                 row.get("opportunity_type"),
                 row.get("decision"),
+                row.get("promotion_scope"),
                 row.get("next_checkpoint"),
             )
         )

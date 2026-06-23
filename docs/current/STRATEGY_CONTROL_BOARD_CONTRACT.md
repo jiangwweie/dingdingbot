@@ -2,7 +2,7 @@
 title: STRATEGY_CONTROL_BOARD_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # Strategy Control Board Contract
@@ -37,10 +37,17 @@ The board may combine:
 | StrategyGroup Registry | Explain what the strategy is, what it eats, and what risk gap matters |
 | Runtime state | Decide whether the strategy is running, waiting, processing, unavailable, or needs intervention |
 | Decision Ledger | Summarize keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block state |
+| Tradeability Verdict | Summarize whether a strategy can trade now, and if not, the first Owner-relevant blocker |
 | Review Ledger | Summarize live outcome review after real action |
 
 The board must not manually compute live order authority from documents. It
 must consume runtime state for `actionable_now`.
+
+The board may consume the Tradeability Verdict to avoid misleading compression.
+For example, a promising short candidate that is not yet a final-owned trial
+asset should show as pending admission or policy, not simply as waiting for
+market. The board must still hide internal gate names from the primary Owner
+surface.
 
 ## Required Row Fields
 
@@ -56,6 +63,7 @@ must consume runtime state for `actionable_now`.
 | `intervention` | `无需操作` unless Owner action is required |
 | `reason` | One plain sentence when unavailable or intervention is required |
 | `review_outcome` | `保留`, `调整`, `暂停`, `停用`, or `待复盘` |
+| `tradeability_summary` | One plain sentence such as `等待机会`, `待准入`, `待确认风险范围`, `事实待补齐`, or `暂不可用` |
 
 ## Strategy Learning Surface
 
@@ -69,6 +77,10 @@ but it must not become a raw diagnostic table.
 | missing replay coverage that changes a decision | 样本不足，等待本地补充 |
 | classifier / facts gap that changes a decision | 策略条件待调整 |
 | parked low-priority vocabulary | 暂停观察，不影响主线 |
+| tiny-live intake but not admitted | 有实验价值，待主控准入 |
+| admitted but missing Owner policy | 待确认风险范围 |
+| admitted and armed but no fresh signal | 等待机会 |
+| facts or runtime gate missing | 系统处理中或暂不可用 |
 
 The board should show one compact strategy-learning status only when it changes
 the Owner-relevant state. Healthy background replay, low-priority observation,

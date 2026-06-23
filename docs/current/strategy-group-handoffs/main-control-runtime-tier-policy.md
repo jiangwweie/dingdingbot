@@ -1,13 +1,25 @@
 # Main-Control Runtime Tier Policy
 
 Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-19
+Last updated: 2026-06-23
 
 ## Purpose
 
 This supplement separates StrategyGroup visibility from real-order eligibility.
 It is not order authority, FinalGate input, Operation Layer input, a credential
 change, a live-profile change, or an order-sizing default.
+
+Strategy evaluation follows
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`: `100%`-style return
+targets are aspiration anchors, and `5x`-style leverage values are scenarios for
+review. Neither creates tier promotion authority by itself, and neither blocks a
+bounded experiment-worthy candidate by itself.
+
+Tradeability evaluation follows
+`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`: a candidate that is not yet in
+the registry or runtime tier policy is blocked by asset admission, not by the
+market. `waiting_for_market` is only accurate after final-owned admission,
+scoped policy, armed observation, and non-live readiness are closed.
 
 ## Tier Definitions
 
@@ -35,10 +47,22 @@ change, a live-profile change, or an order-sizing default.
 New or newly reviewed StrategyGroups such as `BRF`, `VCB`, `LSR`, and `RBR`
 default to `L1 observe_only`.
 
-They may move to `L2 shadow_candidate` only after reviewed handoff intake and
-dry-run audit. They must not enter `L4 tiny_real_order_eligible` until the
-first `MPG-001` allocated-subaccount real-order loop has closed or the Owner
-explicitly changes the selected live lane.
+Research-side candidates such as `BRF2-001` or `RBR2-001` are not automatically
+covered by existing `BRF` or `RBR` rows. They must first pass a final-owned
+trial asset admission step:
+
+```text
+tiny_live_intake_candidate
+-> trial_asset_admission_candidate
+-> admitted_trial_asset
+-> L1/L2/L3/L4 tier review as scoped by Owner policy
+```
+
+They may move to `L2 shadow_candidate` only after reviewed handoff intake,
+final-owned admission, and dry-run audit. They must not enter `L4
+tiny_real_order_eligible` until either the first selected live lane has closed
+or the Owner explicitly changes the selected live lane and all runtime scope,
+facts, protection, and official gates pass.
 
 ## Boundary
 
@@ -83,6 +107,20 @@ Decision Ledger plus replay-to-review evidence, not by isolated reports.
 | Keep `L2 shadow_candidate` | Shadow quality is useful but facts/classifier/cost gaps remain |
 | Park | Evidence is weak, negative, low-priority, or not tied to right-tail opportunity |
 | Future `L4` review | Requires explicit Owner lane change or post-MPG first live closure, plus the full official runtime chain |
+
+For newly absorbed research candidates, add the admission step before tier
+movement:
+
+| Admission decision | Required pre-tier evidence |
+| --- | --- |
+| `intake_only` | Research handoff is useful but remains outside final-owned registry and policy |
+| `trial_admission` | Thesis, risk envelope, facts draft, and review path justify final-owned admission preparation |
+| `admitted_trial_asset` | Registry, policy, fact, risk, and non-authority fields are present and testable |
+| `armed_observation` | Watcher scope, signal definition, disable facts, and no-submit boundary are ready |
+
+Return anchors and leverage scenarios may prioritize review, but they do not
+replace the tier evidence path. A `tiny_live_intake_candidate` is an intake
+asset, not `tiny_live_ready` and not `actionable_now`.
 
 The decision ledger is not a promotion authority by itself. It records why a
 StrategyGroup should be kept, revised, promoted, parked, killed, reviewed for

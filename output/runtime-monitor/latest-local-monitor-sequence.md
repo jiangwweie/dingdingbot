@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T01:05:16.760676+00:00
+- 报告时间: 2026-06-23T02:06:30.214108+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -21,6 +21,15 @@
 - 做空试验候选策略组: `BRF2-001`
 - 晋级范围: `intake_only`
 - tiny-live ready: `否`
+- 准入提案状态: `trial_asset_admission_proposal_ready`
+- 准入提案策略组: `BRF2-001`
+- 准入提案下一状态: `admitted_trial_asset`
+- Owner policy required: `是`
+- 交易资格状态: `tradeability_verdict_ready`
+- 交易资格 Top: `BRF2-001` / `not_tradable_policy`
+- 第一阻断: `owner_trial_scope_or_capital_policy_missing` / `owner`
+- 下一动作: `record_owner_trial_scope_policy`
+- 当前可交易数量: `0`
 
 ## Steps
 
@@ -32,6 +41,7 @@
 | strategygroup_portfolio_board | portfolio_board_ready | 0 |
 | strategygroup_research_intake_review | research_intake_review_ready | 0 |
 | strategygroup_capital_trial_readiness_bridge | capital_trial_readiness_bridge_ready | 0 |
+| strategygroup_trial_asset_admission_proposal | trial_asset_admission_proposal_ready | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |
@@ -56,6 +66,7 @@
 | strategygroup_lifecycle_rehearsal | lifecycle_rehearsal_ready | 0 |
 | strategygroup_pre_live_rehearsal_readiness | pre_live_rehearsal_ready | 0 |
 | strategygroup_live_submit_readiness_bridge | live_submit_standby_waiting_for_market | 0 |
+| strategygroup_tradeability_verdict | tradeability_verdict_ready | 0 |
 
 ## Checks
 

@@ -74,6 +74,8 @@
         "sample_event_count": 112,
         "stop_hit_count": 3
       },
+      "promotion_scope": "intake_only",
+      "promotion_target": "paper_observation_or_candidate_trade_packet",
       "real_order_authority": false,
       "required_facts_draft": [
         "closed_1h_ohlcv",
@@ -92,6 +94,7 @@
         ],
         "live_outcome_required": false,
         "live_permission_change": false,
+        "promote_requires_promotion_scope": true,
         "records_paper_outcome": true,
         "records_would_enter": true
       },
@@ -109,9 +112,9 @@
       "source_intake_status": "tiny_live_intake_candidate",
       "source_recommended_runtime_stage": "tiny_live_intake_candidate_with_path_risk",
       "source_reports": [
-        "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/reports/brf2-right-tail-trial-envelope.json",
-        "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/reports/brf2-path-stop-hit-attribution.json",
-        "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/packs/BRF2-001-handoff-pack.json"
+        "brf2-right-tail-trial-envelope.json",
+        "brf2-path-stop-hit-attribution.json",
+        "BRF2-001-handoff-pack.json"
       ],
       "source_tiny_live_ready": false,
       "strategy_direction": "bear_rally_failure_right_tail_short",
@@ -186,6 +189,8 @@
         "path_stop_rate_5m": 0.5897,
         "sample_event_count": 669
       },
+      "promotion_scope": "not_applicable",
+      "promotion_target": "not_applicable",
       "real_order_authority": false,
       "required_facts_draft": [
         "closed_1h_ohlcv",
@@ -203,6 +208,7 @@
         ],
         "live_outcome_required": false,
         "live_permission_change": false,
+        "promote_requires_promotion_scope": true,
         "records_paper_outcome": true,
         "records_would_enter": true
       },
@@ -220,8 +226,8 @@
       "source_intake_status": "tiny_live_intake_candidate",
       "source_recommended_runtime_stage": "tiny_live_intake_candidate_with_path_risk",
       "source_reports": [
-        "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/reports/rbr2-mean-reversion-role-validation.json",
-        "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/packs/RBR2-001-handoff-pack.json"
+        "rbr2-mean-reversion-role-validation.json",
+        "RBR2-001-handoff-pack.json"
       ],
       "source_tiny_live_ready": false,
       "strategy_direction": "range_upper_boundary_mean_reversion_short",
@@ -232,27 +238,31 @@
   ],
   "decision_ledger_rows": [
     {
-      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
+      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=intake_only; promotion_target=paper_observation_or_candidate_trade_packet; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
       "decision": "promote",
       "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
       "opportunity_type": "research_intake",
-      "reason": "research_intake:paper_observation_admission_candidate; direction:bear_rally_failure_right_tail_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority",
+      "promotion_scope": "intake_only",
+      "promotion_target": "paper_observation_or_candidate_trade_packet",
+      "reason": "research_intake:paper_observation_admission_candidate; direction:bear_rally_failure_right_tail_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:intake_only",
       "required_next_evidence": "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping",
       "strategy_group_id": "BRF2-001",
       "tier": "unknown"
     },
     {
-      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
+      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=not_applicable; promotion_target=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
       "decision": "keep_observing",
       "next_checkpoint": "RBR2-001_role_only_range_detector_classifier_merge_note",
       "opportunity_type": "research_intake",
-      "reason": "research_intake:role_only_intake_candidate; direction:range_upper_boundary_mean_reversion_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority",
+      "promotion_scope": "not_applicable",
+      "promotion_target": "not_applicable",
+      "reason": "research_intake:role_only_intake_candidate; direction:range_upper_boundary_mean_reversion_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:not_applicable",
       "required_next_evidence": "range_detector_facts_and_failed_upside_expansion_classifier_merge_review",
       "strategy_group_id": "RBR2-001",
       "tier": "unknown"
     }
   ],
-  "generated_at_utc": "2026-06-22T15:06:59.626183Z",
+  "generated_at_utc": "2026-06-23T02:06:27.443992Z",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -325,7 +335,7 @@
   "scope": "main_control_research_intake_review_only",
   "source_status": {
     "candidate_count": 2,
-    "research_intake_json": "/Users/jiangwei/Documents/final-strategy-research/research/range-short-righttail/reports/tiny-live-intake-candidates.json",
+    "research_intake_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json",
     "source_forbidden_effects": [],
     "source_schema": "brc.strategy_research_tiny_live_intake_candidates.v1",
     "source_scope": "strategy_research_only",

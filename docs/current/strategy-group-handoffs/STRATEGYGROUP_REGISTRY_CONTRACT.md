@@ -2,7 +2,7 @@
 title: STRATEGYGROUP_REGISTRY_CONTRACT
 status: CURRENT_PILOT_CONTRACT
 authority: docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # StrategyGroup Registry Contract
@@ -18,6 +18,7 @@ It answers:
 What does this StrategyGroup eat?
 How does it trade?
 Which tier is it allowed to reach?
+Can it trade now, and if not, what first blocker remains?
 What risks or evidence gaps remain?
 What would promote, downshift, park, or kill it?
 ```
@@ -35,6 +36,7 @@ or order-sizing authority.
 | StrategyGroup Registry | Owner-readable asset registry contract for strategy governance |
 | Runtime tier policy | Defines what each tier may do |
 | Decision Ledger | Records current keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block decisions |
+| Tradeability Verdict | Records whether the strategy can trade now and the first blocker when it cannot |
 | Review Ledger | Records real action outcomes and post-trial learning |
 
 The registry should summarize handoff and research evidence. It must not copy
@@ -60,6 +62,11 @@ FinalGate, or operate the Operation Layer.
 Registry and Owner policy may make a StrategyGroup `trial_eligible`.
 Only runtime state may make it `actionable_now`.
 
+The registry may support a Tradeability Verdict, but it must not compute live
+actionability by itself. Registry rows explain asset admission, policy scope,
+risk envelope, and hard blocks. Runtime state decides whether the current
+market moment can actually trade.
+
 ## Required Registry Fields
 
 Each StrategyGroup registry row should define these fields:
@@ -74,6 +81,8 @@ Each StrategyGroup registry row should define these fields:
 | `supported_sides` | Allowed side set, such as long, short, overlay, or context-only |
 | `default_tier` | Default runtime-governance tier |
 | `trial_eligible` | Whether the StrategyGroup may be considered for small-capital trial eligibility |
+| `tradeability_stage` | Lifecycle stage, such as `tiny_live_intake_candidate`, `trial_asset_admission_candidate`, `admitted_trial_asset`, `armed_observation`, `tiny_live_ready`, or `live_submit_ready` |
+| `first_tradeability_blocker` | Current first non-runtime reason it cannot trade, when known |
 | `actionable_now` | Whether it can submit now; usually generated at runtime, not hand-authored |
 | `risk_gaps` | Strategy risks the Owner may accept or reject |
 | `hard_blocks` | Mechanical or authority issues the Owner cannot override |
@@ -97,6 +106,24 @@ The registry must separate strategy eligibility from action-time execution:
 No fresh signal means `actionable_now=false`. It does not necessarily mean
 `trial_eligible=false`.
 
+## Tradeability Stages
+
+The registry should make the path from research to trading explicit:
+
+| Stage | Registry meaning | Real order |
+| --- | --- | --- |
+| `tiny_live_intake_candidate` | Research-side asset is worth main-control review | No |
+| `trial_asset_admission_candidate` | Main control is preparing final-owned admission | No |
+| `admitted_trial_asset` | Asset exists in final-owned governance scope | No |
+| `armed_observation` | Runtime may observe the asset under scoped rules | No |
+| `tiny_live_ready` | Non-executing readiness is closed | No, unless action-time chain later passes |
+| `live_submit_ready` | Current runtime state says official submit path may proceed | Yes, only through official gates |
+
+The registry should not display a candidate as merely `waiting_for_market`
+unless it is already admitted, scoped, armed, and non-live readiness is closed.
+Before that, the first blocker is usually asset admission, Owner policy, facts,
+strategy quality, or a hard safety boundary.
+
 ## Risk Classes
 
 The registry must separate strategy risk from execution safety:
@@ -115,6 +142,35 @@ override execution safety or authority hard stops.
 Strategy quality risk should become a tier, revise, park, or kill decision. It
 should not silently become a request for the Owner to manually operate the
 execution chain.
+
+## Experiment Evaluation Semantics
+
+Registry review follows
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`.
+
+Do not use fixed return thresholds or arbitrary leverage caps as the registry's
+primary pass/fail language. A high-return number such as `100%` is a right-tail
+aspiration anchor and priority signal. A leverage number such as `5x` is a
+scenario for liquidation, path-risk, loss-envelope, and profile-boundary review.
+
+The registry should prefer these labels:
+
+| Label | Meaning |
+| --- | --- |
+| `experiment_worthy` | Thesis and risk envelope justify further bounded work |
+| `paper_observation_candidate` | Worth live read-only observation without submit authority |
+| `tiny_live_intake_candidate` | Worth main-control intake as a small-capital experimental asset |
+| `trial_asset_admission_candidate` | Worth formal final-owned admission preparation |
+| `admitted_trial_asset` | Accepted as a final-owned trial asset without action-time authority |
+| `armed_observation` | Runtime may observe under scoped rules without real-order authority |
+| `role_only_intake_candidate` | Useful as detector, portfolio role, or classifier input |
+| `classifier_enhancement` | Improves another StrategyGroup but is not an independent trial lane |
+| `StrategyGroup_revision_evidence` | Changes keep, revise, promote, park, or kill logic |
+| `watchlist` | Interesting but not worth active observation yet |
+| `reject` | Negative evidence says not to spend near-term work |
+
+The registry should avoid labels that imply a strategy is dead merely because it
+missed a fixed target or used a higher leverage scenario in research.
 
 ## Tier Meanings
 
@@ -177,6 +233,18 @@ registry row
 -> tier review
 -> Owner policy when risk acceptance or L4 eligibility changes
 ```
+
+Promotion must be scoped. New artifacts should use:
+
+- `promotion_scope=intake_only`;
+- `promotion_scope=trial_admission`;
+- `promotion_scope=armed_observation`;
+- `promotion_scope=tiny_live_ready_review`;
+- `promotion_scope=l4_eligibility_review`.
+
+Generic `promote` without scope is ambiguous and should be rejected during
+main-control intake because it can confuse research intake with live-order
+eligibility.
 
 Downshift or park should be normal, not exceptional:
 

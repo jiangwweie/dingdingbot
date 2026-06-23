@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # Main Control Roadmap
@@ -43,6 +43,26 @@ not a generic research backlog: research, replay, paper/simulator, and cost-mode
 work are included only when they help the system find opportunities, capture
 them through the official runtime path, preserve net edge after execution costs,
 and feed review decisions.
+
+Strategy quality is evaluated by
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`. The roadmap must not
+turn `100%` or any other high-return number into a hard intake gate, and it must
+not treat `5x` or any other leverage scenario as an automatic rejection or
+authorization. The current standard is experiment value: clear thesis, known
+failure modes, bounded loss envelope, replay/paper evidence, and final
+main-control absorbability.
+
+Strategy tradeability is evaluated by
+`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`. The roadmap must not let
+candidate strategies sit indefinitely in reports, packets, or generic
+`waiting_for_market`. Each active candidate should move toward one of two
+answers:
+
+```text
+can trade through the official path
+or
+cannot trade because first blocker X remains
+```
 
 The current planning phase is strategy learning on top of a live-ready P0
 chain. P0 remains ready for the first selected StrategyGroup allocated-subaccount
@@ -119,6 +139,80 @@ Engineering work is mainline only when it improves one of those layers. Extra
 evidence fields, broad UI work, historical cleanup, or strategy expansion are
 not mainline unless they directly support this profitability-oriented loop.
 
+## Tradeability-Oriented Operating Frame
+
+The main-control runtime should prefer tradeability language over packet
+completion language:
+
+```text
+strategy exists
+-> admitted or not admitted
+-> scoped or not scoped
+-> armed or not armed
+-> facts ready or not ready
+-> action-time gates pass or fail
+-> trade or explain first blocker
+```
+
+The standard current-state question is:
+
+```text
+Can this StrategyGroup trade now?
+If not, what is the first blocker, who owns it, and what action removes it?
+```
+
+| Blocker class | Mainline meaning | Default next action |
+| --- | --- | --- |
+| `asset_admission` | Candidate is not a final-owned trial/runtime asset | Build or reject trial asset admission proposal |
+| `owner_policy_required` | Capital, profile, symbol/side, leverage scenario, attempt cap, loss unit, or tier decision is missing | Ask for scoped Owner policy only |
+| `market_wait` | Strategy is admitted, scoped, armed, and only lacks a fresh signal | Keep observing |
+| `facts_gap` | RequiredFacts or source mapping is not closed | Engineer fact mapping or freshness checks |
+| `execution_gate_gap` | Runtime, protection, account, exchange, order, position, or Operation Layer path blocks submit | Repair runtime gate or recovery branch |
+| `strategy_quality_gap` | Strategy is not experiment-worthy or risk cannot be bounded | Revise, park, or kill |
+| `hard_safety_stop` | Action violates a hard boundary | Stop and surface safety state |
+
+For a candidate such as `BRF2-001`, the initial main-control target is not
+direct live authority. The correct target is:
+
+```text
+tiny_live_intake_candidate
+-> trial_asset_admission_candidate
+-> admitted_trial_asset
+-> armed_observation
+-> tiny_live_ready
+-> future live_submit_ready only after fresh signal and official gates
+```
+
+This keeps short-side experiments from being rejected by over-conservative
+evaluation while still preventing research evidence from becoming order
+authority.
+
+## Strategy Experiment Evaluation Frame
+
+Strategy research and main-control intake should use an experiment-value frame,
+not a fixed return-qualification frame.
+
+| Concept | Current meaning | Must not mean |
+| --- | --- | --- |
+| `100%` or similar target | Right-tail aspiration anchor and priority signal | Mandatory pass/fail intake threshold |
+| `5x` or similar leverage | Scenario for liquidation, path-risk, and loss-envelope review | Automatic live authorization or automatic disqualification |
+| `tiny_live_intake_candidate` | Main control may ingest the asset for small-capital experimental review | Tiny-live ready, actionable now, or exchange-write authority |
+| `path_risk_known` | Stop-hit and adverse-path risks are measured and reviewable | Path is safe |
+| `risk_envelope_defined` | Attempt cap, loss cap, pause rule, or review boundary exists | Risk is eliminated |
+
+The preferred advancement question is:
+
+```text
+Is this strategy experiment-worthy, bounded, replayable, observable, and
+absorbable by main control?
+```
+
+The rejected advancement question is:
+
+```text
+Did this strategy prove a fixed 100% return under an arbitrary leverage cap?
+```
+
 ## Bounded-Aggressive Risk Frame
 
 The Owner-funded subaccount allocation is already the upstream risk-control
@@ -192,6 +286,12 @@ If a StrategyGroup is risky but still within scoped policy, the system should
 continue the engineering path toward the appropriate tier. Escalate only when
 the decision changes policy, tier, capital/profile/scope, pause/resume,
 promote/downshift/park/kill, production transition, or abnormal intervention.
+
+Goal-mode work after research intake should therefore be framed as reducing the
+first tradeability blocker, not merely adding another bridge or report. A task
+that moves `not_tradable_asset_admission` to `not_tradable_policy`, or
+`not_tradable_policy` to `not_tradable_market_wait`, has advanced the system
+even if no live order exists yet.
 
 ## No-Signal Progress Policy
 

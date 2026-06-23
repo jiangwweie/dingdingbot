@@ -331,6 +331,8 @@ def _research_intake_review() -> dict:
                 "tier": "unknown",
                 "opportunity_type": "research_intake",
                 "decision": "promote",
+                "promotion_scope": "intake_only",
+                "promotion_target": "paper_observation_or_candidate_trade_packet",
                 "reason": (
                     "research_intake:paper_observation_admission_candidate; "
                     "main_control_absorbs_asset_not_execution_authority"
@@ -340,7 +342,7 @@ def _research_intake_review() -> dict:
                 ),
                 "authority_boundary": (
                     "main_control_research_intake_review_only; "
-                    "real_order_authority=false"
+                    "promotion_scope=intake_only; real_order_authority=false"
                 ),
                 "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
             },
@@ -349,6 +351,8 @@ def _research_intake_review() -> dict:
                 "tier": "unknown",
                 "opportunity_type": "research_intake",
                 "decision": "keep_observing",
+                "promotion_scope": "not_applicable",
+                "promotion_target": "not_applicable",
                 "reason": (
                     "research_intake:role_only_intake_candidate; "
                     "main_control_absorbs_asset_not_execution_authority"
@@ -504,6 +508,10 @@ def test_decision_ledger_integrates_capture_gap_audit_as_review_input_only():
 
     rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
     assert rows["BRF-001"]["decision"] == "promote"
+    assert rows["BRF-001"]["promotion_scope"] == "trial_admission"
+    assert rows["BRF-001"]["promotion_target"] == (
+        "promotion_evidence_review_only"
+    )
     assert rows["BRF-001"]["required_next_evidence"].startswith(
         "promotion_evidence_review_only:"
     )
@@ -543,12 +551,20 @@ def test_decision_ledger_integrates_research_intake_review_as_review_input_only(
 
     rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
     assert rows["BRF2-001"]["decision"] == "promote"
+    assert rows["BRF2-001"]["promotion_scope"] == "intake_only"
+    assert rows["BRF2-001"]["promotion_target"] == (
+        "paper_observation_or_candidate_trade_packet"
+    )
     assert rows["BRF2-001"]["opportunity_type"] == "research_intake"
     assert rows["BRF2-001"]["required_next_evidence"] == (
         "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping"
     )
     assert "tiny_live_ready=false" in rows["BRF2-001"]["authority_boundary"]
+    assert "promotion_scope=intake_only" in rows["BRF2-001"][
+        "authority_boundary"
+    ]
     assert rows["RBR2-001"]["decision"] == "keep_observing"
+    assert rows["RBR2-001"]["promotion_scope"] == "not_applicable"
     assert rows["RBR2-001"]["next_checkpoint"] == (
         "RBR2-001_role_only_range_detector_classifier_merge_note"
     )
@@ -568,6 +584,30 @@ def test_decision_ledger_integrates_research_intake_review_as_review_input_only(
     assert packet["decision"]["l4_promotion_recommended"] is False
     assert packet["interaction"]["calls_finalgate"] is False
     assert packet["interaction"]["calls_operation_layer"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
+def test_decision_ledger_blocks_unscoped_promote_from_research_intake():
+    module = _load_module()
+    research = _research_intake_review()
+    research["decision_ledger_rows"][0].pop("promotion_scope")
+    research["decision_ledger_rows"][0].pop("promotion_target")
+
+    packet = module.build_strategygroup_decision_ledger(
+        opportunity_decision_loop_packet=_opportunity_decision_loop(),
+        signal_coverage_packet=_signal_coverage(),
+        tier_policy=_tier_policy(),
+        research_intake_review_packet=research,
+    )
+
+    assert packet["status"] == "blocked_forbidden_effect"
+    assert "ledger_rows.BRF2-001.unscoped_promote:not_applicable" in packet[
+        "safety_invariants"
+    ]["source_forbidden_effects"]
+    rows = {row["strategy_group_id"]: row for row in packet["ledger_rows"]}
+    assert rows["BRF2-001"]["decision"] == "promote"
+    assert rows["BRF2-001"]["promotion_scope"] == "not_applicable"
     assert packet["interaction"]["places_order"] is False
     assert packet["safety_invariants"]["order_created"] is False
 

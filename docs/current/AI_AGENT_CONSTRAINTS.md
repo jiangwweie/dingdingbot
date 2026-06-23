@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # AI Agent Constraints
@@ -48,6 +48,32 @@ and live-profile or sizing-default mutation outside explicit Owner direction.
 Inside the selected StrategyGroup, selected symbol/side universe, allocated
 subaccount capital, and configured leverage/notional profile, the system should
 prefer fast opportunity capture over additional discretionary de-risking.
+
+Strategy evaluation uses the experiment-value contract in
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`. Do not reject or
+stall a strategy merely because it has not proven a fixed `100%` return target.
+Do not treat `5x` or any other leverage value as an automatic quality failure.
+Leverage is a scenario to evaluate through liquidation buffer, path risk, loss
+unit, attempt cap, protection, and pause rules. Runtime leverage authority still
+comes only from the selected profile and action-time exchange facts.
+
+Strategy tradeability uses `docs/current/TRADEABILITY_VERDICT_CONTRACT.md`.
+Agents must not stop at "research absorbed", "packet ready", or
+"waiting_for_market" when a strategy still cannot trade. Every active selected,
+admitted, or newly absorbed candidate must expose:
+
+- whether it can trade now;
+- if not, the first blocker;
+- whether the blocker is engineering, Owner policy, market, runtime,
+  strategy-review, or safety;
+- the exact next action;
+- the state expected after that action.
+
+Do not classify a candidate as `not_tradable_market_wait` unless asset
+admission, scoped Owner policy, runtime observation scope, and non-live
+readiness are already closed. A strategy such as a research-side short
+candidate may be `tiny_live_intake_candidate` and still have the first blocker
+`asset_admission`.
 
 ## Global Authority Model
 
@@ -101,6 +127,17 @@ Do not mark a task complete when it only says a capability is missing. Convert
 the missing capability into code, tests, generated checks, monitor integration,
 or a precise next bottleneck. Use `partial` if the task only produced a packet,
 summary, or diagnosis.
+
+For strategy-admission work, the capability unlocked must be stated in
+tradeability language. Examples:
+
+| Capability | Meaning |
+| --- | --- |
+| `verdict_ready` | Each active candidate has a current tradeability verdict |
+| `trial_asset_admission_candidate` | A research intake candidate has a final-owned admission proposal |
+| `admitted_trial_asset` | Registry, policy, and tier surfaces recognize the trial asset without submit authority |
+| `armed_observation_ready` | Runtime can observe the scoped asset without real-order authority |
+| `tiny_live_ready` | Non-executing readiness is closed and only action-time gates remain |
 
 Small-capital execution frictions are engineering lifecycle branches before
 they are live blockers. Implement coarse cost estimates, submit/reject/partial/
@@ -156,6 +193,11 @@ they change one of these decisions: `go_live`, `do_not_go_live`,
 `keep_observing`, `revise`, `park`, `kill`, `promote`, or
 `block_for_safety`.
 
+Decision rows that use `promote` must include `promotion_scope`. Valid scopes
+include `intake_only`, `trial_admission`, `armed_observation`,
+`tiny_live_ready_review`, and `l4_eligibility_review`. Generic promote wording
+is too ambiguous for new artifacts.
+
 ## Global Source Discipline
 
 Agents must follow `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` when
@@ -175,6 +217,12 @@ contract. Dynamic actionability belongs to runtime state. Owner risk acceptance
 belongs to explicit Owner policy or current scoped decisions. Generated monitor,
 replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
 into authority.
+
+Strategy-research artifacts from `/Users/jiangwei/Documents/final-strategy-research`
+must not become unconditional runtime monitor dependencies. Main control should
+first copy, normalize, or absorb the research package into a final-owned
+snapshot or structured intake artifact, then generate verdict and admission
+outputs from final-owned inputs.
 
 Goal-mode work must follow `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`.
 Architecture direction should enter execution as one bounded Goal Packet, and

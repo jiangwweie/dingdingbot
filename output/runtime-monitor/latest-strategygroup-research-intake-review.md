@@ -13,10 +13,10 @@
 
 ## Candidate Rows
 
-| StrategyGroup | Direction | Intake Position | Paper Observation | Tiny-Live Ready | Next |
-| --- | --- | --- | --- | --- | --- |
-| `BRF2-001` | `bear_rally_failure_right_tail_short` | `paper_observation_admission_candidate` | `true` | `false` | `BRF2-001_paper_observation_admission_packet` |
-| `RBR2-001` | `range_upper_boundary_mean_reversion_short` | `role_only_intake_candidate` | `true` | `false` | `RBR2-001_role_only_range_detector_classifier_merge_note` |
+| StrategyGroup | Direction | Intake Position | Promotion Scope | Paper Observation | Tiny-Live Ready | Next |
+| --- | --- | --- | --- | --- | --- | --- |
+| `BRF2-001` | `bear_rally_failure_right_tail_short` | `paper_observation_admission_candidate` | `intake_only` | `true` | `false` | `BRF2-001_paper_observation_admission_packet` |
+| `RBR2-001` | `range_upper_boundary_mean_reversion_short` | `role_only_intake_candidate` | `not_applicable` | `true` | `false` | `RBR2-001_role_only_range_detector_classifier_merge_note` |
 
 ## Boundary
 

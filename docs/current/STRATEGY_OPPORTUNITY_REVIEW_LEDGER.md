@@ -2,7 +2,7 @@
 title: STRATEGY_OPPORTUNITY_REVIEW_LEDGER
 status: CURRENT
 authority: docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
-last_verified: 2026-06-19
+last_verified: 2026-06-23
 ---
 
 # StrategyGroup Decision Ledger
@@ -36,6 +36,18 @@ closure. During healthy no-signal periods, `P0.5` must use local and read-only
 market evidence to improve StrategyGroup quality instead of waiting passively
 for live signals.
 
+Strategy decision language follows
+`docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`. Rows should treat
+high-return targets such as `100%` as aspiration anchors and leverage values
+such as `5x` as review scenarios. They should not turn either into a fixed
+intake pass/fail gate.
+
+Tradeability language follows `docs/current/TRADEABILITY_VERDICT_CONTRACT.md`.
+When a row affects whether a strategy can trade, it should make the first
+blocker explicit. A candidate may be promising but still blocked by asset
+admission, Owner policy, facts, runtime gate, strategy quality, or hard safety.
+Do not flatten those states into `waiting_for_market`.
+
 The ledger is a decision surface, not a diagnostic archive. A record belongs
 here only when it changes one of these decisions:
 
@@ -49,6 +61,10 @@ kill
 promote
 block_for_safety
 ```
+
+New `promote` rows must include `promotion_scope`. Generic promotion is too
+ambiguous because `intake_only`, `trial_admission`, `armed_observation`,
+`tiny_live_ready_review`, and `l4_eligibility_review` mean different things.
 
 ## Relationship To Existing Ledgers
 
@@ -66,7 +82,11 @@ Lower-level replay packets, diagnostics, no-action samples, and source-mapping
 files remain evidence. They should not be copied into the main control layer
 unless they change a decision.
 
-## Required Row Shape
+## Row Shape
+
+The first eight fields are the minimal required shape. `promotion_scope` is
+required only when `decision=promote`. `tradeability_first_blocker` is optional
+and should be present only when the row feeds Tradeability Verdict.
 
 | Field | Meaning |
 | --- | --- |
@@ -78,6 +98,8 @@ unless they change a decision.
 | `required_next_evidence` | The next evidence needed to change the decision, or `none` |
 | `authority_boundary` | Why this row does or does not affect live authority |
 | `next_checkpoint` | The next concrete checkpoint for this StrategyGroup |
+| `promotion_scope` | Required when `decision=promote`; examples: `intake_only`, `trial_admission`, `armed_observation`, `tiny_live_ready_review`, `l4_eligibility_review` |
+| `tradeability_first_blocker` | Optional blocker used when the row feeds Tradeability Verdict |
 
 Each StrategyGroup should have at most one current main decision row. Historical
 or superseded details belong in lower-level artifacts, not in the main-control
@@ -114,6 +136,10 @@ Replay must not be represented as:
 - Operation Layer evidence;
 - real-submit authority;
 - proof of profitability.
+
+Replay may still make a strategy experiment-worthy when it exposes a clear
+right-tail or portfolio-role thesis, known failure modes, bounded loss envelope,
+and a useful next checkpoint.
 
 ## Current Local Checkpoint
 
@@ -156,6 +182,10 @@ following:
 Rows may support future tier decisions, but the ledger itself is never tier
 promotion authority. Promotion still follows the runtime tier policy and the
 official live chain.
+
+Decision Ledger output may feed Tradeability Verdict output, but it must not
+replace the verdict. The ledger says why strategy governance changes. The
+verdict says whether the strategy can trade now and, if not, the first blocker.
 
 ## Anti-Overengineering Rule
 
