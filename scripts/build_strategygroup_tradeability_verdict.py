@@ -39,6 +39,10 @@ DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
 )
+DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
@@ -103,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
         "--trial-asset-admission-proposal-json",
         default=str(DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON),
     )
+    parser.add_argument(
+        "--three-strategy-live-trial-portfolio-json",
+        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -115,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
         live_submit_readiness=_read_json(Path(args.live_submit_readiness_json)),
         trial_asset_admission_proposal=_read_optional_json(
             Path(args.trial_asset_admission_proposal_json)
+        ),
+        three_strategy_live_trial_portfolio=_read_optional_json(
+            Path(args.three_strategy_live_trial_portfolio_json)
         ),
     )
     output_json = Path(args.output_json)
@@ -146,6 +157,7 @@ def build_tradeability_verdict(
     signal_coverage: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     trial_asset_admission_proposal: dict[str, Any] | None = None,
+    three_strategy_live_trial_portfolio: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
@@ -154,6 +166,7 @@ def build_tradeability_verdict(
         tier_policy,
         signal_coverage,
         trial_asset_admission_proposal or {},
+        three_strategy_live_trial_portfolio or {},
     )
     registry_rows = _registry_rows_by_id(registry)
     tier_rows = _tier_rows_by_id(tier_policy)
@@ -162,11 +175,13 @@ def build_tradeability_verdict(
     admission_proposals = _admission_proposals_by_id(
         trial_asset_admission_proposal or {}
     )
+    portfolio_seats = _portfolio_seats_by_id(three_strategy_live_trial_portfolio or {})
 
     all_ids = set(candidate_rows)
     all_ids.update(tier_rows)
     all_ids.update(observed_rows)
     all_ids.update(admission_proposals)
+    all_ids.update(portfolio_seats)
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
 
@@ -182,6 +197,7 @@ def build_tradeability_verdict(
             tier_row=tier_rows.get(strategy_group_id, {}),
             observed_row=observed_rows.get(strategy_group_id, {}),
             admission_proposal=admission_proposals.get(strategy_group_id, {}),
+            portfolio_seat=portfolio_seats.get(strategy_group_id, {}),
             live_submit_readiness=live_submit_readiness,
             forbidden_effects=forbidden_effects,
         )
@@ -260,6 +276,7 @@ def _verdict_row(
     tier_row: dict[str, Any],
     observed_row: dict[str, Any],
     admission_proposal: dict[str, Any],
+    portfolio_seat: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
@@ -273,6 +290,7 @@ def _verdict_row(
         tier_row=tier_row,
         observed_row=observed_row,
         admission_proposal=admission_proposal,
+        portfolio_seat=portfolio_seat,
         live_submit_readiness=live_submit_readiness,
     )
     classifier = _first_blocker(
@@ -283,13 +301,14 @@ def _verdict_row(
         registry_present=registry_present,
         tier_present=tier_present,
         tier_row=tier_row,
+        portfolio_seat=portfolio_seat,
         blockers=blockers,
         live_submit_readiness=live_submit_readiness,
         forbidden_effects=forbidden_effects,
     )
     actionable_now = classifier["verdict"] == "tradable_now"
     real_order_authority = classifier["verdict"] == "tradable_now"
-    policy_scope = _policy_scope(candidate)
+    policy_scope = _policy_scope(candidate, portfolio_seat)
     return {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
@@ -317,6 +336,8 @@ def _verdict_row(
             "tier_policy_mode": str(tier_row.get("mode") or "unknown"),
             "trial_eligible": registry_row.get("trial_eligible") is True,
             "observe_only_would_enter": bool(observed_row),
+            "live_trial_portfolio_seat": bool(portfolio_seat),
+            "live_trial_portfolio_stage": str(portfolio_seat.get("stage") or ""),
         },
         "evidence_snapshot": {
             "recent_opportunity_count": _int(candidate.get("recent_opportunity_count")),
@@ -350,6 +371,7 @@ def _first_blocker(
     registry_present: bool,
     tier_present: bool,
     tier_row: dict[str, Any],
+    portfolio_seat: dict[str, Any],
     blockers: list[str],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
@@ -403,6 +425,10 @@ def _first_blocker(
             "continue_armed_observation_until_fresh_signal",
             "live_submit_ready",
         )
+
+    portfolio_blocker = _portfolio_first_blocker(portfolio_seat)
+    if portfolio_blocker:
+        return portfolio_blocker
 
     text = " ".join([stage, " ".join(blockers), str(candidate.get("identity_status") or "")]).lower()
     if (
@@ -504,6 +530,7 @@ def _stage(
     tier_row: dict[str, Any],
     observed_row: dict[str, Any],
     admission_proposal: dict[str, Any],
+    portfolio_seat: dict[str, Any],
     live_submit_readiness: dict[str, Any],
 ) -> str:
     if _row_live_submit_ready(
@@ -513,6 +540,12 @@ def _stage(
         return "live_submit_ready"
     if admission_proposal:
         return "trial_asset_admission_candidate"
+    if portfolio_seat:
+        portfolio_stage = str(portfolio_seat.get("stage") or "")
+        if portfolio_stage == "armed_observation_ready":
+            return "armed_observation"
+        if portfolio_stage:
+            return portfolio_stage
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         live_submit_readiness=live_submit_readiness,
@@ -644,7 +677,32 @@ def _admission_proposals_by_id(packet: dict[str, Any]) -> dict[str, dict[str, An
     return {strategy_id: proposal} if strategy_id else {}
 
 
-def _policy_scope(candidate: dict[str, Any]) -> dict[str, Any]:
+def _portfolio_seats_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if not packet:
+        return {}
+    seats = _as_dict(packet.get("seat_readiness"))
+    return {str(key): _as_dict(value) for key, value in seats.items()}
+
+
+def _policy_scope(candidate: dict[str, Any], portfolio_seat: dict[str, Any]) -> dict[str, Any]:
+    portfolio_scope = _as_dict(portfolio_seat.get("policy_scope"))
+    if portfolio_scope:
+        return {
+            "capital_scope": portfolio_scope.get("capital_scope", "not_applicable"),
+            "profile": portfolio_scope.get("profile", "not_applicable"),
+            "symbol_scope": _string_list(portfolio_scope.get("symbol_scope")),
+            "side_scope": _string_list(portfolio_scope.get("side_scope")),
+            "leverage_scenario": portfolio_scope.get(
+                "leverage_scenario", "not_applicable"
+            ),
+            "attempt_cap": portfolio_scope.get(
+                "attempt_cap", "owner_policy_required"
+            ),
+            "loss_unit": portfolio_scope.get("loss_unit", "owner_policy_required"),
+            "missing_policy_fields": _string_list(
+                portfolio_scope.get("missing_policy_fields")
+            ),
+        }
     missing = [str(item) for item in candidate.get("risk_boundary_missing") or []]
     return {
         "capital_scope": _policy_value(candidate, "capital_scope", missing),
@@ -666,6 +724,25 @@ def _policy_value(candidate: dict[str, Any], field: str, missing: list[str]) -> 
     if field in missing:
         return "owner_policy_required"
     return str(candidate.get(field) or "not_applicable")
+
+
+def _portfolio_first_blocker(portfolio_seat: dict[str, Any]) -> dict[str, str]:
+    blocker = _as_dict(portfolio_seat.get("first_blocker"))
+    if not blocker:
+        return {}
+    projection = _as_dict(portfolio_seat.get("tradeability_projection"))
+    return _classifier(
+        str(blocker.get("verdict") or "not_tradable_market_wait"),
+        str(blocker.get("first_blocker_class") or "fresh_signal_absent"),
+        str(
+            blocker.get("first_blocker_detail")
+            or blocker.get("first_blocker_class")
+            or "portfolio seat blocker"
+        ),
+        str(blocker.get("blocker_owner") or "market"),
+        str(blocker.get("next_action") or "continue_armed_observation"),
+        str(projection.get("next_state_after_blocker_removed") or "live_submit_ready"),
+    )
 
 
 def _required_facts_status(
@@ -957,6 +1034,12 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
 
 
 def _status(value: Any) -> str:

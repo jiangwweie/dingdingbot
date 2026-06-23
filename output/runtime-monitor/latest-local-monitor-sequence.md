@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T03:09:48.862641+00:00
+- 报告时间: 2026-06-23T04:46:32.903066+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -25,6 +25,10 @@
 - 准入提案策略组: `BRF2-001`
 - 准入提案下一状态: `admitted_trial_asset`
 - Owner policy required: `是`
+- 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
+- 三策略席位: `MPG-001, BRF2-001, SOR-001`
+- 三策略席位数: `3`
+- 组合第一阻断统计 market/owner/engineering: `2` / `1` / `0`
 - 交易资格状态: `tradeability_verdict_ready`
 - 交易资格 Top: `BRF2-001` / `not_tradable_policy`
 - 第一阻断: `owner_trial_scope_or_capital_policy_missing` / `owner`
@@ -66,6 +70,7 @@
 | strategygroup_lifecycle_rehearsal | lifecycle_rehearsal_ready | 0 |
 | strategygroup_pre_live_rehearsal_readiness | pre_live_rehearsal_ready | 0 |
 | strategygroup_live_submit_readiness_bridge | live_submit_standby_waiting_for_market | 0 |
+| three_strategy_live_trial_portfolio | three_strategy_live_trial_portfolio_ready | 0 |
 | strategygroup_tradeability_verdict | tradeability_verdict_ready | 0 |
 
 ## Checks

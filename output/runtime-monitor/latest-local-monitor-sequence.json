@@ -9,6 +9,20 @@
     "engineering_gaps": [],
     "execution_blockers": [],
     "goal_complete": false,
+    "live_trial_engineering_gap_count": 0,
+    "live_trial_market_wait_count": 2,
+    "live_trial_next_bottlenecks": {
+      "BRF2-001": "owner_policy_scope_missing",
+      "MPG-001": "fresh_signal_wait",
+      "SOR-001": "fresh_signal_wait"
+    },
+    "live_trial_owner_policy_gap_count": 1,
+    "live_trial_seat_count": 3,
+    "live_trial_strategy_groups": [
+      "MPG-001",
+      "BRF2-001",
+      "SOR-001"
+    ],
     "monitor_refresh_gaps": [
       "runtime_progress_cache_stale"
     ],
@@ -39,6 +53,7 @@
     "short_experiment_candidate_promotion_scope": "intake_only",
     "short_experiment_candidate_selected_strategy_group_id": "BRF2-001",
     "short_experiment_candidate_tiny_live_ready": false,
+    "three_strategy_live_trial_portfolio_ready": true,
     "tradeability_real_order_authority_count": 0,
     "tradeability_row_count": 13,
     "tradeability_row_count_matches_verdict_rows": true,
@@ -55,7 +70,7 @@
     "waiting_for_market": true
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-23T03:09:48.862641+00:00",
+  "generated_at_utc": "2026-06-23T04:46:32.903066+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -161,6 +176,28 @@
         "BRF2-001",
         "RBR2-001"
       ]
+    },
+    "three_strategy_live_trial_portfolio": {
+      "actionable_now": false,
+      "engineering_gap_count": 0,
+      "market_wait_count": 2,
+      "next_bottlenecks": {
+        "BRF2-001": "owner_policy_scope_missing",
+        "MPG-001": "fresh_signal_wait",
+        "SOR-001": "fresh_signal_wait"
+      },
+      "objective_met": true,
+      "owner_policy_gap_count": 1,
+      "ready": true,
+      "real_order_authority": false,
+      "seat_count": 3,
+      "selected_strategy_groups": [
+        "MPG-001",
+        "BRF2-001",
+        "SOR-001"
+      ],
+      "status": "three_strategy_live_trial_portfolio_ready",
+      "strategy_review_gap_count": 0
     },
     "tradeability_verdict": {
       "actionable_now": false,
@@ -735,6 +772,22 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
+        "level": "L0_local_three_strategy_live_trial_portfolio",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "three_strategy_live_trial_portfolio",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
+      "returncode": 0,
+      "status": "three_strategy_live_trial_portfolio_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
         "level": "L0_local_tradeability_verdict",
         "mutates_remote_files": false,
         "places_order": false,
@@ -877,5 +930,27 @@
     "real_order_authority": false,
     "status": "trial_asset_admission_proposal_ready",
     "strategy_group_id": "BRF2-001"
+  },
+  "three_strategy_live_trial_portfolio": {
+    "actionable_now": false,
+    "engineering_gap_count": 0,
+    "market_wait_count": 2,
+    "next_bottlenecks": {
+      "BRF2-001": "owner_policy_scope_missing",
+      "MPG-001": "fresh_signal_wait",
+      "SOR-001": "fresh_signal_wait"
+    },
+    "objective_met": true,
+    "owner_policy_gap_count": 1,
+    "ready": true,
+    "real_order_authority": false,
+    "seat_count": 3,
+    "selected_strategy_groups": [
+      "MPG-001",
+      "BRF2-001",
+      "SOR-001"
+    ],
+    "status": "three_strategy_live_trial_portfolio_ready",
+    "strategy_review_gap_count": 0
   }
 }

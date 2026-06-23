@@ -598,7 +598,7 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
             "status": "tradeability_verdict_ready",
             "generated_at_utc": "2026-06-23T00:00:00+00:00",
             "summary": {
-                "row_count": 2,
+                "row_count": 3,
                 "tradable_now_count": 0,
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
@@ -639,6 +639,17 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                     "actionable_now": False,
                     "real_order_authority": False,
                 },
+                {
+                    "strategy_group_id": "SOR-001",
+                    "stage": "armed_observation",
+                    "verdict": "not_tradable_market_wait",
+                    "first_blocker_class": "fresh_session_range_signal_absent",
+                    "blocker_owner": "market",
+                    "next_action": "continue_session_range_armed_observation_until_fresh_signal",
+                    "after_next_state": "live_submit_ready",
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                },
             ],
             "owner_summary": {
                 "state": "交易资格已判定",
@@ -653,7 +664,7 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                 "actionable_now": False,
             },
             "checks": {
-                "row_count": 2,
+                "row_count": 3,
                 "one_current_verdict_per_strategy_group": True,
                 "owner_policy_blocker_present": True,
                 "owner_decision_required": False,
@@ -667,6 +678,81 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
             },
             "interaction": {
                 "level": "L0_local_tradeability_verdict",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "schema": "brc.three_strategy_live_trial_portfolio.v1",
+            "scope": "three_strategy_live_trial_portfolio_read_model",
+            "status": "three_strategy_live_trial_portfolio_ready",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
+            "portfolio_goal": "at_least_3_live_trial_strategygroups",
+            "selected_strategy_groups": ["MPG-001", "BRF2-001", "SOR-001"],
+            "seat_count": 3,
+            "objective_met": True,
+            "seat_readiness": {
+                "MPG-001": {
+                    "stage": "armed_observation",
+                    "first_blocker": {
+                        "verdict": "not_tradable_market_wait",
+                        "first_blocker_class": "fresh_executable_signal_absent",
+                        "blocker_owner": "market",
+                        "next_action": "continue_armed_observation_until_fresh_signal",
+                    },
+                },
+                "BRF2-001": {
+                    "stage": "trial_asset_admission_candidate",
+                    "first_blocker": {
+                        "verdict": "not_tradable_policy",
+                        "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+                        "blocker_owner": "owner",
+                        "next_action": "record_owner_trial_scope_policy",
+                    },
+                },
+                "SOR-001": {
+                    "stage": "armed_observation_ready",
+                    "first_blocker": {
+                        "verdict": "not_tradable_market_wait",
+                        "first_blocker_class": "fresh_session_range_signal_absent",
+                        "blocker_owner": "market",
+                        "next_action": "continue_session_range_armed_observation_until_fresh_signal",
+                    },
+                },
+            },
+            "next_engineering_bottleneck": {
+                "MPG-001": "fresh_signal_wait",
+                "BRF2-001": "owner_policy_scope_missing",
+                "SOR-001": "fresh_signal_wait",
+            },
+            "checks": {
+                "seat_count": 3,
+                "at_least_three_seats": True,
+                "objective_met": True,
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            "interaction": {
+                "level": "L0_local_three_strategy_live_trial_portfolio",
                 "remote_interaction_count": 0,
                 "mutates_remote_files": False,
                 "approaches_real_order": False,
@@ -1002,6 +1088,9 @@ def _maybe_write_strategygroup_closure_step(
     if script == "build_strategygroup_live_submit_readiness_bridge.py":
         _write_ready_live_submit_readiness_bridge(command)
         return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_strategygroup_three_strategy_live_trial_portfolio.py":
+        _write_ready_three_strategy_live_trial_portfolio(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_tradeability_verdict.py":
         _write_ready_tradeability_verdict(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -1280,6 +1369,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        three_strategy_live_trial_portfolio_json=tmp_path
+        / "three-strategy-portfolio.json",
+        three_strategy_live_trial_portfolio_md=tmp_path
+        / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
@@ -1317,6 +1410,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_lifecycle_rehearsal.py",
         "build_strategygroup_pre_live_rehearsal_readiness.py",
         "build_strategygroup_live_submit_readiness_bridge.py",
+        "build_strategygroup_three_strategy_live_trial_portfolio.py",
         "build_strategygroup_tradeability_verdict.py",
     ]
     assert len(decision_loop_commands) == 2
@@ -1391,6 +1485,21 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "BRF2-001"
     )
     assert report["strategy_trial_asset_admission"]["owner_policy_required"] is True
+    assert report["three_strategy_live_trial_portfolio"]["ready"] is True
+    assert report["three_strategy_live_trial_portfolio"]["seat_count"] == 3
+    assert report["three_strategy_live_trial_portfolio"][
+        "selected_strategy_groups"
+    ] == ["MPG-001", "BRF2-001", "SOR-001"]
+    assert report["checks"]["three_strategy_live_trial_portfolio_ready"] is True
+    assert report["checks"]["live_trial_seat_count"] == 3
+    assert report["checks"]["live_trial_strategy_groups"] == [
+        "MPG-001",
+        "BRF2-001",
+        "SOR-001",
+    ]
+    assert report["checks"]["live_trial_market_wait_count"] == 2
+    assert report["checks"]["live_trial_owner_policy_gap_count"] == 1
+    assert report["checks"]["live_trial_engineering_gap_count"] == 0
     assert report["strategy_tradeability_verdict"]["top_verdict"] == (
         "not_tradable_policy"
     )
@@ -1404,8 +1513,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["checks"]["tradeability_top_verdict"] == (
         "not_tradable_policy"
     )
-    assert report["checks"]["tradeability_row_count"] == 2
-    assert report["checks"]["tradeability_verdict_rows_count"] == 2
+    assert report["checks"]["tradeability_row_count"] == 3
+    assert report["checks"]["tradeability_verdict_rows_count"] == 3
     assert report["checks"]["tradeability_row_count_matches_verdict_rows"] is True
     assert report["checks"]["tradeability_tradable_now_count"] == 0
     assert report["checks"]["tradeability_real_order_authority_count"] == 0
@@ -1679,6 +1788,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        three_strategy_live_trial_portfolio_json=tmp_path
+        / "three-strategy-portfolio.json",
+        three_strategy_live_trial_portfolio_md=tmp_path
+        / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
@@ -1993,6 +2106,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        three_strategy_live_trial_portfolio_json=tmp_path
+        / "three-strategy-portfolio.json",
+        three_strategy_live_trial_portfolio_md=tmp_path
+        / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
@@ -2264,6 +2381,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        three_strategy_live_trial_portfolio_json=tmp_path
+        / "three-strategy-portfolio.json",
+        three_strategy_live_trial_portfolio_md=tmp_path
+        / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,
@@ -2523,6 +2644,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        three_strategy_live_trial_portfolio_json=tmp_path
+        / "three-strategy-portfolio.json",
+        three_strategy_live_trial_portfolio_md=tmp_path
+        / "three-strategy-portfolio.md",
         strategygroup_tradeability_verdict_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_verdict_md=tmp_path / "tradeability.md",
         command_runner=fake_runner,

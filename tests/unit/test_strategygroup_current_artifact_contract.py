@@ -53,3 +53,41 @@ def test_current_trial_asset_admission_proposal_artifact_is_complete():
     assert proposal["runtime_admission_plan"]
     assert proposal["actionable_now"] is False
     assert proposal["real_order_authority"] is False
+
+
+def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
+    portfolio = _read_json(
+        "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
+    )
+    monitor = _read_json("output/runtime-monitor/latest-local-monitor-sequence.json")
+    checks = monitor.get("checks") or {}
+
+    assert portfolio["schema"] == "brc.three_strategy_live_trial_portfolio.v1"
+    assert portfolio["scope"] == "three_strategy_live_trial_portfolio_read_model"
+    assert portfolio["status"] == "three_strategy_live_trial_portfolio_ready"
+    assert portfolio["selected_strategy_groups"] == ["MPG-001", "BRF2-001", "SOR-001"]
+    assert portfolio["seat_count"] == 3
+    assert portfolio["objective_met"] is True
+    assert portfolio["checks"]["all_seats_have_first_blocker"] is True
+    assert portfolio["checks"]["all_seats_have_required_facts"] is True
+    assert portfolio["checks"]["all_seats_have_review_hooks"] is True
+    assert portfolio["safety_invariants"]["actionable_now"] is False
+    assert portfolio["safety_invariants"]["real_order_authority"] is False
+    assert portfolio["safety_invariants"]["calls_finalgate"] is False
+    assert portfolio["safety_invariants"]["calls_operation_layer"] is False
+    assert portfolio["safety_invariants"]["calls_exchange_write"] is False
+    assert portfolio["safety_invariants"]["places_order"] is False
+    evidence = portfolio["final_evidence_packet"]
+    assert evidence["closed_engineering_problem"]
+    assert evidence["capability_unlocked"]
+    assert evidence["three_strategy_portfolio_status"] == portfolio["status"]
+    assert evidence["strategy_seat_table"]
+    assert evidence["remaining_first_blockers"]
+    assert evidence["next_live_submit_condition"]
+    assert evidence["tests_run"]
+    assert evidence["files_changed"]
+    assert evidence["deploy_recommendation"]
+
+    assert checks["three_strategy_live_trial_portfolio_ready"] is True
+    assert checks["live_trial_seat_count"] == 3
+    assert checks["live_trial_strategy_groups"] == ["MPG-001", "BRF2-001", "SOR-001"]

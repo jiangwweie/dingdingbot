@@ -216,6 +216,14 @@ DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.md"
 )
+DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
+)
+DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.md"
+)
 DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
 )
@@ -366,6 +374,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_trial_asset_admission_proposal_md=Path(
             args.strategygroup_trial_asset_admission_proposal_md
+        ),
+        three_strategy_live_trial_portfolio_json=Path(
+            args.three_strategy_live_trial_portfolio_json
+        ),
+        three_strategy_live_trial_portfolio_md=Path(
+            args.three_strategy_live_trial_portfolio_md
         ),
         strategygroup_tradeability_verdict_json=Path(
             args.strategygroup_tradeability_verdict_json
@@ -540,6 +554,12 @@ def build_local_monitor_sequence_report(
     ),
     strategygroup_trial_asset_admission_proposal_md: Path = (
         DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD
+    ),
+    three_strategy_live_trial_portfolio_json: Path = (
+        DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON
+    ),
+    three_strategy_live_trial_portfolio_md: Path = (
+        DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD
     ),
     strategygroup_tradeability_verdict_json: Path = (
         DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON
@@ -1182,6 +1202,42 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    three_strategy_live_trial_portfolio_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_three_strategy_live_trial_portfolio.py"
+        ),
+        "--registry-json",
+        str(
+            REPO_ROOT
+            / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
+        ),
+        "--tier-policy-json",
+        str(
+            REPO_ROOT
+            / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        ),
+        "--capital-trial-readiness-bridge-json",
+        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--trial-asset-admission-proposal-json",
+        str(strategygroup_trial_asset_admission_proposal_json),
+        "--signal-coverage-json",
+        str(signal_coverage_json),
+        "--output-json",
+        str(three_strategy_live_trial_portfolio_json),
+        "--output-owner-progress",
+        str(three_strategy_live_trial_portfolio_md),
+    ]
+    steps.append(
+        _run_step(
+            "three_strategy_live_trial_portfolio",
+            three_strategy_live_trial_portfolio_command,
+            three_strategy_live_trial_portfolio_json,
+            runner,
+        )
+    )
+
     strategygroup_tradeability_verdict_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_tradeability_verdict.py"),
@@ -1203,6 +1259,8 @@ def build_local_monitor_sequence_report(
         str(strategygroup_live_submit_readiness_bridge_json),
         "--trial-asset-admission-proposal-json",
         str(strategygroup_trial_asset_admission_proposal_json),
+        "--three-strategy-live-trial-portfolio-json",
+        str(three_strategy_live_trial_portfolio_json),
         "--output-json",
         str(strategygroup_tradeability_verdict_json),
         "--output-owner-progress",
@@ -1281,6 +1339,9 @@ def build_local_monitor_sequence_report(
     trial_admission_summary = _sequence_trial_admission_summary(
         packets.get("strategygroup_trial_asset_admission_proposal", {})
     )
+    three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
+        packets.get("three_strategy_live_trial_portfolio", {})
+    )
     observation_layer_summary = _sequence_observation_layer_summary(
         signal_coverage_packet=packets.get("signal_coverage", {}),
         expansion_review_packet=packets.get("signal_coverage_expansion_review", {}),
@@ -1310,6 +1371,7 @@ def build_local_monitor_sequence_report(
             "strategy_candidate_trade": capital_trial_summary,
             "strategy_experiment_candidate": capital_trial_summary,
             "trial_asset_admission": trial_admission_summary,
+            "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "tradeability_verdict": tradeability_summary,
         },
         "interaction": interaction,
@@ -1318,6 +1380,7 @@ def build_local_monitor_sequence_report(
         "strategy_candidate_trade": capital_trial_summary,
         "strategy_experiment_candidate": capital_trial_summary,
         "strategy_trial_asset_admission": trial_admission_summary,
+        "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "strategy_tradeability_verdict": tradeability_summary,
         "checks": {
             "blockers": execution_blockers,
@@ -1386,6 +1449,25 @@ def build_local_monitor_sequence_report(
             ],
             "trial_asset_admission_next_action": trial_admission_summary[
                 "next_action"
+            ],
+            "three_strategy_live_trial_portfolio_ready": (
+                three_strategy_portfolio_summary["ready"]
+            ),
+            "live_trial_seat_count": three_strategy_portfolio_summary["seat_count"],
+            "live_trial_strategy_groups": three_strategy_portfolio_summary[
+                "selected_strategy_groups"
+            ],
+            "live_trial_owner_policy_gap_count": three_strategy_portfolio_summary[
+                "owner_policy_gap_count"
+            ],
+            "live_trial_market_wait_count": three_strategy_portfolio_summary[
+                "market_wait_count"
+            ],
+            "live_trial_engineering_gap_count": three_strategy_portfolio_summary[
+                "engineering_gap_count"
+            ],
+            "live_trial_next_bottlenecks": three_strategy_portfolio_summary[
+                "next_bottlenecks"
             ],
             "tradeability_top_strategy_group_id": tradeability_summary[
                 "top_strategy_group_id"
@@ -2142,6 +2224,39 @@ def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    seats = _as_dict(packet.get("seat_readiness"))
+    selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
+    blocker_rows = [
+        _as_dict(_as_dict(seats.get(strategy_id)).get("first_blocker"))
+        for strategy_id in selected
+    ]
+    return {
+        "status": _status(packet) or "missing",
+        "ready": _status(packet) == "three_strategy_live_trial_portfolio_ready",
+        "objective_met": packet.get("objective_met") is True,
+        "seat_count": _int(packet.get("seat_count")),
+        "selected_strategy_groups": selected,
+        "market_wait_count": sum(
+            blocker.get("blocker_owner") == "market" for blocker in blocker_rows
+        ),
+        "owner_policy_gap_count": sum(
+            blocker.get("blocker_owner") == "owner" for blocker in blocker_rows
+        ),
+        "engineering_gap_count": sum(
+            blocker.get("blocker_owner") == "engineering"
+            for blocker in blocker_rows
+        ),
+        "strategy_review_gap_count": sum(
+            blocker.get("blocker_owner") == "strategy_review"
+            for blocker in blocker_rows
+        ),
+        "next_bottlenecks": _as_dict(packet.get("next_engineering_bottleneck")),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
     summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
     top_strategy_group_id = str(summary.get("top_strategy_group_id") or "")
@@ -2380,6 +2495,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     research_intake = report.get("strategy_research_intake") or {}
     experiment_candidate = report.get("strategy_experiment_candidate") or {}
     trial_admission = report.get("strategy_trial_asset_admission") or {}
+    three_strategy_portfolio = (
+        report.get("three_strategy_live_trial_portfolio") or {}
+    )
     tradeability = report.get("strategy_tradeability_verdict") or {}
     lines = [
         "## StrategyGroup Runtime Local Monitor Sequence",
@@ -2413,6 +2531,10 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 准入提案策略组: `{trial_admission.get('strategy_group_id') or 'none'}`",
         f"- 准入提案下一状态: `{trial_admission.get('after_next_state') or 'none'}`",
         f"- Owner policy required: `{_yes_no(trial_admission.get('owner_policy_required') is True)}`",
+        f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
+        f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
+        f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
         f"- 交易资格状态: `{tradeability.get('status', 'missing')}`",
         f"- 交易资格 Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_verdict', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
@@ -2748,6 +2870,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-trial-asset-admission-proposal-md",
         default=str(DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD),
+    )
+    parser.add_argument(
+        "--three-strategy-live-trial-portfolio-json",
+        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
+    )
+    parser.add_argument(
+        "--three-strategy-live-trial-portfolio-md",
+        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD),
     )
     parser.add_argument(
         "--strategygroup-tradeability-verdict-json",
