@@ -4,14 +4,16 @@
     "forbidden_effects": [],
     "order_sizing_mutated": false,
     "owner_decision_required": false,
-    "owner_policy_required": true,
+    "owner_policy_recorded": true,
+    "owner_policy_required": false,
+    "owner_policy_scope_missing": false,
     "proposal_generated": true,
     "real_order_authority": false,
     "registry_policy_mutated": false,
     "runtime_profile_mutated": false,
     "tier_policy_mutated": false
   },
-  "generated_at_utc": "2026-06-23T04:46:29.687275+00:00",
+  "generated_at_utc": "2026-06-23T05:37:39.975927+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -37,28 +39,51 @@
       "attempt_cap",
       "loss_unit"
     ],
-    "owner_policy_required": true
+    "owner_policy_recorded": true,
+    "owner_policy_required": false,
+    "owner_policy_scope_missing": false
   },
   "proposal": {
     "actionable_now": false,
-    "after_next_state": "admitted_trial_asset",
+    "after_next_state": "armed_observation",
     "current_stage": "tiny_live_intake_candidate",
-    "next_action": "record_owner_trial_scope_policy",
+    "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
     "owner_policy_defaults": {
       "attempt_cap": 3,
-      "capital_scope": "owner_policy_required",
-      "leverage_scenario": "owner_policy_required",
-      "loss_unit": 1,
-      "max_notional": "owner_policy_required",
+      "authority_boundary": "owner_policy_only; actionable_now=false; real_order_authority=false; finalgate_required; operation_layer_required",
+      "capital_scope": {
+        "amount": "30",
+        "currency": "USDT",
+        "loss_capable": true,
+        "type": "isolated_subaccount_full_allocation"
+      },
+      "daily_loss_cap_units": 1,
+      "leverage_scenario": "5x_scenario_not_authority",
+      "loss_unit": {
+        "amount": "10",
+        "basis": "30U / 3 attempts",
+        "currency": "USDT"
+      },
+      "max_consecutive_losses": 2,
+      "max_notional": {
+        "amount": "150",
+        "basis": "30U capital x 5x scenario",
+        "currency": "USDT",
+        "final_authority": "runtime_profile_and_action_time_exchange_facts"
+      },
+      "pause_conditions": [
+        "any_path_stop_without_post_trade_review",
+        "two_consecutive_losses",
+        "symbol_specific_loss_until_symbol_review",
+        "missing_required_path_or_liquidation_buffer_evidence"
+      ],
       "side_scope": [
         "short"
       ],
-      "slippage_limit": "owner_policy_required",
-      "symbol_scope": [
-        "owner_policy_required"
-      ],
-      "trial_identity": "owner_policy_required",
-      "valid_until": "owner_policy_required"
+      "slippage_limit": "action_time_runtime_fact_required",
+      "symbol_scope": "brf2_research_supported_symbols_only",
+      "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+      "valid_until": "one_review_cycle"
     },
     "owner_policy_fields": [
       "capital_scope",
@@ -72,7 +97,9 @@
       "attempt_cap",
       "loss_unit"
     ],
-    "owner_policy_required": true,
+    "owner_policy_recorded": true,
+    "owner_policy_required": false,
+    "owner_policy_scope_missing": false,
     "proposal_type": "non_applying_registry_tier_runtime_admission_draft",
     "proposed_registry_row": {
       "authority_boundary": "proposal_only; not_registry_authority; not_runtime_admission; actionable_now=false; real_order_authority=false",
@@ -110,10 +137,10 @@
       ],
       "trial_eligible": false
     },
-    "proposed_stage": "trial_asset_admission_candidate",
+    "proposed_stage": "admitted_trial_asset",
     "proposed_tier_policy_row": {
-      "mode": "trial_asset_admission_candidate",
-      "reason": "Owner policy and scoped risk boundary required before armed observation",
+      "mode": "admitted_trial_asset",
+      "reason": "Owner trial scope recorded; RequiredFacts mapping remains before armed observation",
       "tier": "trial_admission"
     },
     "real_order_authority": false,

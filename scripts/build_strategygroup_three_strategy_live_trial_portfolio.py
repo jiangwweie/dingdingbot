@@ -34,6 +34,9 @@ DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
 )
+DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json"
+)
 DEFAULT_SIGNAL_COVERAGE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
 )
@@ -63,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON),
     )
     parser.add_argument(
+        "--brf2-owner-trial-policy-scope-json",
+        default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON),
+    )
+    parser.add_argument(
         "--signal-coverage-json",
         default=str(DEFAULT_SIGNAL_COVERAGE_JSON),
     )
@@ -76,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         capital_trial_bridge=_read_json(Path(args.capital_trial_readiness_bridge_json)),
         trial_asset_admission_proposal=_read_optional_json(
             Path(args.trial_asset_admission_proposal_json)
+        ),
+        brf2_owner_trial_policy_scope=_read_optional_json(
+            Path(args.brf2_owner_trial_policy_scope_json)
         ),
         signal_coverage=_read_optional_json(Path(args.signal_coverage_json)),
     )
@@ -105,6 +115,7 @@ def build_three_strategy_live_trial_portfolio(
     tier_policy: dict[str, Any],
     capital_trial_bridge: dict[str, Any],
     trial_asset_admission_proposal: dict[str, Any] | None = None,
+    brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     signal_coverage: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -112,10 +123,15 @@ def build_three_strategy_live_trial_portfolio(
     tier_rows = _as_dict(tier_policy.get("current_strategy_groups"))
     selected = _as_dict(capital_trial_bridge.get("selected_non_mpg_trial_candidate"))
     proposal = _as_dict((trial_asset_admission_proposal or {}).get("proposal"))
+    owner_policy_scope = brf2_owner_trial_policy_scope or {}
 
     seats = {
         "MPG-001": _mpg_seat(registry_rows, tier_rows),
-        "BRF2-001": _brf2_seat(selected=selected, proposal=proposal),
+        "BRF2-001": _brf2_seat(
+            selected=selected,
+            proposal=proposal,
+            owner_policy_scope=owner_policy_scope,
+        ),
         "SOR-001": _sor_seat(registry_rows, tier_rows, signal_coverage or {}),
     }
     selected_strategy_groups = list(SELECTED_STRATEGY_GROUPS)
@@ -214,6 +230,11 @@ def build_three_strategy_live_trial_portfolio(
                 "authority boundary, and review hooks"
             ),
             "three_strategy_portfolio_status": status,
+            "brf2_policy_scope_recorded": _policy_recorded(owner_policy_scope),
+            "brf2_stage_after_policy": seats["BRF2-001"].get("stage", ""),
+            "brf2_new_first_blocker": _as_dict(
+                seats["BRF2-001"].get("first_blocker")
+            ).get("first_blocker_class", ""),
             "strategy_seat_table": [
                 seats[strategy_id] for strategy_id in selected_strategy_groups
             ],
@@ -323,7 +344,12 @@ def _mpg_seat(
     }
 
 
-def _brf2_seat(*, selected: dict[str, Any], proposal: dict[str, Any]) -> dict[str, Any]:
+def _brf2_seat(
+    *,
+    selected: dict[str, Any],
+    proposal: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
+) -> dict[str, Any]:
     required_facts = _string_list(
         proposal.get("runtime_admission_plan", {}).get("required_facts_draft")
         or selected.get("required_facts_draft")
@@ -333,21 +359,15 @@ def _brf2_seat(*, selected: dict[str, Any], proposal: dict[str, Any]) -> dict[st
         or selected.get("disable_or_review_facts_draft")
     )
     risk_envelope = _as_dict(selected.get("risk_envelope"))
-    return {
-        "strategy_group_id": "BRF2-001",
-        "seat": "B",
-        "seat_role": "short_weak_rally_failure_right_tail_experiment",
-        "strategy_thesis": "short-side weak/rally-failure right-tail continuation",
-        "stage": "trial_asset_admission_candidate",
-        "admitted_or_selected_as_live_trial_asset": True,
-        "registry_admitted": False,
-        "tier_policy_mode": "trial_asset_admission_candidate",
-        "experiment_worthiness_review_closed": True,
-        "loss_envelope_expressed": True,
-        "trial_policy_proposal_ready": True,
-        "admitted_trial_asset_proposal_ready": bool(proposal),
-        "armed_observation_plan_ready": True,
-        "policy_scope": {
+    policy_recorded = _policy_recorded(owner_policy_scope) or (
+        proposal.get("owner_policy_recorded") is True
+        and proposal.get("owner_policy_scope_missing") is False
+    )
+    policy = _as_dict(owner_policy_scope.get("policy"))
+    policy_scope = (
+        _brf2_recorded_policy_scope(policy)
+        if policy_recorded
+        else {
             "capital_scope": "owner_policy_required",
             "symbol_scope": _string_list(selected.get("symbol_scope"))
             or ["owner_policy_required"],
@@ -356,15 +376,78 @@ def _brf2_seat(*, selected: dict[str, Any], proposal: dict[str, Any]) -> dict[st
             "attempt_cap": risk_envelope.get("attempt_cap_per_review_cycle", 3),
             "loss_unit": risk_envelope.get("daily_loss_cap_units", 1),
             "profile": "owner_policy_required",
-        },
-        "owner_policy_required": True,
-        "owner_policy_status": "trial_scope_policy_missing_machine_checkable",
-        "symbol_scope": _string_list(selected.get("symbol_scope"))
+        }
+    )
+    stage = "admitted_trial_asset" if policy_recorded else "trial_asset_admission_candidate"
+    owner_policy_required = not policy_recorded
+    owner_policy_status = (
+        "owner_trial_scope_policy_recorded"
+        if policy_recorded
+        else "trial_scope_policy_missing_machine_checkable"
+    )
+    first_blocker = (
+        {
+            "verdict": "not_tradable_facts",
+            "first_blocker_class": "required_facts_mapping_gap",
+            "blocker_owner": "engineering",
+            "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+        }
+        if policy_recorded
+        else {
+            "verdict": "not_tradable_policy",
+            "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+            "blocker_owner": "owner",
+            "next_action": "record_owner_trial_scope_policy",
+        }
+    )
+    tradeability_projection = (
+        {
+            "can_trade": False,
+            "verdict": "not_tradable_facts",
+            "next_state_after_blocker_removed": "armed_observation",
+        }
+        if policy_recorded
+        else {
+            "can_trade": False,
+            "verdict": "not_tradable_policy",
+            "next_state_after_blocker_removed": "admitted_trial_asset",
+        }
+    )
+    return {
+        "strategy_group_id": "BRF2-001",
+        "seat": "B",
+        "seat_role": "short_weak_rally_failure_right_tail_experiment",
+        "strategy_thesis": "short-side weak/rally-failure right-tail continuation",
+        "stage": stage,
+        "admitted_or_selected_as_live_trial_asset": True,
+        "registry_admitted": False,
+        "tier_policy_mode": "trial_asset_admission_candidate",
+        "experiment_worthiness_review_closed": True,
+        "loss_envelope_expressed": True,
+        "trial_policy_proposal_ready": True,
+        "admitted_trial_asset_proposal_ready": bool(proposal),
+        "armed_observation_plan_ready": True,
+        "policy_scope": policy_scope,
+        "owner_policy_required": owner_policy_required,
+        "owner_policy_recorded": policy_recorded,
+        "owner_policy_scope_missing": not policy_recorded,
+        "owner_policy_status": owner_policy_status,
+        "trial_identity": policy.get("trial_identity", ""),
+        "symbol_scope": _string_list(policy_scope.get("symbol_scope"))
+        or _string_list(selected.get("symbol_scope"))
         or ["owner_policy_required"],
-        "side_scope": _string_list(selected.get("side_scope")) or ["short"],
-        "leverage_scenario": "5x_scenario_requires_owner_policy_not_authority",
-        "attempt_cap": risk_envelope.get("attempt_cap_per_review_cycle", 3),
-        "loss_unit": risk_envelope.get("daily_loss_cap_units", 1),
+        "side_scope": _string_list(policy_scope.get("side_scope"))
+        or _string_list(selected.get("side_scope"))
+        or ["short"],
+        "leverage_scenario": policy_scope.get(
+            "leverage_scenario", "5x_scenario_requires_owner_policy_not_authority"
+        ),
+        "attempt_cap": policy_scope.get(
+            "attempt_cap", risk_envelope.get("attempt_cap_per_review_cycle", 3)
+        ),
+        "loss_unit": policy_scope.get(
+            "loss_unit", risk_envelope.get("daily_loss_cap_units", 1)
+        ),
         "pause_conditions": [
             "short_squeeze_risk_state_red",
             "required_facts_stale_or_missing",
@@ -389,24 +472,50 @@ def _brf2_seat(*, selected: dict[str, Any], proposal: dict[str, Any]) -> dict[st
             "tiny_live_ready": False,
             "live_submit_ready": False,
         },
-        "first_blocker": {
-            "verdict": "not_tradable_policy",
-            "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-            "blocker_owner": "owner",
-            "next_action": "record_owner_trial_scope_policy",
-        },
-        "tradeability_projection": {
-            "can_trade": False,
-            "verdict": "not_tradable_policy",
-            "next_state_after_blocker_removed": "admitted_trial_asset",
-        },
+        "first_blocker": first_blocker,
+        "tradeability_projection": tradeability_projection,
         "authority_boundary": _authority_boundary(),
         "review_hooks": [
             "strategygroup_decision_ledger",
             "trial_attempt_review_ledger",
             "post_submit_review_ledger_after_real_attempt",
         ],
-        "next_bottleneck": "owner_policy_scope_missing",
+        "next_bottleneck": (
+            "required_facts_mapping_gap"
+            if policy_recorded
+            else "owner_policy_scope_missing"
+        ),
+    }
+
+
+def _policy_recorded(packet: dict[str, Any]) -> bool:
+    policy = _as_dict(packet.get("policy"))
+    return (
+        packet.get("status") == "brf2_owner_trial_policy_scope_recorded"
+        and packet.get("brf2_policy_scope_recorded") is True
+        and packet.get("owner_policy_scope_missing") is False
+        and policy.get("strategy_group_id") == "BRF2-001"
+    )
+
+
+def _brf2_recorded_policy_scope(policy: dict[str, Any]) -> dict[str, Any]:
+    capital = _as_dict(policy.get("capital_scope"))
+    max_notional = _as_dict(policy.get("max_notional"))
+    loss_unit = _as_dict(policy.get("loss_unit"))
+    return {
+        "capital_scope": capital,
+        "symbol_scope": [str(policy.get("symbol_scope") or "")],
+        "side_scope": _string_list(policy.get("side_scope")),
+        "leverage_scenario": policy.get("leverage_scenario"),
+        "max_notional": max_notional,
+        "attempt_cap": policy.get("attempt_cap"),
+        "loss_unit": loss_unit,
+        "daily_loss_cap_units": policy.get("daily_loss_cap_units"),
+        "max_consecutive_losses": policy.get("max_consecutive_losses"),
+        "valid_until": policy.get("valid_until"),
+        "profile": "runtime_profile_and_action_time_exchange_facts",
+        "authority_boundary": policy.get("authority_boundary"),
+        "missing_policy_fields": [],
     }
 
 

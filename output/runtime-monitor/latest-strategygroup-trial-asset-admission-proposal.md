@@ -1,29 +1,30 @@
 ## StrategyGroup Trial Asset Admission Proposal
 
 - Status: `trial_asset_admission_proposal_ready`
-- Generated: `2026-06-23T04:46:29.687275+00:00`
+- Generated: `2026-06-23T05:37:39.975927+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json`
 - StrategyGroup: `BRF2-001`
 - Current stage: `tiny_live_intake_candidate`
-- Proposed stage: `trial_asset_admission_candidate`
-- Owner policy required: `是`
-- Next action: `record_owner_trial_scope_policy`
+- Proposed stage: `admitted_trial_asset`
+- Owner policy required: `否`
+- Owner policy recorded: `是`
+- Next action: `close_brf2_required_facts_mapping_for_armed_observation`
 - Real order authority: `否`
 
 ## Owner Policy Fields
 
 | Field | Value |
 | --- | --- |
-| `capital_scope` | `owner_policy_required` |
-| `max_notional` | `owner_policy_required` |
-| `valid_until` | `owner_policy_required` |
-| `slippage_limit` | `owner_policy_required` |
-| `trial_identity` | `owner_policy_required` |
-| `symbol_scope` | `['owner_policy_required']` |
+| `capital_scope` | `{'amount': '30', 'currency': 'USDT', 'loss_capable': True, 'type': 'isolated_subaccount_full_allocation'}` |
+| `max_notional` | `{'amount': '150', 'basis': '30U capital x 5x scenario', 'currency': 'USDT', 'final_authority': 'runtime_profile_and_action_time_exchange_facts'}` |
+| `valid_until` | `one_review_cycle` |
+| `slippage_limit` | `action_time_runtime_fact_required` |
+| `trial_identity` | `BRF2_TINY_SHORT_TRIAL_30U_V0` |
+| `symbol_scope` | `brf2_research_supported_symbols_only` |
 | `side_scope` | `['short']` |
-| `leverage_scenario` | `owner_policy_required` |
+| `leverage_scenario` | `5x_scenario_not_authority` |
 | `attempt_cap` | `3` |
-| `loss_unit` | `1` |
+| `loss_unit` | `{'amount': '10', 'basis': '30U / 3 attempts', 'currency': 'USDT'}` |
 
 ## Boundary
 

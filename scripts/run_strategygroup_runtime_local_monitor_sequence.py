@@ -216,6 +216,12 @@ DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.md"
 )
+DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json"
+)
+DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.md"
+)
 DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
@@ -374,6 +380,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         strategygroup_trial_asset_admission_proposal_md=Path(
             args.strategygroup_trial_asset_admission_proposal_md
+        ),
+        brf2_owner_trial_policy_scope_json=Path(
+            args.brf2_owner_trial_policy_scope_json
+        ),
+        brf2_owner_trial_policy_scope_md=Path(
+            args.brf2_owner_trial_policy_scope_md
         ),
         three_strategy_live_trial_portfolio_json=Path(
             args.three_strategy_live_trial_portfolio_json
@@ -555,6 +567,12 @@ def build_local_monitor_sequence_report(
     strategygroup_trial_asset_admission_proposal_md: Path = (
         DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD
     ),
+    brf2_owner_trial_policy_scope_json: Path = (
+        DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON
+    ),
+    brf2_owner_trial_policy_scope_md: Path = (
+        DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD
+    ),
     three_strategy_live_trial_portfolio_json: Path = (
         DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON
     ),
@@ -677,6 +695,23 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    brf2_owner_trial_policy_scope_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_brf2_owner_trial_policy_scope.py"),
+        "--output-json",
+        str(brf2_owner_trial_policy_scope_json),
+        "--output-owner-progress",
+        str(brf2_owner_trial_policy_scope_md),
+    ]
+    steps.append(
+        _run_step(
+            "brf2_owner_trial_policy_scope",
+            brf2_owner_trial_policy_scope_command,
+            brf2_owner_trial_policy_scope_json,
+            runner,
+        )
+    )
+
     strategygroup_trial_asset_admission_proposal_command = [
         sys.executable,
         str(
@@ -687,6 +722,8 @@ def build_local_monitor_sequence_report(
         str(strategygroup_capital_trial_readiness_bridge_json),
         "--trial-packet-json",
         str(strategygroup_capital_trial_packet_json),
+        "--brf2-owner-trial-policy-scope-json",
+        str(brf2_owner_trial_policy_scope_json),
         "--output-json",
         str(strategygroup_trial_asset_admission_proposal_json),
         "--output-owner-progress",
@@ -1222,6 +1259,8 @@ def build_local_monitor_sequence_report(
         str(strategygroup_capital_trial_readiness_bridge_json),
         "--trial-asset-admission-proposal-json",
         str(strategygroup_trial_asset_admission_proposal_json),
+        "--brf2-owner-trial-policy-scope-json",
+        str(brf2_owner_trial_policy_scope_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
         "--output-json",
@@ -1259,6 +1298,8 @@ def build_local_monitor_sequence_report(
         str(strategygroup_live_submit_readiness_bridge_json),
         "--trial-asset-admission-proposal-json",
         str(strategygroup_trial_asset_admission_proposal_json),
+        "--brf2-owner-trial-policy-scope-json",
+        str(brf2_owner_trial_policy_scope_json),
         "--three-strategy-live-trial-portfolio-json",
         str(three_strategy_live_trial_portfolio_json),
         "--output-json",
@@ -1339,6 +1380,9 @@ def build_local_monitor_sequence_report(
     trial_admission_summary = _sequence_trial_admission_summary(
         packets.get("strategygroup_trial_asset_admission_proposal", {})
     )
+    brf2_policy_summary = _sequence_brf2_owner_trial_policy_summary(
+        packets.get("brf2_owner_trial_policy_scope", {})
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         packets.get("three_strategy_live_trial_portfolio", {})
     )
@@ -1371,6 +1415,7 @@ def build_local_monitor_sequence_report(
             "strategy_candidate_trade": capital_trial_summary,
             "strategy_experiment_candidate": capital_trial_summary,
             "trial_asset_admission": trial_admission_summary,
+            "brf2_owner_trial_policy": brf2_policy_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "tradeability_verdict": tradeability_summary,
         },
@@ -1380,6 +1425,7 @@ def build_local_monitor_sequence_report(
         "strategy_candidate_trade": capital_trial_summary,
         "strategy_experiment_candidate": capital_trial_summary,
         "strategy_trial_asset_admission": trial_admission_summary,
+        "brf2_owner_trial_policy": brf2_policy_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "strategy_tradeability_verdict": tradeability_summary,
         "checks": {
@@ -1450,6 +1496,25 @@ def build_local_monitor_sequence_report(
             "trial_asset_admission_next_action": trial_admission_summary[
                 "next_action"
             ],
+            "brf2_owner_policy_recorded": brf2_policy_summary[
+                "owner_policy_recorded"
+            ],
+            "brf2_owner_policy_scope_missing": brf2_policy_summary[
+                "owner_policy_scope_missing"
+            ],
+            "brf2_stage_after_policy": brf2_policy_summary[
+                "brf2_stage_after_policy"
+            ],
+            "brf2_new_first_blocker": brf2_policy_summary[
+                "brf2_new_first_blocker"
+            ],
+            "brf2_next_bottleneck": (
+                three_strategy_portfolio_summary["next_bottlenecks"].get(
+                    "BRF2-001", ""
+                )
+            ),
+            "brf2_actionable_now": False,
+            "brf2_real_order_authority": False,
             "three_strategy_live_trial_portfolio_ready": (
                 three_strategy_portfolio_summary["ready"]
             ),
@@ -2224,6 +2289,35 @@ def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sequence_brf2_owner_trial_policy_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    policy = _as_dict(packet.get("policy"))
+    return {
+        "status": _status(packet) or "missing",
+        "active": _status(packet) == "brf2_owner_trial_policy_scope_recorded",
+        "strategy_group_id": str(policy.get("strategy_group_id") or ""),
+        "trial_identity": str(policy.get("trial_identity") or ""),
+        "owner_policy_recorded": packet.get("brf2_policy_scope_recorded") is True,
+        "owner_policy_scope_missing": packet.get("owner_policy_scope_missing")
+        is not False,
+        "brf2_stage_after_policy": str(
+            packet.get("brf2_stage_after_policy") or ""
+        ),
+        "brf2_new_first_blocker": str(
+            packet.get("brf2_new_first_blocker") or ""
+        ),
+        "next_action": str(packet.get("brf2_next_action") or ""),
+        "capital_scope": _as_dict(policy.get("capital_scope")),
+        "max_notional": _as_dict(policy.get("max_notional")),
+        "side_scope": [str(item) for item in policy.get("side_scope") or []],
+        "symbol_scope": str(policy.get("symbol_scope") or ""),
+        "leverage_scenario": str(policy.get("leverage_scenario") or ""),
+        "attempt_cap": _int(policy.get("attempt_cap")),
+        "loss_unit": _as_dict(policy.get("loss_unit")),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
 def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
     seats = _as_dict(packet.get("seat_readiness"))
     selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
@@ -2495,6 +2589,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     research_intake = report.get("strategy_research_intake") or {}
     experiment_candidate = report.get("strategy_experiment_candidate") or {}
     trial_admission = report.get("strategy_trial_asset_admission") or {}
+    brf2_policy = report.get("brf2_owner_trial_policy") or {}
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -2531,6 +2626,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 准入提案策略组: `{trial_admission.get('strategy_group_id') or 'none'}`",
         f"- 准入提案下一状态: `{trial_admission.get('after_next_state') or 'none'}`",
         f"- Owner policy required: `{_yes_no(trial_admission.get('owner_policy_required') is True)}`",
+        f"- BRF2 Owner policy recorded: `{_yes_no(brf2_policy.get('owner_policy_recorded') is True)}`",
+        f"- BRF2 next blocker: `{brf2_policy.get('brf2_new_first_blocker', 'missing')}`",
         f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
@@ -2870,6 +2967,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategygroup-trial-asset-admission-proposal-md",
         default=str(DEFAULT_STRATEGYGROUP_TRIAL_ASSET_ADMISSION_PROPOSAL_MD),
+    )
+    parser.add_argument(
+        "--brf2-owner-trial-policy-scope-json",
+        default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON),
+    )
+    parser.add_argument(
+        "--brf2-owner-trial-policy-scope-md",
+        default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_MD),
     )
     parser.add_argument(
         "--three-strategy-live-trial-portfolio-json",

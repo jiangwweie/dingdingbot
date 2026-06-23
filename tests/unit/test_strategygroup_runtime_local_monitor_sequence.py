@@ -602,29 +602,29 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
                 "tradable_now_count": 0,
                 "actionable_now_count": 0,
                 "real_order_authority_count": 0,
-                "owner_first_blocker_count": 1,
-                "engineering_first_blocker_count": 1,
+                "owner_first_blocker_count": 0,
+                "engineering_first_blocker_count": 2,
                 "market_first_blocker_count": 1,
                 "runtime_first_blocker_count": 0,
                 "strategy_review_first_blocker_count": 1,
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_policy",
-                "top_first_blocker_class": (
-                    "owner_trial_scope_or_capital_policy_missing"
+                "top_verdict": "not_tradable_facts",
+                "top_first_blocker_class": "required_facts_mapping_gap",
+                "top_next_action": (
+                    "close_brf2_required_facts_mapping_for_armed_observation"
                 ),
-                "top_next_action": "record_owner_trial_scope_policy",
             },
             "verdict_rows": [
                 {
                     "strategy_group_id": "BRF2-001",
-                    "stage": "trial_asset_admission_candidate",
-                    "verdict": "not_tradable_policy",
-                    "first_blocker_class": (
-                        "owner_trial_scope_or_capital_policy_missing"
+                    "stage": "admitted_trial_asset",
+                    "verdict": "not_tradable_facts",
+                    "first_blocker_class": "required_facts_mapping_gap",
+                    "blocker_owner": "engineering",
+                    "next_action": (
+                        "close_brf2_required_facts_mapping_for_armed_observation"
                     ),
-                    "blocker_owner": "owner",
-                    "next_action": "record_owner_trial_scope_policy",
-                    "after_next_state": "admitted_trial_asset",
+                    "after_next_state": "armed_observation",
                     "actionable_now": False,
                     "real_order_authority": False,
                 },
@@ -654,11 +654,9 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
             "owner_summary": {
                 "state": "交易资格已判定",
                 "top_strategy_group_id": "BRF2-001",
-                "top_verdict": "not_tradable_policy",
-                "top_first_blocker": (
-                    "owner_trial_scope_or_capital_policy_missing"
-                ),
-                "owner_policy_blocker_present": True,
+                "top_verdict": "not_tradable_facts",
+                "top_first_blocker": "required_facts_mapping_gap",
+                "owner_policy_blocker_present": False,
                 "owner_intervention_required": False,
                 "real_order_authority": False,
                 "actionable_now": False,
@@ -666,7 +664,7 @@ def _write_ready_tradeability_verdict(command: list[str]) -> None:
             "checks": {
                 "row_count": 3,
                 "one_current_verdict_per_strategy_group": True,
-                "owner_policy_blocker_present": True,
+                "owner_policy_blocker_present": False,
                 "owner_decision_required": False,
                 "row_count_matches_verdict_rows": True,
                 "tradable_now_rows_have_authority": True,
@@ -721,12 +719,14 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     },
                 },
                 "BRF2-001": {
-                    "stage": "trial_asset_admission_candidate",
+                    "stage": "admitted_trial_asset",
                     "first_blocker": {
-                        "verdict": "not_tradable_policy",
-                        "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-                        "blocker_owner": "owner",
-                        "next_action": "record_owner_trial_scope_policy",
+                        "verdict": "not_tradable_facts",
+                        "first_blocker_class": "required_facts_mapping_gap",
+                        "blocker_owner": "engineering",
+                        "next_action": (
+                            "close_brf2_required_facts_mapping_for_armed_observation"
+                        ),
                     },
                 },
                 "SOR-001": {
@@ -741,7 +741,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
             },
             "next_engineering_bottleneck": {
                 "MPG-001": "fresh_signal_wait",
-                "BRF2-001": "owner_policy_scope_missing",
+                "BRF2-001": "required_facts_mapping_gap",
                 "SOR-001": "fresh_signal_wait",
             },
             "checks": {
@@ -784,14 +784,21 @@ def _write_ready_trial_asset_admission_proposal(command: list[str]) -> None:
             "proposal": {
                 "strategy_group_id": "BRF2-001",
                 "current_stage": "tiny_live_intake_candidate",
-                "proposed_stage": "trial_asset_admission_candidate",
-                "next_action": "record_owner_trial_scope_policy",
-                "after_next_state": "admitted_trial_asset",
+                "proposed_stage": "admitted_trial_asset",
+                "owner_policy_required": False,
+                "owner_policy_recorded": True,
+                "owner_policy_scope_missing": False,
+                "next_action": (
+                    "close_brf2_required_facts_mapping_for_armed_observation"
+                ),
+                "after_next_state": "armed_observation",
                 "actionable_now": False,
                 "real_order_authority": False,
             },
             "owner_policy_checkpoint": {
-                "owner_policy_required": True,
+                "owner_policy_required": False,
+                "owner_policy_recorded": True,
+                "owner_policy_scope_missing": False,
                 "owner_policy_fields": [
                     "capital_scope",
                     "max_notional",
@@ -804,13 +811,69 @@ def _write_ready_trial_asset_admission_proposal(command: list[str]) -> None:
             },
             "checks": {
                 "proposal_generated": True,
-                "owner_policy_required": True,
+                "owner_policy_required": False,
+                "owner_policy_recorded": True,
+                "owner_policy_scope_missing": False,
                 "owner_decision_required": False,
                 "actionable_now": False,
                 "real_order_authority": False,
             },
             "interaction": {
                 "level": "L0_local_trial_asset_admission_proposal",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "actionable_now": False,
+                "real_order_authority": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+        },
+    )
+
+
+def _write_ready_brf2_owner_trial_policy_scope(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "schema": "brc.brf2_owner_trial_policy_scope.v0",
+            "scope": "final_owned_brf2_owner_trial_policy_scope_non_executing",
+            "status": "brf2_owner_trial_policy_scope_recorded",
+            "generated_at_utc": "2026-06-23T00:00:00+00:00",
+            "brf2_policy_scope_recorded": True,
+            "owner_policy_recorded": True,
+            "owner_policy_scope_missing": False,
+            "brf2_stage_after_policy": "admitted_trial_asset",
+            "brf2_new_first_blocker": "required_facts_mapping_gap",
+            "brf2_next_action": (
+                "close_brf2_required_facts_mapping_for_armed_observation"
+            ),
+            "policy": {
+                "strategy_group_id": "BRF2-001",
+                "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+                "capital_scope": {
+                    "type": "isolated_subaccount_full_allocation",
+                    "amount": "30",
+                    "currency": "USDT",
+                    "loss_capable": True,
+                },
+                "side_scope": ["short"],
+                "symbol_scope": "brf2_research_supported_symbols_only",
+                "leverage_scenario": "5x_scenario_not_authority",
+                "max_notional": {"amount": "150", "currency": "USDT"},
+                "attempt_cap": 3,
+                "loss_unit": {"amount": "10", "currency": "USDT"},
+            },
+            "interaction": {
+                "level": "L0_local_brf2_owner_trial_policy_scope",
                 "remote_interaction_count": 0,
                 "mutates_remote_files": False,
                 "approaches_real_order": False,
@@ -1094,6 +1157,9 @@ def _maybe_write_strategygroup_closure_step(
     if script == "build_strategygroup_tradeability_verdict.py":
         _write_ready_tradeability_verdict(command)
         return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_brf2_owner_trial_policy_scope.py":
+        _write_ready_brf2_owner_trial_policy_scope(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_portfolio_board.py":
         _write_ready_strategygroup_portfolio_board(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -1369,6 +1435,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        brf2_owner_trial_policy_scope_json=tmp_path / "brf2-policy.json",
+        brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -1385,6 +1453,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_portfolio_board.py",
         "build_strategygroup_research_intake_review.py",
         "build_strategygroup_capital_trial_readiness_bridge.py",
+        "build_brf2_owner_trial_policy_scope.py",
         "build_strategygroup_trial_asset_admission_proposal.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
@@ -1484,7 +1553,14 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["strategy_trial_asset_admission"]["strategy_group_id"] == (
         "BRF2-001"
     )
-    assert report["strategy_trial_asset_admission"]["owner_policy_required"] is True
+    assert report["strategy_trial_asset_admission"]["owner_policy_required"] is False
+    assert report["brf2_owner_trial_policy"]["owner_policy_recorded"] is True
+    assert report["brf2_owner_trial_policy"]["owner_policy_scope_missing"] is False
+    assert report["checks"]["brf2_owner_policy_recorded"] is True
+    assert report["checks"]["brf2_owner_policy_scope_missing"] is False
+    assert report["checks"]["brf2_stage_after_policy"] == "admitted_trial_asset"
+    assert report["checks"]["brf2_new_first_blocker"] == "required_facts_mapping_gap"
+    assert report["checks"]["brf2_next_bottleneck"] == "required_facts_mapping_gap"
     assert report["three_strategy_live_trial_portfolio"]["ready"] is True
     assert report["three_strategy_live_trial_portfolio"]["seat_count"] == 3
     assert report["three_strategy_live_trial_portfolio"][
@@ -1498,20 +1574,20 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "SOR-001",
     ]
     assert report["checks"]["live_trial_market_wait_count"] == 2
-    assert report["checks"]["live_trial_owner_policy_gap_count"] == 1
-    assert report["checks"]["live_trial_engineering_gap_count"] == 0
+    assert report["checks"]["live_trial_owner_policy_gap_count"] == 0
+    assert report["checks"]["live_trial_engineering_gap_count"] == 1
     assert report["strategy_tradeability_verdict"]["top_verdict"] == (
-        "not_tradable_policy"
+        "not_tradable_facts"
     )
     assert report["strategy_tradeability_verdict"]["top_first_blocker_class"] == (
-        "owner_trial_scope_or_capital_policy_missing"
+        "required_facts_mapping_gap"
     )
     assert report["strategy_tradeability_verdict"]["top_next_action"] == (
-        "record_owner_trial_scope_policy"
+        "close_brf2_required_facts_mapping_for_armed_observation"
     )
     assert report["checks"]["tradeability_top_strategy_group_id"] == "BRF2-001"
     assert report["checks"]["tradeability_top_verdict"] == (
-        "not_tradable_policy"
+        "not_tradable_facts"
     )
     assert report["checks"]["tradeability_row_count"] == 3
     assert report["checks"]["tradeability_verdict_rows_count"] == 3
@@ -1788,6 +1864,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        brf2_owner_trial_policy_scope_json=tmp_path / "brf2-policy.json",
+        brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2106,6 +2184,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        brf2_owner_trial_policy_scope_json=tmp_path / "brf2-policy.json",
+        brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2381,6 +2461,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        brf2_owner_trial_policy_scope_json=tmp_path / "brf2-policy.json",
+        brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path
@@ -2644,6 +2726,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "trial-admission-proposal.json",
         strategygroup_trial_asset_admission_proposal_md=tmp_path
         / "trial-admission-proposal.md",
+        brf2_owner_trial_policy_scope_json=tmp_path / "brf2-policy.json",
+        brf2_owner_trial_policy_scope_md=tmp_path / "brf2-policy.md",
         three_strategy_live_trial_portfolio_json=tmp_path
         / "three-strategy-portfolio.json",
         three_strategy_live_trial_portfolio_md=tmp_path

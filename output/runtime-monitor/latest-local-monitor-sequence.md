@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T04:46:32.903066+00:00
+- 报告时间: 2026-06-23T05:37:42.691929+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -23,16 +23,18 @@
 - tiny-live ready: `否`
 - 准入提案状态: `trial_asset_admission_proposal_ready`
 - 准入提案策略组: `BRF2-001`
-- 准入提案下一状态: `admitted_trial_asset`
-- Owner policy required: `是`
+- 准入提案下一状态: `armed_observation`
+- Owner policy required: `否`
+- BRF2 Owner policy recorded: `是`
+- BRF2 next blocker: `required_facts_mapping_gap`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
-- 组合第一阻断统计 market/owner/engineering: `2` / `1` / `0`
+- 组合第一阻断统计 market/owner/engineering: `2` / `0` / `1`
 - 交易资格状态: `tradeability_verdict_ready`
-- 交易资格 Top: `BRF2-001` / `not_tradable_policy`
-- 第一阻断: `owner_trial_scope_or_capital_policy_missing` / `owner`
-- 下一动作: `record_owner_trial_scope_policy`
+- 交易资格 Top: `BRF2-001` / `not_tradable_facts`
+- 第一阻断: `required_facts_mapping_gap` / `engineering`
+- 下一动作: `close_brf2_required_facts_mapping_for_armed_observation`
 - 当前可交易数量: `0`
 
 ## Steps
@@ -45,6 +47,7 @@
 | strategygroup_portfolio_board | portfolio_board_ready | 0 |
 | strategygroup_research_intake_review | research_intake_review_ready | 0 |
 | strategygroup_capital_trial_readiness_bridge | capital_trial_readiness_bridge_ready | 0 |
+| brf2_owner_trial_policy_scope | brf2_owner_trial_policy_scope_recorded | 0 |
 | strategygroup_trial_asset_admission_proposal | trial_asset_admission_proposal_ready | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |

@@ -39,6 +39,9 @@ DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
 )
+DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json"
+)
 DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
@@ -108,6 +111,10 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON),
     )
     parser.add_argument(
+        "--brf2-owner-trial-policy-scope-json",
+        default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON),
+    )
+    parser.add_argument(
         "--three-strategy-live-trial-portfolio-json",
         default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
     )
@@ -123,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
         live_submit_readiness=_read_json(Path(args.live_submit_readiness_json)),
         trial_asset_admission_proposal=_read_optional_json(
             Path(args.trial_asset_admission_proposal_json)
+        ),
+        brf2_owner_trial_policy_scope=_read_optional_json(
+            Path(args.brf2_owner_trial_policy_scope_json)
         ),
         three_strategy_live_trial_portfolio=_read_optional_json(
             Path(args.three_strategy_live_trial_portfolio_json)
@@ -157,6 +167,7 @@ def build_tradeability_verdict(
     signal_coverage: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     trial_asset_admission_proposal: dict[str, Any] | None = None,
+    brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     three_strategy_live_trial_portfolio: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -166,6 +177,7 @@ def build_tradeability_verdict(
         tier_policy,
         signal_coverage,
         trial_asset_admission_proposal or {},
+        brf2_owner_trial_policy_scope or {},
         three_strategy_live_trial_portfolio or {},
     )
     registry_rows = _registry_rows_by_id(registry)
@@ -175,12 +187,16 @@ def build_tradeability_verdict(
     admission_proposals = _admission_proposals_by_id(
         trial_asset_admission_proposal or {}
     )
+    owner_policy_scopes = _owner_policy_scopes_by_id(
+        brf2_owner_trial_policy_scope or {}
+    )
     portfolio_seats = _portfolio_seats_by_id(three_strategy_live_trial_portfolio or {})
 
     all_ids = set(candidate_rows)
     all_ids.update(tier_rows)
     all_ids.update(observed_rows)
     all_ids.update(admission_proposals)
+    all_ids.update(owner_policy_scopes)
     all_ids.update(portfolio_seats)
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
@@ -197,6 +213,7 @@ def build_tradeability_verdict(
             tier_row=tier_rows.get(strategy_group_id, {}),
             observed_row=observed_rows.get(strategy_group_id, {}),
             admission_proposal=admission_proposals.get(strategy_group_id, {}),
+            owner_policy_scope=owner_policy_scopes.get(strategy_group_id, {}),
             portfolio_seat=portfolio_seats.get(strategy_group_id, {}),
             live_submit_readiness=live_submit_readiness,
             forbidden_effects=forbidden_effects,
@@ -276,6 +293,7 @@ def _verdict_row(
     tier_row: dict[str, Any],
     observed_row: dict[str, Any],
     admission_proposal: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
     live_submit_readiness: dict[str, Any],
     forbidden_effects: list[str],
@@ -290,6 +308,7 @@ def _verdict_row(
         tier_row=tier_row,
         observed_row=observed_row,
         admission_proposal=admission_proposal,
+        owner_policy_scope=owner_policy_scope,
         portfolio_seat=portfolio_seat,
         live_submit_readiness=live_submit_readiness,
     )
@@ -298,6 +317,7 @@ def _verdict_row(
         stage=stage,
         candidate=candidate,
         admission_proposal=admission_proposal,
+        owner_policy_scope=owner_policy_scope,
         registry_present=registry_present,
         tier_present=tier_present,
         tier_row=tier_row,
@@ -308,7 +328,11 @@ def _verdict_row(
     )
     actionable_now = classifier["verdict"] == "tradable_now"
     real_order_authority = classifier["verdict"] == "tradable_now"
-    policy_scope = _policy_scope(candidate, portfolio_seat)
+    policy_scope = _policy_scope(candidate, portfolio_seat, owner_policy_scope)
+    owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
+        admission_proposal.get("owner_policy_recorded") is True
+        and admission_proposal.get("owner_policy_scope_missing") is False
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
@@ -330,6 +354,12 @@ def _verdict_row(
         "runtime_scope_status": {
             "registry_admitted": registry_present,
             "trial_asset_admission_proposal_ready": bool(admission_proposal),
+            "owner_policy_recorded": owner_policy_recorded,
+            "owner_policy_scope_missing": bool(admission_proposal)
+            and not owner_policy_recorded,
+            "brf2_trial_identity": str(
+                _as_dict(owner_policy_scope.get("policy")).get("trial_identity") or ""
+            ),
             "registry_default_tier": str(registry_row.get("default_tier") or "unknown"),
             "tier_policy_present": tier_present,
             "tier_policy_tier": str(tier_row.get("tier") or "unknown"),
@@ -368,6 +398,7 @@ def _first_blocker(
     stage: str,
     candidate: dict[str, Any],
     admission_proposal: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
     registry_present: bool,
     tier_present: bool,
     tier_row: dict[str, Any],
@@ -403,7 +434,11 @@ def _first_blocker(
             "complete_observe_only_role_review_before_trial_admission",
             "trial_asset_admission_candidate",
         )
-    if admission_proposal:
+    owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
+        admission_proposal.get("owner_policy_recorded") is True
+        and admission_proposal.get("owner_policy_scope_missing") is False
+    )
+    if admission_proposal and not owner_policy_recorded:
         return _classifier(
             "not_tradable_policy",
             "owner_trial_scope_or_capital_policy_missing",
@@ -411,6 +446,15 @@ def _first_blocker(
             "owner",
             "record_owner_trial_scope_policy",
             "admitted_trial_asset",
+        )
+    if strategy_group_id == "BRF2-001" and owner_policy_recorded:
+        return _classifier(
+            "not_tradable_facts",
+            "required_facts_mapping_gap",
+            "Owner trial policy is recorded; RequiredFacts mapping must close before armed observation",
+            "engineering",
+            "close_brf2_required_facts_mapping_for_armed_observation",
+            "armed_observation",
         )
 
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
@@ -530,6 +574,7 @@ def _stage(
     tier_row: dict[str, Any],
     observed_row: dict[str, Any],
     admission_proposal: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
     live_submit_readiness: dict[str, Any],
 ) -> str:
@@ -538,7 +583,13 @@ def _stage(
         live_submit_readiness=live_submit_readiness,
     ):
         return "live_submit_ready"
+    owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
+        admission_proposal.get("owner_policy_recorded") is True
+        and admission_proposal.get("owner_policy_scope_missing") is False
+    )
     if admission_proposal:
+        if owner_policy_recorded:
+            return str(admission_proposal.get("proposed_stage") or "admitted_trial_asset")
         return "trial_asset_admission_candidate"
     if portfolio_seat:
         portfolio_stage = str(portfolio_seat.get("stage") or "")
@@ -677,6 +728,14 @@ def _admission_proposals_by_id(packet: dict[str, Any]) -> dict[str, dict[str, An
     return {strategy_id: proposal} if strategy_id else {}
 
 
+def _owner_policy_scopes_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if not _policy_recorded(packet):
+        return {}
+    policy = _as_dict(packet.get("policy"))
+    strategy_id = str(policy.get("strategy_group_id") or "")
+    return {strategy_id: packet} if strategy_id else {}
+
+
 def _portfolio_seats_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not packet:
         return {}
@@ -684,7 +743,28 @@ def _portfolio_seats_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(key): _as_dict(value) for key, value in seats.items()}
 
 
-def _policy_scope(candidate: dict[str, Any], portfolio_seat: dict[str, Any]) -> dict[str, Any]:
+def _policy_scope(
+    candidate: dict[str, Any],
+    portfolio_seat: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
+) -> dict[str, Any]:
+    if _policy_recorded(owner_policy_scope):
+        policy = _as_dict(owner_policy_scope.get("policy"))
+        return {
+            "capital_scope": _as_dict(policy.get("capital_scope")),
+            "profile": "runtime_profile_and_action_time_exchange_facts",
+            "symbol_scope": [str(policy.get("symbol_scope") or "")],
+            "side_scope": _string_list(policy.get("side_scope")),
+            "leverage_scenario": policy.get("leverage_scenario", "not_applicable"),
+            "max_notional": _as_dict(policy.get("max_notional")),
+            "attempt_cap": policy.get("attempt_cap"),
+            "loss_unit": _as_dict(policy.get("loss_unit")),
+            "daily_loss_cap_units": policy.get("daily_loss_cap_units"),
+            "max_consecutive_losses": policy.get("max_consecutive_losses"),
+            "valid_until": policy.get("valid_until"),
+            "trial_identity": policy.get("trial_identity"),
+            "missing_policy_fields": [],
+        }
     portfolio_scope = _as_dict(portfolio_seat.get("policy_scope"))
     if portfolio_scope:
         return {
@@ -724,6 +804,16 @@ def _policy_value(candidate: dict[str, Any], field: str, missing: list[str]) -> 
     if field in missing:
         return "owner_policy_required"
     return str(candidate.get(field) or "not_applicable")
+
+
+def _policy_recorded(packet: dict[str, Any]) -> bool:
+    policy = _as_dict(packet.get("policy"))
+    return (
+        packet.get("status") == "brf2_owner_trial_policy_scope_recorded"
+        and packet.get("brf2_policy_scope_recorded") is True
+        and packet.get("owner_policy_scope_missing") is False
+        and policy.get("strategy_group_id") == "BRF2-001"
+    )
 
 
 def _portfolio_first_blocker(portfolio_seat: dict[str, Any]) -> dict[str, str]:

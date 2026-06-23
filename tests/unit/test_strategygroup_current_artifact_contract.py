@@ -48,11 +48,53 @@ def test_current_trial_asset_admission_proposal_artifact_is_complete():
     )
     assert proposal_packet["generated_at_utc"]
     assert proposal["owner_policy_defaults"]
+    assert proposal["owner_policy_required"] is False
+    assert proposal["owner_policy_recorded"] is True
+    assert proposal["owner_policy_scope_missing"] is False
+    assert proposal["next_action"] == (
+        "close_brf2_required_facts_mapping_for_armed_observation"
+    )
     assert proposal["proposed_registry_row"]
     assert proposal["proposed_tier_policy_row"]
     assert proposal["runtime_admission_plan"]
     assert proposal["actionable_now"] is False
     assert proposal["real_order_authority"] is False
+
+
+def test_current_brf2_owner_trial_policy_scope_artifact_is_complete():
+    policy_packet = _read_json(
+        "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json"
+    )
+    docs_policy_packet = _read_json(
+        "docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.json"
+    )
+    policy = policy_packet.get("policy") or {}
+
+    assert policy_packet["schema"] == "brc.brf2_owner_trial_policy_scope.v0"
+    assert (
+        policy_packet["scope"]
+        == "final_owned_brf2_owner_trial_policy_scope_non_executing"
+    )
+    assert policy_packet["status"] == "brf2_owner_trial_policy_scope_recorded"
+    assert docs_policy_packet["schema"] == policy_packet["schema"]
+    assert policy_packet["brf2_policy_scope_recorded"] is True
+    assert policy_packet["owner_policy_scope_missing"] is False
+    assert policy["strategy_group_id"] == "BRF2-001"
+    assert policy["trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
+    assert policy["capital_scope"]["amount"] == "30"
+    assert policy["capital_scope"]["currency"] == "USDT"
+    assert policy["capital_scope"]["loss_capable"] is True
+    assert policy["side_scope"] == ["short"]
+    assert policy["leverage_scenario"] == "5x_scenario_not_authority"
+    assert policy["max_notional"]["amount"] == "150"
+    assert policy["attempt_cap"] == 3
+    assert policy["loss_unit"]["amount"] == "10"
+    assert policy_packet["safety_invariants"]["actionable_now"] is False
+    assert policy_packet["safety_invariants"]["real_order_authority"] is False
+    assert policy_packet["safety_invariants"]["calls_finalgate"] is False
+    assert policy_packet["safety_invariants"]["calls_operation_layer"] is False
+    assert policy_packet["safety_invariants"]["calls_exchange_write"] is False
+    assert policy_packet["safety_invariants"]["places_order"] is False
 
 
 def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
@@ -91,3 +133,8 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert checks["three_strategy_live_trial_portfolio_ready"] is True
     assert checks["live_trial_seat_count"] == 3
     assert checks["live_trial_strategy_groups"] == ["MPG-001", "BRF2-001", "SOR-001"]
+    assert checks["live_trial_owner_policy_gap_count"] == 0
+    assert checks["live_trial_engineering_gap_count"] >= 1
+    assert checks["brf2_owner_policy_recorded"] is True
+    assert checks["brf2_owner_policy_scope_missing"] is False
+    assert checks["brf2_new_first_blocker"] == "required_facts_mapping_gap"

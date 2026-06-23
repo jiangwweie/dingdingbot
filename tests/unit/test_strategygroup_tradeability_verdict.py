@@ -260,6 +260,64 @@ def _trial_asset_admission_proposal() -> dict:
     }
 
 
+def _trial_asset_admission_proposal_with_policy() -> dict:
+    packet = _trial_asset_admission_proposal()
+    packet["proposal"] = {
+        **packet["proposal"],
+        "proposed_stage": "admitted_trial_asset",
+        "owner_policy_required": False,
+        "owner_policy_recorded": True,
+        "owner_policy_scope_missing": False,
+        "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+        "after_next_state": "armed_observation",
+    }
+    packet["checks"] = {
+        **packet["checks"],
+        "owner_policy_blocker_present": False,
+        "owner_policy_recorded": True,
+        "owner_policy_scope_missing": False,
+    }
+    return packet
+
+
+def _owner_policy_scope() -> dict:
+    return {
+        "status": "brf2_owner_trial_policy_scope_recorded",
+        "brf2_policy_scope_recorded": True,
+        "owner_policy_scope_missing": False,
+        "policy": {
+            "strategy_group_id": "BRF2-001",
+            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "capital_scope": {
+                "type": "isolated_subaccount_full_allocation",
+                "amount": "30",
+                "currency": "USDT",
+                "loss_capable": True,
+            },
+            "side_scope": ["short"],
+            "symbol_scope": "brf2_research_supported_symbols_only",
+            "leverage_scenario": "5x_scenario_not_authority",
+            "max_notional": {
+                "amount": "150",
+                "currency": "USDT",
+                "basis": "30U capital x 5x scenario",
+                "final_authority": "runtime_profile_and_action_time_exchange_facts",
+            },
+            "attempt_cap": 3,
+            "loss_unit": {
+                "amount": "10",
+                "currency": "USDT",
+                "basis": "30U / 3 attempts",
+            },
+            "daily_loss_cap_units": 1,
+            "max_consecutive_losses": 2,
+            "valid_until": "one_review_cycle",
+            "pause_conditions": ["two_consecutive_losses"],
+            "authority_boundary": "owner_policy_only; actionable_now=false",
+        },
+    }
+
+
 def test_tradeability_verdict_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -335,6 +393,43 @@ def test_tradeability_verdict_advances_brf2_to_policy_blocker_after_proposal():
     assert packet["checks"]["owner_decision_required"] is False
 
 
+def test_tradeability_verdict_advances_brf2_to_facts_blocker_after_policy_recorded():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    brf2 = rows["BRF2-001"]
+    assert brf2["stage"] == "admitted_trial_asset"
+    assert brf2["verdict"] == "not_tradable_facts"
+    assert brf2["first_blocker_class"] == "required_facts_mapping_gap"
+    assert brf2["blocker_owner"] == "engineering"
+    assert brf2["next_action"] == (
+        "close_brf2_required_facts_mapping_for_armed_observation"
+    )
+    assert brf2["after_next_state"] == "armed_observation"
+    assert brf2["runtime_scope_status"]["owner_policy_recorded"] is True
+    assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
+    assert brf2["runtime_scope_status"]["brf2_trial_identity"] == (
+        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+    )
+    assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
+    assert brf2["policy_scope"]["max_notional"]["amount"] == "150"
+    assert packet["checks"]["owner_policy_blocker_present"] is False
+    assert packet["summary"]["engineering_first_blocker_count"] >= 1
+    assert brf2["actionable_now"] is False
+    assert brf2["real_order_authority"] is False
+
+
 def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
     module = _load_module()
 
@@ -344,7 +439,8 @@ def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
         tier_policy=_tier_policy(),
         signal_coverage=_signal_coverage(),
         live_submit_readiness=_live_submit_readiness_ready_for("MPG-001"),
-        trial_asset_admission_proposal=_trial_asset_admission_proposal(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
@@ -354,7 +450,8 @@ def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
     assert rows["MPG-001"]["actionable_now"] is True
     assert rows["MPG-001"]["real_order_authority"] is True
 
-    assert rows["BRF2-001"]["verdict"] == "not_tradable_policy"
+    assert rows["BRF2-001"]["verdict"] == "not_tradable_facts"
+    assert rows["BRF2-001"]["first_blocker_class"] == "required_facts_mapping_gap"
     assert rows["BTPC-001"]["verdict"] != "tradable_now"
     assert rows["RBR-001"]["verdict"] != "tradable_now"
     assert rows["RBR2-001"]["verdict"] != "tradable_now"
@@ -362,7 +459,7 @@ def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
     assert packet["summary"]["top_strategy_group_id"] == "MPG-001"
     assert packet["summary"]["top_verdict"] == "tradable_now"
     assert packet["summary"]["selected_candidate_strategy_group_id"] == "BRF2-001"
-    assert packet["summary"]["selected_candidate_verdict"] == "not_tradable_policy"
+    assert packet["summary"]["selected_candidate_verdict"] == "not_tradable_facts"
     assert packet["summary"]["actionable_now_count"] == 1
     assert packet["summary"]["real_order_authority_count"] == 1
     assert packet["checks"]["tradable_now_rows_have_authority"] is True
@@ -379,13 +476,14 @@ def test_unscoped_live_submit_ready_does_not_make_any_row_tradable():
         tier_policy=_tier_policy(),
         signal_coverage=_signal_coverage(),
         live_submit_readiness=_live_submit_readiness_ready_for(None),
-        trial_asset_admission_proposal=_trial_asset_admission_proposal(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
     rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
     assert rows["MPG-001"]["verdict"] != "tradable_now"
-    assert rows["BRF2-001"]["verdict"] == "not_tradable_policy"
+    assert rows["BRF2-001"]["verdict"] == "not_tradable_facts"
     assert packet["summary"]["tradable_now_count"] == 0
     assert packet["summary"]["actionable_now_count"] == 0
     assert packet["summary"]["real_order_authority_count"] == 0
@@ -401,6 +499,7 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     tier_json = tmp_path / "tier.json"
     signal_json = tmp_path / "signal.json"
     live_json = tmp_path / "live.json"
+    policy_json = tmp_path / "policy.json"
     output_json = tmp_path / "verdict.json"
     output_md = tmp_path / "verdict.md"
     bridge_json.write_text(json.dumps(_capital_trial_bridge()), encoding="utf-8")
@@ -408,6 +507,7 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
     tier_json.write_text(json.dumps(_tier_policy()), encoding="utf-8")
     signal_json.write_text(json.dumps(_signal_coverage()), encoding="utf-8")
     live_json.write_text(json.dumps(_live_submit_readiness()), encoding="utf-8")
+    policy_json.write_text(json.dumps({}), encoding="utf-8")
 
     exit_code = module.main(
         [
@@ -421,6 +521,8 @@ def test_tradeability_verdict_cli_writes_json_and_markdown(tmp_path: Path):
             str(signal_json),
             "--live-submit-readiness-json",
             str(live_json),
+            "--brf2-owner-trial-policy-scope-json",
+            str(policy_json),
             "--output-json",
             str(output_json),
             "--output-owner-progress",

@@ -68,6 +68,44 @@ def _trial_packet() -> dict:
     }
 
 
+def _owner_policy_scope() -> dict:
+    return {
+        "status": "brf2_owner_trial_policy_scope_recorded",
+        "brf2_policy_scope_recorded": True,
+        "owner_policy_scope_missing": False,
+        "policy": {
+            "strategy_group_id": "BRF2-001",
+            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "capital_scope": {
+                "type": "isolated_subaccount_full_allocation",
+                "amount": "30",
+                "currency": "USDT",
+                "loss_capable": True,
+            },
+            "side_scope": ["short"],
+            "symbol_scope": "brf2_research_supported_symbols_only",
+            "leverage_scenario": "5x_scenario_not_authority",
+            "max_notional": {
+                "amount": "150",
+                "currency": "USDT",
+                "basis": "30U capital x 5x scenario",
+                "final_authority": "runtime_profile_and_action_time_exchange_facts",
+            },
+            "attempt_cap": 3,
+            "loss_unit": {
+                "amount": "10",
+                "currency": "USDT",
+                "basis": "30U / 3 attempts",
+            },
+            "daily_loss_cap_units": 1,
+            "max_consecutive_losses": 2,
+            "valid_until": "one_review_cycle",
+            "pause_conditions": ["two_consecutive_losses"],
+            "authority_boundary": "owner_policy_only; actionable_now=false",
+        },
+    }
+
+
 def test_trial_asset_admission_proposal_promotes_engineering_to_owner_policy():
     module = _load_module()
 
@@ -105,6 +143,38 @@ def test_trial_asset_admission_proposal_promotes_engineering_to_owner_policy():
     assert packet["interaction"]["calls_exchange_write"] is False
 
 
+def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
+    module = _load_module()
+
+    packet = module.build_trial_asset_admission_proposal(
+        capital_trial_bridge=_bridge(),
+        trial_packet=_trial_packet(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    proposal = packet["proposal"]
+    assert packet["status"] == "trial_asset_admission_proposal_ready"
+    assert proposal["strategy_group_id"] == "BRF2-001"
+    assert proposal["proposed_stage"] == "admitted_trial_asset"
+    assert proposal["owner_policy_required"] is False
+    assert proposal["owner_policy_recorded"] is True
+    assert proposal["owner_policy_scope_missing"] is False
+    assert proposal["next_action"] == (
+        "close_brf2_required_facts_mapping_for_armed_observation"
+    )
+    assert proposal["after_next_state"] == "armed_observation"
+    assert proposal["owner_policy_defaults"]["trial_identity"] == (
+        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+    )
+    assert proposal["owner_policy_defaults"]["max_notional"]["amount"] == "150"
+    assert packet["owner_policy_checkpoint"]["owner_policy_required"] is False
+    assert packet["owner_policy_checkpoint"]["owner_policy_recorded"] is True
+    assert packet["checks"]["owner_policy_scope_missing"] is False
+    assert packet["checks"]["actionable_now"] is False
+    assert packet["checks"]["real_order_authority"] is False
+
+
 def test_trial_asset_admission_proposal_cli_writes_outputs(tmp_path: Path):
     module = _load_module()
     bridge_json = tmp_path / "bridge.json"
@@ -120,6 +190,8 @@ def test_trial_asset_admission_proposal_cli_writes_outputs(tmp_path: Path):
             str(bridge_json),
             "--trial-packet-json",
             str(trial_json),
+            "--brf2-owner-trial-policy-scope-json",
+            str(tmp_path / "missing-policy.json"),
             "--output-json",
             str(output_json),
             "--output-owner-progress",

@@ -13,6 +13,9 @@
     "seat_count": 3
   },
   "final_evidence_packet": {
+    "brf2_new_first_blocker": "required_facts_mapping_gap",
+    "brf2_policy_scope_recorded": true,
+    "brf2_stage_after_policy": "admitted_trial_asset",
     "capability_unlocked": "main control can display at least three StrategyGroup trial seats with first blocker, next action, policy scope, RequiredFacts, authority boundary, and review hooks",
     "closed_engineering_problem": "single-strategy waiting view replaced by a machine-checkable three-seat live-trial portfolio read model",
     "deploy_recommendation": "deploy_after_tests_pass",
@@ -34,10 +37,10 @@
     "next_live_submit_condition": "fresh seat-scoped signal plus RequiredFacts, candidate evidence, action-time FinalGate, and official Operation Layer",
     "remaining_first_blockers": {
       "BRF2-001": {
-        "blocker_owner": "owner",
-        "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-        "next_action": "record_owner_trial_scope_policy",
-        "verdict": "not_tradable_policy"
+        "blocker_owner": "engineering",
+        "first_blocker_class": "required_facts_mapping_gap",
+        "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+        "verdict": "not_tradable_facts"
       },
       "MPG-001": {
         "blocker_owner": "market",
@@ -165,22 +168,28 @@
         ],
         "experiment_worthiness_review_closed": true,
         "first_blocker": {
-          "blocker_owner": "owner",
-          "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-          "next_action": "record_owner_trial_scope_policy",
-          "verdict": "not_tradable_policy"
+          "blocker_owner": "engineering",
+          "first_blocker_class": "required_facts_mapping_gap",
+          "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+          "verdict": "not_tradable_facts"
         },
         "kill_conditions": [
           "attempt_cap_exhausted_without_review_positive_edge",
           "daily_loss_cap_units_breached",
           "post_trade_review_rejects_right_tail_thesis"
         ],
-        "leverage_scenario": "5x_scenario_requires_owner_policy_not_authority",
+        "leverage_scenario": "5x_scenario_not_authority",
         "loss_envelope_expressed": true,
-        "loss_unit": 1,
-        "next_bottleneck": "owner_policy_scope_missing",
-        "owner_policy_required": true,
-        "owner_policy_status": "trial_scope_policy_missing_machine_checkable",
+        "loss_unit": {
+          "amount": "10",
+          "basis": "30U / 3 attempts",
+          "currency": "USDT"
+        },
+        "next_bottleneck": "required_facts_mapping_gap",
+        "owner_policy_recorded": true,
+        "owner_policy_required": false,
+        "owner_policy_scope_missing": false,
+        "owner_policy_status": "owner_trial_scope_policy_recorded",
         "pause_conditions": [
           "short_squeeze_risk_state_red",
           "required_facts_stale_or_missing",
@@ -189,16 +198,36 @@
         ],
         "policy_scope": {
           "attempt_cap": 3,
-          "capital_scope": "owner_policy_required",
-          "leverage_scenario": "5x_scenario_requires_owner_policy_not_authority",
-          "loss_unit": 1,
-          "profile": "owner_policy_required",
+          "authority_boundary": "owner_policy_only; actionable_now=false; real_order_authority=false; finalgate_required; operation_layer_required",
+          "capital_scope": {
+            "amount": "30",
+            "currency": "USDT",
+            "loss_capable": true,
+            "type": "isolated_subaccount_full_allocation"
+          },
+          "daily_loss_cap_units": 1,
+          "leverage_scenario": "5x_scenario_not_authority",
+          "loss_unit": {
+            "amount": "10",
+            "basis": "30U / 3 attempts",
+            "currency": "USDT"
+          },
+          "max_consecutive_losses": 2,
+          "max_notional": {
+            "amount": "150",
+            "basis": "30U capital x 5x scenario",
+            "currency": "USDT",
+            "final_authority": "runtime_profile_and_action_time_exchange_facts"
+          },
+          "missing_policy_fields": [],
+          "profile": "runtime_profile_and_action_time_exchange_facts",
           "side_scope": [
             "short"
           ],
           "symbol_scope": [
-            "owner_policy_required"
-          ]
+            "brf2_research_supported_symbols_only"
+          ],
+          "valid_until": "one_review_cycle"
         },
         "registry_admitted": false,
         "required_facts": [
@@ -224,18 +253,19 @@
         "side_scope": [
           "short"
         ],
-        "stage": "trial_asset_admission_candidate",
+        "stage": "admitted_trial_asset",
         "strategy_group_id": "BRF2-001",
         "strategy_thesis": "short-side weak/rally-failure right-tail continuation",
         "symbol_scope": [
-          "owner_policy_required"
+          "brf2_research_supported_symbols_only"
         ],
         "tier_policy_mode": "trial_asset_admission_candidate",
         "tradeability_projection": {
           "can_trade": false,
-          "next_state_after_blocker_removed": "admitted_trial_asset",
-          "verdict": "not_tradable_policy"
+          "next_state_after_blocker_removed": "armed_observation",
+          "verdict": "not_tradable_facts"
         },
+        "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
         "trial_policy_proposal_ready": true
       },
       {
@@ -355,10 +385,10 @@
   },
   "first_blockers": {
     "BRF2-001": {
-      "blocker_owner": "owner",
-      "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-      "next_action": "record_owner_trial_scope_policy",
-      "verdict": "not_tradable_policy"
+      "blocker_owner": "engineering",
+      "first_blocker_class": "required_facts_mapping_gap",
+      "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+      "verdict": "not_tradable_facts"
     },
     "MPG-001": {
       "blocker_owner": "market",
@@ -373,7 +403,7 @@
       "verdict": "not_tradable_market_wait"
     }
   },
-  "generated_at_utc": "2026-06-23T04:46:32.840627+00:00",
+  "generated_at_utc": "2026-06-23T05:37:42.633710+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -385,13 +415,13 @@
     "remote_interaction_count": 0
   },
   "next_engineering_bottleneck": {
-    "BRF2-001": "owner_policy_scope_missing",
+    "BRF2-001": "required_facts_mapping_gap",
     "MPG-001": "fresh_signal_wait",
     "SOR-001": "fresh_signal_wait"
   },
   "objective_met": true,
   "owner_policy_required": {
-    "BRF2-001": true,
+    "BRF2-001": false,
     "MPG-001": false,
     "SOR-001": false
   },
@@ -458,22 +488,28 @@
       ],
       "experiment_worthiness_review_closed": true,
       "first_blocker": {
-        "blocker_owner": "owner",
-        "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-        "next_action": "record_owner_trial_scope_policy",
-        "verdict": "not_tradable_policy"
+        "blocker_owner": "engineering",
+        "first_blocker_class": "required_facts_mapping_gap",
+        "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+        "verdict": "not_tradable_facts"
       },
       "kill_conditions": [
         "attempt_cap_exhausted_without_review_positive_edge",
         "daily_loss_cap_units_breached",
         "post_trade_review_rejects_right_tail_thesis"
       ],
-      "leverage_scenario": "5x_scenario_requires_owner_policy_not_authority",
+      "leverage_scenario": "5x_scenario_not_authority",
       "loss_envelope_expressed": true,
-      "loss_unit": 1,
-      "next_bottleneck": "owner_policy_scope_missing",
-      "owner_policy_required": true,
-      "owner_policy_status": "trial_scope_policy_missing_machine_checkable",
+      "loss_unit": {
+        "amount": "10",
+        "basis": "30U / 3 attempts",
+        "currency": "USDT"
+      },
+      "next_bottleneck": "required_facts_mapping_gap",
+      "owner_policy_recorded": true,
+      "owner_policy_required": false,
+      "owner_policy_scope_missing": false,
+      "owner_policy_status": "owner_trial_scope_policy_recorded",
       "pause_conditions": [
         "short_squeeze_risk_state_red",
         "required_facts_stale_or_missing",
@@ -482,16 +518,36 @@
       ],
       "policy_scope": {
         "attempt_cap": 3,
-        "capital_scope": "owner_policy_required",
-        "leverage_scenario": "5x_scenario_requires_owner_policy_not_authority",
-        "loss_unit": 1,
-        "profile": "owner_policy_required",
+        "authority_boundary": "owner_policy_only; actionable_now=false; real_order_authority=false; finalgate_required; operation_layer_required",
+        "capital_scope": {
+          "amount": "30",
+          "currency": "USDT",
+          "loss_capable": true,
+          "type": "isolated_subaccount_full_allocation"
+        },
+        "daily_loss_cap_units": 1,
+        "leverage_scenario": "5x_scenario_not_authority",
+        "loss_unit": {
+          "amount": "10",
+          "basis": "30U / 3 attempts",
+          "currency": "USDT"
+        },
+        "max_consecutive_losses": 2,
+        "max_notional": {
+          "amount": "150",
+          "basis": "30U capital x 5x scenario",
+          "currency": "USDT",
+          "final_authority": "runtime_profile_and_action_time_exchange_facts"
+        },
+        "missing_policy_fields": [],
+        "profile": "runtime_profile_and_action_time_exchange_facts",
         "side_scope": [
           "short"
         ],
         "symbol_scope": [
-          "owner_policy_required"
-        ]
+          "brf2_research_supported_symbols_only"
+        ],
+        "valid_until": "one_review_cycle"
       },
       "registry_admitted": false,
       "required_facts": [
@@ -517,18 +573,19 @@
       "side_scope": [
         "short"
       ],
-      "stage": "trial_asset_admission_candidate",
+      "stage": "admitted_trial_asset",
       "strategy_group_id": "BRF2-001",
       "strategy_thesis": "short-side weak/rally-failure right-tail continuation",
       "symbol_scope": [
-        "owner_policy_required"
+        "brf2_research_supported_symbols_only"
       ],
       "tier_policy_mode": "trial_asset_admission_candidate",
       "tradeability_projection": {
         "can_trade": false,
-        "next_state_after_blocker_removed": "admitted_trial_asset",
-        "verdict": "not_tradable_policy"
+        "next_state_after_blocker_removed": "armed_observation",
+        "verdict": "not_tradable_facts"
       },
+      "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
       "trial_policy_proposal_ready": true
     },
     "MPG-001": {
@@ -751,8 +808,8 @@
   "tradeability_summary": {
     "BRF2-001": {
       "can_trade": false,
-      "next_state_after_blocker_removed": "admitted_trial_asset",
-      "verdict": "not_tradable_policy"
+      "next_state_after_blocker_removed": "armed_observation",
+      "verdict": "not_tradable_facts"
     },
     "MPG-001": {
       "can_trade": false,
