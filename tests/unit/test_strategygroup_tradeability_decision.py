@@ -904,11 +904,11 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
     assert closure["checks"]["rbr_observe_only_has_exit_decision"] is True
 
     assert rows["CPM-RO-001"]["first_blocker_class"] == (
-        "fresh_cpm_long_signal_absent"
+        "cpm_registry_identity_gap"
     )
-    assert rows["CPM-RO-001"]["decision"] == "not_tradable_market_wait"
-    assert rows["CPM-RO-001"]["stage"] == "armed_observation"
-    assert rows["CPM-RO-001"]["required_facts_status"] == "ready"
+    assert rows["CPM-RO-001"]["decision"] == "not_tradable_asset_admission"
+    assert rows["CPM-RO-001"]["stage"] == "observe_only_would_enter"
+    assert rows["CPM-RO-001"]["required_facts_status"] == "not_applicable"
 
     assert paths["CPM-LONG"]["trigger_required_facts"] == [
         "htf_trend_intact",
@@ -928,10 +928,10 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
         "funding_not_extreme",
         "action_time_available_balance",
     ]
-    assert paths["CPM-LONG"]["first_blocker"] == "fresh_cpm_long_signal_absent"
-    assert paths["CPM-LONG"]["blocker_owner"] == "market"
-    assert paths["CPM-SHORT"]["first_blocker"] == "fresh_cpm_short_signal_absent"
-    assert paths["CPM-SHORT"]["blocker_owner"] == "market"
+    assert paths["CPM-LONG"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-LONG"]["blocker_owner"] == "engineering"
+    assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-SHORT"]["blocker_owner"] == "engineering"
     assert paths["BRF2-SHORT"]["required_facts_mapping_status"] == "ready"
     assert paths["BRF2-SHORT"]["first_blocker"] == "fresh_brf2_short_signal_absent"
     assert paths["MPG-LONG"]["first_blocker"] == "fresh_mpg_long_signal_absent"
@@ -961,6 +961,42 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
         assert path["post_action_expected_state"]
         assert "actionable_now" not in path
         assert "real_order_authority" not in path
+
+
+def test_cpm_path_schema_does_not_promote_identity_review_to_market_wait():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    paths = {
+        path["path_id"]: path
+        for path in packet["july_bullish_rebound_trade_path_closure"]["paths"]
+    }
+    cpm = rows["CPM-RO-001"]
+
+    assert cpm["stage"] != "armed_observation"
+    assert cpm["decision"] != "not_tradable_market_wait"
+    assert cpm["first_blocker_class"] != "fresh_cpm_long_signal_absent"
+    assert cpm["required_facts_status"] != "ready"
+    assert cpm["first_blocker_class"] == "cpm_registry_identity_gap"
+    assert paths["CPM-LONG"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-LONG"]["required_facts_mapping_status"] == "not_applicable"
+    assert paths["CPM-SHORT"]["required_facts_mapping_status"] == "not_applicable"
 
 
 def test_july_closure_does_not_pass_rbr_exit_check_when_rows_are_absent():
