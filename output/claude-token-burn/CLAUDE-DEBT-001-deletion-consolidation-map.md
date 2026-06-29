@@ -57,7 +57,7 @@ The biggest wins come from: (a) archiving the scripts directory's historical art
 | **archive** | HIGH | `scripts/verify_tokyo_runtime_governance_*.py` (1 file) | Tokyo governance postdeploy verify | Completed migration artifact | None needed | None | Confirm deploy is done |
 | **archive** | HIGH | `scripts/audit_tokyo_runtime_governance_*.py` (1 file) | Tokyo governance migration gap audit | Completed migration artifact | None needed | None | Confirm deploy is done |
 | **archive** | HIGH | `tests/unit/test_tokyo_runtime_governance_*.py` (10 files) | Tests for completed Tokyo migration | Test code for historical migration | None needed | None | Confirm deploy is done |
-| **archive** | HIGH | `scripts/runtime_controlled_tiny_live_bridge_*.py` (3 files) | Testnet bridge proof scripts | Historical testnet-to-live bridge artifacts | None needed | None | Confirm bridge is no longer active |
+| **done** | HIGH | `scripts/runtime_controlled_tiny_live_readiness_*.py` (3 files) | Tiny-live readiness proof scripts | Active files renamed from bridge wording to readiness projection / proof evidence | None needed | None | Completed by `SYS-LONG-0084F` |
 | **archive** | HIGH | `scripts/runtime_official_*_proof.py` (15 files) | One-off verification proof scripts | Point-in-time proof artifacts, not reusable | None needed | None | Confirm proofs are captured in reports |
 | **archive** | HIGH | `scripts/runtime_legacy_compatibility_isolation_packet.py` | Legacy compatibility isolation | Self-declares legacy | None needed | None | Confirm no active callers |
 | **archive** | HIGH | `scripts/runtime_*_packet.py` (34 total in scripts/) | Packet builder scripts | One-off packet generation, not runtime code | None needed | None | Check which are still actively invoked |
@@ -291,7 +291,7 @@ These can be done with high confidence and low risk:
 4. **Archive all `scripts/*tokyo_runtime_governance*`** — 11 scripts for a completed migration.
 5. **Archive all `tests/unit/test_tokyo_runtime_governance_*`** — 10 test files for completed migration.
 6. **Archive `scripts/runtime_legacy_compatibility_isolation_packet.py`** + its test — Self-declares legacy.
-7. **Archive `scripts/runtime_controlled_tiny_live_bridge_*.py`** — 3 testnet bridge scripts.
+7. **Done: rename `scripts/runtime_controlled_tiny_live_bridge_*.py`** — 3 tiny-live proof scripts now use readiness projection names.
 8. **Delete duplicate `first_real_submit` scripts** in `scripts/replay_recovery_history/first_real_submit/` (keep top-level copies).
 9. **Add `output/`, `local-archives/`, `data/*.db`, `logs/` to `.gitignore`** if not already there.
 10. **Delete empty `tasks/` directory** (0 bytes).
@@ -326,7 +326,7 @@ These changes touch active code paths or Codex-owned files:
 - Archive `scripts/replay_recovery_history/`
 - Archive all 11 `*tokyo_runtime_governance*` scripts + 10 tests
 - Archive `scripts/runtime_legacy_compatibility_isolation_packet.py` + test
-- Archive `scripts/runtime_controlled_tiny_live_bridge_*.py` (3 files)
+- Done: renamed `scripts/runtime_controlled_tiny_live_bridge_*.py` to readiness projection/proof entrypoints
 - Archive 15 `scripts/runtime_official_*_proof.py` files
 - Archive `scripts/runtime_*_packet.py` (34 files) — verify which are still active first
 - Delete empty `tasks/` directory

@@ -1,7 +1,7 @@
 {
   "after_next_state": "armed_observation",
   "armed_observation_entry_criteria": {
-    "all_required_fact_keys_mapped": true,
+    "all_required_fact_observation_specs_mapped": true,
     "disable_fact_blockers_mapped": true,
     "fresh_signal_rule_mapped": true,
     "owner_policy_recorded": true,
@@ -63,26 +63,58 @@
   ],
   "blockers": [],
   "checks": {
-    "actionable_now": false,
-    "calls_exchange_write": false,
-    "calls_finalgate": false,
-    "calls_operation_layer": false,
     "disable_fact_count": 5,
     "fresh_signal_rule_mapped": true,
     "owner_policy_recorded": true,
-    "places_order": false,
-    "real_order_authority": false,
     "required_fact_count": 8,
     "required_facts_mapping_ready": true,
     "trial_asset_admission_proposal_ready": true
   },
   "current_stage": "admitted_trial_asset",
-  "disable_fact_keys": [
-    "short_squeeze_risk_state",
-    "strong_reclaim_disable_state",
-    "rally_extension_invalidates_failure_state",
-    "liquidity_downshift_state",
-    "spread_liquidity_state"
+  "disable_fact_observation_specs": [
+    {
+      "active_statuses": [
+        "red",
+        "unbounded",
+        "unknown"
+      ],
+      "blocker": "squeeze_risk_not_clear",
+      "fact_key": "short_squeeze_risk_state"
+    },
+    {
+      "active_statuses": [
+        "active",
+        "true"
+      ],
+      "blocker": "strong_reclaim_disable_active",
+      "fact_key": "strong_reclaim_disable_state"
+    },
+    {
+      "active_statuses": [
+        "active",
+        "true"
+      ],
+      "blocker": "rally_extension_invalidates_failure",
+      "fact_key": "rally_extension_invalidates_failure_state"
+    },
+    {
+      "active_statuses": [
+        "active",
+        "true"
+      ],
+      "blocker": "liquidity_downshift_active",
+      "fact_key": "liquidity_downshift_state"
+    },
+    {
+      "active_statuses": [
+        "missing",
+        "thin_volume",
+        "unknown",
+        "wide_spread"
+      ],
+      "blocker": "spread_liquidity_not_acceptable",
+      "fact_key": "spread_liquidity_state"
+    }
   ],
   "disable_facts": [
     {
@@ -153,7 +185,7 @@
       "spread_liquidity_state.acceptable"
     ]
   },
-  "generated_at_utc": "2026-06-23T06:48:32.611188+00:00",
+  "generated_at_utc": "2026-06-28T19:14:03.668223+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -164,16 +196,72 @@
     "places_order": false,
     "remote_interaction_count": 0
   },
-  "next_action": "continue_brf2_armed_observation_until_fresh_signal",
-  "required_fact_keys": [
-    "closed_1h_ohlcv",
-    "closed_5m_ohlcv",
-    "rally_context",
-    "rally_failure_trigger_state",
-    "short_squeeze_risk_state",
-    "strong_reclaim_disable_state",
-    "liquidity_downshift_state",
-    "spread_liquidity_state"
+  "mapping_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
+  "required_fact_observation_specs": [
+    {
+      "accepted_statuses": [
+        "fresh",
+        "present",
+        "ready"
+      ],
+      "fact_key": "closed_1h_ohlcv"
+    },
+    {
+      "accepted_statuses": [
+        "fresh",
+        "present",
+        "ready"
+      ],
+      "fact_key": "closed_5m_ohlcv"
+    },
+    {
+      "accepted_statuses": [
+        "bear_or_weak_reclaim",
+        "ready",
+        "weak_rally"
+      ],
+      "fact_key": "rally_context"
+    },
+    {
+      "accepted_statuses": [
+        "active",
+        "confirmed",
+        "ready"
+      ],
+      "fact_key": "rally_failure_trigger_state"
+    },
+    {
+      "accepted_statuses": [
+        "bounded",
+        "clear",
+        "clear_or_bounded"
+      ],
+      "fact_key": "short_squeeze_risk_state"
+    },
+    {
+      "accepted_statuses": [
+        "clear",
+        "false",
+        "inactive"
+      ],
+      "fact_key": "strong_reclaim_disable_state"
+    },
+    {
+      "accepted_statuses": [
+        "clear",
+        "false",
+        "inactive"
+      ],
+      "fact_key": "liquidity_downshift_state"
+    },
+    {
+      "accepted_statuses": [
+        "acceptable",
+        "normal",
+        "ready"
+      ],
+      "fact_key": "spread_liquidity_state"
+    }
   ],
   "required_facts": [
     {
@@ -243,14 +331,12 @@
   ],
   "required_facts_mapping_ready": true,
   "safety_invariants": {
-    "actionable_now": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
     "calls_operation_layer": false,
     "live_profile_changed": false,
     "order_sizing_changed": false,
     "places_order": false,
-    "real_order_authority": false,
     "registry_authority_changed": false,
     "tier_policy_changed": false,
     "withdrawal_or_transfer_created": false

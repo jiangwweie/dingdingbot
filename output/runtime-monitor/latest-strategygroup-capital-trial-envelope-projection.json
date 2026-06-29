@@ -1,11 +1,9 @@
 {
   "capital_trial_eligibility_rows": [
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=intake_only; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=intake_only; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "short_research_intake",
-      "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
-      "decision": "promote",
+      "candidate_status": "short_experiment_evidence_pending_owner_policy",
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
         "disable_low_structure_loss_atr_lt_0_15",
@@ -20,10 +18,10 @@
       "forward_pending_count": 0,
       "identity_status": "main_control_research_intake_asset",
       "live_permission_change": false,
-      "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+      "next_checkpoint": "BRF2-001_tiny_live_intake_evidence",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "disable_strong_reclaim_proxy",
           "disable_low_structure_loss_atr_lt_0_15",
@@ -35,7 +33,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -45,7 +44,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -69,9 +68,8 @@
       },
       "pool_stage": "tiny_live_intake_candidate_with_path_risk",
       "promotion_scope": "intake_only",
-      "promotion_target": "paper_observation_or_candidate_trade_packet",
+      "promotion_target": "paper_observation_or_experiment_evidence",
       "ranking_score": 597,
-      "real_order_authority": false,
       "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
       "recent_opportunity_count": 11,
       "required_facts_draft": [
@@ -84,7 +82,7 @@
       ],
       "required_next_evidence": [
         "owner_policy_scope",
-        "paper_observation_packet",
+        "paper_observation_evidence",
         "RequiredFacts draft",
         "disable facts",
         "path-risk review"
@@ -113,6 +111,8 @@
       "side_scope": [
         "short"
       ],
+      "strategy_asset_current_decision": "promote",
+      "strategy_asset_seed_source": "curated_research_intake_strategy_asset_seed",
       "strategy_group_id": "BRF2-001",
       "symbol_scope": [
         "owner_policy_required"
@@ -123,22 +123,20 @@
         "3_of_11_cap4_events_hit_5m_stop",
         "strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events",
         "symbol/date filters that fully remove stop hits are high overfit risk",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "candidate_trade_prepare_pending_owner_policy",
+      "trial_recommendation": "experiment_candidate_prepare_pending_owner_policy",
       "would_enter_forward_positive_count": 8
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "short_research_intake",
-      "candidate_status": "role_only_short_candidate_trade_watchlist",
-      "decision": "keep_observing",
+      "candidate_status": "role_only_short_experiment_candidate_watchlist",
       "disable_or_review_facts_draft": [
         "range_regime_detector_v0",
         "us_late_session_role_filter",
@@ -157,7 +155,7 @@
       "next_checkpoint": "RBR2-001_research_intake_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "range_regime_detector_v0",
           "us_late_session_role_filter",
@@ -170,7 +168,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -180,7 +179,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -206,8 +205,7 @@
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": 390,
-      "real_order_authority": false,
-      "reason": "role_only_short_candidate_trade_watchlist",
+      "reason": "role_only_short_experiment_candidate_watchlist",
       "recent_opportunity_count": 78,
       "required_facts_draft": [
         "closed_1h_ohlcv",
@@ -241,6 +239,8 @@
       "side_scope": [
         "short"
       ],
+      "strategy_asset_current_decision": "unknown",
+      "strategy_asset_seed_source": "missing_strategy_asset_seed",
       "strategy_group_id": "RBR2-001",
       "symbol_scope": [
         "owner_policy_required"
@@ -251,41 +251,38 @@
         "5m_stop_hit_rate_is_high",
         "time_stop_only_overstates_realistic_structural_stop_behavior",
         "best role is filler not main right-tail engine",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "role_only_short_candidate_trade_watchlist",
+      "trial_recommendation": "role_only_short_experiment_candidate_watchlist",
       "would_enter_forward_positive_count": 32
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "trial_prepare_candidate_pending_owner_policy",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "no_action_other",
       "dominant_sampled_candidate_id": "MI-001-SOL-LONG",
       "engineering_continue": true,
-      "evidence_stage": "identity_review",
+      "evidence_stage": "revise",
       "execution_tier": "unknown",
-      "forward_pending_count": 0,
+      "forward_pending_count": 11,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
       "next_checkpoint": "MI-001_capital_trial_review",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
-      "pool_stage": "identity_candidate_review",
+      "pool_stage": "not_in_trial_pool",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
-      "ranking_score": 307,
-      "real_order_authority": false,
+      "ranking_score": 191,
       "reason": "trial_prepare_after_owner_identity_and_capital_policy",
-      "recent_opportunity_count": 23,
+      "recent_opportunity_count": 17,
       "required_next_evidence": [],
       "risk_boundary_missing": [
         "capital_scope",
@@ -295,21 +292,24 @@
         "trial_identity"
       ],
       "risk_boundary_ready": false,
-      "sampled_event_count": 8,
+      "sampled_event_count": 9,
       "side_scope": [
         "long"
       ],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "MI-001",
       "symbol_scope": [
-        "SOL/USDT:USDT"
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT"
       ],
       "tiny_live_ready": false,
-      "tradable_forward_count": 22,
+      "tradable_forward_count": 10,
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -317,21 +317,19 @@
         "official_operation_layer_not_reached"
       ],
       "trial_recommendation": "trial_prepare_after_owner_identity_and_capital_policy",
-      "would_enter_forward_positive_count": 22
+      "would_enter_forward_positive_count": 12
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "trial_prepare_watchlist_after_revision",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "no_action_other",
       "dominant_sampled_candidate_id": "LSR-001-XRP-LONG",
       "engineering_continue": true,
       "evidence_stage": "revise",
       "execution_tier": "L1",
-      "forward_pending_count": 1,
+      "forward_pending_count": 0,
       "identity_status": "registry_or_portfolio_identity_present",
       "live_permission_change": false,
       "next_checkpoint": "LSR-001_capital_trial_review",
@@ -341,66 +339,8 @@
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": 44,
-      "real_order_authority": false,
       "reason": "defer_until_rewrite_and_range_facts_closed",
       "recent_opportunity_count": 2,
-      "required_next_evidence": [],
-      "risk_boundary_missing": [
-        "capital_scope",
-        "max_notional",
-        "valid_until",
-        "slippage_limit",
-        "trial_identity"
-      ],
-      "risk_boundary_ready": false,
-      "sampled_event_count": 2,
-      "side_scope": [
-        "short"
-      ],
-      "strategy_group_id": "LSR-001",
-      "symbol_scope": [
-        "XRP/USDT:USDT"
-      ],
-      "tiny_live_ready": false,
-      "tradable_forward_count": 2,
-      "trial_blockers": [
-        "would_enter_forward_outcome_pending:24h",
-        "no_action_or_classifier_attribution_needs_closure",
-        "side_specific_rewrite_not_closed",
-        "range_context_required",
-        "owner_capital_scope_not_confirmed",
-        "fresh_signal_absent",
-        "action_time_finalgate_not_reached",
-        "official_operation_layer_not_reached"
-      ],
-      "trial_recommendation": "defer_until_rewrite_and_range_facts_closed",
-      "would_enter_forward_positive_count": 2
-    },
-    {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
-      "candidate_family": "portfolio_capture_gap",
-      "candidate_status": "promote_review_before_trial_prepare",
-      "decision": "pending",
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker": "market_structure_not_confirmed",
-      "dominant_sampled_candidate_id": "BRF-001-BTC-SHORT",
-      "engineering_continue": true,
-      "evidence_stage": "promote_review",
-      "execution_tier": "L1",
-      "forward_pending_count": 3,
-      "identity_status": "registry_or_portfolio_identity_present",
-      "live_permission_change": false,
-      "next_checkpoint": "BRF-001_capital_trial_review",
-      "owner_policy_required": false,
-      "owner_policy_required_now": false,
-      "pool_stage": "promote_review_candidate",
-      "promotion_scope": "not_applicable",
-      "promotion_target": "not_applicable",
-      "ranking_score": 13,
-      "real_order_authority": false,
-      "reason": "defer_until_squeeze_requiredfacts_forward_completed",
-      "recent_opportunity_count": 1,
       "required_next_evidence": [],
       "risk_boundary_missing": [
         "capital_scope",
@@ -414,17 +354,71 @@
       "side_scope": [
         "short"
       ],
+      "strategy_asset_current_decision": "pending",
+      "strategy_group_id": "LSR-001",
+      "symbol_scope": [
+        "XRP/USDT:USDT"
+      ],
+      "tiny_live_ready": false,
+      "tradable_forward_count": 2,
+      "trial_blockers": [
+        "no_action_or_classifier_attribution_needs_closure",
+        "side_specific_rewrite_not_closed",
+        "range_context_required",
+        "owner_capital_scope_not_confirmed",
+        "fresh_signal_absent",
+        "action_time_finalgate_not_reached",
+        "official_operation_layer_not_reached"
+      ],
+      "trial_recommendation": "defer_until_rewrite_and_range_facts_closed",
+      "would_enter_forward_positive_count": 2
+    },
+    {
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
+      "candidate_family": "portfolio_capture_gap",
+      "candidate_status": "promote_review_before_trial_prepare",
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker": "market_structure_not_confirmed",
+      "dominant_sampled_candidate_id": "BRF-001-BTC-SHORT",
+      "engineering_continue": true,
+      "evidence_stage": "promote_review",
+      "execution_tier": "L1",
+      "forward_pending_count": 6,
+      "identity_status": "registry_or_portfolio_identity_present",
+      "live_permission_change": false,
+      "next_checkpoint": "BRF-001_capital_trial_review",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "pool_stage": "promote_review_candidate",
+      "promotion_scope": "not_applicable",
+      "promotion_target": "not_applicable",
+      "ranking_score": 68,
+      "reason": "defer_until_squeeze_requiredfacts_forward_completed",
+      "recent_opportunity_count": 7,
+      "required_next_evidence": [],
+      "risk_boundary_missing": [
+        "capital_scope",
+        "max_notional",
+        "valid_until",
+        "slippage_limit",
+        "trial_identity"
+      ],
+      "risk_boundary_ready": false,
+      "sampled_event_count": 5,
+      "side_scope": [
+        "short"
+      ],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "BRF-001",
       "symbol_scope": [
         "BTC/USDT:USDT"
       ],
       "tiny_live_ready": false,
-      "tradable_forward_count": 0,
+      "tradable_forward_count": 3,
       "trial_blockers": [
         "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
         "would_enter_forward_outcome_pending:4h",
-        "promote_review_forward_positive_not_completed",
         "owner_policy_scope_not_confirmed",
         "squeeze_classifier_required",
         "requiredfacts_review_required",
@@ -434,31 +428,28 @@
         "official_operation_layer_not_reached"
       ],
       "trial_recommendation": "defer_until_squeeze_requiredfacts_forward_completed",
-      "would_enter_forward_positive_count": 0
+      "would_enter_forward_positive_count": 5
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "identity_review_before_trial_prepare",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "no_action_other",
       "dominant_sampled_candidate_id": "CPM-RO-001",
       "engineering_continue": true,
-      "evidence_stage": "identity_review",
+      "evidence_stage": "revise",
       "execution_tier": "unknown",
-      "forward_pending_count": 4,
+      "forward_pending_count": 1,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
       "next_checkpoint": "CPM-RO-001_capital_trial_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "pool_stage": "identity_candidate_review",
+      "pool_stage": "not_in_trial_pool",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": 161,
-      "real_order_authority": false,
       "reason": "defer_until_identity_or_merge_review_closed",
       "recent_opportunity_count": 18,
       "required_next_evidence": [],
@@ -470,11 +461,11 @@
         "trial_identity"
       ],
       "risk_boundary_ready": false,
-      "sampled_event_count": 13,
+      "sampled_event_count": 8,
       "side_scope": [
-        "short",
-        "long"
+        "short"
       ],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "CPM-RO-001",
       "symbol_scope": [
         "ETH/USDT:USDT"
@@ -484,10 +475,7 @@
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -498,11 +486,9 @@
       "would_enter_forward_positive_count": 13
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "revise_before_trial_prepare",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "stale_data_or_signal",
       "dominant_sampled_candidate_id": "",
@@ -519,7 +505,6 @@
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": -90,
-      "real_order_authority": false,
       "reason": "defer_until_fact_source_classifier_closed",
       "recent_opportunity_count": 0,
       "required_next_evidence": [],
@@ -533,6 +518,7 @@
       "risk_boundary_ready": false,
       "sampled_event_count": 0,
       "side_scope": [],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "BTPC-001",
       "symbol_scope": [],
       "tiny_live_ready": false,
@@ -551,32 +537,30 @@
     }
   ],
   "capital_trial_summary": {
-    "actionable_now_count": 0,
     "eligibility_row_count": 7,
     "engineering_continuation_count": 7,
     "live_permission_change_count": 0,
     "non_mpg_trial_candidate_count": 7,
     "owner_policy_checkpoint_count": 1,
     "portfolio_row_count": 10,
-    "real_order_authority_count": 0,
-    "selected_candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+    "selected_candidate_status": "short_experiment_evidence_pending_owner_policy",
     "selected_non_mpg_strategy_group_id": "BRF2-001",
     "selected_short_strategy_group_id": "BRF2-001",
-    "short_candidate_trade_count": 1,
-    "trial_packet_generated": true
+    "short_experiment_candidate_count": 1,
+    "trial_envelope_generated": true
   },
   "engineering_continuation_queue": [
     {
       "blocked_until": "engineering_closure_or_owner_policy_checkpoint",
-      "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+      "candidate_status": "short_experiment_evidence_pending_owner_policy",
       "does_not_authorize_live_execution": true,
-      "next_engineering_bottleneck": "candidate_trade_prepare_pending_owner_policy",
+      "next_engineering_bottleneck": "experiment_candidate_prepare_pending_owner_policy",
       "strategy_group_id": "BRF2-001",
       "trial_blockers": [
         "3_of_11_cap4_events_hit_5m_stop",
         "strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events",
         "symbol/date filters that fully remove stop hits are high overfit risk",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
@@ -586,15 +570,15 @@
     },
     {
       "blocked_until": "engineering_closure_or_owner_policy_checkpoint",
-      "candidate_status": "role_only_short_candidate_trade_watchlist",
+      "candidate_status": "role_only_short_experiment_candidate_watchlist",
       "does_not_authorize_live_execution": true,
-      "next_engineering_bottleneck": "role_only_short_candidate_trade_watchlist",
+      "next_engineering_bottleneck": "role_only_short_experiment_candidate_watchlist",
       "strategy_group_id": "RBR2-001",
       "trial_blockers": [
         "5m_stop_hit_rate_is_high",
         "time_stop_only_overstates_realistic_structural_stop_behavior",
         "best role is filler not main right-tail engine",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
@@ -611,8 +595,9 @@
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -627,7 +612,6 @@
       "next_engineering_bottleneck": "defer_until_rewrite_and_range_facts_closed",
       "strategy_group_id": "LSR-001",
       "trial_blockers": [
-        "would_enter_forward_outcome_pending:24h",
         "no_action_or_classifier_attribution_needs_closure",
         "side_specific_rewrite_not_closed",
         "range_context_required",
@@ -647,7 +631,6 @@
         "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
         "would_enter_forward_outcome_pending:4h",
-        "promote_review_forward_positive_not_completed",
         "owner_policy_scope_not_confirmed",
         "squeeze_classifier_required",
         "requiredfacts_review_required",
@@ -666,10 +649,7 @@
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -694,33 +674,31 @@
       ]
     }
   ],
-  "generated_at_utc": "2026-06-23T02:06:27.493303+00:00",
+  "generated_at_utc": "2026-06-28T19:14:03.411295+00:00",
   "goal_progress_projection": {
     "no_live_permission": true,
     "owner_intervention_required": false,
-    "owner_policy_decision_required_later": true,
-    "p05_capital_trial": "short_candidate_trade_packet_pending_owner_policy",
+    "owner_policy_confirmation_required_later": true,
     "promotion_scope": "intake_only",
-    "summary": "First non-MPG short experiment candidate selected from review-only evidence; promotion scope is intake-only and this is not live execution permission.",
-    "tiny_live_ready": false
+    "signal_observation_capital_trial": "short_experiment_evidence_pending_owner_policy",
+    "summary": "First non-MPG short experiment candidate selected from review-only evidence; promotion scope is intake-only and this is not live execution permission."
   },
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
     "calls_operation_layer": false,
-    "level": "L0_local_capital_trial_readiness_bridge",
+    "level": "L0_local_capital_trial_envelope_projection",
     "mutates_remote_files": false,
     "places_order": false,
+    "projection_role": "trial_envelope_projection",
     "remote_interaction_count": 0
   },
   "non_mpg_trial_candidate_ranking": [
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=intake_only; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=intake_only; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "short_research_intake",
-      "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
-      "decision": "promote",
+      "candidate_status": "short_experiment_evidence_pending_owner_policy",
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
         "disable_low_structure_loss_atr_lt_0_15",
@@ -735,10 +713,10 @@
       "forward_pending_count": 0,
       "identity_status": "main_control_research_intake_asset",
       "live_permission_change": false,
-      "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+      "next_checkpoint": "BRF2-001_tiny_live_intake_evidence",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "disable_strong_reclaim_proxy",
           "disable_low_structure_loss_atr_lt_0_15",
@@ -750,7 +728,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -760,7 +739,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -784,9 +763,8 @@
       },
       "pool_stage": "tiny_live_intake_candidate_with_path_risk",
       "promotion_scope": "intake_only",
-      "promotion_target": "paper_observation_or_candidate_trade_packet",
+      "promotion_target": "paper_observation_or_experiment_evidence",
       "ranking_score": 597,
-      "real_order_authority": false,
       "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
       "recent_opportunity_count": 11,
       "required_facts_draft": [
@@ -799,7 +777,7 @@
       ],
       "required_next_evidence": [
         "owner_policy_scope",
-        "paper_observation_packet",
+        "paper_observation_evidence",
         "RequiredFacts draft",
         "disable facts",
         "path-risk review"
@@ -828,6 +806,8 @@
       "side_scope": [
         "short"
       ],
+      "strategy_asset_current_decision": "promote",
+      "strategy_asset_seed_source": "curated_research_intake_strategy_asset_seed",
       "strategy_group_id": "BRF2-001",
       "symbol_scope": [
         "owner_policy_required"
@@ -838,22 +818,20 @@
         "3_of_11_cap4_events_hit_5m_stop",
         "strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events",
         "symbol/date filters that fully remove stop hits are high overfit risk",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "candidate_trade_prepare_pending_owner_policy",
+      "trial_recommendation": "experiment_candidate_prepare_pending_owner_policy",
       "would_enter_forward_positive_count": 8
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "short_research_intake",
-      "candidate_status": "role_only_short_candidate_trade_watchlist",
-      "decision": "keep_observing",
+      "candidate_status": "role_only_short_experiment_candidate_watchlist",
       "disable_or_review_facts_draft": [
         "range_regime_detector_v0",
         "us_late_session_role_filter",
@@ -872,7 +850,7 @@
       "next_checkpoint": "RBR2-001_research_intake_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "range_regime_detector_v0",
           "us_late_session_role_filter",
@@ -885,7 +863,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -895,7 +874,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -921,8 +900,7 @@
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": 390,
-      "real_order_authority": false,
-      "reason": "role_only_short_candidate_trade_watchlist",
+      "reason": "role_only_short_experiment_candidate_watchlist",
       "recent_opportunity_count": 78,
       "required_facts_draft": [
         "closed_1h_ohlcv",
@@ -956,6 +934,8 @@
       "side_scope": [
         "short"
       ],
+      "strategy_asset_current_decision": "unknown",
+      "strategy_asset_seed_source": "missing_strategy_asset_seed",
       "strategy_group_id": "RBR2-001",
       "symbol_scope": [
         "owner_policy_required"
@@ -966,41 +946,38 @@
         "5m_stop_hit_rate_is_high",
         "time_stop_only_overstates_realistic_structural_stop_behavior",
         "best role is filler not main right-tail engine",
-        "source_tiny_live_ready_false",
+        "source_non_executing_trial_readiness_not_closed",
         "owner_capital_scope_not_confirmed",
         "owner_trial_identity_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "role_only_short_candidate_trade_watchlist",
+      "trial_recommendation": "role_only_short_experiment_candidate_watchlist",
       "would_enter_forward_positive_count": 32
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "trial_prepare_candidate_pending_owner_policy",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "no_action_other",
       "dominant_sampled_candidate_id": "MI-001-SOL-LONG",
       "engineering_continue": true,
-      "evidence_stage": "identity_review",
+      "evidence_stage": "revise",
       "execution_tier": "unknown",
-      "forward_pending_count": 0,
+      "forward_pending_count": 11,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
       "next_checkpoint": "MI-001_capital_trial_review",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
-      "pool_stage": "identity_candidate_review",
+      "pool_stage": "not_in_trial_pool",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
-      "ranking_score": 307,
-      "real_order_authority": false,
+      "ranking_score": 191,
       "reason": "trial_prepare_after_owner_identity_and_capital_policy",
-      "recent_opportunity_count": 23,
+      "recent_opportunity_count": 17,
       "required_next_evidence": [],
       "risk_boundary_missing": [
         "capital_scope",
@@ -1010,21 +987,24 @@
         "trial_identity"
       ],
       "risk_boundary_ready": false,
-      "sampled_event_count": 8,
+      "sampled_event_count": 9,
       "side_scope": [
         "long"
       ],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "MI-001",
       "symbol_scope": [
-        "SOL/USDT:USDT"
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT"
       ],
       "tiny_live_ready": false,
-      "tradable_forward_count": 22,
+      "tradable_forward_count": 10,
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -1032,31 +1012,28 @@
         "official_operation_layer_not_reached"
       ],
       "trial_recommendation": "trial_prepare_after_owner_identity_and_capital_policy",
-      "would_enter_forward_positive_count": 22
+      "would_enter_forward_positive_count": 12
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "identity_review_before_trial_prepare",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "no_action_other",
       "dominant_sampled_candidate_id": "CPM-RO-001",
       "engineering_continue": true,
-      "evidence_stage": "identity_review",
+      "evidence_stage": "revise",
       "execution_tier": "unknown",
-      "forward_pending_count": 4,
+      "forward_pending_count": 1,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
       "next_checkpoint": "CPM-RO-001_capital_trial_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "pool_stage": "identity_candidate_review",
+      "pool_stage": "not_in_trial_pool",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": 161,
-      "real_order_authority": false,
       "reason": "defer_until_identity_or_merge_review_closed",
       "recent_opportunity_count": 18,
       "required_next_evidence": [],
@@ -1068,11 +1045,11 @@
         "trial_identity"
       ],
       "risk_boundary_ready": false,
-      "sampled_event_count": 13,
+      "sampled_event_count": 8,
       "side_scope": [
-        "short",
-        "long"
+        "short"
       ],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "CPM-RO-001",
       "symbol_scope": [
         "ETH/USDT:USDT"
@@ -1082,10 +1059,7 @@
       "trial_blockers": [
         "registry_identity_or_registry_row_missing",
         "execution_tier_not_in_policy_or_registry",
-        "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-        "owner_policy_scope_not_confirmed",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
@@ -1096,30 +1070,27 @@
       "would_enter_forward_positive_count": 13
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
-      "candidate_status": "trial_prepare_watchlist_after_revision",
-      "decision": "pending",
+      "candidate_status": "promote_review_before_trial_prepare",
       "does_not_authorize_live_execution": true,
-      "dominant_blocker": "no_action_other",
-      "dominant_sampled_candidate_id": "LSR-001-XRP-LONG",
+      "dominant_blocker": "market_structure_not_confirmed",
+      "dominant_sampled_candidate_id": "BRF-001-BTC-SHORT",
       "engineering_continue": true,
-      "evidence_stage": "revise",
+      "evidence_stage": "promote_review",
       "execution_tier": "L1",
-      "forward_pending_count": 1,
+      "forward_pending_count": 6,
       "identity_status": "registry_or_portfolio_identity_present",
       "live_permission_change": false,
-      "next_checkpoint": "LSR-001_capital_trial_review",
+      "next_checkpoint": "BRF-001_capital_trial_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "pool_stage": "rewrite_candidate_after_revision",
+      "pool_stage": "promote_review_candidate",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
-      "ranking_score": 44,
-      "real_order_authority": false,
-      "reason": "defer_until_rewrite_and_range_facts_closed",
-      "recent_opportunity_count": 2,
+      "ranking_score": 68,
+      "reason": "defer_until_squeeze_requiredfacts_forward_completed",
+      "recent_opportunity_count": 7,
       "required_next_evidence": [],
       "risk_boundary_missing": [
         "capital_scope",
@@ -1129,54 +1100,54 @@
         "trial_identity"
       ],
       "risk_boundary_ready": false,
-      "sampled_event_count": 2,
+      "sampled_event_count": 5,
       "side_scope": [
         "short"
       ],
-      "strategy_group_id": "LSR-001",
+      "strategy_asset_current_decision": "pending",
+      "strategy_group_id": "BRF-001",
       "symbol_scope": [
-        "XRP/USDT:USDT"
+        "BTC/USDT:USDT"
       ],
       "tiny_live_ready": false,
-      "tradable_forward_count": 2,
+      "tradable_forward_count": 3,
       "trial_blockers": [
+        "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "no_action_or_classifier_attribution_needs_closure",
-        "side_specific_rewrite_not_closed",
-        "range_context_required",
+        "would_enter_forward_outcome_pending:4h",
+        "owner_policy_scope_not_confirmed",
+        "squeeze_classifier_required",
+        "requiredfacts_review_required",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "defer_until_rewrite_and_range_facts_closed",
-      "would_enter_forward_positive_count": 2
+      "trial_recommendation": "defer_until_squeeze_requiredfacts_forward_completed",
+      "would_enter_forward_positive_count": 5
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
-      "candidate_status": "promote_review_before_trial_prepare",
-      "decision": "pending",
+      "candidate_status": "trial_prepare_watchlist_after_revision",
       "does_not_authorize_live_execution": true,
-      "dominant_blocker": "market_structure_not_confirmed",
-      "dominant_sampled_candidate_id": "BRF-001-BTC-SHORT",
+      "dominant_blocker": "no_action_other",
+      "dominant_sampled_candidate_id": "LSR-001-XRP-LONG",
       "engineering_continue": true,
-      "evidence_stage": "promote_review",
+      "evidence_stage": "revise",
       "execution_tier": "L1",
-      "forward_pending_count": 3,
+      "forward_pending_count": 0,
       "identity_status": "registry_or_portfolio_identity_present",
       "live_permission_change": false,
-      "next_checkpoint": "BRF-001_capital_trial_review",
+      "next_checkpoint": "LSR-001_capital_trial_review",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "pool_stage": "promote_review_candidate",
+      "pool_stage": "rewrite_candidate_after_revision",
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
-      "ranking_score": 13,
-      "real_order_authority": false,
-      "reason": "defer_until_squeeze_requiredfacts_forward_completed",
-      "recent_opportunity_count": 1,
+      "ranking_score": 44,
+      "reason": "defer_until_rewrite_and_range_facts_closed",
+      "recent_opportunity_count": 2,
       "required_next_evidence": [],
       "risk_boundary_missing": [
         "capital_scope",
@@ -1190,34 +1161,29 @@
       "side_scope": [
         "short"
       ],
-      "strategy_group_id": "BRF-001",
+      "strategy_asset_current_decision": "pending",
+      "strategy_group_id": "LSR-001",
       "symbol_scope": [
-        "BTC/USDT:USDT"
+        "XRP/USDT:USDT"
       ],
       "tiny_live_ready": false,
-      "tradable_forward_count": 0,
+      "tradable_forward_count": 2,
       "trial_blockers": [
-        "would_enter_forward_outcome_pending:12h",
-        "would_enter_forward_outcome_pending:24h",
-        "would_enter_forward_outcome_pending:4h",
-        "promote_review_forward_positive_not_completed",
-        "owner_policy_scope_not_confirmed",
-        "squeeze_classifier_required",
-        "requiredfacts_review_required",
+        "no_action_or_classifier_attribution_needs_closure",
+        "side_specific_rewrite_not_closed",
+        "range_context_required",
         "owner_capital_scope_not_confirmed",
         "fresh_signal_absent",
         "action_time_finalgate_not_reached",
         "official_operation_layer_not_reached"
       ],
-      "trial_recommendation": "defer_until_squeeze_requiredfacts_forward_completed",
-      "would_enter_forward_positive_count": 0
+      "trial_recommendation": "defer_until_rewrite_and_range_facts_closed",
+      "would_enter_forward_positive_count": 2
     },
     {
-      "actionable_now": false,
-      "authority_boundary_summary": "promotion_scope=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+      "authority_boundary_summary": "promotion_scope=not_applicable; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_family": "portfolio_capture_gap",
       "candidate_status": "revise_before_trial_prepare",
-      "decision": "pending",
       "does_not_authorize_live_execution": true,
       "dominant_blocker": "stale_data_or_signal",
       "dominant_sampled_candidate_id": "",
@@ -1234,7 +1200,6 @@
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
       "ranking_score": -90,
-      "real_order_authority": false,
       "reason": "defer_until_fact_source_classifier_closed",
       "recent_opportunity_count": 0,
       "required_next_evidence": [],
@@ -1248,6 +1213,7 @@
       "risk_boundary_ready": false,
       "sampled_event_count": 0,
       "side_scope": [],
+      "strategy_asset_current_decision": "pending",
       "strategy_group_id": "BTPC-001",
       "symbol_scope": [],
       "tiny_live_ready": false,
@@ -1280,21 +1246,29 @@
     "status": "owner_policy_required_later",
     "strategy_group_id": "BRF2-001"
   },
+  "projection_metadata": {
+    "artifact_role": "trial_envelope_projection",
+    "audit_evidence": true,
+    "owner_supervision_projection": true,
+    "primary_object": "trial_envelope_v0",
+    "runtime_truth_source": false,
+    "strategygroup_lifecycle_owner": false,
+    "tradeability_decision_source": false
+  },
+  "projection_schema": "brc.strategygroup_capital_trial_envelope_projection.v1",
+  "projection_status": "trial_envelope_projection_ready",
   "reject_reasons": [],
   "runtime_posture": {
     "no_live_permission": true,
-    "p0_5_state": "capital_trial_prepare_candidate_selected",
     "p0_state": "waiting_for_market",
-    "runtime_owner_intervention_required": false
+    "runtime_owner_intervention_required": false,
+    "signal_observation_grade": "capital_trial_prepare_candidate_selected"
   },
   "safety_invariants": {
-    "actionable_now": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
     "calls_operation_layer": false,
-    "creates_execution_intent": false,
     "exchange_write_called": false,
-    "execution_intent_created": false,
     "final_gate_called": false,
     "l4_real_order_scope_expanded": false,
     "live_profile_changed": false,
@@ -1304,21 +1278,18 @@
     "order_sizing_changed": false,
     "places_order": false,
     "preview_or_replay_treated_as_live_signal": false,
-    "real_order_authority": false,
     "registry_authority_changed": false,
     "shadow_candidate_created": false,
     "submit_authorization_created": false,
     "tier_policy_changed": false,
     "withdrawal_or_transfer_created": false
   },
-  "schema": "brc.strategygroup_capital_trial_readiness_bridge.v1",
-  "scope": "strategygroup_capital_trial_readiness_bridge_review_only",
+  "schema": "brc.strategygroup_capital_trial_envelope_projection.v1",
+  "scope": "strategygroup_capital_trial_envelope_projection_review_only",
   "selected_non_mpg_trial_candidate": {
-    "actionable_now": false,
-    "authority_boundary_summary": "promotion_scope=intake_only; tiny_live_ready=false; actionable_now=false; real_order_authority=false",
+    "authority_boundary_summary": "promotion_scope=intake_only; non_executing_trial_readiness=false; no_finalgate_no_operation_layer_no_exchange_write",
     "candidate_family": "short_research_intake",
-    "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
-    "decision": "promote",
+    "candidate_status": "short_experiment_evidence_pending_owner_policy",
     "disable_or_review_facts_draft": [
       "disable_strong_reclaim_proxy",
       "disable_low_structure_loss_atr_lt_0_15",
@@ -1333,10 +1304,10 @@
     "forward_pending_count": 0,
     "identity_status": "main_control_research_intake_asset",
     "live_permission_change": false,
-    "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
+    "next_checkpoint": "BRF2-001_tiny_live_intake_evidence",
     "owner_policy_required": true,
     "owner_policy_required_now": false,
-    "paper_observation_packet_shape": {
+    "paper_observation_evidence_shape": {
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
         "disable_low_structure_loss_atr_lt_0_15",
@@ -1348,7 +1319,8 @@
         "Operation Layer",
         "exchange_write",
         "live RequiredFacts",
-        "actionable_now"
+        "Tradeability Decision authority",
+        "Runtime Safety State authority"
       ],
       "must_record": [
         "would_enter_timestamp",
@@ -1358,7 +1330,7 @@
         "required_facts_snapshot",
         "disable_or_review_fact_snapshot",
         "paper_forward_outcome",
-        "review_ledger_decision"
+        "review_outcome"
       ],
       "record_type": "paper_observation_only",
       "required_facts_draft": [
@@ -1382,9 +1354,8 @@
     },
     "pool_stage": "tiny_live_intake_candidate_with_path_risk",
     "promotion_scope": "intake_only",
-    "promotion_target": "paper_observation_or_candidate_trade_packet",
+    "promotion_target": "paper_observation_or_experiment_evidence",
     "ranking_score": 597,
-    "real_order_authority": false,
     "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
     "recent_opportunity_count": 11,
     "required_facts_draft": [
@@ -1397,7 +1368,7 @@
     ],
     "required_next_evidence": [
       "owner_policy_scope",
-      "paper_observation_packet",
+      "paper_observation_evidence",
       "RequiredFacts draft",
       "disable facts",
       "path-risk review"
@@ -1426,6 +1397,8 @@
     "side_scope": [
       "short"
     ],
+    "strategy_asset_current_decision": "promote",
+    "strategy_asset_seed_source": "curated_research_intake_strategy_asset_seed",
     "strategy_group_id": "BRF2-001",
     "symbol_scope": [
       "owner_policy_required"
@@ -1436,14 +1409,14 @@
       "3_of_11_cap4_events_hit_5m_stop",
       "strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events",
       "symbol/date filters that fully remove stop hits are high overfit risk",
-      "source_tiny_live_ready_false",
+      "source_non_executing_trial_readiness_not_closed",
       "owner_capital_scope_not_confirmed",
       "owner_trial_identity_not_confirmed",
       "fresh_signal_absent",
       "action_time_finalgate_not_reached",
       "official_operation_layer_not_reached"
     ],
-    "trial_recommendation": "candidate_trade_prepare_pending_owner_policy",
+    "trial_recommendation": "experiment_candidate_prepare_pending_owner_policy",
     "would_enter_forward_positive_count": 8
   },
   "source_status": {
@@ -1452,16 +1425,12 @@
     "research_intake_review": "research_intake_review_ready",
     "would_enter_sampled_count": 30
   },
-  "status": "capital_trial_readiness_bridge_ready",
-  "trial_packet_v0": {
-    "actionable_now": false,
+  "status": "trial_envelope_projection_ready",
+  "trial_envelope_v0": {
     "authority_boundary": {
-      "actionability_source": "runtime_only",
-      "actionable_now": false,
       "calls_exchange_write": false,
       "calls_finalgate": false,
       "calls_operation_layer": false,
-      "creates_execution_intent": false,
       "live_permission_change": false,
       "live_profile_change": false,
       "order_sizing_change": false,
@@ -1470,30 +1439,29 @@
       "preview_or_replay_treated_as_live_signal": false,
       "promotion_scope": "intake_only",
       "promotion_scope_is_intake_only": true,
-      "real_order_authority": false,
       "registry_admission": false,
       "tier_policy_change": false,
       "tiny_live_ready": false,
       "unscoped_promote": false
     },
-    "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
-    "decision": "promote",
+    "candidate_status": "short_experiment_evidence_pending_owner_policy",
     "disable_or_review_facts_draft": [
       "disable_strong_reclaim_proxy",
       "disable_low_structure_loss_atr_lt_0_15",
       "disable_trend_flip_proxy"
     ],
+    "envelope_id": "trial-envelope-v0:BRF2-001:20260622",
     "evidence_refs": {
-      "capture_gap_audit": "/Users/jiangwei/Documents/final/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "portfolio_board": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+      "capture_gap_audit": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "portfolio_board": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
       "recent_opportunity_count": 11,
       "research_intake_position": "paper_observation_admission_candidate",
       "sampled_event_count": 11,
       "tradable_forward_count": 8,
       "would_enter_forward_positive_count": 8
     },
-    "generated_at_utc": "2026-06-23T02:06:27.493303+00:00",
-    "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as a non-executing candidate-trade packet, pending Owner policy scope and future official live gates.",
+    "generated_at_utc": "2026-06-28T19:14:03.411295+00:00",
+    "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as non-executing candidate-trade evidence, pending Owner policy scope and future official live gates.",
     "kill_conditions": [
       "owner_policy_not_accepted",
       "strategy_identity_unresolved",
@@ -1508,9 +1476,8 @@
       "reconciliation_or_settlement_unavailable"
     ],
     "live_permission_change": false,
-    "next_checkpoint": "BRF2-001_tiny_live_intake_candidate_packet",
-    "packet_id": "trial-packet-v0:BRF2-001:20260622",
-    "paper_observation_packet_shape": {
+    "next_checkpoint": "BRF2-001_tiny_live_intake_evidence",
+    "paper_observation_evidence_shape": {
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
         "disable_low_structure_loss_atr_lt_0_15",
@@ -1522,7 +1489,8 @@
         "Operation Layer",
         "exchange_write",
         "live RequiredFacts",
-        "actionable_now"
+        "Tradeability Decision authority",
+        "Runtime Safety State authority"
       ],
       "must_record": [
         "would_enter_timestamp",
@@ -1532,7 +1500,7 @@
         "required_facts_snapshot",
         "disable_or_review_fact_snapshot",
         "paper_forward_outcome",
-        "review_ledger_decision"
+        "review_outcome"
       ],
       "record_type": "paper_observation_only",
       "required_facts_draft": [
@@ -1554,9 +1522,9 @@
       "sample_event_count": 112,
       "stop_hit_count": 3
     },
+    "policy_outcome": "promote",
     "promotion_scope": "intake_only",
-    "promotion_target": "paper_observation_or_candidate_trade_packet",
-    "real_order_authority": false,
+    "promotion_target": "paper_observation_or_experiment_evidence",
     "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
     "required_facts_draft": [
       "closed_1h_ohlcv",
@@ -1568,7 +1536,7 @@
     ],
     "required_next_evidence": [
       "owner_policy_scope",
-      "paper_observation_packet",
+      "paper_observation_evidence",
       "RequiredFacts draft",
       "disable facts",
       "path-risk review"
@@ -1591,7 +1559,7 @@
       "protection_status",
       "reconciliation_status",
       "settlement_status",
-      "review_decision"
+      "review_outcome"
     ],
     "risk_envelope": {
       "attempt_cap_per_review_cycle": 3,
@@ -1604,7 +1572,7 @@
         "missing_required_path_or_liquidation_buffer_evidence"
       ]
     },
-    "schema": "brc.strategygroup_capital_trial_packet.v0",
+    "schema": "brc.strategygroup_capital_trial_envelope.v0",
     "side_scope": [
       "short"
     ],

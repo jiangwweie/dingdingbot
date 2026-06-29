@@ -1,13 +1,13 @@
-## StrategyGroup Deep-Dive Owner Decision Package
+## StrategyGroup Deep-Dive Owner Policy Package
 
 - 主链路: 等待可执行机会
 - 策略复核层: 六条线已深挖完成
 - 实盘权限变化: 否
 - Owner 当前要决策: 是，限于策略政策方向
 - Runtime Owner 介入: 否
-- Output: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-owner-decision.md`
+- Output: `output/runtime-monitor/latest-strategygroup-review-only-deep-dive-owner-policy.md`
 
-## Decision Cards
+## Policy Policy items
 
 | StrategyGroup | 推荐决策 | 备选项 | 不授权 |
 | --- | --- | --- | --- |

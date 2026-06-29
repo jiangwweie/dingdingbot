@@ -8,7 +8,7 @@
 
 ## 已知客观事实
 
-- **输出 JSON**: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-regime-role-coverage-map.json`
+- **输出 JSON**: `output/runtime-monitor/latest-strategygroup-regime-role-coverage-map.json`
 - **Schema**: `brc.strategygroup_regime_role_coverage_map.v1`
 - **Scope**: `local_review_only`
 - **Active review groups**: `10`
@@ -21,27 +21,27 @@
 ## 当前市场 regime 判断
 
 - **P0 状态**: `waiting_for_market`
-- **P0.5 状态**: `review_needed`
+- **Signal Observation 状态**: `review_needed`
 - **Strategy Capture Gap**: `True`
 - **Gap 证据字段**: `audit_conclusion.strategy_capture_gap_supported`
 - **判断来源**: `local_current_artifacts_only`
-- **解释**: The latest local artifacts show no P0 executable fresh signal, but P0.5 strategy observation is active. Recent opportunity evidence is concentrated in MI and CPM long/rebound structures, while short, range, and derivatives-stress roles are covered mainly by immature or fact/classifier-blocked StrategyGroups.
+- **解释**: The latest local artifacts show no P0 executable fresh signal, but Signal Observation review evidence is active. Recent opportunity evidence is concentrated in MI and CPM long/rebound structures, while short, range, and derivatives-stress roles are covered mainly by immature or fact/classifier-blocked StrategyGroups.
 - **限制**: This task did not refresh public Binance klines/funding/OI; it uses the current committed/generated artifacts as the review authority.
 
 ## StrategyGroup 角色覆盖表
 
-| StrategyGroup | Owner Label | Tier | Evidence | Role | Buckets | Recent | Tradable | Blocker | Trial Pool | Next |
+| StrategyGroup | Owner Label | Tier | Evidence | Role | Buckets | Recent | Tradable | Blocker | Trial Pool | Checkpoint |
 | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- |
-| `MPG-001` | **动量延续** | `L4` | `trial_waiting` | selected long momentum trial lane | `trend_long` | 0 | 0 | `none_recorded` | `trial_waiting` | `MPG-001_no_action_visibility_and_routing_audit` |
-| `BRF-001` | **熊市反弹失败** | `L1` | `promote_review` | bear rally failure promote-review lane | `bear_rally_failure_short` | 1 | 0 | `market_structure_not_confirmed` | `promote_review` | `BRF-001_forward_outcome_and_requiredfacts_review` |
+| `MPG-001` | **动量延续** | `L4` | `trial_waiting` | selected long momentum trial lane | `trend_long` | 0 | 0 | `none_recorded` | `trial_waiting` | `build_mpg_member_role_controls_v2_without_live_scope_expansion` |
+| `BRF-001` | **熊市反弹失败** | `L1` | `promote_review` | bear rally failure promote-review lane | `bear_rally_failure_short` | 7 | 5 | `market_structure_not_confirmed` | `promote_review` | `BRF-001_forward_outcome_and_requiredfacts_review` |
 | `BTPC-001` | **熊市回抽延续** | `L2` | `revise` | bear pullback continuation L2 shadow lane | `bear_pullback_continuation_short, derivatives_stress` | 0 | 0 | `stale_data_or_signal` | `revise` | `BTPC-001_classifier_fact_source_revision_review` |
 | `LSR-001` | **流动性扫盘/短线复活** | `L1` | `revise` | liquidity sweep and short-revival rewrite lane | `liquidity_sweep_reversal, bear_pullback_continuation_short` | 2 | 2 | `no_action_other` | `revise` | `LSR-001_classifier_fact_source_revision_review` |
-| `MI-001` | **动量冲击** | `unknown` | `identity_review` | high-signal momentum-impulse identity candidate | `momentum_impulse, unclear_or_identity_review` | 23 | 22 | `no_action_other` | `identity_review` | `MI-001_registry_identity_review` |
-| `CPM-RO-001` | **CPM 回补观察** | `unknown` | `identity_review` | mild-trend pullback observation asset | `trend_long, unclear_or_identity_review` | 18 | 13 | `no_action_other` | `identity_review` | `CPM-RO-001_registry_identity_review` |
-| `FBS-001` | **资金费率/基差压力** | `L3` | `coverage_visibility_review` | derivatives-stress armed observation lane | `derivatives_stress` | 0 | 0 | `none_recorded` | `not_in_trial_pool` | `FBS-001_no_action_visibility_and_routing_audit` |
-| `SOR-001` | **开盘区间结构** | `L3` | `coverage_visibility_review` | session-structure armed observation lane | `session_structure` | 0 | 0 | `none_recorded` | `not_in_trial_pool` | `SOR-001_no_action_visibility_and_routing_audit` |
-| `VCB-001` | **波动压缩突破** | `L1` | `observe` | volatility compression breakout observe lane | `false_breakout_or_compression_failure` | 2 | 2 | `classifier_threshold_not_met` | `not_in_trial_pool` | `VCB-001_continue_observe_only` |
-| `RBR-001` | **区间边界回归** | `L1` | `park` | parked range-boundary vocabulary | `range_reversion` | 6 | 6 | `no_action_other` | `not_in_trial_pool` | `park_until_material_new_edge_evidence` |
+| `MI-001` | **动量冲击** | `unknown` | `revise` | high-signal momentum-impulse identity candidate | `momentum_impulse, unclear_or_identity_review` | 17 | 12 | `no_action_other` | `revise` | `open_mi_identity_overlap_symbol_concentration_review` |
+| `CPM-RO-001` | **CPM 回补观察** | `unknown` | `revise` | mild-trend pullback observation asset | `trend_long, unclear_or_identity_review` | 18 | 13 | `no_action_other` | `revise` | `open_cpm_ro_semantic_source_merge_quality_review` |
+| `FBS-001` | **资金费率/基差压力** | `L3` | `coverage_visibility_review` | derivatives-stress armed observation lane | `derivatives_stress` | 0 | 0 | `none_recorded` | `not_in_trial_pool` | `run_fbs_derivatives_fact_coverage_visibility_review` |
+| `SOR-001` | **开盘区间结构** | `L3` | `coverage_visibility_review` | session-structure armed observation lane | `session_structure` | 0 | 0 | `none_recorded` | `not_in_trial_pool` | `run_sor_session_no_action_visibility_review` |
+| `VCB-001` | **波动压缩突破** | `L1` | `observe` | volatility compression breakout observe lane | `false_breakout_or_compression_failure` | 2 | 2 | `classifier_threshold_not_met` | `not_in_trial_pool` | `run_vcb_false_breakout_classifier_review` |
+| `RBR-001` | **区间边界回归** | `L1` | `park` | parked range-boundary vocabulary | `range_reversion` | 9 | 5 | `no_action_other` | `not_in_trial_pool` | `keep_parked_until_material_new_edge_evidence` |
 
 ## 熊市 / 震荡 / 做空语义缺口
 
@@ -60,20 +60,20 @@
 
 ## 哪些在 final 内补
 
-- **MPG-001**: MPG-001_no_action_visibility_and_routing_audit。缺口：`visibility_gap, maturity_gap`。
+- **MPG-001**: build_mpg_member_role_controls_v2_without_live_scope_expansion。缺口：`visibility_gap, maturity_gap`。
 - **BRF-001**: BRF-001_forward_outcome_and_requiredfacts_review。缺口：`maturity_gap, fact_source_gap`。
 - **BTPC-001**: BTPC-001_classifier_fact_source_revision_review。缺口：`classifier_gap, fact_source_gap`。
 - **LSR-001**: LSR-001_classifier_fact_source_revision_review。缺口：`classifier_gap, maturity_gap`。
-- **MI-001**: MI-001_registry_identity_review。缺口：`identity_gap`。
-- **CPM-RO-001**: CPM-RO-001_registry_identity_review。缺口：`identity_gap, classifier_gap`。
-- **FBS-001**: FBS-001_no_action_visibility_and_routing_audit。缺口：`fact_source_gap, visibility_gap`。
-- **SOR-001**: SOR-001_no_action_visibility_and_routing_audit。缺口：`visibility_gap, maturity_gap`。
-- **VCB-001**: VCB-001_continue_observe_only。缺口：`classifier_gap, maturity_gap`。
-- **RBR-001**: park_until_material_new_edge_evidence。缺口：`maturity_gap, true_research_gap`。
+- **MI-001**: open_mi_identity_overlap_symbol_concentration_review。缺口：`identity_gap`。
+- **CPM-RO-001**: open_cpm_ro_semantic_source_merge_quality_review。缺口：`identity_gap, classifier_gap`。
+- **FBS-001**: run_fbs_derivatives_fact_coverage_visibility_review。缺口：`fact_source_gap, visibility_gap`。
+- **SOR-001**: run_sor_session_no_action_visibility_review。缺口：`visibility_gap, maturity_gap`。
+- **VCB-001**: run_vcb_false_breakout_classifier_review。缺口：`classifier_gap, maturity_gap`。
+- **RBR-001**: keep_parked_until_material_new_edge_evidence。缺口：`maturity_gap, true_research_gap`。
 
 ## 哪些需要 strategy-research bounded lane
 
-| Role Bucket | Decision | Reason |
+| Role Bucket | Research Escalation Result | Reason |
 | --- | --- | --- |
 | `trend_long` | `no_research_needed` | Current final assets cover the role enough for engineering closure before new research. |
 | `momentum_impulse` | `no_research_needed` | Current final assets cover the role enough for engineering closure before new research. |
@@ -88,13 +88,12 @@
 
 ## 对 Trial Candidate Pool 的影响
 
-- **Trial candidate count**: `5`
+- **Trial candidate count**: `3`
 - **Trial eligible count**: `1`
-- **Actionable now count**: `0`
 - **结论**: The current trial pool is useful, but opportunity evidence is skewed toward MI/CPM and MPG-style long or rebound momentum. Weak-market and range roles should remain visible as review lanes so the system does not overfit the next trial pool to recent long-side brightness.
 - **新增候选触发条件**:
   - RBR replacement or revision shows repeatable positive range-reversion outcomes after costs
-  - FBS derivatives RequiredFacts are attached and produce reviewable stress/squeeze packets
+  - FBS derivatives RequiredFacts are attached and produce reviewable stress/squeeze evidence
   - BTPC stale/fact-source blockers are resolved and false-negative review remains positive
   - BRF forward outcome plus squeeze classifier supports L2 review without live scope expansion
 
@@ -102,8 +101,6 @@
 
 | Invariant | Value |
 | --- | --- |
-| `real_order_authority` | `false` |
-| `actionable_now` | `false` |
 | `calls_finalgate` | `false` |
 | `calls_operation_layer` | `false` |
 | `calls_exchange_write` | `false` |

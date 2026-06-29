@@ -1,15 +1,14 @@
 ## StrategyGroup Trial Asset Admission Proposal
 
 - Status: `trial_asset_admission_proposal_ready`
-- Generated: `2026-06-23T05:37:39.975927+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json`
+- Generated: `2026-06-28T19:14:03.500791+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json`
 - StrategyGroup: `BRF2-001`
 - Current stage: `tiny_live_intake_candidate`
 - Proposed stage: `admitted_trial_asset`
 - Owner policy required: `否`
 - Owner policy recorded: `是`
-- Next action: `close_brf2_required_facts_mapping_for_armed_observation`
-- Real order authority: `否`
+- Next checkpoint: `close_brf2_required_facts_mapping_for_armed_observation`
 
 ## Owner Policy Fields
 

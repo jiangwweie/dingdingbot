@@ -1,0 +1,226 @@
+{
+  "cached_report_interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cache_gate",
+    "max_remote_interactions": 0,
+    "mutates_remote_files": false,
+    "places_order": false,
+    "policy": {
+      "approaches_real_order": false,
+      "description": "Local cache, local files, or local computation only.",
+      "exchange_write_allowed": false,
+      "level_prefix": "L0",
+      "owner_label": "本地读取",
+      "rank": 0,
+      "remote_interaction_allowed": false,
+      "remote_mutation_allowed": false
+    },
+    "remote_interaction_count": 0,
+    "uses_snapshot_level": "L1_readonly_snapshot"
+  },
+  "checks": {
+    "blockers": [],
+    "cached_blockers": [],
+    "deployment_issue": false,
+    "entry_fast_chain_boundary_ready": true,
+    "exit_hardening_boundary_ready": true,
+    "first_bounded_real_order_complete": false,
+    "fresh_signal_notification_policy_checked": true,
+    "product_gaps": [],
+    "real_order_closure_proven": false,
+    "real_order_readiness_summary": {
+      "blocked": 0,
+      "pass": 1,
+      "submit_blocker_keys": [],
+      "total": 2,
+      "waiting": 1,
+      "waiting_keys": [
+        "fresh_signal"
+      ]
+    },
+    "runtime_dry_run_audit_passed": true,
+    "runtime_dry_run_missing_required_checks": [],
+    "runtime_dry_run_required_checks_present": true,
+    "runtime_dry_run_scenario_count": 14,
+    "runtime_execution_chain_closure_status_ready": true,
+    "runtime_execution_chain_missing_or_failed_segments": [],
+    "runtime_execution_chain_ready_segment_count": 22,
+    "runtime_execution_chain_ready_segments": [
+      "fresh_signal_fast_auto_chain_checked",
+      "required_facts_readiness_checked",
+      "execution_attempt_rehearsal_prepare_checked",
+      "selected_strategygroup_dispatch_guard_checked",
+      "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+      "operation_layer_evidence_relay_checked",
+      "scoped_pipeline_operation_layer_submit_projection_checked",
+      "operation_layer_authorization_chain_guard_checked",
+      "operation_layer_standing_authorization_relay_checked",
+      "operation_layer_blocker_review_policy_checked",
+      "post_submit_exit_outcome_matrix_checked",
+      "reduce_only_recovery_standing_authorization_checked",
+      "strategygroup_adapter_boundary_checked",
+      "runtime_tier_policy_checked",
+      "new_strategygroups_default_observe_only_checked",
+      "tp1_policy_checked",
+      "runner_exit_policy_checked",
+      "reduce_only_recovery_checked",
+      "entry_filled_protection_ok_checked",
+      "partial_fill_policy_checked",
+      "exchange_submit_failed_before_acceptance_policy_checked",
+      "active_position_remains_open_policy_checked"
+    ],
+    "runtime_execution_goal_chain_missing_or_failed_segments": [],
+    "runtime_execution_goal_chain_ready_segment_count": 7,
+    "runtime_execution_goal_chain_ready_segments": [
+      "fresh_or_mock_signal",
+      "required_facts_readiness",
+      "candidate_authorization_evidence",
+      "action_time_finalgate",
+      "official_operation_layer_evidence_relay_projection",
+      "disabled_dry_run_proof",
+      "post_submit_exit_outcome_matrix"
+    ],
+    "runtime_live_closure_evidence_reject_reasons": [],
+    "runtime_live_closure_evidence_status": "not_generated",
+    "runtime_ready": true,
+    "source_readiness_ready": true,
+    "strategygroup_tier_boundary_ready": true,
+    "waiting_for_market": true,
+    "warnings": [],
+    "watcher_ready": true
+  },
+  "current_read_interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cache_read",
+    "max_remote_interactions": 0,
+    "mutates_remote_files": false,
+    "places_order": false,
+    "policy": {
+      "approaches_real_order": false,
+      "description": "Local cache, local files, or local computation only.",
+      "exchange_write_allowed": false,
+      "level_prefix": "L0",
+      "owner_label": "本地读取",
+      "rank": 0,
+      "remote_interaction_allowed": false,
+      "remote_mutation_allowed": false
+    },
+    "remote_interaction_count": 0,
+    "uses_snapshot_level": "L1_readonly_snapshot"
+  },
+  "generated_at_utc": "2026-06-24T14:36:25.635464+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cache_read",
+    "max_remote_interactions": 0,
+    "mutates_remote_files": false,
+    "places_order": false,
+    "policy": {
+      "approaches_real_order": false,
+      "description": "Local cache, local files, or local computation only.",
+      "exchange_write_allowed": false,
+      "level_prefix": "L0",
+      "owner_label": "本地读取",
+      "rank": 0,
+      "remote_interaction_allowed": false,
+      "remote_mutation_allowed": false
+    },
+    "remote_interaction_count": 0,
+    "uses_snapshot_level": "L1_readonly_snapshot"
+  },
+  "monitor_status": "needs_refresh",
+  "notification": {
+    "automation_notify": true,
+    "message": "本地 runtime monitor 缓存已过期，等待自动化刷新",
+    "monitor_refresh_needed": true,
+    "monitor_refresh_reasons": [
+      "runtime_progress_cache_stale"
+    ],
+    "notification_result": "NOTIFY",
+    "owner_intervention_required": false,
+    "owner_notify": false,
+    "reason": "runtime_progress_cache_stale",
+    "refresh_required": true
+  },
+  "owner_runtime_state": {
+    "monitor_refresh_needed": true,
+    "monitor_refresh_reasons": [
+      "runtime_progress_cache_stale"
+    ],
+    "monitor_status": "needs_refresh",
+    "owner_intervention_required": false,
+    "owner_status": "waiting_for_opportunity",
+    "runtime_status": "waiting_for_market",
+    "waiting_for_market": true
+  },
+  "owner_status": "waiting_for_opportunity",
+  "owner_summary": {
+    "checkpoint_source": "daily_check_cache_gate_projection",
+    "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
+    "owner_intervention_required": false,
+    "progress": {
+      "chain_closure": "非市场链路已收口",
+      "chain_closure_missing_or_failed_segments": [],
+      "chain_closure_ready_segments": 22,
+      "dry_run_audit": "审计演练正常",
+      "dry_run_audit_scenarios": 14,
+      "entry_fast_chain_boundary": "ready",
+      "exit_hardening_boundary": "ready",
+      "goal_chain_missing_or_failed_segments": [],
+      "goal_chain_ready_segments": 7,
+      "live_closure": "not_generated",
+      "real_order_readiness": {
+        "blocked": 0,
+        "pass": 1,
+        "submit_blocker_keys": [],
+        "total": 2,
+        "waiting": 1,
+        "waiting_keys": [
+          "fresh_signal"
+        ]
+      },
+      "runtime": "正常",
+      "source_readiness": "正常",
+      "strategygroup_tier_boundary": "ready",
+      "watcher": "运行中"
+    },
+    "risk_level": "L0 local cache only",
+    "state": "等待机会",
+    "visibility": {
+      "category": "monitor_refresh",
+      "detail": "本地 runtime monitor 缓存已过期，等待自动化刷新",
+      "label": "等待机会",
+      "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
+      "owner_intervention_required": false
+    }
+  },
+  "runtime_status": "waiting_for_market",
+  "safety_invariants": {
+    "env_files_read": false,
+    "exchange_write_called": false,
+    "migrations_run": false,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "remote_files_modified": false,
+    "secrets_read": false,
+    "services_restarted": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema_version": 13,
+  "scope": "strategygroup_runtime_daily_check",
+  "source": {
+    "expected_runtime_head": "runtime-head-1",
+    "runtime_head": "runtime-head-1",
+    "runtime_release_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-runtime-head-1"
+  },
+  "status": "waiting_for_market_monitor_refresh_needed"
+}

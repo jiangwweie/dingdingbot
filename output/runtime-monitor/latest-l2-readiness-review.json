@@ -1,0 +1,202 @@
+{
+  "counts": {
+    "blocked_count": 5,
+    "classifier_repair_spec_ready_count": 0,
+    "classifier_revision_executed_count": 0,
+    "conditional_l2_candidate_count": 0,
+    "economic_replay_executed_count": 0,
+    "economic_replay_spec_ready_count": 0,
+    "enabled_l2_count": 1,
+    "forbidden_effect_count": 0,
+    "review_row_count": 6
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_l2_readiness_review",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "owner_state": "coverage_policy_current",
+  "readiness_rows": [
+    {
+      "blocking_gaps_before_l2": [],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "unknown",
+      "current_tier": "unclassified",
+      "economic_replay_spec": {},
+      "l2_readiness": "missing_policy",
+      "l2_shadow_candidate_observation_enabled": false,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [],
+      "recommended_action": "require_policy_before_l2_review",
+      "side": "long",
+      "strategy_group_id": "MI-001",
+      "symbol": "SOL/USDT:USDT"
+    },
+    {
+      "blocking_gaps_before_l2": [],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "unknown",
+      "current_tier": "unclassified",
+      "economic_replay_spec": {},
+      "l2_readiness": "missing_policy",
+      "l2_shadow_candidate_observation_enabled": false,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [],
+      "recommended_action": "require_policy_before_l2_review",
+      "side": "long",
+      "strategy_group_id": "MI-001",
+      "symbol": "BNB/USDT:USDT"
+    },
+    {
+      "blocking_gaps_before_l2": [],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "unknown",
+      "current_tier": "unclassified",
+      "economic_replay_spec": {},
+      "l2_readiness": "missing_policy",
+      "l2_shadow_candidate_observation_enabled": false,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [],
+      "recommended_action": "require_policy_before_l2_review",
+      "side": "long",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "ETH/USDT:USDT"
+    },
+    {
+      "blocking_gaps_before_l2": [
+        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
+        "short_squeeze_risk_classifier_missing_from_runtime",
+        "separate_brf_l2_intake_dry_run_missing",
+        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+      ],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "P0_5",
+      "current_tier": "L1",
+      "economic_replay_spec": {},
+      "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+      "l2_shadow_candidate_observation_enabled": false,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [
+        "runtime semantics builder already defines BRF-001 bear rally failure short entry and structure-extreme protection vocabulary",
+        "main-control runtime tier policy keeps BRF as a known new L1 observe-only group",
+        "BRF shares the short-continuation research track with BTPC but has not passed separate L2 intake"
+      ],
+      "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+      "side": "short",
+      "strategy_group_id": "BRF-001",
+      "symbol": "BTC/USDT:USDT"
+    },
+    {
+      "blocking_gaps_before_l2": [
+        "fixed_horizon_economic_result_negative",
+        "calm_range_m2m_failed",
+        "worst_90d_2x_reaches_negative_135_68_percent",
+        "trend_invalidation_and_range_quality_facts_missing"
+      ],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "P2",
+      "current_tier": "L1",
+      "economic_replay_spec": {},
+      "l2_readiness": "blocked_parked_negative_evidence",
+      "l2_shadow_candidate_observation_enabled": false,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [
+        "range-boundary vocabulary can still help classifier design"
+      ],
+      "recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+      "side": "short",
+      "strategy_group_id": "RBR-001",
+      "symbol": "ADA/USDT:USDT"
+    },
+    {
+      "blocking_gaps_before_l2": [
+        "historical_open_interest_window_missing",
+        "historical_global_long_short_ratio_window_missing",
+        "top_trader_position_ratio_window_missing",
+        "real_exchange_margin_liquidation_model_missing",
+        "short_squeeze_risk_not_runtime_blocking"
+      ],
+      "classifier_repair_spec": {},
+      "conditional_l2_review_candidate": false,
+      "coverage_review_priority": "P0_5",
+      "current_tier": "L2",
+      "economic_replay_spec": {},
+      "l2_readiness": "l2_shadow_candidate_observation_enabled",
+      "l2_shadow_candidate_observation_enabled": true,
+      "may_change_tier_policy_now": false,
+      "may_create_shadow_candidate_now": false,
+      "may_place_real_order_now": false,
+      "positive_evidence": [
+        "main-control l2 intake handoff imported as non-executing strategy input",
+        "main-control RequiredFacts map now includes BTPC-001 L2 intake facts",
+        "main-control L2 intake dry-run passed",
+        "runtime tier policy promotes BTPC-001 to L2 shadow_candidate only",
+        "largest current right-tail lead among reviewed expansion candidates",
+        "candidate evidence reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
+        "supports bearish-only activation and strong-uptrend disable review"
+      ],
+      "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+      "side": null,
+      "strategy_group_id": "BTPC-001",
+      "symbol": null
+    }
+  ],
+  "review_outcome_state": {
+    "default_next_step": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+    "enabled_l2_groups": [
+      "BTPC-001"
+    ],
+    "handoff_intake_recommended_groups": [],
+    "l4_scope_change_recommended": false,
+    "primary_judgment_source": false,
+    "primary_judgment_source_name": "strategy_asset_state",
+    "review_scope": "l2_readiness_review",
+    "shadow_candidate_creation_recommended_now": false,
+    "source_role": "l2_readiness_review_provenance",
+    "state_family": "Review Outcome State",
+    "tier_policy_change_recommended": false,
+    "tradeability_decision_source": false
+  },
+  "safety_invariants": {
+    "does_not_change_tier_policy": true,
+    "does_not_create_shadow_candidate": true,
+    "does_not_expand_l4_real_order_scope": true,
+    "exchange_write_called": false,
+    "final_gate_called": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "review_only": true,
+    "runtime_started": false,
+    "server_files_mutated": false,
+    "server_interaction": false,
+    "shadow_candidate_created": false,
+    "source_forbidden_effects": [],
+    "strategy_parameters_changed": false,
+    "tier_policy_changed": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "scope": "strategygroup_l2_readiness_review",
+  "source_expansion_review_status": "review_needed_broader_observe_only_would_enter",
+  "status": "l2_readiness_review_already_enabled"
+}

@@ -1,56 +1,55 @@
-# StrategyGroup Owner Decision Package
+# StrategyGroup Owner Policy Package
 
 ## Summary
 
-- Status: `owner_decision_package_ready`
-- Closed problem: Strategy observations are now converted into Owner-ready decision cards with default recommendations, counterevidence, risks, and next system actions.
-- Capability unlocked: Owner can decide strategy policy direction without reading raw would_enter/no_action rows or replay packets.
+- Status: `owner_policy_package_incomplete`
+- Closed problem: Strategy observations are now converted into Owner-ready policy items with default recommendations, counterevidence, risks, and next system actions.
+- Capability unlocked: Owner can confirm strategy policy direction without reading raw would_enter/no_action rows or replay evidence.
 - Next bottleneck: Owner policy confirmation is required before promote, park, kill, registry admission, tier policy, member live scope, or live-profile changes.
-- Real order authority: `false`
 - Live permission change: `false`
 
 ## Strategy Quality Snapshot
 
-| StrategyGroup | Owner state | System found | Next step | Decision ready |
+| StrategyGroup | Owner state | System found | Next step | Policy ready |
 | --- | --- | --- | --- | --- |
 | `MPG-001` | 等待机会 | P0 selected lane has no executable fresh signal; member review is active. | `MPG-001_no_action_visibility_and_routing_audit` | `true` |
-| `BRF-001` | 待复核 | observed 1 would_enter events | `BRF-001_forward_outcome_and_requiredfacts_review` | `true` |
-| `BTPC-001` | 待调整 | observed 152 missed no_action forward positives | `BTPC-001_classifier_fact_source_revision_review` | `true` |
+| `BRF-001` | 等待机会 | observed 7 would_enter events | `BRF-001_forward_outcome_and_requiredfacts_review` | `true` |
+| `BTPC-001` | 待调整 | observed 155 missed no_action forward positives | `BTPC-001_classifier_fact_source_revision_review` | `true` |
 | `LSR-001` | 待调整 | observed 2 would_enter events | `LSR-001_classifier_fact_source_revision_review` | `true` |
-| `MI-001` | 身份待定 | observed 23 would_enter events | `MI-001_registry_identity_review` | `true` |
+| `MI-001` | 身份待定 | observed 17 would_enter events | `MI-001_registry_identity_review` | `true` |
 | `CPM-RO-001` | 身份待定 | observed 18 would_enter events | `CPM-RO-001_registry_identity_review` | `true` |
-| `RBR-001` | 已暂停 | observed 6 would_enter events | `park_until_material_new_edge_evidence` | `false` |
+| `RBR-001` | 已暂停 | observed 9 would_enter events | `park_until_material_new_edge_evidence` | `false` |
 | `VCB-001` | 等待机会 | observed 2 would_enter events | `VCB-001_continue_observe_only` | `false` |
 
 ## Closure Tracks
 
-| Track | Status | Card | Default recommendation |
+| Track | Status | Policy item | Default recommendation |
 | --- | --- | --- | --- |
-| `P0.5-A` Strategy Quality Snapshot | `ready` | `-` | `-` |
-| `P0.5-B` BRF squeeze / RequiredFacts / forward outcome review | `ready_for_owner_decision` | `BRF-001:owner_policy_decision` | `approve_promote_review_without_live_scope_change` |
-| `P0.5-C` BTPC stale / fact-source / classifier attribution closure | `ready_for_owner_decision` | `BTPC-001:owner_policy_decision` | `keep_l2_shadow_and_revise_fact_classifier_inputs` |
-| `P0.5-D` LSR side-specific rewrite evidence closure | `ready_for_owner_decision` | `LSR-001:owner_policy_decision` | `formalize_short_revival_rewrite_without_live_scope_change` |
-| `P0.5-E` MI-001 identity packet | `ready_for_owner_decision` | `MI-001:owner_policy_decision` | `open_formal_candidate_review_and_overlap_check` |
-| `P0.5-F` CPM-RO-001 identity packet | `ready_for_owner_decision` | `CPM-RO-001:owner_policy_decision` | `keep_as_observation_asset_and_run_merge_review` |
-| `P0.5-G` MPG member role / exit-decay / risk boundary review | `ready_for_owner_decision` | `MPG-001:member_policy_decision` | `approve_member_role_split_without_live_scope_expansion` |
+| `signal-observation-A` Strategy Quality Snapshot | `ready` | `-` | `-` |
+| `signal-observation-B` BRF squeeze / RequiredFacts / forward outcome review | `ready_for_owner_policy` | `BRF-001:owner_policy_choice` | `approve_promote_review_without_live_scope_change` |
+| `signal-observation-C` BTPC stale / fact-source / classifier attribution closure | `ready_for_owner_policy` | `BTPC-001:owner_policy_choice` | `keep_l2_shadow_and_revise_fact_classifier_inputs` |
+| `signal-observation-D` LSR side-specific rewrite evidence closure | `ready_for_owner_policy` | `LSR-001:owner_policy_choice` | `formalize_short_revival_rewrite_without_live_scope_change` |
+| `signal-observation-E` MI-001 identity review | `ready_for_owner_policy` | `MI-001:owner_policy_choice` | `open_formal_candidate_review_and_overlap_check` |
+| `signal-observation-F` CPM-RO-001 identity review | `ready_for_owner_policy` | `CPM-RO-001:owner_policy_choice` | `keep_as_observation_asset_and_run_merge_review` |
+| `signal-observation-G` MPG member role / exit-decay / risk boundary review | `ready_for_owner_policy` | `MPG-001:member_policy_decision` | `approve_member_role_split_without_live_scope_expansion` |
 
-## Owner Decision Cards
+## Owner Policy Items
 
-| Card | Question | Default | Evidence for | Evidence against |
+| Policy item | Question | Default | Evidence for | Evidence against |
 | --- | --- | --- | --- | --- |
-| `BRF-001:owner_policy_decision` | 是否允许 BRF-001 进入下一层 promote review，而不是直接进入实盘。 | `approve_promote_review_without_live_scope_change` | would_enter observed: 1<br>missed no_action forward positives: 136<br>BRF replay sample count: 5 | latest would_enter forward outcome is still pending<br>squeeze-risk replay sample recommends revise before promotion<br>RequiredFacts review is not a live-authority packet |
-| `BTPC-001:owner_policy_decision` | 是否保持 BTPC-001 为 L2 shadow，并继续修 fact-source 与 classifier，而不是放松 stale gate 或停车。 | `keep_l2_shadow_and_revise_fact_classifier_inputs` | high-priority stale-blocked no_action count: 169<br>missed no_action forward positives: 152<br>proxy reviewable would_enter count: 2<br>classifier rule review count: 2 | live RequiredFacts gaps remain: 8<br>source attachments pending: 8<br>relaxing stale gate now would be a policy and safety risk |
-| `LSR-001:owner_policy_decision` | 是否把 LSR-001 的 short-revival 语义正式化为复核方向，并保持 observe-only。 | `formalize_short_revival_rewrite_without_live_scope_change` | would_enter observed: 2<br>would_enter forward positives: 2<br>LSR replay sample count: 5 | sample size is small<br>long preview and short-revival semantics still conflict<br>range-context RequiredFacts are not yet formal live authority |
-| `MI-001:owner_policy_decision` | MI-001 应作为正式候选、MPG 子能力、观察资产，还是停车。 | `open_formal_candidate_review_and_overlap_check` | would_enter observed: 23<br>would_enter forward positives: 22<br>forward positive ratio: 22/23 | strategy identity is not in current registry<br>overlap with MPG / TEQ is not yet resolved<br>symbol concentration and semantic explanation still need review |
-| `CPM-RO-001:owner_policy_decision` | CPM-RO-001 应独立、合并、作为观察资产，还是停车。 | `keep_as_observation_asset_and_run_merge_review` | would_enter observed: 18<br>would_enter forward positives: 13<br>forward positive ratio: 13/18 | strategy identity is not in current registry<br>forward quality is mixed relative to MI<br>merge target across CPM/RBR/momentum family is unresolved |
-| `MPG-001:member_policy_decision` | 是否接受 MPG member 角色拆分与 exit/decay 复核方向，且不扩实盘范围。 | `approve_member_role_split_without_live_scope_expansion` | MPG replay sample count: 8<br>six member roles are present in the quality closure wave<br>exit horizons and decay controls are present before any live expansion | current package does not prove which member should receive live scope<br>member-level evidence remains review-only and not action-time live facts |
+| `BRF-001:owner_policy_choice` | 是否允许 BRF-001 进入下一层 promote review，而不是直接进入实盘。 | `approve_promote_review_without_live_scope_change` | would_enter observed: 7<br>missed no_action forward positives: 134<br>BRF replay sample count: 5 | latest would_enter forward outcome is still pending<br>squeeze-risk replay sample recommends revise before promotion<br>RequiredFacts review is not a live-authority artifact |
+| `BTPC-001:owner_policy_choice` | 是否保持 BTPC-001 为 L2 shadow，并继续修 fact-source 与 classifier，而不是放松 stale gate 或停车。 | `keep_l2_shadow_and_revise_fact_classifier_inputs` | high-priority stale-blocked no_action count: 169<br>missed no_action forward positives: 155<br>proxy reviewable would_enter count: 0<br>classifier rule review count: 2 | live RequiredFacts gaps remain: 8<br>source attachments pending: 8<br>relaxing stale gate now would be a policy and safety risk |
+| `LSR-001:owner_policy_choice` | 是否把 LSR-001 的 short-revival 语义正式化为复核方向，并保持 observe-only。 | `formalize_short_revival_rewrite_without_live_scope_change` | would_enter observed: 2<br>would_enter forward positives: 2<br>LSR replay sample count: 5 | sample size is small<br>long preview and short-revival semantics still conflict<br>range-context RequiredFacts are not yet formal live authority |
+| `MI-001:owner_policy_choice` | MI-001 应作为正式候选、MPG 子能力、观察资产，还是停车。 | `open_formal_candidate_review_and_overlap_check` | would_enter observed: 17<br>would_enter forward positives: 12<br>forward positive ratio: 12/17 | strategy identity is not in current registry<br>overlap with MPG / TEQ is not yet resolved<br>symbol concentration and semantic explanation still need review |
+| `CPM-RO-001:owner_policy_choice` | CPM-RO-001 应独立、合并、作为观察资产，还是停车。 | `keep_as_observation_asset_and_run_merge_review` | would_enter observed: 18<br>would_enter forward positives: 13<br>forward positive ratio: 13/18 | strategy identity is not in current registry<br>forward quality is mixed relative to MI<br>merge target across CPM/RBR/momentum family is unresolved |
+| `MPG-001:member_policy_decision` | 是否接受 MPG member 角色拆分与 exit/decay 复核方向，且不扩实盘范围。 | `approve_member_role_split_without_live_scope_expansion` | MPG replay sample count: 0<br>six member roles are present in the quality closure wave<br>exit horizons and decay controls are present before any live expansion | current package does not prove which member should receive live scope<br>member-level evidence remains review-only and not action-time live facts |
 
-## Decision Options
+## Policy Options
 
-### BRF-001:owner_policy_decision
+### BRF-001:owner_policy_choice
 
 - Owner summary: BRF 已看到熊市反弹失败 short 结构，但 squeeze 与 RequiredFacts 仍要先复核。
-- Why not live: runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts
+- Why not live: registry-baseline rows are strategy assets only and cannot authorize execution
 
 | Option | Meaning | Tradeoff |
 | --- | --- | --- |
@@ -58,10 +57,10 @@
 | `keep_l1_observe` 继续 L1 观察 | 保留 BRF 观察，不进入下一层晋级复核。 | 降低误升风险，但可能继续错过 bear-rally failure 结构学习。 |
 | `park_until_squeeze_review` 暂缓 | 先不推进 BRF，除非 squeeze 风险材料更清楚。 | 最保守，但会延后 BRF 捕获质量闭合。 |
 
-### BTPC-001:owner_policy_decision
+### BTPC-001:owner_policy_choice
 
 - Owner summary: BTPC 不是简单没机会，而是 stale/fact-source/classifier 阻断过强，当前适合保持 L2 shadow 并修输入。
-- Why not live: runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts
+- Why not live: registry-baseline rows are strategy assets only and cannot authorize execution
 
 | Option | Meaning | Tradeoff |
 | --- | --- | --- |
@@ -70,10 +69,10 @@
 | `relax_gate_after_false_positive_review` 有条件放松 | 只在 false-positive 风险复核完成后讨论 stale gate 放松。 | 可能提高捕获率，但不能在当前包内直接落地。 |
 | `park_btpc` 停车 | 停止 BTPC 近期推进。 | 减少治理复杂度，但放弃当前最多的 missed no-action 正向窗口。 |
 
-### LSR-001:owner_policy_decision
+### LSR-001:owner_policy_choice
 
 - Owner summary: LSR 有 2 个 would_enter 且 forward outcome 为正，适合继续做 side-specific rewrite。
-- Why not live: runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts
+- Why not live: registry-baseline rows are strategy assets only and cannot authorize execution
 
 | Option | Meaning | Tradeoff |
 | --- | --- | --- |
@@ -81,10 +80,10 @@
 | `keep_observe` 继续观察 | 不正式化 rewrite，只保留 L1 观察。 | 安全但会延迟 LSR 捕获质量闭合。 |
 | `park_lsr` 停车 | 暂停 LSR 复核。 | 减少维护，但放弃已有正向样本。 |
 
-### MI-001:owner_policy_decision
+### MI-001:owner_policy_choice
 
 - Owner summary: MI-001 的 would_enter 和 forward positive 很强，不能继续只当 smoke lane。
-- Why not live: decision-ledger evidence is review-only and cannot authorize execution
+- Why not live: strategy-asset-state evidence is review-only and cannot authorize execution
 
 | Option | Meaning | Tradeoff |
 | --- | --- | --- |
@@ -93,10 +92,10 @@
 | `observe_asset` 观察资产 | 保留信号观察，不进入正式候选。 | 治理轻，但强样本无法进入主学习闭环。 |
 | `park` 停车 | 认为语义不足或过拟合风险高，暂不推进。 | 最保守，但与当前 23/22 正向证据冲突。 |
 
-### CPM-RO-001:owner_policy_decision
+### CPM-RO-001:owner_policy_choice
 
 - Owner summary: CPM-RO 有 would_enter 与正向 outcome，但质量混杂且注册身份不清。
-- Why not live: decision-ledger evidence is review-only and cannot authorize execution
+- Why not live: strategy-asset-state evidence is review-only and cannot authorize execution
 
 | Option | Meaning | Tradeoff |
 | --- | --- | --- |
@@ -127,9 +126,9 @@
 
 ## Owner Confirmation Boundary
 
-- Owner policy decision required: `true`
+- Owner policy confirmation required: `true`
 - Runtime Owner intervention required: `false`
-- Decision count: `6`
+- Owner policy policy_item count: `6`
 - Hard stop: Do not promote, park, kill, change registry authority, change tier policy, change live profile, expand MPG member live scope, or expand real-order scope without Owner confirmation.
 
 ## Safety
@@ -139,23 +138,21 @@
 | `local_review_only` | `true` |
 | `server_interaction` | `false` |
 | `server_files_mutated` | `false` |
-| `runtime_started` | `false` |
 | `strategy_parameters_changed` | `false` |
+| `registry_authority_changed` | `false` |
 | `tier_policy_changed` | `false` |
 | `live_profile_changed` | `false` |
-| `registry_authority_changed` | `false` |
 | `mpg_member_live_scope_expanded` | `false` |
 | `l4_real_order_scope_expanded` | `false` |
 | `shadow_candidate_created` | `false` |
-| `execution_intent_created` | `false` |
 | `final_gate_called` | `false` |
 | `operation_layer_called` | `false` |
 | `order_created` | `false` |
 | `exchange_write_called` | `false` |
-| `real_order_authority` | `false` |
 | `preview_or_replay_treated_as_live_signal` | `false` |
+| `runtime_started` | `false` |
 
 ## Output
 
-- JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-owner-decision-package.json`
-- Markdown: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-owner-decision-package.md`
+- JSON: `output/runtime-monitor/latest-strategygroup-owner-policy-package.json`
+- Markdown: `output/runtime-monitor/latest-strategygroup-owner-policy-package.md`

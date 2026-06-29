@@ -1,19 +1,17 @@
 {
   "checks": {
-    "actionable_now": false,
     "forbidden_effects": [],
     "order_sizing_mutated": false,
-    "owner_decision_required": false,
+    "owner_policy_confirmation_required": false,
     "owner_policy_recorded": true,
     "owner_policy_required": false,
     "owner_policy_scope_missing": false,
     "proposal_generated": true,
-    "real_order_authority": false,
     "registry_policy_mutated": false,
     "runtime_profile_mutated": false,
     "tier_policy_mutated": false
   },
-  "generated_at_utc": "2026-06-23T05:37:39.975927+00:00",
+  "generated_at_utc": "2026-06-28T19:14:03.500791+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -25,8 +23,8 @@
     "remote_interaction_count": 0
   },
   "owner_policy_checkpoint": {
-    "owner_decision_required_now": false,
     "owner_intervention_required": false,
+    "owner_policy_confirmation_required_now": false,
     "owner_policy_fields": [
       "capital_scope",
       "max_notional",
@@ -44,13 +42,12 @@
     "owner_policy_scope_missing": false
   },
   "proposal": {
-    "actionable_now": false,
     "after_next_state": "armed_observation",
     "current_stage": "tiny_live_intake_candidate",
-    "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+    "non_authority_checkpoint": "close_brf2_required_facts_mapping_for_armed_observation",
     "owner_policy_defaults": {
       "attempt_cap": 3,
-      "authority_boundary": "owner_policy_only; actionable_now=false; real_order_authority=false; finalgate_required; operation_layer_required",
+      "authority_boundary": "owner_policy_only; finalgate_required; operation_layer_required; no_exchange_write",
       "capital_scope": {
         "amount": "30",
         "currency": "USDT",
@@ -102,7 +99,7 @@
     "owner_policy_scope_missing": false,
     "proposal_type": "non_applying_registry_tier_runtime_admission_draft",
     "proposed_registry_row": {
-      "authority_boundary": "proposal_only; not_registry_authority; not_runtime_admission; actionable_now=false; real_order_authority=false",
+      "authority_boundary": "proposal_only; not_registry_authority; not_runtime_admission; finalgate_required; operation_layer_required; no_exchange_write",
       "default_tier": "trial_admission",
       "evidence_status": "trial_asset_admission_proposal",
       "required_facts_summary": {
@@ -143,7 +140,6 @@
       "reason": "Owner trial scope recorded; RequiredFacts mapping remains before armed observation",
       "tier": "trial_admission"
     },
-    "real_order_authority": false,
     "runtime_admission_plan": {
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
@@ -166,14 +162,12 @@
     "strategy_group_id": "BRF2-001"
   },
   "safety_invariants": {
-    "actionable_now": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
     "calls_operation_layer": false,
     "live_profile_changed": false,
     "order_sizing_changed": false,
     "places_order": false,
-    "real_order_authority": false,
     "registry_authority_changed": false,
     "tier_policy_changed": false
   },
