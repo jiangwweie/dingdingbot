@@ -28,6 +28,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
+        "operation_layer_standing_authorization_relay_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
