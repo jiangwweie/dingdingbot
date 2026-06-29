@@ -1,8 +1,8 @@
 ## StrategyGroup Tradeability Decision
 
 - Status: `tradeability_decision_ready`
-- Generated: `2026-06-28T19:14:07.977700+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-tradeability-decision.json`
+- Generated: `2026-06-29T11:49:54.255199+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-tradeability-decision.json`
 - Decision rows: `13`
 - Tradable now: `0`
 - Top blocker: `BRF2-001` / `not_tradable_market_wait` / `short_squeeze_risk_state_disable_active`

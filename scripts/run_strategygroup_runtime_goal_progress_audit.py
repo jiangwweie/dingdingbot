@@ -1861,7 +1861,7 @@ def _strategygroup_portfolio_board_track(
         "status": "blocked" if blockers else "ready",
         "owner_state": "策略组合筛选中" if not blockers else "需处理",
         "progress_checkpoint": (
-            "继续工程补证队列和 review-only 小资金候选池治理，不改变实盘权限"
+            "继续工程补证队列和 受控实盘候选池治理，不改变实盘权限"
             if not blockers
             else "修复 StrategyGroup Portfolio Board 证据或安全边界"
         ),

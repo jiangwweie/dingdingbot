@@ -111,11 +111,16 @@ def _brf2_policy() -> dict:
     return {
         "policy": {
             "capital_scope": {
-                "amount": "30",
-                "currency": "USDT",
                 "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
+                "currency": "USDT",
             },
-            "loss_unit": {"amount": "10", "currency": "USDT"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+            },
             "attempt_cap": 3,
             "max_consecutive_losses": 2,
             "pause_conditions": ["two_consecutive_losses"],
@@ -206,8 +211,10 @@ def test_trial_grade_signal_catalog_and_brf2_proxy_boundary() -> None:
     assert "actionable_now" not in brf2["authority_boundary"]
     assert "real_order_authority" not in brf2["authority_boundary"]
     assert brf2["risk_envelope"]["attempt_cap"] == 3
-    assert brf2["risk_envelope"]["loss_unit"]["amount"] == "10"
-    assert brf2["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert brf2["risk_envelope"]["loss_unit"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert brf2["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
     assert brf2["authority_boundary"]["trial_grade_signal_can_bypass_hard_safety_gates"] is False
 
 
@@ -230,7 +237,7 @@ def test_sor_trial_grade_audit_exposes_missing_replay_source() -> None:
     assert sor["fixture_replay_projection"]["source"] == (
         "missing_strategy_specific_replay_source"
     )
-    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is False
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is False
     assert sor["false_positive_review_pack"][0]["case"] == "sor_replay_source_missing"
     assert any(
         row["recommendation"] == "needs_replay_source"
@@ -259,7 +266,7 @@ def test_sor_replay_source_calibrates_trial_grade_without_live_authority() -> No
     assert sor["fixture_replay_projection"]["would_trigger_cases"] == [
         "session_range_breakdown_trial_would_enter"
     ]
-    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
     assert sor["verified_recent_window_counts"]["windows_days"]["30"][
         "trial_grade_observation_count"
     ] == 0

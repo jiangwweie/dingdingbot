@@ -1053,8 +1053,8 @@ def _signal_grade_status(
         return {
             "strategy_group_id": strategy_group_id,
             "trial_grade_audit_ready": False,
-            "trial_grade_30u_standby_ready": runtime_readiness.get(
-                "trial_grade_30u_standby_ready"
+            "controlled_live_standby_ready": runtime_readiness.get(
+                "controlled_live_standby_ready"
             )
             is True,
             "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
@@ -1079,8 +1079,8 @@ def _signal_grade_status(
         "current_gate_looks_like": str(
             assessment.get("current_gate_looks_like") or "unknown"
         ),
-        "trial_grade_30u_standby_ready": runtime_readiness.get(
-            "trial_grade_30u_standby_ready"
+        "controlled_live_standby_ready": runtime_readiness.get(
+            "controlled_live_standby_ready"
         )
         is True,
         "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
@@ -1099,11 +1099,11 @@ def _signal_grade_status(
         "max_loss_estimate_usdt": str(
             projection.get("max_loss_estimate_usdt") or ""
         ),
-        "would_enter_30u_trial_if_same_structure": (
-            tomorrow.get("would_enter_30u_trial") is True
+        "would_enter_controlled_live_trial_if_same_structure": (
+            tomorrow.get("would_enter_controlled_live_trial") is True
         ),
-        "trial_grade_signal_can_prepare_30u_trial": (
-            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        "trial_grade_signal_can_prepare_controlled_live": (
+            authority.get("trial_grade_signal_can_prepare_controlled_live") is True
         ),
         "trial_grade_signal_can_bypass_hard_safety_gates": (
             authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
@@ -1411,7 +1411,7 @@ def _summary(
         by_decision[str(row["decision"])] = by_decision.get(str(row["decision"]), 0) + 1
         by_owner[str(row["blocker_owner"])] = by_owner.get(str(row["blocker_owner"]), 0) + 1
     trial_grade_standby_count = sum(
-        _as_dict(row.get("signal_grade_status")).get("trial_grade_30u_standby_ready")
+        _as_dict(row.get("signal_grade_status")).get("controlled_live_standby_ready")
         is True
         for row in rows
     )
@@ -1432,7 +1432,7 @@ def _summary(
         "strategy_review_first_blocker_count": by_owner.get("strategy_review", 0),
         "by_decision": by_decision,
         "by_blocker_owner": by_owner,
-        "trial_grade_30u_standby_count": trial_grade_standby_count,
+        "controlled_live_standby_count": trial_grade_standby_count,
         "stage_5_waiting_live_opportunity_ready_count": stage_5_ready_count,
         "selected_strategy_group_id": selected_strategy_group_id,
         "selected_candidate_strategy_group_id": str(

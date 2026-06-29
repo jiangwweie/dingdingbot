@@ -434,15 +434,24 @@ def test_current_brf2_owner_trial_policy_scope_artifact_is_complete():
     assert policy_packet["brf2_policy_scope_recorded"] is True
     assert policy_packet["owner_policy_scope_missing"] is False
     assert policy["strategy_group_id"] == "BRF2-001"
-    assert policy["trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
-    assert policy["capital_scope"]["amount"] == "30"
+    assert policy["trial_identity"] == "BRF2_CONTROLLED_SHORT_TRIAL_V0"
+    assert policy["capital_scope"]["amount_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert policy["capital_scope"]["allocation_mode"] == (
+        "full_available_isolated_subaccount"
+    )
     assert policy["capital_scope"]["currency"] == "USDT"
     assert policy["capital_scope"]["loss_capable"] is True
     assert policy["side_scope"] == ["short"]
     assert policy["leverage_scenario"] == "5x_scenario_not_authority"
-    assert policy["max_notional"]["amount"] == "150"
+    assert policy["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert policy["attempt_cap"] == 3
-    assert policy["loss_unit"]["amount"] == "10"
+    assert policy["loss_unit"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     for authority_mirror in (
         "actionable_now",
         "real_order_authority",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Record the final-owned BRF2 Owner trial policy scope.
 
-This artifact records the Owner-approved BRF2 small-capital trial boundary. It
+This artifact records the Owner-approved BRF2 controlled-subaccount trial boundary. It
 is non-executing: it does not mutate registry, tier policy, runtime profile,
 order sizing, FinalGate, Operation Layer, or exchange state.
 """
@@ -46,10 +46,11 @@ SCHEMA = "brc.brf2_owner_trial_policy_scope.v0"
 
 OWNER_POLICY = {
     "strategy_group_id": "BRF2-001",
-    "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+    "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
     "capital_scope": {
         "type": "isolated_subaccount_full_allocation",
-        "amount": "30",
+        "allocation_mode": "full_available_isolated_subaccount",
+        "amount_source": "action_time_exchange_available_balance",
         "currency": "USDT",
         "loss_capable": True,
     },
@@ -57,16 +58,18 @@ OWNER_POLICY = {
     "symbol_scope": "brf2_research_supported_symbols_only",
     "leverage_scenario": "5x_scenario_not_authority",
     "max_notional": {
-        "amount": "150",
         "currency": "USDT",
-        "basis": "30U capital x 5x scenario",
+        "calculation": "action_time_exchange_available_balance * leverage_scenario",
+        "balance_source": "action_time_exchange_available_balance",
+        "basis": "controlled subaccount dynamic allocation x leverage scenario",
         "final_authority": "runtime_profile_and_action_time_exchange_facts",
     },
     "attempt_cap": 3,
     "loss_unit": {
-        "amount": "10",
         "currency": "USDT",
-        "basis": "30U / 3 attempts",
+        "calculation": "action_time_exchange_available_balance / attempt_cap",
+        "balance_source": "action_time_exchange_available_balance",
+        "basis": "controlled subaccount dynamic allocation / attempt cap",
     },
     "daily_loss_cap_units": 1,
     "max_consecutive_losses": 2,
@@ -158,14 +161,15 @@ def build_brf2_owner_trial_policy_scope(
         "checks": {
             "owner_policy_recorded": True,
             "owner_policy_scope_missing": False,
-            "capital_scope_amount": "30",
+            "capital_scope_balance_source": "action_time_exchange_available_balance",
             "capital_scope_currency": "USDT",
+            "capital_scope_allocation_mode": "full_available_isolated_subaccount",
             "loss_capable": True,
             "side_scope_short_only": True,
-            "max_notional_amount": "150",
+            "max_notional_source": "runtime_profile_and_action_time_exchange_facts",
             "leverage_scenario_is_not_authority": True,
             "attempt_cap": 3,
-            "loss_unit_amount": "10",
+            "loss_unit_source": "action_time_exchange_available_balance",
         },
         "final_policy_evidence": {
             "closed_engineering_problem": (
@@ -258,7 +262,8 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
         "| --- | --- |",
         (
             "| Capital scope | "
-            f"`{capital['amount']} {capital['currency']} isolated full allocation` |"
+            f"`{capital['allocation_mode']} from {capital['amount_source']} "
+            f"({capital['currency']})` |"
         ),
         f"| Loss capable | `{_yes_no(bool(capital['loss_capable']))}` |",
         f"| Side scope | `{', '.join(policy['side_scope'])}` |",
@@ -266,12 +271,12 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
         f"| Leverage scenario | `{policy['leverage_scenario']}` |",
         (
             "| Max notional | "
-            f"`{max_notional['amount']} {max_notional['currency']} ({max_notional['basis']})` |"
+            f"`{max_notional['calculation']} ({max_notional['basis']})` |"
         ),
         f"| Attempt cap | `{policy['attempt_cap']}` |",
         (
             "| Loss unit | "
-            f"`{loss_unit['amount']} {loss_unit['currency']} ({loss_unit['basis']})` |"
+            f"`{loss_unit['calculation']} ({loss_unit['basis']})` |"
         ),
         f"| Daily loss cap units | `{policy['daily_loss_cap_units']}` |",
         f"| Max consecutive losses | `{policy['max_consecutive_losses']}` |",

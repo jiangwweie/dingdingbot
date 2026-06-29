@@ -257,8 +257,8 @@ def build_three_strategy_live_trial_portfolio(
                 seats[strategy_id].get("trial_envelope_id") == TRIAL_ENVELOPE_ID
                 for strategy_id in selected_strategy_groups
             ),
-            "trial_grade_30u_standby_ready": stage_5_standby["ready"],
-            "trial_grade_30u_standby_count": stage_5_standby["standby_count"],
+            "controlled_live_standby_ready": stage_5_standby["ready"],
+            "controlled_live_standby_count": stage_5_standby["standby_count"],
             "stage_5_waiting_live_opportunity": stage_5_standby["ready"],
             "action_time_preflight_pending_fresh_signal": stage_5_standby[
                 "action_time_preflight_pending_fresh_signal"
@@ -741,28 +741,39 @@ def _sor_seat(
         "experiment_worthiness_review_closed": True,
         "loss_envelope_expressed": True,
         "trial_envelope_id": TRIAL_ENVELOPE_ID,
-        "trial_envelope_role": "trial_grade_30u_policy_boundary_member",
+        "trial_envelope_role": "controlled_subaccount_policy_boundary_member",
         "observed_no_action_count": no_action_count,
         "policy_scope": {
             "capital_scope": {
-                "amount": "30",
                 "currency": "USDT",
-                "type": "trial_grade_audit_envelope_not_sizing_default",
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
             },
             "symbol_scope": ["session_eligible_perps"],
             "side_scope": ["short", "long_revival_only"],
             "leverage_scenario": "trial_grade_scenario_not_production_authority",
             "attempt_cap": 3,
-            "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
             "profile": "existing_observation_profile_boundary",
         },
         "owner_policy_required": False,
-        "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
+        "owner_policy_status": "controlled_subaccount_observation_policy_recorded_not_production_authority",
         "symbol_scope": ["session_eligible_perps"],
         "side_scope": ["short", "long_revival_only"],
         "leverage_scenario": "trial_grade_scenario_not_production_authority",
         "attempt_cap": 3,
-        "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+        "loss_unit": {
+            "currency": "USDT",
+            "calculation": "action_time_exchange_available_balance / attempt_cap",
+            "balance_source": "action_time_exchange_available_balance",
+            "basis": "controlled subaccount dynamic allocation / attempt cap",
+        },
         "pause_conditions": [
             "outside_session_window",
             "post_open_decay_disable_state_true",
@@ -843,8 +854,8 @@ def _attach_trial_grade_standby(
         )
         standby_ready = (
             signal_status["trial_grade_audit_ready"]
-            and signal_status["trial_grade_policy_scope"] == "30U_bounded_trial_only"
-            and signal_status["trial_grade_signal_can_prepare_30u_trial"]
+            and signal_status["trial_grade_policy_scope"] == "controlled_subaccount_live_scope"
+            and signal_status["trial_grade_signal_can_prepare_controlled_live"]
             and not signal_status["production_grade_authority_changed"]
             and seat.get("admitted_or_selected_as_live_trial_asset") is True
             and seat.get("owner_policy_required") is False
@@ -854,7 +865,7 @@ def _attach_trial_grade_standby(
             and not hard_safety_gates_relaxed
             and not signal_status["trial_grade_signal_can_bypass_hard_safety_gates"]
         )
-        runtime_readiness["trial_grade_30u_standby_ready"] = standby_ready
+        runtime_readiness["controlled_live_standby_ready"] = standby_ready
         runtime_readiness["stage_5_waiting_live_opportunity_ready"] = standby_ready
         runtime_readiness["action_time_preflight_pending_fresh_signal"] = standby_ready
         runtime_readiness["trial_grade_policy_scope"] = policy_update.get(
@@ -993,11 +1004,11 @@ def _trial_grade_signal_status(
         "max_loss_estimate_usdt": str(
             projection.get("max_loss_estimate_usdt") or ""
         ),
-        "would_enter_30u_trial_if_same_structure": (
-            tomorrow.get("would_enter_30u_trial") is True
+        "would_enter_controlled_live_trial_if_same_structure": (
+            tomorrow.get("would_enter_controlled_live_trial") is True
         ),
-        "trial_grade_signal_can_prepare_30u_trial": (
-            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        "trial_grade_signal_can_prepare_controlled_live": (
+            authority.get("trial_grade_signal_can_prepare_controlled_live") is True
         ),
         "trial_grade_signal_can_bypass_hard_safety_gates": (
             authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
@@ -1011,7 +1022,7 @@ def _portfolio_trial_envelope(seats: dict[str, dict[str, Any]]) -> dict[str, Any
     loss_unit = brf2_policy.get("loss_unit")
     max_notional = _as_dict(brf2_policy.get("max_notional"))
     explicit_owner_policy_strategy_groups = (
-        ["BRF2-001"] if capital.get("amount") and capital.get("currency") else []
+        ["BRF2-001"] if capital.get("amount_source") and capital.get("currency") else []
     )
     return {
         "trial_envelope_id": TRIAL_ENVELOPE_ID,

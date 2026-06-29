@@ -2956,7 +2956,7 @@ class _ThreeStrategyPortfolioSummaryProjection:
     strategy_review_gap_count: int
     next_bottlenecks: dict[str, Any]
     stage_5_status: str
-    trial_grade_30u_standby_count: int
+    controlled_live_standby_count: int
     hard_safety_gates_relaxed: bool
     readiness_stage_evidence: dict[str, Any]
     projection_role: str = "trial_envelope_projection"
@@ -3006,7 +3006,7 @@ class _ThreeStrategyPortfolioSummaryProjection:
             ),
             next_bottlenecks=_as_dict(artifact.get("next_engineering_bottleneck")),
             stage_5_status=str(stage_5.get("status") or "missing"),
-            trial_grade_30u_standby_count=_int(stage_5.get("standby_count")),
+            controlled_live_standby_count=_int(stage_5.get("standby_count")),
             hard_safety_gates_relaxed=(
                 stage_5.get("hard_safety_gates_relaxed") is True
             ),
@@ -3026,7 +3026,7 @@ class _ThreeStrategyPortfolioSummaryProjection:
             "strategy_review_gap_count": self.strategy_review_gap_count,
             "next_bottlenecks": self.next_bottlenecks,
             "stage_5_status": self.stage_5_status,
-            "trial_grade_30u_standby_count": self.trial_grade_30u_standby_count,
+            "controlled_live_standby_count": self.controlled_live_standby_count,
             "hard_safety_gates_relaxed": self.hard_safety_gates_relaxed,
             "readiness_stage_evidence": self.readiness_stage_evidence,
             "projection_role": self.projection_role,
@@ -3095,7 +3095,7 @@ class _TradeabilityDecisionProjection:
     decision_rows_count: int
     row_count_matches_decision_rows: bool
     runtime_trade_allowed_rows: int
-    trial_grade_30u_standby_count: int
+    controlled_live_standby_count: int
     stage_5_waiting_live_opportunity_ready_count: int
     top_strategy_group_id: str
     top_decision: str
@@ -3132,8 +3132,8 @@ class _TradeabilityDecisionProjection:
             decision_rows_count=len(decision_rows),
             row_count_matches_decision_rows=row_count == len(decision_rows),
             runtime_trade_allowed_rows=_int(summary.get("tradable_now_count")),
-            trial_grade_30u_standby_count=_int(
-                summary.get("trial_grade_30u_standby_count")
+            controlled_live_standby_count=_int(
+                summary.get("controlled_live_standby_count")
             ),
             stage_5_waiting_live_opportunity_ready_count=_int(
                 summary.get("stage_5_waiting_live_opportunity_ready_count")
@@ -3165,7 +3165,7 @@ class _TradeabilityDecisionProjection:
             "decision_result_counts": {
                 "runtime_trade_allowed_rows": self.runtime_trade_allowed_rows,
             },
-            "trial_grade_30u_standby_count": self.trial_grade_30u_standby_count,
+            "controlled_live_standby_count": self.controlled_live_standby_count,
             "stage_5_waiting_live_opportunity_ready_count": (
                 self.stage_5_waiting_live_opportunity_ready_count
             ),
@@ -3195,7 +3195,7 @@ def _sequence_trial_grade_signal_gate_audit_summary(
                 _as_dict(rows.get(strategy_group_id)).get(
                     "tomorrow_same_structure_assessment"
                 )
-            ).get("would_enter_30u_trial")
+            ).get("would_enter_controlled_live_trial")
             is True
         )
 
@@ -3212,9 +3212,9 @@ def _sequence_trial_grade_signal_gate_audit_summary(
         ),
         "hard_safety_gates_relaxed": summary.get("hard_safety_gates_relaxed")
         is True,
-        "brf2_would_enter_30u_trial_if_same_structure": would_enter("BRF2-001"),
-        "mpg_would_enter_30u_trial_if_same_structure": would_enter("MPG-001"),
-        "sor_would_enter_30u_trial_if_same_structure": would_enter("SOR-001"),
+        "brf2_would_enter_controlled_live_trial_if_same_structure": would_enter("BRF2-001"),
+        "mpg_would_enter_controlled_live_trial_if_same_structure": would_enter("MPG-001"),
+        "sor_would_enter_controlled_live_trial_if_same_structure": would_enter("SOR-001"),
     }
 
 
@@ -3365,8 +3365,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- RBR/RBR2 role review: `{signal_observation_grade.get('role_review_count', 0)}`",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
-        f"- 小资金试验候选状态: `{experiment_candidate.get('status', 'missing')}`",
-        f"- 小资金试验候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
+        f"- 受控实盘候选状态: `{experiment_candidate.get('status', 'missing')}`",
+        f"- 受控实盘候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
         f"- 做空试验候选策略组: `{experiment_candidate.get('selected_short_strategy_group_id') or 'none'}`",
         f"- 晋级范围: `{experiment_candidate.get('promotion_scope') or 'not_applicable'}`",
         f"- 准入提案状态: `{trial_admission.get('status', 'missing')}`",
@@ -3391,13 +3391,13 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 第五阶段状态: `{three_strategy_portfolio.get('stage_5_status', 'missing')}`",
-        f"- 30U trial standby 席位: `{three_strategy_portfolio.get('trial_grade_30u_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- 受控实盘 standby 席位: `{three_strategy_portfolio.get('controlled_live_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
         f"- Tradeability Decision 状态: `{tradeability.get('status', 'missing')}`",
         f"- Tradeability Decision Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_decision', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
         f"- 下一检查点: `{tradeability.get('top_tradeability_checkpoint', 'missing')}`",
-        f"- Tradeability trial-grade standby: `{tradeability.get('trial_grade_30u_standby_count', 0)}`",
+        f"- Tradeability trial-grade standby: `{tradeability.get('controlled_live_standby_count', 0)}`",
         f"- Trial-grade signal audit: `{trial_grade_audit.get('status', 'missing')}`",
         f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_submit_count_30d', 0)}`",
         f"- Trial-grade hard gates relaxed: `{_yes_no(trial_grade_audit.get('hard_safety_gates_relaxed') is True)}`",

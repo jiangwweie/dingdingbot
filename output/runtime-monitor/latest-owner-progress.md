@@ -1,7 +1,7 @@
 ## StrategyGroup Runtime Progress
 
 - 报告时间: 2026-06-24T14:36:25.635464+00:00
-- 缓存年龄: 100h37m
+- 缓存年龄: 117h13m
 - 缓存状态: stale
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存

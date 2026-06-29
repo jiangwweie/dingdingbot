@@ -850,7 +850,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     "stage": "armed_observation",
                     "runtime_readiness": {
                         "armed_observation_ready": True,
-                        "trial_grade_30u_standby_ready": True,
+                        "controlled_live_standby_ready": True,
                         "stage_5_waiting_live_opportunity_ready": True,
                         "action_time_preflight_pending_fresh_signal": True,
                         "tiny_live_ready": False,
@@ -869,7 +869,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     "runtime_readiness": {
                         "armed_observation_ready": True,
                         "blocked_by": "fresh_brf2_short_signal_absent",
-                        "trial_grade_30u_standby_ready": True,
+                        "controlled_live_standby_ready": True,
                         "stage_5_waiting_live_opportunity_ready": True,
                         "action_time_preflight_pending_fresh_signal": True,
                         "tiny_live_ready": False,
@@ -888,7 +888,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                     "stage": "armed_observation",
                     "runtime_readiness": {
                         "armed_observation_ready": True,
-                        "trial_grade_30u_standby_ready": True,
+                        "controlled_live_standby_ready": True,
                         "stage_5_waiting_live_opportunity_ready": True,
                         "action_time_preflight_pending_fresh_signal": True,
                         "tiny_live_ready": False,
@@ -920,7 +920,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                 "seat_count": 3,
                 "at_least_three_seats": True,
                 "objective_met": True,
-                "trial_grade_30u_standby_count": 3,
+                "controlled_live_standby_count": 3,
                 "stage_5_waiting_live_opportunity_ready_count": 3,
                 "hard_safety_gates_relaxed": False,
             },
@@ -962,7 +962,7 @@ def _write_ready_trial_grade_signal_gate_audit(command: list[str]) -> None:
                 strategy_group_id: {
                     "strategy_group_id": strategy_group_id,
                     "tomorrow_same_structure_assessment": {
-                        "would_enter_30u_trial": True,
+                        "would_enter_controlled_live_trial": True,
                     },
                 }
                 for strategy_group_id in ("MPG-001", "BRF2-001", "SOR-001")
@@ -1345,19 +1345,26 @@ def _write_ready_brf2_owner_trial_policy_scope(command: list[str]) -> None:
             ),
             "policy": {
                 "strategy_group_id": "BRF2-001",
-                "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+                "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
                 "capital_scope": {
                     "type": "isolated_subaccount_full_allocation",
-                    "amount": "30",
+                    "allocation_mode": "full_available_isolated_subaccount",
+                    "amount_source": "action_time_exchange_available_balance",
                     "currency": "USDT",
                     "loss_capable": True,
                 },
                 "side_scope": ["short"],
                 "symbol_scope": "brf2_research_supported_symbols_only",
                 "leverage_scenario": "5x_scenario_not_authority",
-                "max_notional": {"amount": "150", "currency": "USDT"},
+                "max_notional": {
+                    "currency": "USDT",
+                    "balance_source": "action_time_exchange_available_balance",
+                },
                 "attempt_cap": 3,
-                "loss_unit": {"amount": "10", "currency": "USDT"},
+                "loss_unit": {
+                    "currency": "USDT",
+                    "balance_source": "action_time_exchange_available_balance",
+                },
             },
             "interaction": {
                 "level": "L0_local_brf2_owner_trial_policy_scope",
@@ -2601,7 +2608,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "waiting_for_trial_grade_live_opportunity"
     )
     assert report["three_strategy_live_trial_portfolio"][
-        "trial_grade_30u_standby_count"
+        "controlled_live_standby_count"
     ] == 3
     assert (
         "stage_5_waiting_live_opportunity_ready"
@@ -2638,7 +2645,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "live_trial_next_bottlenecks",
         "stage_5_status",
         "stage_5_waiting_live_opportunity_ready",
-        "trial_grade_30u_standby_count",
+        "controlled_live_standby_count",
         "action_time_preflight_pending_fresh_signal",
         "stage_5_hard_safety_gates_relaxed",
     ):
@@ -2671,9 +2678,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "trial_grade_observation_count_30d",
         "trial_grade_action_time_submit_count_30d",
         "trial_grade_hard_safety_gates_relaxed",
-        "trial_grade_brf2_would_enter_30u_trial_if_same_structure",
-        "trial_grade_mpg_would_enter_30u_trial_if_same_structure",
-        "trial_grade_sor_would_enter_30u_trial_if_same_structure",
+        "trial_grade_brf2_would_enter_controlled_live_trial_if_same_structure",
+        "trial_grade_mpg_would_enter_controlled_live_trial_if_same_structure",
+        "trial_grade_sor_would_enter_controlled_live_trial_if_same_structure",
     ):
         assert removed_check not in _legacy_monitor_checks(report)
     assert report["tradeability_decision"]["top_decision"] == (
@@ -4250,7 +4257,7 @@ def test_local_monitor_sequence_tradeability_decision_projection_preserves_shape
             "tradable_now_count": 0,
             "actionable_now_count": 0,
             "real_order_authority_count": 0,
-            "trial_grade_30u_standby_count": 2,
+            "controlled_live_standby_count": 2,
             "stage_5_waiting_live_opportunity_ready_count": 2,
             "top_strategy_group_id": "BRF2-001",
             "top_decision": "not_tradable_market_wait",
@@ -4386,7 +4393,7 @@ def test_local_monitor_sequence_three_strategy_portfolio_projection_preserves_sh
     assert projection.market_wait_count == 1
     assert projection.owner_policy_gap_count == 1
     assert projection.engineering_gap_count == 1
-    assert projection.trial_grade_30u_standby_count == 3
+    assert projection.controlled_live_standby_count == 3
     assert projection.hard_safety_gates_relaxed is False
     assert projection.readiness_stage_evidence["source"] == (
         "three_strategy_live_trial_portfolio.summary_projection"

@@ -5,12 +5,13 @@
   "brf2_stage_after_policy": "admitted_trial_asset",
   "checks": {
     "attempt_cap": 3,
-    "capital_scope_amount": "30",
+    "capital_scope_allocation_mode": "full_available_isolated_subaccount",
+    "capital_scope_balance_source": "action_time_exchange_available_balance",
     "capital_scope_currency": "USDT",
     "leverage_scenario_is_not_authority": true,
     "loss_capable": true,
-    "loss_unit_amount": "10",
-    "max_notional_amount": "150",
+    "loss_unit_source": "action_time_exchange_available_balance",
+    "max_notional_source": "runtime_profile_and_action_time_exchange_facts",
     "owner_policy_recorded": true,
     "owner_policy_scope_missing": false,
     "side_scope_short_only": true
@@ -53,7 +54,7 @@
     ],
     "three_strategy_portfolio_status": "pending_downstream_regeneration"
   },
-  "generated_at_utc": "2026-06-28T19:13:44.930918+00:00",
+  "generated_at_utc": "2026-06-29T11:49:48.383084+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -70,7 +71,8 @@
     "attempt_cap": 3,
     "authority_boundary": "owner_policy_only; finalgate_required; operation_layer_required; no_exchange_write",
     "capital_scope": {
-      "amount": "30",
+      "allocation_mode": "full_available_isolated_subaccount",
+      "amount_source": "action_time_exchange_available_balance",
       "currency": "USDT",
       "loss_capable": true,
       "type": "isolated_subaccount_full_allocation"
@@ -78,14 +80,16 @@
     "daily_loss_cap_units": 1,
     "leverage_scenario": "5x_scenario_not_authority",
     "loss_unit": {
-      "amount": "10",
-      "basis": "30U / 3 attempts",
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation / attempt cap",
+      "calculation": "action_time_exchange_available_balance / attempt_cap",
       "currency": "USDT"
     },
     "max_consecutive_losses": 2,
     "max_notional": {
-      "amount": "150",
-      "basis": "30U capital x 5x scenario",
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation x leverage scenario",
+      "calculation": "action_time_exchange_available_balance * leverage_scenario",
       "currency": "USDT",
       "final_authority": "runtime_profile_and_action_time_exchange_facts"
     },
@@ -100,7 +104,7 @@
     ],
     "strategy_group_id": "BRF2-001",
     "symbol_scope": "brf2_research_supported_symbols_only",
-    "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+    "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
     "valid_until": "one_review_cycle"
   },
   "safety_invariants": {

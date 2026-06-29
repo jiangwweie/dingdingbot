@@ -26,7 +26,7 @@ def _load_module():
     return module
 
 
-def test_brf2_owner_trial_policy_scope_records_30u_boundary_without_authority():
+def test_brf2_owner_trial_policy_scope_records_controlled_subaccount_boundary_without_authority():
     module = _load_module()
 
     artifact = module.build_brf2_owner_trial_policy_scope(
@@ -46,19 +46,24 @@ def test_brf2_owner_trial_policy_scope_records_30u_boundary_without_authority():
     assert "final_policy_evidence" in artifact
     assert "final_evidence_packet" not in artifact
     assert policy["strategy_group_id"] == "BRF2-001"
-    assert policy["trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
+    assert policy["trial_identity"] == "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     assert policy["capital_scope"] == {
         "type": "isolated_subaccount_full_allocation",
-        "amount": "30",
+        "allocation_mode": "full_available_isolated_subaccount",
+        "amount_source": "action_time_exchange_available_balance",
         "currency": "USDT",
         "loss_capable": True,
     }
     assert policy["side_scope"] == ["short"]
     assert policy["symbol_scope"] == "brf2_research_supported_symbols_only"
     assert policy["leverage_scenario"] == "5x_scenario_not_authority"
-    assert policy["max_notional"]["amount"] == "150"
+    assert policy["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert policy["attempt_cap"] == 3
-    assert policy["loss_unit"]["amount"] == "10"
+    assert policy["loss_unit"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     for authority_mirror in (
         "actionable_now",
         "real_order_authority",

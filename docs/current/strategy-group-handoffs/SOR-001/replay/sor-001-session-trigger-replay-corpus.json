@@ -5,7 +5,7 @@
   "live_order_eligible": false,
   "notes": [
     "SOR-001 session trigger replay is trial-grade review evidence only.",
-    "These replay windows can calibrate 30U bounded trial gates, but cannot authorize FinalGate, Operation Layer, exchange write, or real orders."
+    "These replay windows can calibrate controlled-subaccount trial gates, but cannot authorize FinalGate, Operation Layer, exchange write, or real orders."
   ],
   "replay_samples": [
     {

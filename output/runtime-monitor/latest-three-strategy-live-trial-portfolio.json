@@ -9,12 +9,12 @@
     "contains_brf2": true,
     "contains_mpg": true,
     "contains_sor_or_replacement": true,
+    "controlled_live_standby_count": 3,
+    "controlled_live_standby_ready": true,
     "hard_safety_gates_relaxed": false,
     "objective_met": true,
     "seat_count": 3,
-    "stage_5_waiting_live_opportunity": true,
-    "trial_grade_30u_standby_count": 3,
-    "trial_grade_30u_standby_ready": true
+    "stage_5_waiting_live_opportunity": true
   },
   "final_portfolio_evidence": {
     "brf2_new_first_blocker": "short_squeeze_risk_state_disable_active",
@@ -89,7 +89,7 @@
       "repair_checkpoint": "continue_session_range_armed_observation_until_fresh_signal"
     }
   },
-  "generated_at_utc": "2026-06-28T19:14:07.802848+00:00",
+  "generated_at_utc": "2026-06-29T11:49:54.079037+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -188,8 +188,9 @@
       "leverage_scenario": "5x_scenario_not_authority",
       "loss_envelope_expressed": true,
       "loss_unit": {
-        "amount": "10",
-        "basis": "30U / 3 attempts",
+        "balance_source": "action_time_exchange_available_balance",
+        "basis": "controlled subaccount dynamic allocation / attempt cap",
+        "calculation": "action_time_exchange_available_balance / attempt_cap",
         "currency": "USDT"
       },
       "next_bottleneck": "short_squeeze_risk_state_disable_active",
@@ -207,7 +208,8 @@
         "attempt_cap": 3,
         "authority_boundary": "owner_policy_only; finalgate_required; operation_layer_required; no_exchange_write",
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
           "loss_capable": true,
           "type": "isolated_subaccount_full_allocation"
@@ -215,14 +217,16 @@
         "daily_loss_cap_units": 1,
         "leverage_scenario": "5x_scenario_not_authority",
         "loss_unit": {
-          "amount": "10",
-          "basis": "30U / 3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "max_consecutive_losses": 2,
         "max_notional": {
-          "amount": "150",
-          "basis": "30U capital x 5x scenario",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation x leverage scenario",
+          "calculation": "action_time_exchange_available_balance * leverage_scenario",
           "currency": "USDT",
           "final_authority": "runtime_profile_and_action_time_exchange_facts"
         },
@@ -338,6 +342,7 @@
         "armed_observation_plan_ready": true,
         "armed_observation_ready": true,
         "blocked_by": "short_squeeze_risk_state_disable_active",
+        "controlled_live_standby_ready": true,
         "live_submit_ready": false,
         "readiness_stage_evidence": {
           "can_create_execution_attempt": false,
@@ -359,8 +364,7 @@
         },
         "stage_5_waiting_live_opportunity_ready": true,
         "tiny_live_ready": false,
-        "trial_grade_30u_standby_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only"
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope"
       },
       "seat": "B",
       "seat_role": "short_weak_rally_failure_right_tail_experiment",
@@ -391,12 +395,12 @@
         "recent_30d_trial_grade_observation_count": 0,
         "strategy_group_id": "BRF2-001",
         "trial_grade_audit_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only",
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope",
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true,
-        "would_enter_30u_trial_if_same_structure": false
+        "trial_grade_signal_can_prepare_controlled_live": true,
+        "would_enter_controlled_live_trial_if_same_structure": false
       },
-      "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+      "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
       "trial_policy_proposal_ready": true
     },
     "MPG-001": {
@@ -478,6 +482,7 @@
       "runtime_readiness": {
         "action_time_preflight_pending_fresh_signal": true,
         "armed_observation_ready": true,
+        "controlled_live_standby_ready": true,
         "live_submit_ready": false,
         "readiness_stage_evidence": {
           "can_create_execution_attempt": false,
@@ -499,8 +504,7 @@
         },
         "stage_5_waiting_live_opportunity_ready": true,
         "tiny_live_ready": true,
-        "trial_grade_30u_standby_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only"
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope"
       },
       "seat": "A",
       "seat_role": "current_main_l4_live_pilot",
@@ -531,10 +535,10 @@
         "recent_30d_trial_grade_observation_count": 0,
         "strategy_group_id": "MPG-001",
         "trial_grade_audit_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only",
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope",
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true,
-        "would_enter_30u_trial_if_same_structure": true
+        "trial_grade_signal_can_prepare_controlled_live": true,
+        "would_enter_controlled_live_trial_if_same_structure": true
       }
     },
     "SOR-001": {
@@ -562,14 +566,15 @@
       "leverage_scenario": "trial_grade_scenario_not_production_authority",
       "loss_envelope_expressed": true,
       "loss_unit": {
-        "amount": "10",
-        "basis": "3 attempts",
+        "balance_source": "action_time_exchange_available_balance",
+        "basis": "controlled subaccount dynamic allocation / attempt cap",
+        "calculation": "action_time_exchange_available_balance / attempt_cap",
         "currency": "USDT"
       },
       "next_bottleneck": "fresh_signal_wait",
       "observed_no_action_count": 0,
       "owner_policy_required": false,
-      "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
+      "owner_policy_status": "controlled_subaccount_observation_policy_recorded_not_production_authority",
       "pause_conditions": [
         "outside_session_window",
         "post_open_decay_disable_state_true",
@@ -579,14 +584,16 @@
       "policy_scope": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
-          "type": "trial_grade_audit_envelope_not_sizing_default"
+          "type": "isolated_subaccount_full_allocation"
         },
         "leverage_scenario": "trial_grade_scenario_not_production_authority",
         "loss_unit": {
-          "amount": "10",
-          "basis": "3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "profile": "existing_observation_profile_boundary",
@@ -634,6 +641,7 @@
       "runtime_readiness": {
         "action_time_preflight_pending_fresh_signal": true,
         "armed_observation_ready": true,
+        "controlled_live_standby_ready": true,
         "live_submit_ready": false,
         "readiness_stage_evidence": {
           "can_create_execution_attempt": false,
@@ -655,8 +663,7 @@
         },
         "stage_5_waiting_live_opportunity_ready": true,
         "tiny_live_ready": false,
-        "trial_grade_30u_standby_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only"
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope"
       },
       "seat": "C",
       "seat_role": "session_range_decorrelated_experiment",
@@ -677,7 +684,7 @@
         "next_state_after_blocker_removed": "live_submit_ready"
       },
       "trial_envelope_id": "three_strategy_live_trial_envelope_v1",
-      "trial_envelope_role": "trial_grade_30u_policy_boundary_member",
+      "trial_envelope_role": "controlled_subaccount_policy_boundary_member",
       "trial_grade_signal_status": {
         "current_gate_looks_like": "conditional_armed_observation_with_trial_grade_replay_calibration",
         "fixture_trial_grade_trigger_case_count": 1,
@@ -688,10 +695,10 @@
         "recent_30d_trial_grade_observation_count": 0,
         "strategy_group_id": "SOR-001",
         "trial_grade_audit_ready": true,
-        "trial_grade_policy_scope": "30U_bounded_trial_only",
+        "trial_grade_policy_scope": "controlled_subaccount_live_scope",
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true,
-        "would_enter_30u_trial_if_same_structure": true
+        "trial_grade_signal_can_prepare_controlled_live": true,
+        "would_enter_controlled_live_trial_if_same_structure": true
       }
     }
   },
@@ -732,7 +739,7 @@
       "SOR-001"
     ],
     "status": "phase_5_waiting_for_live_opportunity",
-    "trial_grade_policy_scope": "30U_bounded_trial_only"
+    "trial_grade_policy_scope": "controlled_subaccount_live_scope"
   },
   "status": "three_strategy_live_trial_portfolio_ready",
   "trial_envelope": {
@@ -744,7 +751,8 @@
     "attempt_cap": 3,
     "boundary": "read_model_policy_boundary_only; no_live_profile_change; action_time_finalgate_and_operation_layer_still_required",
     "capital": {
-      "amount": "30",
+      "allocation_mode": "full_available_isolated_subaccount",
+      "amount_source": "action_time_exchange_available_balance",
       "currency": "USDT",
       "loss_capable": true,
       "type": "isolated_subaccount_full_allocation"
@@ -765,14 +773,16 @@
     ],
     "leverage_scenario": "5x_scenario_not_authority",
     "loss_unit": {
-      "amount": "10",
-      "basis": "30U / 3 attempts",
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation / attempt cap",
+      "calculation": "action_time_exchange_available_balance / attempt_cap",
       "currency": "USDT"
     },
     "max_consecutive_losses": 2,
     "max_notional": {
-      "amount": "150",
-      "basis": "30U capital x 5x scenario",
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation x leverage scenario",
+      "calculation": "action_time_exchange_available_balance * leverage_scenario",
       "currency": "USDT",
       "final_authority": "runtime_profile_and_action_time_exchange_facts"
     },
@@ -804,14 +814,16 @@
       "BRF2-001": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
           "loss_capable": true,
           "type": "isolated_subaccount_full_allocation"
         },
         "loss_unit": {
-          "amount": "10",
-          "basis": "30U / 3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "owner_policy_required": false,
@@ -845,17 +857,19 @@
       "SOR-001": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
-          "type": "trial_grade_audit_envelope_not_sizing_default"
+          "type": "isolated_subaccount_full_allocation"
         },
         "loss_unit": {
-          "amount": "10",
-          "basis": "3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "owner_policy_required": false,
-        "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
+        "owner_policy_status": "controlled_subaccount_observation_policy_recorded_not_production_authority",
         "side_scope": [
           "short",
           "long_revival_only"
@@ -865,7 +879,7 @@
         "symbol_scope": [
           "session_eligible_perps"
         ],
-        "trial_envelope_role": "trial_grade_30u_policy_boundary_member"
+        "trial_envelope_role": "controlled_subaccount_policy_boundary_member"
       }
     },
     "state_family": "Strategy Policy / Trial Envelope",

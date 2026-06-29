@@ -33,7 +33,7 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
         },
     }
 

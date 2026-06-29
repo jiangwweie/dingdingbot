@@ -368,10 +368,11 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
             "capital_scope": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
@@ -379,16 +380,18 @@ def _owner_policy_scope() -> dict:
             "symbol_scope": "brf2_research_supported_symbols_only",
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
                 "final_authority": "runtime_profile_and_action_time_exchange_facts",
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
@@ -411,23 +414,26 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
             "explicit_owner_policy_strategy_groups": ["BRF2-001"],
             "capital": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
             },
             "protection_required": True,
             "review_required": True,
@@ -439,15 +445,17 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
                     "owner_policy_required": False,
                     "capital_scope": {
                         "type": "isolated_subaccount_full_allocation",
-                        "amount": "30",
+                        "allocation_mode": "full_available_isolated_subaccount",
+                        "amount_source": "action_time_exchange_available_balance",
                         "currency": "USDT",
                         "loss_capable": True,
                     },
                     "attempt_cap": 3,
                     "loss_unit": {
-                        "amount": "10",
                         "currency": "USDT",
-                        "basis": "30U / 3 attempts",
+                        "calculation": "action_time_exchange_available_balance / attempt_cap",
+                        "balance_source": "action_time_exchange_available_balance",
+                        "basis": "controlled subaccount dynamic allocation / attempt cap",
                     },
                     "symbol_scope": ["brf2_research_supported_symbols_only"],
                     "side_scope": ["short"],
@@ -461,7 +469,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
             "MPG-001": {
                 "stage": "armed_observation",
                 "runtime_readiness": {
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -473,7 +481,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
                     "armed_observation_ready": True,
                     "tiny_live_ready": False,
                     "live_submit_ready": False,
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -494,7 +502,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
             "SOR-001": {
                 "stage": "armed_observation",
                 "runtime_readiness": {
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -522,7 +530,7 @@ def _trial_grade_signal_gate_audit() -> dict:
             "BRF2-001": {
                 "strategy_group_id": "BRF2-001",
                 "signal_grade_current_assessment": {
-                    "current_gate_looks_like": "trial_grade_30u_standby",
+                    "current_gate_looks_like": "controlled_live_standby",
                 },
                 "verified_recent_window_counts": {
                     "windows_days": {
@@ -537,10 +545,10 @@ def _trial_grade_signal_gate_audit() -> dict:
                     "max_loss_estimate_usdt": "10",
                 },
                 "tomorrow_same_structure_assessment": {
-                    "would_enter_30u_trial": True,
+                    "would_enter_controlled_live_trial": True,
                 },
                 "authority_boundary": {
-                    "trial_grade_signal_can_prepare_30u_trial": True,
+                    "trial_grade_signal_can_prepare_controlled_live": True,
                     "trial_grade_signal_can_bypass_hard_safety_gates": False,
                 },
             },
@@ -777,10 +785,14 @@ def test_tradeability_decision_advances_brf2_to_facts_blocker_after_policy_recor
     assert brf2["runtime_scope_status"]["owner_policy_recorded"] is True
     assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
     assert brf2["runtime_scope_status"]["brf2_trial_identity"] == (
-        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+        "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     )
-    assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
-    assert brf2["policy_scope"]["max_notional"]["amount"] == "150"
+    assert brf2["policy_scope"]["capital_scope"]["amount_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert brf2["policy_scope"]["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     secondary = {row["blocker"] for row in brf2["secondary_blockers"]}
     resolved = {row["blocker"] for row in brf2["resolved_blockers"]}
     assert "owner_capital_scope_not_confirmed" not in secondary
@@ -827,7 +839,7 @@ def test_tradeability_decision_moves_brf2_to_market_wait_after_mapping():
     )
     assert brf2["after_next_state"] == "live_submit_ready"
     assert brf2["required_facts_status"] == "ready"
-    assert brf2["signal_grade_status"]["trial_grade_30u_standby_ready"] is True
+    assert brf2["signal_grade_status"]["controlled_live_standby_ready"] is True
     assert (
         brf2["signal_grade_status"]["stage_5_waiting_live_opportunity_ready"]
         is True
@@ -836,7 +848,7 @@ def test_tradeability_decision_moves_brf2_to_market_wait_after_mapping():
     assert "real_order_authority" not in brf2
     assert brf2["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
     assert packet["summary"]["tradable_now_count"] == 0
-    assert packet["summary"]["trial_grade_30u_standby_count"] == 3
+    assert packet["summary"]["controlled_live_standby_count"] == 3
     assert packet["summary"]["stage_5_waiting_live_opportunity_ready_count"] == 3
     assert packet["checks"]["market_wait_only_after_admission"] is True
 
@@ -899,9 +911,13 @@ def test_tradeability_decision_prefers_trial_envelope_before_legacy_seat_policy(
     assert brf2["policy_scope"]["trial_envelope_id"] == (
         "three_strategy_live_trial_envelope_v1"
     )
-    assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
+    assert brf2["policy_scope"]["capital_scope"]["amount_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert brf2["policy_scope"]["attempt_cap"] == 3
-    assert brf2["policy_scope"]["loss_unit"]["amount"] == "10"
+    assert brf2["policy_scope"]["loss_unit"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert brf2["policy_scope"]["protection_required"] is True
     assert brf2["policy_scope"]["review_required"] is True
     assert brf2["runtime_scope_status"]["trial_envelope_id"] == (
@@ -1541,7 +1557,7 @@ def test_cli_explicit_brf2_owner_policy_path_feeds_policy_state(
     runtime_scope = brf2["runtime_scope_status"]
     assert runtime_scope["owner_policy_recorded"] is True
     assert runtime_scope["owner_policy_scope_missing"] is False
-    assert runtime_scope["brf2_trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
+    assert runtime_scope["brf2_trial_identity"] == "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     assert "actionable_now" not in brf2
     assert "real_order_authority" not in brf2
     assert brf2["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
@@ -1742,7 +1758,7 @@ def test_cli_without_explicit_trial_grade_audit_does_not_read_default_audit(
     signal_grade = brf2["signal_grade_status"]
     assert signal_grade["trial_grade_audit_ready"] is False
     assert "current_gate_looks_like" not in signal_grade
-    assert signal_grade["trial_grade_30u_standby_ready"] is True
+    assert signal_grade["controlled_live_standby_ready"] is True
     assert signal_grade["stage_5_waiting_live_opportunity_ready"] is True
     assert "actionable_now" not in brf2
     assert "real_order_authority" not in brf2
@@ -1812,10 +1828,10 @@ def test_cli_explicit_trial_grade_audit_path_feeds_trial_grade_state(
     brf2 = rows["BRF2-001"]
     signal_grade = brf2["signal_grade_status"]
     assert signal_grade["trial_grade_audit_ready"] is True
-    assert signal_grade["current_gate_looks_like"] == "trial_grade_30u_standby"
+    assert signal_grade["current_gate_looks_like"] == "controlled_live_standby"
     assert signal_grade["recent_30d_trial_grade_observation_count"] == 2
     assert signal_grade["fixture_trial_grade_trigger_case_count"] == 2
-    assert signal_grade["trial_grade_signal_can_prepare_30u_trial"] is True
+    assert signal_grade["trial_grade_signal_can_prepare_controlled_live"] is True
     assert signal_grade["trial_grade_signal_can_bypass_hard_safety_gates"] is False
     assert "actionable_now" not in brf2
     assert "real_order_authority" not in brf2

@@ -71,10 +71,11 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
             "capital_scope": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
@@ -82,16 +83,18 @@ def _owner_policy_scope() -> dict:
             "symbol_scope": "brf2_research_supported_symbols_only",
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
                 "final_authority": "runtime_profile_and_action_time_exchange_facts",
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
@@ -203,9 +206,11 @@ def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
     )
     assert proposal["after_next_state"] == "armed_observation"
     assert proposal["owner_policy_defaults"]["trial_identity"] == (
-        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+        "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     )
-    assert proposal["owner_policy_defaults"]["max_notional"]["amount"] == "150"
+    assert proposal["owner_policy_defaults"]["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert proposal["owner_policy_defaults"]["authority_boundary"] == (
         "owner_policy_only; finalgate_required; operation_layer_required; "
         "no_exchange_write"

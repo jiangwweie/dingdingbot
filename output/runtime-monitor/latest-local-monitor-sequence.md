@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-28T19:14:08.001185+00:00
+- 报告时间: 2026-06-29T11:49:54.278641+00:00
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -16,8 +16,8 @@
 - RBR/RBR2 role review: `1`
 - 策略 intake 状态: `research_intake_review_ready`
 - 策略 intake 候选: `BRF2-001, RBR2-001`
-- 小资金试验候选状态: `trial_envelope_projection_ready`
-- 小资金试验候选策略组: `BRF2-001`
+- 受控实盘候选状态: `trial_envelope_projection_ready`
+- 受控实盘候选策略组: `BRF2-001`
 - 做空试验候选策略组: `BRF2-001`
 - 晋级范围: `intake_only`
 - 准入提案状态: `trial_asset_admission_proposal_ready`
@@ -42,12 +42,12 @@
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
 - 第五阶段状态: `phase_5_waiting_for_live_opportunity`
-- 30U trial standby 席位: `3` / `3`
+- 受控实盘 standby 席位: `3` / `3`
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - Tradeability Decision 状态: `tradeability_decision_ready`
 - Tradeability Decision Top: `BRF2-001` / `not_tradable_market_wait`
 - 第一阻断: `short_squeeze_risk_state_disable_active` / `market`
-- 下一动作: `continue_brf2_armed_observation_until_disable_clears`
+- 下一检查点: `continue_brf2_armed_observation_until_disable_clears`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
 - Trial-grade 30d observation / action-time submit: `0` / `0`

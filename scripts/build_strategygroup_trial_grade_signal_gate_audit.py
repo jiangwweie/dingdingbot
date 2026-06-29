@@ -212,13 +212,13 @@ def build_trial_grade_signal_gate_audit(
         "signal_grade_catalog": _signal_grade_catalog(),
         "audit_question": (
             "Are MPG-001, BRF2-001, and SOR-001 fresh signal gates "
-            "production-grade strict or suitable for bounded 30U trial-grade?"
+            "production-grade strict or suitable for controlled subaccount trial-grade?"
         ),
         "strategy_group_rows": strategy_rows,
         "summary": summary,
         "hard_safety_gate_list": HARD_SAFETY_GATES,
         "live_trial_policy_update": {
-            "scope": "30U_bounded_trial_only",
+            "scope": "controlled_subaccount_live_scope",
             "does_not_change_production_grade_authority": True,
             "does_not_expand_live_profile": True,
             "does_not_change_order_sizing_defaults": True,
@@ -313,7 +313,7 @@ def _strategy_audit_row(
             replay_projection=replay_projection,
         ),
         "authority_boundary": {
-            "trial_grade_signal_can_prepare_30u_trial": True,
+            "trial_grade_signal_can_prepare_controlled_live": True,
             "trial_grade_signal_can_bypass_hard_safety_gates": False,
             "replay_or_proxy_counts_are_live_signals": False,
         },
@@ -327,8 +327,8 @@ def _signal_grade_catalog() -> dict[str, dict[str, Any]]:
             "use": "record_replay_repair_classifier",
         },
         "trial_grade_signal": {
-            "may_place_order": "only_inside_scoped_small_capital_trial_after_action_time_gates",
-            "use": "enter_30u_bounded_live_trial",
+            "may_place_order": "only_inside_scoped_controlled_subaccount_trial_after_action_time_gates",
+            "use": "enter_controlled_subaccount_live_trial",
         },
         "production_grade_signal": {
             "may_place_order": "yes_after_higher_tier_or_production_policy_and_action_time_gates",
@@ -375,7 +375,7 @@ def _gate_profiles(
                     "short_squeeze_risk_not_red",
                     "strong_reclaim_not_active",
                     "spread_liquidity_not_unknown",
-                    "30U_policy_envelope",
+                    "controlled_subaccount_policy_envelope",
                     "action_time_live_required_facts_before_submit",
                 ],
                 "warnings_allowed": [
@@ -409,7 +409,7 @@ def _gate_profiles(
                     "session_window_matched",
                     "post_open_decay_not_active",
                     "stop_protection_required",
-                    "30U_policy_envelope",
+                    "controlled_subaccount_policy_envelope",
                     "action_time_live_required_facts_before_submit",
                 ],
                 "warnings_allowed": [
@@ -489,7 +489,7 @@ def _trial_gate_diff(strategy_group_id: str, brf2_capture: dict[str, Any]) -> li
             _diff(
                 "session_range_confidence",
                 "production_confidence_and_session_quality_required",
-                "lower_confidence_can_be_warning_inside_30u_trial",
+                "lower_confidence_can_be_warning_inside_controlled_subaccount_trial",
                 "downgrade_to_warning_for_trial",
             ),
             _diff(
@@ -561,9 +561,19 @@ def _risk_envelope(
         policy = _as_dict(brf2_policy.get("policy"))
         return {
             "capital_scope": policy.get("capital_scope")
-            or {"amount": "30", "currency": "USDT", "type": "trial"},
+            or {
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
+                "currency": "USDT",
+            },
             "loss_unit": policy.get("loss_unit")
-            or {"amount": "10", "currency": "USDT", "basis": "30U / 3 attempts"},
+            or {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
             "attempt_cap": _int(policy.get("attempt_cap"), default=3),
             "max_consecutive_losses": _int(
                 policy.get("max_consecutive_losses"), default=2
@@ -580,11 +590,17 @@ def _risk_envelope(
         risk = _as_dict(sor_handoff.get("risk_defaults"))
         return {
             "capital_scope": {
-                "amount": "30",
                 "currency": "USDT",
-                "type": "proposed_trial_only_not_policy_authority",
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
             },
-            "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
             "attempt_cap": 3,
             "max_consecutive_losses": 2,
             "pause_conditions": [
@@ -601,11 +617,17 @@ def _risk_envelope(
     )
     return {
         "capital_scope": {
-            "amount": "30",
             "currency": "USDT",
-            "type": "trial_grade_audit_envelope_not_sizing_default",
+            "type": "isolated_subaccount_full_allocation",
+            "allocation_mode": "full_available_isolated_subaccount",
+            "amount_source": "action_time_exchange_available_balance",
         },
-        "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+        "loss_unit": {
+            "currency": "USDT",
+            "calculation": "action_time_exchange_available_balance / attempt_cap",
+            "balance_source": "action_time_exchange_available_balance",
+            "basis": "controlled subaccount dynamic allocation / attempt cap",
+        },
         "attempt_cap": 3,
         "max_consecutive_losses": 2,
         "pause_conditions": [
@@ -797,7 +819,7 @@ def _tomorrow_assessment(
                 if will_enter
                 else "continue_armed_observation"
             ),
-            "would_enter_30u_trial": will_enter,
+            "would_enter_controlled_live_trial": will_enter,
             "reason": "BRF2 can use BRF short would-enter proxy for trial-grade review, but submit still needs live action-time facts.",
         }
     if strategy_group_id == "SOR-001":
@@ -808,7 +830,7 @@ def _tomorrow_assessment(
                 if replay_ready
                 else "not_proven_until_sor_session_replay_source_exists"
             ),
-            "would_enter_30u_trial": replay_ready,
+            "would_enter_controlled_live_trial": replay_ready,
             "reason": (
                 "SOR replay source now defines trial-grade session trigger behavior; submit still needs live action-time facts."
                 if replay_ready
@@ -817,7 +839,7 @@ def _tomorrow_assessment(
         }
     return {
         "if_same_structure_appears_tomorrow": "enter_trial_only_if_selected_scope_and_action_time_hard_gates_pass",
-        "would_enter_30u_trial": replay_projection["trial_grade_trigger_case_count"] > 0,
+        "would_enter_controlled_live_trial": replay_projection["trial_grade_trigger_case_count"] > 0,
         "reason": "MPG trial-grade can treat false-breakout/fast-reversal risk as envelope risk, not as authority bypass.",
     }
 
@@ -856,7 +878,7 @@ def _summary(strategy_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "hard_safety_gates_relaxed": False,
         "risk_treatment": "strategy_risk_to_envelope_not_generic_blocker",
         "next_engineering_bottleneck": (
-            "convert trial-grade audit into 30U trial admission policy wording "
+            "convert trial-grade audit into controlled subaccount admission policy wording "
             "and runtime trigger calibration without changing production authority."
         ),
     }
@@ -1047,7 +1069,7 @@ def _markdown(audit_artifact: dict[str, Any], output_json: Path) -> str:
         f"- Status: `{audit_artifact['status']}`",
         f"- Generated: `{audit_artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
-        "- Scope: `30U bounded trial only`",
+        "- Scope: `controlled subaccount live scope`",
         "",
         "## Summary",
         "",

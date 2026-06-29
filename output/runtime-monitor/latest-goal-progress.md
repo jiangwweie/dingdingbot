@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Goal Progress
 
-- 报告时间: 2026-06-28T19:22:52.611536+00:00
+- 报告时间: 2026-06-29T11:49:51.126892+00:00
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0 local audit
@@ -146,7 +146,7 @@
 | Owner Visibility Projection | ready | 已就绪 | 保持 Owner 进度层输出，不要求阅读原始证据包 | none |
 | Strategy Review Evidence Projection | ready | 策略政策待确认 | 等待 Owner 策略政策确认，不改变实盘权限 | none |
 | Strategy Review Deep Dive Projection | ready | 六条线等待政策决策 | 等待 Owner 确认六条策略线下一步政策，不改变实盘权限 | none |
-| StrategyGroup Portfolio Projection | ready | 策略组合筛选中 | 继续工程补证队列和 review-only 小资金候选池治理，不改变实盘权限 | none |
+| StrategyGroup Portfolio Projection | ready | 策略组合筛选中 | 继续工程补证队列和 受控实盘候选池治理，不改变实盘权限 | none |
 | Capital Trial Envelope Projection | ready | 资金试验候选准备中 | 保留 BRF2-001 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点 | none |
 | Safety Invariants Projection | ready | 已就绪 | 保持不触发 FinalGate、Operation Layer、exchange write 或订单动作 | none |
 

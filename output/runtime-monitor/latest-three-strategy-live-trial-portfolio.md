@@ -1,8 +1,8 @@
 ## Three Strategy Live Trial Portfolio
 
 - Status: `three_strategy_live_trial_portfolio_ready`
-- Generated: `2026-06-28T19:14:07.802848+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json`
+- Generated: `2026-06-29T11:49:54.079037+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json`
 - Portfolio goal: `at_least_3_live_trial_strategygroups`
 - Seat count: `3`
 - Objective met: `是`
