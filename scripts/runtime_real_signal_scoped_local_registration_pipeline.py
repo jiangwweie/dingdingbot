@@ -135,7 +135,7 @@ def _relay_readiness_evidence_ids(
             "source_readiness_evidence_json": readiness_evidence_json,
             "copied_evidence_ids": copied,
             "missing_evidence_ids_after_relay": missing,
-            "ready_for_operation_layer_evidence_handoff": not missing,
+            "ready_for_operation_layer_evidence_relay": not missing,
             "does_not_create_evidence_ids": True,
         },
     }
@@ -210,15 +210,19 @@ def _operation_layer_evidence_after_local_registration(
 def _fresh_id_hint(readiness_report: dict[str, Any]) -> str:
     preview = readiness_report.get("operator_action_preview")
     candidate_id = None
-    packet_id = None
+    artifact_id = None
     if isinstance(preview, dict):
         candidate_id = preview.get("order_candidate_id")
-        packet_id = preview.get("readiness_packet_id")
+        artifact_id = preview.get("readiness_artifact_id")
     payload = readiness_report.get("api_payload")
     if isinstance(payload, dict):
         candidate_id = candidate_id or payload.get("order_candidate_id")
-        packet_id = packet_id or payload.get("packet_id")
-    raw = str(candidate_id or packet_id or "unknown").strip()
+        artifact_id = (
+            artifact_id
+            or payload.get("readiness_artifact_id")
+            or payload.get("artifact_id")
+        )
+    raw = str(candidate_id or artifact_id or "unknown").strip()
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in raw)
     return f"requested-fresh-submit-authorization-{safe[:160]}"
 
@@ -247,7 +251,7 @@ def _readiness_args(
         runtime_instance_id=args.runtime_instance_id,
         intent_draft_source_json=str(source_path),
         evidence_json=evidence_json,
-        first_real_submit_packet_json=None,
+        first_real_submit_evidence_json=None,
         additional_warning=["rtf020_real_signal_pipeline"],
         additional_blocker=None,
         env_file=args.env_file,
@@ -281,7 +285,7 @@ def _binding_args(
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        handoff_json=str(handoff_path),
+        handoff_artifact_json=str(handoff_path),
         requested_fresh_submit_authorization_id=None,
         allow_create_from_existing_intent=True,
         allow_create_intent_from_latest_draft=True,
@@ -533,7 +537,7 @@ def _build_report(
                 extra_blockers=["readiness_evidence_json_required_after_source_ready"],
             )
 
-        readiness = runtime_persisted_draft_source_readiness_api_flow._build_packet(
+        readiness = runtime_persisted_draft_source_readiness_api_flow._build_artifact(
             _readiness_args(
                 args,
                 source_path=source_path,
@@ -553,7 +557,7 @@ def _build_report(
                 reports=reports,
             )
 
-        handoff = runtime_official_submit_handoff_api_flow._build_packet(
+        handoff = runtime_official_submit_handoff_api_flow._build_artifact(
             _handoff_args(
                 args,
                 readiness_path=readiness_path,

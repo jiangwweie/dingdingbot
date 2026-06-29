@@ -25,7 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 def _load_env() -> None:
     try:
         from dotenv import load_dotenv
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         return
     load_dotenv(REPO_ROOT / ".env")
     load_dotenv(REPO_ROOT / ".env.local", override=True)
@@ -246,7 +246,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
-        choices=["live_market", "local_sqlite_fallback"],
+        choices=["live_market", "local_sqlite_read_only"],
         default="live_market",
         help="Closed-candle read-only market source.",
     )

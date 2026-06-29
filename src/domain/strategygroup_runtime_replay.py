@@ -102,7 +102,7 @@ class ReplayReviewRecommendation(str, Enum):
 class StrategyGroupReplayOwnerSummary(StrategyGroupReplayModel):
     current_state: str = Field(min_length=1, max_length=128)
     owner_intervention_required: Literal[False] = False
-    next_action: str = Field(min_length=1, max_length=256)
+    non_authority_checkpoint: str = Field(min_length=1, max_length=256)
     summary_lines: list[str] = Field(default_factory=list)
 
 
@@ -1369,7 +1369,7 @@ def post_submit_simulator_matrix() -> list[StrategyGroupPostSubmitSimulatorCase]
     ]
 
 
-def build_mpg001_replay_lab_packet(
+def build_mpg001_replay_lab_report(
     *, generated_at_ms: int
 ) -> StrategyGroupReplayReport:
     replay_samples = mpg001_replay_corpus(observed_at_ms=generated_at_ms)
@@ -1561,8 +1561,12 @@ def build_mpg001_replay_lab_packet(
         checks=checks,
         blockers=blockers,
         owner_summary=StrategyGroupReplayOwnerSummary(
-            current_state="P0.5 replay_ready" if status == "passed" else "P0.5 replay_blocked",
-            next_action=(
+            current_state=(
+                "signal_observation_replay_ready"
+                if status == "passed"
+                else "signal_observation_replay_blocked"
+            ),
+            non_authority_checkpoint=(
                 "Use replay/synthetic rehearsal while P0 waits for a real fresh signal."
             ),
             summary_lines=[

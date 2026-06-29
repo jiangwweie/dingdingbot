@@ -24,7 +24,7 @@ FinalGate.
 
 `BTPC-001` is imported for L2 non-executing shadow-candidate observation.
 These facts do not authorize `FinalGate`, `Operation Layer`, or real orders.
-They define the minimum facts required before a BTPC shadow-candidate packet can
+They define the minimum facts required before BTPC shadow-candidate evidence can
 be prepared for review.
 
 | RequiredFact | Class | Current Main-Control Meaning | Missing Behavior |

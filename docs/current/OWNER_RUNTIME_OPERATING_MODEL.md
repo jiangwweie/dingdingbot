@@ -24,7 +24,7 @@ The global authority model is:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
@@ -33,12 +33,12 @@ Review updates strategy governance.
 | Strategy policy | Enable, pause, resume, promote, downshift, park, kill, or accept scoped strategy risk | Maintain registry, tier state, and decision evidence |
 | Runtime scope | Allocate subaccount risk budget, profile, symbol/side scope, and production-stage transition | Enforce selected scope without hidden de-risking |
 | Normal process | Supervise status and intervene only when requested | Observe, check, prepare, submit through official path, protect, reconcile, settle, and record |
-| Actionability | Cannot hand-set `actionable_now=true` | Derive `actionable_now` from fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account, and exchange facts |
+| Runtime authority | Cannot hand-grant runtime trade/order authority | Produce Tradeability Decision from asset, policy, fact, signal, and gate inputs; produce Runtime Safety State from live-submit safety inputs |
 
 The Owner can decide that a risky StrategyGroup deserves higher or lower tier
 eligibility. The Owner should not be turned into the operator who manually
 assembles facts, validates every signal, approves every in-boundary candidate,
-or reads raw packets before routine process execution can continue.
+or reads raw evidence artifacts before routine process execution can continue.
 
 ## Owner Decisions
 
@@ -114,12 +114,12 @@ authorization and not automatic strategy disqualification. The system should
 advance experiment-worthy strategy assets when their thesis, failure modes, risk
 envelope, replay or paper evidence, and main-control absorption route are clear.
 
-Strategy tradeability follows `docs/current/TRADEABILITY_VERDICT_CONTRACT.md`.
+Strategy tradeability follows `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
 The Owner-facing system must make the difference between these states explicit:
 
 | State | Meaning | Owner role |
 | --- | --- | --- |
-| `can_trade_now` | Runtime has a current actionable signal and official gates may proceed | Supervise status |
+| `trade_allowed_now` | Tradeability Decision and Runtime Safety State allow the official path to proceed | Supervise status |
 | `market_wait` | Strategy is admitted and ready enough, but no fresh signal exists | No action |
 | `asset_admission_gap` | Strategy is promising but not yet a final-owned trial/runtime asset | Review admission only when policy is needed |
 | `policy_gap` | Capital, profile, symbol/side, leverage scenario, attempt cap, or tier decision is missing | Decide scoped policy |
@@ -147,15 +147,15 @@ no-action / would-enter observation
 ```
 
 This is not Owner-operated trading. It is system learning. The Owner should not
-manually interpret raw no-action packets, replay files, or RequiredFacts gaps in
+manually interpret raw no-action evidence, replay files, or RequiredFacts gaps in
 normal operation.
 
-The pre-live learning record is the StrategyGroup Decision Ledger. Its
-compatibility path remains `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md`.
-The post-action record remains the Review Ledger. Both are review artifacts;
-neither bypasses the official live path. The pre-live ledger is not a general
-opportunity log; it records only high-priority observations that change a
-StrategyGroup decision.
+The current pre-live strategy-decision source is Strategy Asset State.
+`docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` is the current Strategy
+Asset State pre-live evidence contract. The post-action record remains the
+Review Ledger. Both are review artifacts; neither bypasses the official live
+path. Pre-live evidence is not a general opportunity log; it records only
+high-priority observations that change a StrategyGroup decision.
 
 ## Owner-Facing State
 
@@ -172,7 +172,7 @@ The Owner should see product states:
 | `paused` | Owner or system pause is active |
 | `completed` | The latest run is settled and recorded |
 
-Raw evidence packets remain available for audit but are not the Owner's daily
+Raw evidence artifacts remain available for audit but are not the Owner's daily
 operating interface.
 
 ## Strategy Asset Layer
@@ -181,15 +181,18 @@ The StrategyGroup asset layer is the registry, not the runtime state. The
 registry explains what a StrategyGroup eats, how it trades, what risks remain,
 and what would promote, downshift, park, or kill it.
 
-`trial_eligible` and `actionable_now` must stay separate:
+`trial_eligible`, Tradeability Decision, and Runtime Safety State must stay
+separate:
 
-| Field | Owner meaning |
+| Boundary | Owner meaning |
 | --- | --- |
 | `trial_eligible` | This StrategyGroup may be considered for small-capital trial eligibility under scoped policy |
-| `actionable_now` | Fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account, and exchange facts currently allow action |
+| Tradeability Decision | The only read model that answers whether the StrategyGroup can trade now and identifies the first blocker |
+| Runtime Safety State | The only runtime safety read model that says whether the official live-submit path is currently safe enough to proceed |
 
-No fresh signal makes `actionable_now=false`. It does not automatically make
-the StrategyGroup a bad strategy or remove its trial eligibility.
+No fresh signal makes the Tradeability Decision report market wait. It does not
+automatically make the StrategyGroup a bad strategy or remove its trial
+eligibility.
 
 `tiny_live_intake_candidate` and `tiny_live_ready` must also stay separate:
 
@@ -203,7 +206,7 @@ the StrategyGroup a bad strategy or remove its trial eligibility.
 
 Owner approval may move a strategy through policy-dependent stages. It cannot
 turn research evidence, intake status, or tiny-live readiness into current
-`actionable_now`.
+runtime trade/order authority.
 
 ## Runtime Product State
 
@@ -213,7 +216,7 @@ product state after each watcher tick:
 ```text
 watcher tick
 -> signed GET-only live facts
--> StrategyGroup readiness packet
+-> StrategyGroup readiness state
 -> runtime pilot product state
 -> notification only when state materially changes
 ```
@@ -234,7 +237,7 @@ Main Owner screens should avoid internal gate names. Use terse language:
 | blocker code | Details only |
 | reconciliation mismatch | 订单结果不一致，等待系统处理 |
 
-If everything is healthy, the UI should say `运行中`, `等待机会`, or `无需操作`.
+If everything is healthy, the Owner product surface should say `运行中`, `等待机会`, or `无需操作`.
 Do not show a next-step prompt for healthy automation.
 
 ## Document Authority

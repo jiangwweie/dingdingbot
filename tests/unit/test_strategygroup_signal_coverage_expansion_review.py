@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
@@ -105,7 +106,7 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     module = _load_module()
 
     packet = module.build_signal_coverage_expansion_review(
-        signal_coverage_packet=_signal_coverage(),
+        signal_coverage_artifact=_signal_coverage(),
         tier_policy=_tier_policy(),
         expansion_policy=_expansion_policy(),
     )
@@ -120,9 +121,12 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["mutates_remote_files"] is False
     assert packet["interaction"]["approaches_real_order"] is False
-    assert packet["decision"]["observation_scope_review_recommended"] is True
-    assert packet["decision"]["real_order_scope_change_recommended"] is False
-    assert packet["decision"]["l4_promotion_recommended"] is False
+    assert "decision" not in packet
+    review_outcome = packet["review_outcome_state"]
+    assert review_outcome["observation_scope_review_recommended"] is True
+    assert review_outcome["real_order_scope_change_recommended"] is False
+    assert review_outcome["l4_promotion_recommended"] is False
+    assert review_outcome["tradeability_decision_source"] is False
     rows = {row["strategy_group_id"]: row for row in packet["review_rows"]}
     assert rows["BTPC-001"]["current_tier"] == "L1"
     assert rows["BTPC-001"]["coverage_review_priority"] == "P0_5"
@@ -136,9 +140,11 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
         "observe-only; no candidate/order"
     )
     assert rows["BTPC-001"]["may_place_real_order_after_this_review"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["changes_tier_policy"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["tier_policy_changed"] is False
+    assert "operator_command_plan" not in packet
     assert packet["safety_invariants"]["does_not_expand_l4_real_order_scope"] is True
+    assert "execution_intent_created" not in packet["safety_invariants"]
 
 
 def test_expansion_review_records_p2_parked_signal_without_priority_review():
@@ -157,7 +163,7 @@ def test_expansion_review_records_p2_parked_signal_without_priority_review():
     tier_policy["new_strategy_group_defaults"]["known_new_groups"]["RBR"] = "L1"
 
     packet = module.build_signal_coverage_expansion_review(
-        signal_coverage_packet=signal_coverage,
+        signal_coverage_artifact=signal_coverage,
         tier_policy=tier_policy,
         expansion_policy=_expansion_policy(),
     )
@@ -167,9 +173,11 @@ def test_expansion_review_records_p2_parked_signal_without_priority_review():
     assert packet["counts"]["review_row_count"] == 1
     assert packet["counts"]["actionable_review_row_count"] == 0
     assert packet["counts"]["low_priority_or_parked_review_row_count"] == 1
-    assert packet["decision"]["observation_scope_review_recommended"] is False
-    assert packet["decision"]["low_priority_observation_recorded"] is True
-    assert packet["decision"]["real_order_scope_change_recommended"] is False
+    assert "decision" not in packet
+    review_outcome = packet["review_outcome_state"]
+    assert review_outcome["observation_scope_review_recommended"] is False
+    assert review_outcome["low_priority_observation_recorded"] is True
+    assert review_outcome["real_order_scope_change_recommended"] is False
     row = packet["review_rows"][0]
     assert row["strategy_group_id"] == "RBR-001"
     assert row["coverage_review_priority"] == "P2"
@@ -187,9 +195,10 @@ def test_expansion_review_records_p2_parked_signal_without_priority_review():
     role = packet["role_review_rows"][0]
     assert role["source_observation_strategy_group_id"] == "RBR-001"
     assert role["linked_intake_strategy_group_id"] == "RBR2-001"
+    assert "role_review_decision" not in role
+    assert role["role_review_outcome"] == "review_range_detector_role_not_live_candidate"
     assert role["authority_boundary"] == (
-        "role_review_only; actionable_now=false; "
-        "real_order_authority=false; no_finalgate_no_operation_layer"
+        "role_review_only; no_finalgate_no_operation_layer; no_exchange_write"
     )
 
 
@@ -226,7 +235,7 @@ def test_expansion_review_records_high_priority_no_action_attribution_queue():
     ]
 
     packet = module.build_signal_coverage_expansion_review(
-        signal_coverage_packet=signal_coverage,
+        signal_coverage_artifact=signal_coverage,
         tier_policy=_tier_policy(),
         expansion_policy=_expansion_policy(),
     )
@@ -236,8 +245,11 @@ def test_expansion_review_records_high_priority_no_action_attribution_queue():
     assert queue["BRF-001"]["attribution_class"] == "market_structure_or_path_risk"
     assert queue["BTPC-001"]["attribution_class"] == "fact_source_or_freshness"
     assert queue["BRF-001"]["authority_boundary"] == (
-        "no_action_attribution_only; actionable_now=false; "
-        "real_order_authority=false"
+        "no_action_attribution_only; no_finalgate_no_operation_layer; "
+        "no_exchange_write"
+    )
+    assert packet["observation_layer"]["signal_observation_state"] == (
+        "observation_active"
     )
 
 
@@ -245,27 +257,70 @@ def test_expansion_review_reports_no_review_when_no_broader_signal():
     module = _load_module()
 
     packet = module.build_signal_coverage_expansion_review(
-        signal_coverage_packet=_signal_coverage(would_enter=False),
+        signal_coverage_artifact=_signal_coverage(would_enter=False),
         tier_policy=_tier_policy(),
     )
 
     assert packet["status"] == "no_expansion_review_needed"
     assert packet["owner_state"] == "waiting_for_opportunity"
     assert packet["review_rows"] == []
-    assert packet["decision"]["observation_scope_review_recommended"] is False
+    assert "decision" not in packet
+    assert (
+        packet["review_outcome_state"]["observation_scope_review_recommended"]
+        is False
+    )
 
 
 def test_expansion_review_blocks_forbidden_source_effect():
     module = _load_module()
 
     packet = module.build_signal_coverage_expansion_review(
-        signal_coverage_packet=_signal_coverage(forbidden=True),
+        signal_coverage_artifact=_signal_coverage(forbidden=True),
         tier_policy=_tier_policy(),
     )
 
     assert packet["status"] == "blocked_forbidden_effect"
     assert "source.order" in packet["safety_invariants"]["source_forbidden_effects"]
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
+def test_expansion_review_rejects_source_authority_mirrors():
+    module = _load_module()
+    signal_coverage = deepcopy(_signal_coverage())
+    signal_coverage["checks"]["actionable_now"] = False
+    signal_coverage["broader_observation"]["real_order_authority"] = False
+    signal_coverage["broader_observation"]["would_enter_signals"][0][
+        "actionable_now"
+    ] = False
+    signal_coverage["safety_invariants"]["real_order_authority"] = False
+
+    artifact = module.build_signal_coverage_expansion_review(
+        signal_coverage_artifact=signal_coverage,
+        tier_policy=_tier_policy(),
+        expansion_policy=_expansion_policy(),
+    )
+
+    forbidden = artifact["safety_invariants"]["source_forbidden_effects"]
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert (
+        "signal_coverage.checks.legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert (
+        "signal_coverage.broader_observation."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in forbidden
+    assert (
+        "signal_coverage.would_enter_signals.BTPC-001."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert (
+        "signal_coverage.safety_invariants."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in forbidden
+    assert artifact["review_outcome_state"]["tradeability_decision_source"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["safety_invariants"]["operation_layer_called"] is False
 
 
 def test_expansion_review_cli_writes_json_and_owner_progress(tmp_path, capsys):

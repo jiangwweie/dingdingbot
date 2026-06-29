@@ -25,7 +25,6 @@ from src.domain.bounded_risk_campaign import (
     BrcLlmIntent,
     BrcLlmIntentAction,
     BrcOperatorDecisionResult,
-    BrcReviewDecision,
     BrcWorkflowRun,
     BrcWorkflowStatus,
 )
@@ -96,8 +95,8 @@ class BrcTestnetRehearsalWorkflowResult(BaseModel):
     confirmation_phrase_id: Optional[str] = None
     steps: list[dict[str, Any]] = Field(default_factory=list)
     evidence: Optional[dict[str, Any]] = None
-    review_packet: Optional[dict[str, Any]] = None
-    review_decision: Optional[dict[str, Any]] = None
+    review_artifact: Optional[dict[str, Any]] = None
+    review_outcome: Optional[dict[str, Any]] = None
     mutation_executed: bool = True
     withdrawal_executed: bool = False
     live_ready: bool = False
@@ -169,7 +168,7 @@ def _system_prompt() -> str:
     return (
         "Classify Owner text for a Bounded Risk Campaign operator gateway. "
         "Return JSON only with keys action, confidence, reason_text. Allowed "
-        "actions: read_review_packet, read_next_eligibility, read_evidence, "
+        "actions: read_review_artifact, read_next_eligibility, read_evidence, "
         "request_testnet_rehearsal, unknown. Never choose live/mainnet, "
         "withdrawal, transfer, strategy execution, autonomous order, sizing, "
         "leverage, side, or symbol override."
@@ -378,16 +377,16 @@ class BrcOperatorWorkflow:
         final_inventory: Optional[dict[str, Any]],
         testnet_rehearsal_executor: Optional[Callable[[str], Awaitable[dict[str, Any]]]],
     ) -> dict[str, Any]:
-        if run.action == BrcLlmIntentAction.READ_REVIEW_PACKET:
-            packet = await self._campaign_service.build_review_packet(final_inventory=final_inventory)
-            return {"review_packet": packet.model_dump(mode="json")}
+        if run.action == BrcLlmIntentAction.READ_REVIEW_ARTIFACT:
+            artifact = await self._campaign_service.build_review_artifact(final_inventory=final_inventory)
+            return {"review_artifact": artifact.model_dump(mode="json")}
         if run.action == BrcLlmIntentAction.READ_NEXT_ELIGIBILITY:
             eligibility = await self._campaign_service.evaluate_next_campaign_eligibility(
                 final_inventory=final_inventory,
             )
             return {"eligibility": eligibility.model_dump(mode="json")}
         if run.action == BrcLlmIntentAction.READ_EVIDENCE:
-            evidence = await self._campaign_service.build_latest_evidence_packet()
+            evidence = await self._campaign_service.build_latest_evidence_artifact()
             if final_inventory is not None:
                 evidence["final_inventory"] = final_inventory
             return {"evidence": evidence}
@@ -443,7 +442,7 @@ class BrcOperatorWorkflow:
         if action == BrcLlmIntentAction.UNKNOWN:
             return "BRC LLM intent is unknown"
         if action not in {
-            BrcLlmIntentAction.READ_REVIEW_PACKET,
+            BrcLlmIntentAction.READ_REVIEW_ARTIFACT,
             BrcLlmIntentAction.READ_NEXT_ELIGIBILITY,
             BrcLlmIntentAction.READ_EVIDENCE,
             BrcLlmIntentAction.REQUEST_TESTNET_REHEARSAL,

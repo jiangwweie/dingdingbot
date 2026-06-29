@@ -15,7 +15,7 @@ from src.domain.runtime_active_position_resolution import (
     RuntimeActivePositionResolutionStatus,
 )
 from src.domain.runtime_next_attempt_release import (
-    build_runtime_next_attempt_release_packet,
+    build_runtime_next_attempt_release_evidence,
 )
 
 
@@ -24,14 +24,14 @@ def _write_json(path, value):
 
 
 def _release_report(status, gate):
-    release = build_runtime_next_attempt_release_packet(
+    release = build_runtime_next_attempt_release_evidence(
         active_position_resolution=_resolution(status),
-        next_attempt_gate_packet=gate,
+        next_attempt_gate_evidence=gate,
         now_ms=NOW_MS,
     )
     return {
         "status": release.status.value,
-        "packet": release.model_dump(mode="json"),
+        "release_evidence": release.model_dump(mode="json"),
     }
 
 
@@ -47,7 +47,7 @@ def test_release_rehearsal_calls_planner_when_release_ready(tmp_path):
     )
     _write_json(signal_path, {"signal_input": _signal_input().model_dump(mode="json")})
 
-    packet = runtime_release_strategy_planning_rehearsal_from_reports._build_packet(
+    artifact = runtime_release_strategy_planning_rehearsal_from_reports._build_artifact(
         type(
             "Args",
             (),
@@ -64,12 +64,22 @@ def test_release_rehearsal_calls_planner_when_release_ready(tmp_path):
 
     import asyncio
 
-    result = asyncio.run(packet)
+    result = asyncio.run(artifact)
     assert result["status"] == "ready_for_final_gate_preflight"
     assert result["planner_called"] is True
-    assert result["packet"]["order_candidate_id"] == "rehearsal-order-candidate-eval-fresh"
-    assert result["packet"]["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert result["packet"]["operator_command_plan"]["live_submit_allowed"] is False
+    assert "planning_artifact" in result
+    assert "packet" not in result
+    assert result["planning_artifact"]["order_candidate_id"] == "rehearsal-order-candidate-eval-fresh"
+    assert "operator_command_plan" not in result["planning_artifact"]
+    assert result["planning_artifact"]["strategy_planning_plan"]["creates_shadow_candidate"] is True
+    assert result["planning_artifact"]["strategy_planning_plan"]["live_submit_allowed"] is False
+    assert (
+        result["safety_invariants"][
+            "release_strategy_planning_rehearsal_evidence_only"
+        ]
+        is True
+    )
+    assert "packet_only" not in result["safety_invariants"]
     assert result["safety_invariants"]["pg_write_called"] is False
     assert result["safety_invariants"]["exchange_write_called"] is False
     assert result["safety_invariants"]["order_lifecycle_called"] is False
@@ -90,7 +100,7 @@ def test_release_rehearsal_blocks_before_planner_when_release_blocked(tmp_path):
     import asyncio
 
     result = asyncio.run(
-        runtime_release_strategy_planning_rehearsal_from_reports._build_packet(
+        runtime_release_strategy_planning_rehearsal_from_reports._build_artifact(
             type(
                 "Args",
                 (),
@@ -108,6 +118,13 @@ def test_release_rehearsal_blocks_before_planner_when_release_blocked(tmp_path):
 
     assert result["status"] == "blocked_by_release_gate"
     assert result["planner_called"] is False
-    assert "next_attempt_release_not_ready_for_strategy_signal" in result["packet"]["blockers"]
-    assert result["packet"]["operator_command_plan"]["creates_shadow_candidate"] is False
+    assert "next_attempt_release_not_ready_for_strategy_signal" in result[
+        "planning_artifact"
+    ]["blockers"]
+    assert (
+        result["planning_artifact"]["strategy_planning_plan"][
+            "creates_shadow_candidate"
+        ]
+        is False
+    )
     assert result["safety_invariants"]["order_created"] is False

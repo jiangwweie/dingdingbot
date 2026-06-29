@@ -75,8 +75,8 @@ class StrategyTrialHardBlocker(BaseModel):
     source: str
 
 
-class OwnerReviewPacket(BaseModel):
-    packet_id: str
+class OwnerReviewArtifact(BaseModel):
+    artifact_id: str
     carrier: StrategyTrialCarrierView
     testnet_rehearsal_result: Literal["completed_with_valid_protection"]
     testnet_rehearsal_evidence: dict[str, str | bool]
@@ -148,7 +148,7 @@ class StrategyTrialArchitectureGovernanceResponse(BaseModel):
         "strategy_trial_architecture_governance_blocked_with_explicit_hard_blockers",
     ]
     bnb_state: Literal["bnb_first_carrier_consolidated"]
-    owner_review_packet: OwnerReviewPacket
+    owner_review_artifact: OwnerReviewArtifact
     authorization_draft: BoundedLiveTrialAuthorizationDraft
     minimal_live_trial_gate: MinimalLiveTrialGateResult
     architecture_classification: list[StrategyTrialArchitectureClassification]
@@ -204,8 +204,8 @@ def build_bnb_strategy_trial_architecture_governance(
     return StrategyTrialArchitectureGovernanceResponse(
         final_state=final_state,
         bnb_state="bnb_first_carrier_consolidated",
-        owner_review_packet=OwnerReviewPacket(
-            packet_id="MI-001-BNB-LONG-owner-live-review-packet-v1",
+        owner_review_artifact=OwnerReviewArtifact(
+            artifact_id="MI-001-BNB-LONG-owner-live-review-artifact-v1",
             carrier=carrier,
             testnet_rehearsal_result="completed_with_valid_protection",
             testnet_rehearsal_evidence=_testnet_rehearsal_evidence(),
@@ -235,8 +235,8 @@ def build_bnb_strategy_trial_architecture_governance(
         ],
         technical_debt_later=[
             "Controlled testnet runtime endpoints remain BNB-first allowlisted",
-            "Governance response remains a static review packet; Owner trial-flow endpoints persist acknowledgement and draft metadata",
-            "Owner Console can consume the governance API before a polished live packet UI",
+            "Governance response remains a static review artifact; Owner trial-flow endpoints persist acknowledgement and draft metadata",
+            "Owner Console can consume the governance API before a polished live artifact readmodel",
         ],
     )
 

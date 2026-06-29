@@ -1,8 +1,8 @@
 """Runtime execution plan draft models.
 
-These models bridge OrderCandidate review toward ExecutionIntent creation, but
-remain non-executable. They do not create ExecutionIntent records, orders, or
-exchange requests.
+These models turn OrderCandidate review into non-executable plan and intent
+drafts. They do not create ExecutionIntent records, orders, or exchange
+requests.
 """
 
 from __future__ import annotations

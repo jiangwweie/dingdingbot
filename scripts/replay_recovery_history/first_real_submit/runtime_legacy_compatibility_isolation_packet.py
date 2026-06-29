@@ -20,11 +20,11 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 
 
 MAINLINE_ARTIFACTS = (
-    "scripts/runtime_controlled_tiny_live_bridge_readiness_packet.py",
-    "scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py",
-    "scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py",
+    "scripts/runtime_controlled_tiny_live_readiness_projection.py",
+    "scripts/runtime_controlled_tiny_live_readiness_to_preflight_proof.py",
+    "scripts/runtime_controlled_tiny_live_readiness_to_local_cycle_proof.py",
     "scripts/runtime_live_continuation_refresh_flow.py",
-    "scripts/runtime_live_continuation_selector_packet.py",
+    "scripts/runtime_live_continuation_selector_projection.py",
     "scripts/runtime_official_prepare_api_flow.py",
     "scripts/runtime_official_flat_next_attempt_end_to_end_proof.py",
     "scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py",
@@ -32,8 +32,8 @@ MAINLINE_ARTIFACTS = (
 )
 
 STANDING_RECOVERY_PROOF_ARTIFACTS = (
-    "scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py",
-    "scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py",
+    "scripts/runtime_controlled_tiny_live_readiness_to_preflight_proof.py",
+    "scripts/runtime_controlled_tiny_live_readiness_to_local_cycle_proof.py",
 )
 
 LEGACY_COMPATIBILITY_ARTIFACTS = (
@@ -210,7 +210,7 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
             ),
         },
         "safety_invariants": {
-            "packet_only": True,
+            "legacy_compatibility_evidence_only": True,
             "pg_read": False,
             "pg_write": False,
             "api_called": False,

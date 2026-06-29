@@ -78,7 +78,7 @@ def _waiting_observation():
         "signal_input_json": "/tmp/signal.json",
         "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
         "warnings": ["observe"],
-        "operator_command_plan": {
+        "api_prepare_plan": {
             "creates_shadow_candidate": False,
         },
         "safety_invariants": {
@@ -99,7 +99,7 @@ def _ready_observation_without_records():
         "signal_input_json": "/tmp/ready-signal.json",
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {
+        "api_prepare_plan": {
             "next_step": "rerun_with_allow_prepare_records_under_standing_authorization",
             "creates_shadow_candidate": False,
         },
@@ -119,14 +119,14 @@ def _prepared_observation():
         "scope": "runtime_next_attempt_observation_api_prepare_flow",
         "status": "ready_for_final_gate_preflight",
         "signal_input_json": "/tmp/ready-signal.json",
-        "prepare_packet": {
-            "operator_command_plan": {
+        "prepare_artifact": {
+            "prepare_artifact_plan": {
                 "prepared_authorization_id": "auth-prepared-1",
             },
         },
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {
+        "api_prepare_plan": {
             "prepared_authorization_id": "auth-prepared-1",
             "creates_shadow_candidate": True,
         },
@@ -148,7 +148,7 @@ def _prepared_observation():
 def test_fresh_signal_loop_blocks_before_observation_when_post_submit_not_ready(tmp_path):
     observation_calls = []
 
-    packet = runtime_fresh_signal_prepare_loop._build_packet(
+    artifact = runtime_fresh_signal_prepare_loop._build_artifact(
         _args(tmp_path),
         finalize_builder=lambda args: {
             "status": "finalized_next_attempt_blocked",
@@ -159,59 +159,59 @@ def test_fresh_signal_loop_blocks_before_observation_when_post_submit_not_ready(
         observation_builder=lambda args: observation_calls.append(args),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "post_submit_finalize"
-    assert packet["blockers"] == ["runtime_active_position_slot_in_use"]
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "post_submit_finalize"
+    assert artifact["blockers"] == ["runtime_active_position_slot_in_use"]
     assert observation_calls == []
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["fresh_signal_prepare_plan"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_fresh_signal_loop_waits_after_post_submit_ready(tmp_path):
     finalize_calls = []
     observation_calls = []
 
-    packet = runtime_fresh_signal_prepare_loop._build_packet(
+    artifact = runtime_fresh_signal_prepare_loop._build_artifact(
         _args(tmp_path),
         finalize_builder=lambda args: finalize_calls.append(args) or _ready_post_submit(),
         observation_builder=lambda args: observation_calls.append(args)
         or _waiting_observation(),
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["blockers"] == [
+    assert artifact["status"] == "waiting_for_signal"
+    assert artifact["blockers"] == [
         "strategy_signal_not_ready_for_shadow_candidate_prepare"
     ]
     assert finalize_calls[0].reservation_id is None
     assert observation_calls[0].allow_prepare_records is False
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["fresh_signal_prepare_plan"]["next_step"] == (
         "continue_observation_until_fresh_runtime_signal"
     )
-    assert packet["safety_invariants"]["prepare_records_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["prepare_records_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_fresh_signal_loop_reports_ready_without_creating_records(tmp_path):
-    packet = runtime_fresh_signal_prepare_loop._build_packet(
+    artifact = runtime_fresh_signal_prepare_loop._build_artifact(
         _args(tmp_path),
         finalize_builder=lambda args: _ready_post_submit(),
         observation_builder=lambda args: _ready_observation_without_records(),
     )
 
-    assert packet["status"] == "ready_for_prepare"
-    assert packet["signal_input_json"] == "/tmp/ready-signal.json"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "ready_for_prepare"
+    assert artifact["signal_input_json"] == "/tmp/ready-signal.json"
+    assert artifact["fresh_signal_prepare_plan"]["next_step"] == (
         "rerun_with_allow_prepare_records_under_standing_authorization"
     )
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["safety_invariants"]["prepare_records_created"] is False
+    assert artifact["fresh_signal_prepare_plan"]["creates_shadow_candidate"] is False
+    assert artifact["fresh_signal_prepare_plan"]["places_order"] is False
+    assert artifact["safety_invariants"]["prepare_records_created"] is False
 
 
 def test_fresh_signal_loop_can_create_prepare_records_only_when_allowed(tmp_path):
     observation_calls = []
 
-    packet = runtime_fresh_signal_prepare_loop._build_packet(
+    artifact = runtime_fresh_signal_prepare_loop._build_artifact(
         _args(tmp_path, allow_prepare_records=True),
         finalize_builder=lambda args: _ready_post_submit(),
         observation_builder=lambda args: observation_calls.append(args)
@@ -219,25 +219,25 @@ def test_fresh_signal_loop_can_create_prepare_records_only_when_allowed(tmp_path
     )
 
     assert observation_calls[0].allow_prepare_records is True
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["prepared_authorization_id"] == "auth-prepared-1"
-    assert packet["operator_command_plan"]["requires_official_final_gate"] is True
-    assert packet["operator_command_plan"]["creates_executable_execution_intent"] is False
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_created"] is False
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["prepared_authorization_id"] == "auth-prepared-1"
+    assert artifact["fresh_signal_prepare_plan"]["requires_official_final_gate"] is True
+    assert artifact["fresh_signal_prepare_plan"]["creates_executable_execution_intent"] is False
+    assert artifact["safety_invariants"]["prepare_records_created"] is True
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
 
 
 def test_fresh_signal_loop_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy loop")
         return {"status": "waiting_for_signal", "ok": True}
 
     monkeypatch.setattr(
         runtime_fresh_signal_prepare_loop,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,

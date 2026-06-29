@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the local BRF/LSR/VCB post-revision replay review packet.
+"""Build the local BRF/LSR/VCB post-revision replay review artifact.
 
 This review executes deterministic local evaluator fixtures after the BRF/LSR/VCB
 classifier revisions. It proves the revised classifiers can distinguish
@@ -33,6 +33,12 @@ from src.domain.strategy_family_signal import (  # noqa: E402
     SignalSide,
     SignalType,
     StrategyFamilySignalInput,
+)
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_boundary,
+    review_outcome_default_next_step,
+    review_outcome_state_boundary,
 )
 
 
@@ -155,16 +161,9 @@ def build_post_revision_replay_review() -> dict[str, Any]:
         "schema": "brc.strategygroup_post_revision_replay_review.v1",
         "scope": "strategygroup_post_revision_replay_review",
         "status": status,
-        "interaction": {
-            "level": "L0_local_post_revision_replay_review",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_post_revision_replay_review"
+        ),
         "counts": {
             "review_case_count": len(rows),
             "passed_case_count": len(rows) - len(failed_rows),
@@ -178,7 +177,6 @@ def build_post_revision_replay_review() -> dict[str, Any]:
             "disable_or_no_action_case_count": sum(
                 1 for row in rows if row["observed_signal_type"] == "no_action"
             ),
-            "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
         },
         "checks": {
@@ -207,64 +205,68 @@ def build_post_revision_replay_review() -> dict[str, Any]:
                 rows, "VCB-001", "volume_expansion_missing_disabled"
             ),
             "no_case_authorizes_execution": all(
-                row["real_order_authority"] is False
-                and row["candidate_or_finalgate_authority"] is False
+                row["candidate_or_finalgate_authority"] is False
                 and row["operation_layer_authority"] is False
                 for row in rows
             ),
         },
         "review_rows": rows,
-        "decision": {
-            "post_revision_replay_review_passed": status == "passed",
-            "l2_promotion_recommended_now": False,
-            "l4_scope_change_recommended": False,
-            "real_order_scope_change_recommended": False,
-            "default_next_step": (
-                "record_brf001_lsr001_vcb001_post_revision_quality_before_l2"
-                if status == "passed"
-                else "repair_brf001_lsr001_vcb001_post_revision_replay_failures"
+        "review_outcome_state": review_outcome_state_boundary(
+            source_role="post_revision_replay_review_provenance",
+            review_scope="post_revision_replay_review",
+            extra={
+                "post_revision_replay_review_passed": status == "passed",
+                "l2_promotion_recommended_now": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+                "default_next_step": (
+                    "record_brf001_lsr001_vcb001_post_revision_quality_before_l2"
+                    if status == "passed"
+                    else "repair_brf001_lsr001_vcb001_post_revision_replay_failures"
+                ),
+            },
+        ),
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=("local_post_revision_review_only",),
+            false_keys=(
+                "server_interaction",
+                "server_files_mutated",
+                "strategy_parameters_changed",
+                "tier_policy_changed",
+                "l2_promotion_authorized",
+                "l4_real_order_scope_expanded",
+                "shadow_candidate_created",
+                "final_gate_called",
+                "operation_layer_called",
+                "order_created",
+                "order_lifecycle_called",
+                "exchange_write_called",
+                "withdrawal_or_transfer_created",
             ),
-        },
-        "safety_invariants": {
-            "local_post_revision_review_only": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "strategy_parameters_changed": False,
-            "tier_policy_changed": False,
-            "l2_promotion_authorized": False,
-            "l4_real_order_scope_expanded": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-        },
+            include_source_forbidden_effects=False,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
     lines = [
         "# BRF/LSR/VCB Post-Revision Replay Review",
         "",
         "## Summary",
         "",
-        f"- Status: `{packet.get('status')}`",
-        f"- Review cases: `{_as_dict(packet.get('counts')).get('review_case_count', 0)}`",
-        f"- Passed: `{_as_dict(packet.get('counts')).get('passed_case_count', 0)}`",
+        f"- Status: `{artifact.get('status')}`",
+        f"- Review cases: `{_as_dict(artifact.get('counts')).get('review_case_count', 0)}`",
+        f"- Passed: `{_as_dict(artifact.get('counts')).get('passed_case_count', 0)}`",
         "- L2 promotion authority: `false`",
         "- L4 scope change: `false`",
-        "- Real order authority: `false`",
         "",
         "## Review Rows",
         "",
-        _review_table(_dict_rows(packet.get("review_rows"))),
+        _review_table(_dict_rows(artifact.get("review_rows"))),
         "",
         "## Next",
         "",
-        f"- `{_as_dict(packet.get('decision')).get('default_next_step')}`",
+        f"- `{review_outcome_default_next_step(artifact)}`",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -313,7 +315,6 @@ def _review_case(
         "price_action_structure": _as_dict(evidence.get("price_action_structure")),
         "short_squeeze_risk": _as_dict(evidence.get("short_squeeze_risk")),
         "passed": passed,
-        "real_order_authority": False,
         "candidate_or_finalgate_authority": False,
         "operation_layer_authority": False,
         "l2_promotion_authority": False,
@@ -549,8 +550,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
 
-    packet = build_post_revision_replay_review()
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    artifact = build_post_revision_replay_review()
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -558,9 +559,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] == "passed" else 2
+    return 0 if artifact["status"] == "passed" else 2
 
 
 if __name__ == "__main__":

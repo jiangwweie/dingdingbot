@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Classify a live next-attempt gate blocker from existing evidence.
 
-RTF-095 consumes the RTF-094 live-attempt readiness packet plus an optional
-read-only live-position monitor packet.  It never calls PG, exchange,
+RTF-095 consumes the RTF-094 live-attempt readiness evidence plus an optional
+read-only live-position monitor projection. It never calls PG, exchange,
 OrderLifecycle, or runtime mutation services.  Its purpose is to decide whether
 ``next_attempt_gate_blocked`` is a real active-position slot, a stale/unknown
 projection issue, or a missing-facts problem.
@@ -51,9 +51,9 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
 
 
 def _runtime_row(
-    readiness_packet: dict[str, Any], runtime_instance_id: str
+    readiness_artifact: dict[str, Any], runtime_instance_id: str
 ) -> dict[str, Any] | None:
-    rows = readiness_packet.get("runtime_readiness")
+    rows = readiness_artifact.get("runtime_readiness")
     if not isinstance(rows, list):
         return None
     for row in rows:
@@ -65,21 +65,21 @@ def _runtime_row(
     return None
 
 
-def _position_packet(live_position_monitor: dict[str, Any] | None) -> dict[str, Any]:
+def _position_artifact(live_position_monitor: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(live_position_monitor, dict):
         return {}
-    packet = live_position_monitor.get("packet")
-    if isinstance(packet, dict):
-        return packet
+    artifact = live_position_monitor.get("artifact")
+    if isinstance(artifact, dict):
+        return artifact
     return live_position_monitor
 
 
 def _forbidden_effects(
-    readiness_packet: dict[str, Any],
+    readiness_artifact: dict[str, Any],
     live_position_monitor: dict[str, Any] | None,
 ) -> dict[str, bool]:
     effects: dict[str, bool] = {key: False for key in FORBIDDEN_EFFECT_KEYS}
-    safety = readiness_packet.get("safety_invariants")
+    safety = readiness_artifact.get("safety_invariants")
     if isinstance(safety, dict):
         nested = safety.get("forbidden_effects")
         if isinstance(nested, dict):
@@ -111,15 +111,17 @@ def _has_next_attempt_gate_blocker(row: dict[str, Any] | None) -> bool:
     return "next_attempt_gate_blocked" in set(row.get("blockers") or [])
 
 
-def _active_slot_in_use(packet: dict[str, Any]) -> bool:
-    if bool(packet.get("active_position_present")):
+def _active_slot_in_use(position_artifact: dict[str, Any]) -> bool:
+    if bool(position_artifact.get("active_position_present")):
         return True
-    blockers = set(packet.get("blockers") or [])
+    blockers = set(position_artifact.get("blockers") or [])
     if "runtime_max_active_positions_in_use" in blockers:
         return True
-    local_count = _int_value(packet.get("local_active_position_count"))
-    exchange_count = _int_value(packet.get("exchange_active_position_count"))
-    max_active = _int_value(packet.get("max_active_positions"))
+    local_count = _int_value(position_artifact.get("local_active_position_count"))
+    exchange_count = _int_value(
+        position_artifact.get("exchange_active_position_count")
+    )
+    max_active = _int_value(position_artifact.get("max_active_positions"))
     if max_active is None:
         max_active = 1
     return bool(
@@ -128,18 +130,20 @@ def _active_slot_in_use(packet: dict[str, Any]) -> bool:
     )
 
 
-def _flat_position(packet: dict[str, Any]) -> bool:
-    if bool(packet.get("active_position_present")):
+def _flat_position(position_artifact: dict[str, Any]) -> bool:
+    if bool(position_artifact.get("active_position_present")):
         return False
-    local_count = _int_value(packet.get("local_active_position_count"))
-    exchange_count = _int_value(packet.get("exchange_active_position_count"))
+    local_count = _int_value(position_artifact.get("local_active_position_count"))
+    exchange_count = _int_value(
+        position_artifact.get("exchange_active_position_count")
+    )
     return local_count == 0 and exchange_count == 0
 
 
 def _classification_status(
     *,
     row: dict[str, Any] | None,
-    position_packet: dict[str, Any],
+    position_artifact: dict[str, Any],
     forbidden_effects: dict[str, bool],
 ) -> str:
     if any(forbidden_effects.values()):
@@ -148,18 +152,18 @@ def _classification_status(
         return "gate_blocker_classification_runtime_not_monitored"
     if not _has_next_attempt_gate_blocker(row):
         return "gate_blocker_classification_no_next_attempt_gate_blocker"
-    if not position_packet:
+    if not position_artifact:
         return "gate_blocker_classification_missing_position_facts"
-    if _active_slot_in_use(position_packet):
+    if _active_slot_in_use(position_artifact):
         return "gate_blocked_by_active_position_slot"
-    if _flat_position(position_packet):
+    if _flat_position(position_artifact):
         return "gate_blocked_by_stale_or_unresolved_next_attempt_projection"
     return "gate_blocked_by_unknown_position_state"
 
 
-def _operator_plan(status: str, position_packet: dict[str, Any]) -> dict[str, Any]:
-    hard_stop = bool(position_packet.get("hard_stop_boundary_present"))
-    can_continue = bool(position_packet.get("can_continue_holding"))
+def _operator_plan(status: str, position_artifact: dict[str, Any]) -> dict[str, Any]:
+    hard_stop = bool(position_artifact.get("hard_stop_boundary_present"))
+    can_continue = bool(position_artifact.get("can_continue_holding"))
     if status == "gate_blocked_by_active_position_slot":
         if hard_stop and can_continue:
             next_step = "continue_read_only_position_monitoring_until_flat_or_signal_exit"
@@ -196,21 +200,21 @@ def _operator_plan(status: str, position_packet: dict[str, Any]) -> dict[str, An
     }
 
 
-def build_classification_packet(
+def build_classification_artifact(
     *,
-    readiness_packet: dict[str, Any],
+    readiness_artifact: dict[str, Any],
     runtime_instance_id: str,
     live_position_monitor: dict[str, Any] | None = None,
     deployed_head: str | None = None,
     release_name: str | None = None,
     remote_report_path: str | None = None,
 ) -> dict[str, Any]:
-    row = _runtime_row(readiness_packet, runtime_instance_id)
-    position = _position_packet(live_position_monitor)
-    effects = _forbidden_effects(readiness_packet, live_position_monitor)
+    row = _runtime_row(readiness_artifact, runtime_instance_id)
+    position = _position_artifact(live_position_monitor)
+    effects = _forbidden_effects(readiness_artifact, live_position_monitor)
     status = _classification_status(
         row=row,
-        position_packet=position,
+        position_artifact=position,
         forbidden_effects=effects,
     )
     warnings = []
@@ -226,7 +230,7 @@ def build_classification_packet(
         "scope": "runtime_next_attempt_gate_blocker_classification",
         "status": status,
         "runtime_instance_id": runtime_instance_id,
-        "source_readiness_status": readiness_packet.get("status"),
+        "source_readiness_status": readiness_artifact.get("status"),
         "source_runtime_status": row.get("status") if row else None,
         "has_next_attempt_gate_blocker": _has_next_attempt_gate_blocker(row),
         "blockers": blockers,
@@ -274,7 +278,7 @@ def build_classification_packet(
             ),
         },
         "safety_invariants": {
-            "packet_only": True,
+            "gate_blocker_classification_projection_only": True,
             "no_forbidden_live_side_effects": not any(effects.values()),
             "forbidden_effects": effects,
             "pg_called_by_classifier": False,
@@ -284,7 +288,7 @@ def build_classification_packet(
             "runtime_state_mutated_by_classifier": False,
             "withdrawal_or_transfer_created_by_classifier": False,
         },
-        "operator_command_plan": _operator_plan(status, position),
+        "next_attempt_gate_blocker_plan": _operator_plan(status, position),
         "deployment_context": {
             "deployed_head": deployed_head,
             "release_name": release_name,
@@ -319,8 +323,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_classification_packet(
-        readiness_packet=_read_json(args.readiness_json),
+    artifact = build_classification_artifact(
+        readiness_artifact=_read_json(args.readiness_json),
         runtime_instance_id=args.runtime_instance_id,
         live_position_monitor=(
             _read_json(args.live_position_monitor_json)
@@ -332,9 +336,9 @@ def main(argv: list[str] | None = None) -> int:
         remote_report_path=args.remote_report_path,
     )
     if args.output_json:
-        _write_json(args.output_json, packet)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        _write_json(args.output_json, artifact)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         "gate_blocker_classification_no_next_attempt_gate_blocker",
         "gate_blocked_by_active_position_slot",
     } else 2

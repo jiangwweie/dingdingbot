@@ -6,8 +6,8 @@ import time
 from typing import Any, Protocol
 
 from src.domain.runtime_live_position_monitor import (
-    RuntimeLivePositionMonitorPacket,
-    build_runtime_live_position_monitor_packet,
+    RuntimeLivePositionMonitorArtifact,
+    build_runtime_live_position_monitor_artifact,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
@@ -45,7 +45,7 @@ class ReconciliationServicePort(Protocol):
 
 
 class RuntimeLivePositionMonitorService:
-    """Build post-submit runtime monitor packets from read-only facts.
+    """Build post-submit runtime monitor artifacts from read-only facts.
 
     This service is read-only with respect to execution: it may call repository
     reads and exchange read endpoints, but it never creates/cancels/amends
@@ -67,12 +67,12 @@ class RuntimeLivePositionMonitorService:
         self._exchange_gateway = exchange_gateway
         self._reconciliation_service = reconciliation_service
 
-    async def build_monitor_packet(
+    async def build_monitor_artifact(
         self,
         *,
         runtime_instance_id: str,
         now_ms: int | None = None,
-    ) -> RuntimeLivePositionMonitorPacket:
+    ) -> RuntimeLivePositionMonitorArtifact:
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         get_runtime = getattr(self._runtime_repository, "get_runtime", None)
         if callable(get_runtime):
@@ -116,7 +116,7 @@ class RuntimeLivePositionMonitorService:
             except Exception:
                 reconciliation_result = None
 
-        return build_runtime_live_position_monitor_packet(
+        return build_runtime_live_position_monitor_artifact(
             runtime=runtime,
             local_positions=list(local_positions),
             local_open_orders=list(local_open_orders),

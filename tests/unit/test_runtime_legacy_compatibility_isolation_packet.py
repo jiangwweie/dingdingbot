@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts import runtime_legacy_compatibility_isolation_packet as script
+from scripts import runtime_legacy_compatibility_isolation_evidence as script
 
 
 def _write(root: Path, rel_path: str, text: str = "# test\n") -> None:
@@ -27,8 +27,10 @@ def _write_all_required(root: Path) -> None:
 def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
     _write_all_required(tmp_path)
 
-    packet = script.build_isolation_packet(repo_root=tmp_path)
+    packet = script.build_isolation_evidence(repo_root=tmp_path)
 
+    assert not hasattr(script, "build_isolation_packet")
+    assert packet["scope"] == "runtime_legacy_compatibility_isolation_evidence"
     assert packet["status"] == "legacy_compatibility_isolated_from_runtime_mainline"
     assert packet["blockers"] == []
     assert packet["checks"]["mainline_artifacts_present"] is True
@@ -58,13 +60,15 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
     assert packet["cleanup_policy"]["future_cleanup_required"] is False
     assert packet["cleanup_policy"]["future_archive_hygiene_recommended"] is False
     assert packet["cleanup_policy"]["archive_hygiene_completed"] is True
+    assert packet["safety_invariants"]["legacy_compatibility_evidence_only"] is True
+    assert "packet_only" not in packet["safety_invariants"]
     assert packet["safety_invariants"]["exchange_called"] is False
 
 
 def test_isolation_allows_historical_helper_only_in_neutral_wrapper(tmp_path):
     _write_all_required(tmp_path)
 
-    packet = script.build_isolation_packet(repo_root=tmp_path)
+    packet = script.build_isolation_evidence(repo_root=tmp_path)
 
     assert packet["status"] == "legacy_compatibility_isolated_from_runtime_mainline"
     assert any(
@@ -89,11 +93,14 @@ def test_isolation_blocks_when_mainline_uses_legacy_primary_gate(tmp_path):
     _write_all_required(tmp_path)
     target = tmp_path / script.MAINLINE_ARTIFACTS[0]
     target.write_text(
-        "from scripts.verify_runtime_submit_rehearsal_pre_live_packet import main\n",
+        (
+            "from scripts.verify_runtime_submit_rehearsal_pre_live_"
+            "packet import main\n"
+        ),
         encoding="utf-8",
     )
 
-    packet = script.build_isolation_packet(repo_root=tmp_path)
+    packet = script.build_isolation_evidence(repo_root=tmp_path)
 
     assert packet["status"] == "legacy_compatibility_isolation_blocked"
     assert any(
@@ -108,7 +115,7 @@ def test_isolation_blocks_missing_legacy_artifact(tmp_path):
     missing = tmp_path / script.LEGACY_COMPATIBILITY_ARTIFACTS[0]["history_path"]
     missing.unlink()
 
-    packet = script.build_isolation_packet(repo_root=tmp_path)
+    packet = script.build_isolation_evidence(repo_root=tmp_path)
 
     assert packet["status"] == "legacy_compatibility_isolation_blocked"
     assert any(
@@ -127,7 +134,7 @@ def test_isolation_blocks_legacy_owner_close_terms_in_standing_recovery_proof(tm
         encoding="utf-8",
     )
 
-    packet = script.build_isolation_packet(repo_root=tmp_path)
+    packet = script.build_isolation_evidence(repo_root=tmp_path)
 
     assert packet["status"] == "legacy_compatibility_isolation_blocked"
     assert any(
@@ -141,12 +148,13 @@ def test_isolation_blocks_legacy_owner_close_terms_in_standing_recovery_proof(tm
 
 
 def test_isolation_cli_outputs_json(tmp_path, capsys, monkeypatch):
-    output_path = tmp_path / "out" / "packet.json"
+    _write_all_required(tmp_path)
+    output_path = tmp_path / "out" / "evidence.json"
 
     monkeypatch.setattr(
         script,
         "ROOT_DIR",
-        Path("/Users/jiangwei/Documents/final-sprint6-integration"),
+        tmp_path,
     )
 
     assert script.main(["--output-json", str(output_path)]) == 0

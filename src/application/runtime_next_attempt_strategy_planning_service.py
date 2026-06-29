@@ -3,7 +3,7 @@
 This service reconnects the post-submit runtime loop to the B0 strategy signal
 planning path:
 
-RuntimePostSubmitFinalizePacket(next gate ready)
+RuntimePostSubmitFinalizePayload domain payload(next gate ready)
 -> fresh StrategyFamilySignalInput
 -> RuntimeStrategySignalPlanningService
 -> shadow SignalEvaluation / shadow OrderCandidate planning
@@ -24,12 +24,12 @@ from src.application.runtime_strategy_signal_planning_service import (
     RuntimeStrategySignalCandidatePlanningStatus,
 )
 from src.domain.runtime_next_attempt_release import (
-    RuntimeNextAttemptReleasePacket,
+    RuntimeNextAttemptReleaseEvidence,
     RuntimeNextAttemptReleaseStatus,
 )
 from src.domain.runtime_post_submit_finalize import (
     RuntimeNextAttemptGateStatus,
-    RuntimePostSubmitFinalizePacket,
+    RuntimePostSubmitFinalizePayload,
     RuntimePostSubmitFinalizeStatus,
 )
 from src.domain.strategy_family_signal import StrategyFamilySignalInput
@@ -57,16 +57,19 @@ class RuntimeNextAttemptStrategyPlanningStatus(str, Enum):
     BLOCKED_BY_STRATEGY_PLANNING = "blocked_by_strategy_planning"
 
 
-class RuntimeNextAttemptStrategyPlanningPacket(BaseModel):
-    """Audit packet for one post-submit next-attempt strategy planning pass."""
+class RuntimeNextAttemptStrategyPlanningArtifact(BaseModel):
+    """Audit artifact for one post-submit next-attempt strategy planning pass."""
 
     model_config = ConfigDict(extra="forbid")
 
-    packet_id: str = Field(min_length=1, max_length=640)
+    artifact_id: str = Field(min_length=1, max_length=640)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     source_authorization_id: str = Field(min_length=1, max_length=220)
-    post_submit_finalize_packet_id: str = Field(min_length=1, max_length=640)
-    source_release_packet_id: str | None = Field(default=None, max_length=420)
+    source_post_submit_finalize_payload_id: str | None = Field(
+        default=None,
+        max_length=640,
+    )
+    source_release_evidence_id: str | None = Field(default=None, max_length=420)
     status: RuntimeNextAttemptStrategyPlanningStatus
     next_attempt_gate_status: RuntimeNextAttemptGateStatus
     signal_evaluation_id: str | None = Field(default=None, max_length=128)
@@ -78,7 +81,7 @@ class RuntimeNextAttemptStrategyPlanningPacket(BaseModel):
     order_candidate_id: str | None = Field(default=None, max_length=128)
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    operator_command_plan: dict = Field(default_factory=dict)
+    strategy_planning_plan: dict = Field(default_factory=dict)
     consumed_authorization_replay_only: Literal[True] = True
     requires_fresh_strategy_signal: Literal[True] = True
     requires_fresh_authorization_before_submit: Literal[True] = True
@@ -108,20 +111,20 @@ class RuntimeNextAttemptStrategyPlanningService:
     async def plan_from_post_submit_gate(
         self,
         *,
-        post_submit_finalize_packet: RuntimePostSubmitFinalizePacket,
+        post_submit_finalize_payload: RuntimePostSubmitFinalizePayload,
         signal_input: StrategyFamilySignalInput,
         runtime: StrategyRuntimeInstance,
         context_id: str | None = None,
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
-    ) -> RuntimeNextAttemptStrategyPlanningPacket:
+    ) -> RuntimeNextAttemptStrategyPlanningArtifact:
         blockers = _post_submit_gate_blockers(
-            post_submit_finalize_packet=post_submit_finalize_packet,
+            post_submit_finalize_payload=post_submit_finalize_payload,
             runtime=runtime,
         )
         if blockers:
-            return _packet(
-                post_submit_finalize_packet=post_submit_finalize_packet,
+            return _planning_artifact(
+                post_submit_finalize_payload=post_submit_finalize_payload,
                 runtime=runtime,
                 signal_input=signal_input,
                 status=(
@@ -129,7 +132,7 @@ class RuntimeNextAttemptStrategyPlanningService:
                     .BLOCKED_BY_POST_SUBMIT_GATE
                 ),
                 blockers=blockers,
-                warnings=list(post_submit_finalize_packet.warnings),
+                warnings=list(post_submit_finalize_payload.warnings),
                 operator_next_step="resolve_post_submit_next_attempt_gate",
                 metadata={
                     "blocked_before_strategy_signal_planning": True,
@@ -146,11 +149,11 @@ class RuntimeNextAttemptStrategyPlanningService:
                 expires_at_ms=expires_at_ms,
                 metadata={
                     "runtime_next_attempt_strategy_planning": True,
-                    "source_post_submit_finalize_packet_id": (
-                        post_submit_finalize_packet.packet_id
+                    "source_post_submit_finalize_payload_id": (
+                        post_submit_finalize_payload.post_submit_finalize_payload_id
                     ),
                     "source_authorization_id": (
-                        post_submit_finalize_packet.authorization_id
+                        post_submit_finalize_payload.authorization_id
                     ),
                     "consumed_authorization_replay_only": True,
                     "requires_fresh_authorization_before_submit": True,
@@ -158,8 +161,8 @@ class RuntimeNextAttemptStrategyPlanningService:
                 },
             )
         )
-        return _packet_from_planning_result(
-            post_submit_finalize_packet=post_submit_finalize_packet,
+        return _planning_artifact_from_planning_result(
+            post_submit_finalize_payload=post_submit_finalize_payload,
             runtime=runtime,
             signal_input=signal_input,
             planning_result=planning_result,
@@ -169,20 +172,20 @@ class RuntimeNextAttemptStrategyPlanningService:
     async def plan_from_release_gate(
         self,
         *,
-        next_attempt_release_packet: RuntimeNextAttemptReleasePacket,
+        next_attempt_release_evidence: RuntimeNextAttemptReleaseEvidence,
         signal_input: StrategyFamilySignalInput,
         runtime: StrategyRuntimeInstance,
         context_id: str | None = None,
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
-    ) -> RuntimeNextAttemptStrategyPlanningPacket:
+    ) -> RuntimeNextAttemptStrategyPlanningArtifact:
         blockers = _release_gate_blockers(
-            next_attempt_release_packet=next_attempt_release_packet,
+            next_attempt_release_evidence=next_attempt_release_evidence,
             runtime=runtime,
         )
         if blockers:
-            return _release_packet(
-                next_attempt_release_packet=next_attempt_release_packet,
+            return _release_planning_artifact(
+                next_attempt_release_evidence=next_attempt_release_evidence,
                 runtime=runtime,
                 signal_input=signal_input,
                 status=(
@@ -190,7 +193,7 @@ class RuntimeNextAttemptStrategyPlanningService:
                     .BLOCKED_BY_RELEASE_GATE
                 ),
                 blockers=blockers,
-                warnings=list(next_attempt_release_packet.warnings),
+                warnings=list(next_attempt_release_evidence.warnings),
                 operator_next_step=(
                     "resolve_next_attempt_release_gate_before_strategy_planning"
                 ),
@@ -209,8 +212,8 @@ class RuntimeNextAttemptStrategyPlanningService:
                 expires_at_ms=expires_at_ms,
                 metadata={
                     "runtime_next_attempt_strategy_planning": True,
-                    "source_next_attempt_release_packet_id": (
-                        next_attempt_release_packet.packet_id
+                    "source_next_attempt_release_evidence_id": (
+                        next_attempt_release_evidence.release_evidence_id
                     ),
                     "release_ready_for_strategy_signal": True,
                     "consumed_authorization_replay_only": True,
@@ -219,8 +222,8 @@ class RuntimeNextAttemptStrategyPlanningService:
                 },
             )
         )
-        return _release_packet_from_planning_result(
-            next_attempt_release_packet=next_attempt_release_packet,
+        return _release_planning_artifact_from_planning_result(
+            next_attempt_release_evidence=next_attempt_release_evidence,
             runtime=runtime,
             signal_input=signal_input,
             planning_result=planning_result,
@@ -230,53 +233,53 @@ class RuntimeNextAttemptStrategyPlanningService:
 
 def _post_submit_gate_blockers(
     *,
-    post_submit_finalize_packet: RuntimePostSubmitFinalizePacket,
+    post_submit_finalize_payload: RuntimePostSubmitFinalizePayload,
     runtime: StrategyRuntimeInstance,
 ) -> list[str]:
     blockers: list[str] = []
-    if post_submit_finalize_packet.runtime_instance_id != runtime.runtime_instance_id:
+    if post_submit_finalize_payload.runtime_instance_id != runtime.runtime_instance_id:
         blockers.append("post_submit_runtime_mismatch")
-    if post_submit_finalize_packet.status != (
+    if post_submit_finalize_payload.status != (
         RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
     ):
         blockers.append("post_submit_finalize_not_ready_for_next_attempt")
-    if post_submit_finalize_packet.next_attempt_gate.status != (
+    if post_submit_finalize_payload.next_attempt_gate.status != (
         RuntimeNextAttemptGateStatus.READY_FOR_FRESH_SIGNAL
     ):
         blockers.append("post_submit_next_attempt_gate_not_ready")
-    blockers.extend(post_submit_finalize_packet.blockers)
-    blockers.extend(post_submit_finalize_packet.next_attempt_gate.blockers)
+    blockers.extend(post_submit_finalize_payload.blockers)
+    blockers.extend(post_submit_finalize_payload.next_attempt_gate.blockers)
     return _dedupe(blockers)
 
 
 def _release_gate_blockers(
     *,
-    next_attempt_release_packet: RuntimeNextAttemptReleasePacket,
+    next_attempt_release_evidence: RuntimeNextAttemptReleaseEvidence,
     runtime: StrategyRuntimeInstance,
 ) -> list[str]:
     blockers: list[str] = []
-    if next_attempt_release_packet.runtime_instance_id != runtime.runtime_instance_id:
+    if next_attempt_release_evidence.runtime_instance_id != runtime.runtime_instance_id:
         blockers.append("next_attempt_release_runtime_mismatch")
-    if next_attempt_release_packet.status != (
+    if next_attempt_release_evidence.status != (
         RuntimeNextAttemptReleaseStatus.READY_FOR_STRATEGY_SIGNAL
     ):
         blockers.append("next_attempt_release_not_ready_for_strategy_signal")
-    if not next_attempt_release_packet.strategy_signal_observation_allowed:
+    if not next_attempt_release_evidence.strategy_signal_observation_allowed:
         blockers.append("strategy_signal_observation_not_allowed_by_release")
-    if not next_attempt_release_packet.shadow_candidate_planning_allowed:
+    if not next_attempt_release_evidence.shadow_candidate_planning_allowed:
         blockers.append("shadow_candidate_planning_not_allowed_by_release")
-    blockers.extend(next_attempt_release_packet.blockers)
+    blockers.extend(next_attempt_release_evidence.blockers)
     return _dedupe(blockers)
 
 
-def _packet_from_planning_result(
+def _planning_artifact_from_planning_result(
     *,
-    post_submit_finalize_packet: RuntimePostSubmitFinalizePacket,
+    post_submit_finalize_payload: RuntimePostSubmitFinalizePayload,
     runtime: StrategyRuntimeInstance,
     signal_input: StrategyFamilySignalInput,
     planning_result: RuntimeStrategySignalCandidatePlanningResult,
     metadata: dict | None,
-) -> RuntimeNextAttemptStrategyPlanningPacket:
+) -> RuntimeNextAttemptStrategyPlanningArtifact:
     if (
         planning_result.status
         == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
@@ -300,8 +303,8 @@ def _packet_from_planning_result(
         operator_next_step = "resolve_strategy_signal_planning_blockers"
 
     candidate = planning_result.candidate
-    return _packet(
-        post_submit_finalize_packet=post_submit_finalize_packet,
+    return _planning_artifact(
+        post_submit_finalize_payload=post_submit_finalize_payload,
         runtime=runtime,
         signal_input=signal_input,
         status=status,
@@ -312,7 +315,7 @@ def _packet_from_planning_result(
             else None
         ),
         blockers=list(planning_result.blockers),
-        warnings=list(post_submit_finalize_packet.warnings)
+        warnings=list(post_submit_finalize_payload.warnings)
         + list(planning_result.warnings),
         operator_next_step=operator_next_step,
         metadata={
@@ -324,14 +327,14 @@ def _packet_from_planning_result(
     )
 
 
-def _release_packet_from_planning_result(
+def _release_planning_artifact_from_planning_result(
     *,
-    next_attempt_release_packet: RuntimeNextAttemptReleasePacket,
+    next_attempt_release_evidence: RuntimeNextAttemptReleaseEvidence,
     runtime: StrategyRuntimeInstance,
     signal_input: StrategyFamilySignalInput,
     planning_result: RuntimeStrategySignalCandidatePlanningResult,
     metadata: dict | None,
-) -> RuntimeNextAttemptStrategyPlanningPacket:
+) -> RuntimeNextAttemptStrategyPlanningArtifact:
     if (
         planning_result.status
         == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
@@ -355,8 +358,8 @@ def _release_packet_from_planning_result(
         operator_next_step = "resolve_strategy_signal_planning_blockers"
 
     candidate = planning_result.candidate
-    return _release_packet(
-        next_attempt_release_packet=next_attempt_release_packet,
+    return _release_planning_artifact(
+        next_attempt_release_evidence=next_attempt_release_evidence,
         runtime=runtime,
         signal_input=signal_input,
         status=status,
@@ -367,7 +370,7 @@ def _release_packet_from_planning_result(
             else None
         ),
         blockers=list(planning_result.blockers),
-        warnings=list(next_attempt_release_packet.warnings)
+        warnings=list(next_attempt_release_evidence.warnings)
         + list(planning_result.warnings),
         operator_next_step=operator_next_step,
         metadata={
@@ -379,9 +382,9 @@ def _release_packet_from_planning_result(
     )
 
 
-def _packet(
+def _planning_artifact(
     *,
-    post_submit_finalize_packet: RuntimePostSubmitFinalizePacket,
+    post_submit_finalize_payload: RuntimePostSubmitFinalizePayload,
     runtime: StrategyRuntimeInstance,
     signal_input: StrategyFamilySignalInput,
     status: RuntimeNextAttemptStrategyPlanningStatus,
@@ -391,18 +394,22 @@ def _packet(
     planning_result: RuntimeStrategySignalCandidatePlanningResult | None = None,
     order_candidate_id: str | None = None,
     metadata: dict | None = None,
-) -> RuntimeNextAttemptStrategyPlanningPacket:
-    return RuntimeNextAttemptStrategyPlanningPacket(
-        packet_id=(
+) -> RuntimeNextAttemptStrategyPlanningArtifact:
+    return RuntimeNextAttemptStrategyPlanningArtifact(
+        artifact_id=(
             "runtime-next-attempt-strategy-planning-"
-            f"{post_submit_finalize_packet.authorization_id}-"
+            f"{post_submit_finalize_payload.authorization_id}-"
             f"{signal_input.evaluation_id}"
         ),
         runtime_instance_id=runtime.runtime_instance_id,
-        source_authorization_id=post_submit_finalize_packet.authorization_id,
-        post_submit_finalize_packet_id=post_submit_finalize_packet.packet_id,
+        source_authorization_id=post_submit_finalize_payload.authorization_id,
+        source_post_submit_finalize_payload_id=(
+            post_submit_finalize_payload.post_submit_finalize_payload_id
+        ),
         status=status,
-        next_attempt_gate_status=post_submit_finalize_packet.next_attempt_gate.status,
+        next_attempt_gate_status=(
+            post_submit_finalize_payload.next_attempt_gate.status
+        ),
         signal_evaluation_id=signal_input.evaluation_id,
         strategy_family_id=signal_input.strategy_family_id,
         strategy_family_version_id=signal_input.strategy_family_version_id,
@@ -416,8 +423,8 @@ def _packet(
         order_candidate_id=order_candidate_id,
         blockers=_dedupe(blockers or []),
         warnings=_dedupe(warnings or []),
-        operator_command_plan={
-            "scope": "runtime_next_attempt_strategy_planning_operator_command_plan",
+        strategy_planning_plan={
+            "scope": "runtime_next_attempt_strategy_planning_plan",
             "next_step": operator_next_step,
             "not_executed": True,
             "uses_fresh_signal": True,
@@ -441,9 +448,9 @@ def _packet(
     )
 
 
-def _release_packet(
+def _release_planning_artifact(
     *,
-    next_attempt_release_packet: RuntimeNextAttemptReleasePacket,
+    next_attempt_release_evidence: RuntimeNextAttemptReleaseEvidence,
     runtime: StrategyRuntimeInstance,
     signal_input: StrategyFamilySignalInput,
     status: RuntimeNextAttemptStrategyPlanningStatus,
@@ -453,27 +460,24 @@ def _release_packet(
     planning_result: RuntimeStrategySignalCandidatePlanningResult | None = None,
     order_candidate_id: str | None = None,
     metadata: dict | None = None,
-) -> RuntimeNextAttemptStrategyPlanningPacket:
+) -> RuntimeNextAttemptStrategyPlanningArtifact:
     gate_status = (
         RuntimeNextAttemptGateStatus.READY_FOR_FRESH_SIGNAL
-        if next_attempt_release_packet.status
+        if next_attempt_release_evidence.status
         == RuntimeNextAttemptReleaseStatus.READY_FOR_STRATEGY_SIGNAL
         else RuntimeNextAttemptGateStatus.BLOCKED
     )
-    return RuntimeNextAttemptStrategyPlanningPacket(
-        packet_id=(
+    return RuntimeNextAttemptStrategyPlanningArtifact(
+        artifact_id=(
             "runtime-next-attempt-strategy-planning-"
-            f"{next_attempt_release_packet.packet_id}-"
+            f"{next_attempt_release_evidence.release_evidence_id}-"
             f"{signal_input.evaluation_id}"
         ),
         runtime_instance_id=runtime.runtime_instance_id,
         source_authorization_id=(
-            f"runtime-release:{next_attempt_release_packet.packet_id}"
+            f"runtime-release:{next_attempt_release_evidence.release_evidence_id}"
         ),
-        post_submit_finalize_packet_id=(
-            f"runtime-release:{next_attempt_release_packet.packet_id}"
-        ),
-        source_release_packet_id=next_attempt_release_packet.packet_id,
+        source_release_evidence_id=next_attempt_release_evidence.release_evidence_id,
         status=status,
         next_attempt_gate_status=gate_status,
         signal_evaluation_id=signal_input.evaluation_id,
@@ -489,8 +493,8 @@ def _release_packet(
         order_candidate_id=order_candidate_id,
         blockers=_dedupe(blockers or []),
         warnings=_dedupe(warnings or []),
-        operator_command_plan={
-            "scope": "runtime_next_attempt_strategy_planning_operator_command_plan",
+        strategy_planning_plan={
+            "scope": "runtime_next_attempt_strategy_planning_plan",
             "next_step": operator_next_step,
             "not_executed": True,
             "uses_fresh_signal": True,

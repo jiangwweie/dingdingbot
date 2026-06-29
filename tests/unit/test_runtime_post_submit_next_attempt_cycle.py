@@ -38,13 +38,13 @@ def _args(tmp_path, **overrides):
     return type("Args", (), values)()
 
 
-def _ready_finalize_packet():
+def _ready_finalize_artifact():
     return {
         "scope": "runtime_post_submit_finalize_api_flow",
         "status": "finalized_ready_for_next_attempt",
         "runtime_instance_id": "runtime-1",
         "authorization_id": "auth-1",
-        "post_submit_finalize_packet": {
+        "post_submit_finalize_payload": {
             "packet_id": "post-submit-1",
             "authorization_id": "auth-1",
             "runtime_instance_id": "runtime-1",
@@ -63,7 +63,7 @@ def _ready_finalize_packet():
     }
 
 
-def _waiting_plan_packet():
+def _waiting_plan_artifact():
     return {
         "scope": "runtime_next_attempt_strategy_plan_api_flow",
         "status": "waiting_for_signal",
@@ -77,7 +77,7 @@ def _waiting_plan_packet():
     }
 
 
-def _ready_plan_packet():
+def _ready_plan_artifact():
     return {
         "scope": "runtime_next_attempt_strategy_plan_api_flow",
         "status": "ready_for_final_gate_preflight",
@@ -85,7 +85,7 @@ def _ready_plan_packet():
             "status": "ready_for_final_gate_preflight",
             "signal_evaluation_id": "eval-ready",
             "order_candidate_id": "order-candidate-ready",
-            "operator_command_plan": {"creates_shadow_candidate": True},
+            "strategy_planning_plan": {"creates_shadow_candidate": True},
         },
         "blockers": [],
         "warnings": [],
@@ -98,27 +98,29 @@ def test_cycle_waits_when_post_submit_ready_but_signal_observe_only(tmp_path):
 
     def planning_builder(args):
         planning_calls.append(args)
-        return _waiting_plan_packet()
+        return _waiting_plan_artifact()
 
-    packet = runtime_post_submit_next_attempt_cycle._build_cycle_packet(
+    artifact = runtime_post_submit_next_attempt_cycle._build_cycle_artifact(
         _args(tmp_path, reservation_id=None),
         finalize_builder=lambda args: (
-            finalize_calls.append(args) or _ready_finalize_packet()
+            finalize_calls.append(args) or _ready_finalize_artifact()
         ),
         planning_builder=planning_builder,
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["signal_evaluation_id"] == "eval-1"
-    assert packet["order_candidate_id"] is None
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is False
-    assert packet["operator_command_plan"]["requires_fresh_authorization_before_submit"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "waiting_for_signal"
+    assert artifact["signal_evaluation_id"] == "eval-1"
+    assert artifact["order_candidate_id"] is None
+    assert "operator_command_plan" not in artifact
+    assert artifact["next_attempt_cycle_plan"]["creates_shadow_candidate"] is False
+    assert artifact["next_attempt_cycle_plan"]["requires_fresh_authorization_before_submit"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
     assert finalize_calls[0].reservation_id is None
     assert len(planning_calls) == 1
-    post_packet_path = packet["artifact_paths"]["post_submit_finalize_packet"]
-    assert json.loads(open(post_packet_path, encoding="utf-8").read())["packet_id"] == "post-submit-1"
+    assert "post_submit_finalize_packet" not in artifact["artifact_paths"]
+    post_payload_path = artifact["artifact_paths"]["post_submit_finalize_payload"]
+    assert json.loads(open(post_payload_path, encoding="utf-8").read())["packet_id"] == "post-submit-1"
 
 
 def test_cycle_blocks_before_planning_when_post_submit_not_ready(tmp_path):
@@ -131,43 +133,74 @@ def test_cycle_blocks_before_planning_when_post_submit_not_ready(tmp_path):
             "warnings": [],
         }
 
-    packet = runtime_post_submit_next_attempt_cycle._build_cycle_packet(
+    artifact = runtime_post_submit_next_attempt_cycle._build_cycle_artifact(
         _args(tmp_path),
         finalize_builder=blocked_finalize,
         planning_builder=lambda args: planning_calls.append(args),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "post_submit_finalize"
-    assert "runtime_active_position_slot_in_use" in packet["blockers"]
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "post_submit_finalize"
+    assert "runtime_active_position_slot_in_use" in artifact["blockers"]
     assert planning_calls == []
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is False
+    assert artifact["next_attempt_cycle_plan"]["creates_shadow_candidate"] is False
 
 
 def test_cycle_reaches_final_gate_preflight_when_strategy_planning_ready(tmp_path):
-    packet = runtime_post_submit_next_attempt_cycle._build_cycle_packet(
+    artifact = runtime_post_submit_next_attempt_cycle._build_cycle_artifact(
         _args(tmp_path),
-        finalize_builder=lambda args: _ready_finalize_packet(),
-        planning_builder=lambda args: _ready_plan_packet(),
+        finalize_builder=lambda args: _ready_finalize_artifact(),
+        planning_builder=lambda args: _ready_plan_artifact(),
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["signal_evaluation_id"] == "eval-ready"
-    assert packet["order_candidate_id"] == "order-candidate-ready"
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert packet["operator_command_plan"]["requires_official_final_gate"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["signal_evaluation_id"] == "eval-ready"
+    assert artifact["order_candidate_id"] == "order-candidate-ready"
+    assert artifact["next_attempt_cycle_plan"]["creates_shadow_candidate"] is True
+    assert artifact["next_attempt_cycle_plan"]["requires_official_final_gate"] is True
+    assert artifact["next_attempt_cycle_plan"]["places_order"] is False
+
+
+def test_cycle_ignores_legacy_post_submit_finalize_packet_fallback(tmp_path):
+    planning_payloads = []
+
+    def legacy_finalize_artifact(args):
+        return {
+            "scope": "runtime_post_submit_finalize_api_flow",
+            "status": "finalized_ready_for_next_attempt",
+            "post_submit_finalize_packet": {
+                "packet_id": "legacy-post-submit-packet",
+                "status": "legacy_packet_must_not_feed_planning",
+            },
+            "blockers": [],
+            "warnings": [],
+        }
+
+    def planning_builder(args):
+        planning_payloads.append(
+            json.loads(open(args.post_submit_finalize_payload_json, encoding="utf-8").read())
+        )
+        return _waiting_plan_artifact()
+
+    artifact = runtime_post_submit_next_attempt_cycle._build_cycle_artifact(
+        _args(tmp_path),
+        finalize_builder=legacy_finalize_artifact,
+        planning_builder=planning_builder,
+    )
+
+    assert artifact["status"] == "waiting_for_signal"
+    assert planning_payloads == [{}]
 
 
 def test_cycle_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_cycle_packet(args):
+    def fake_build_cycle_artifact(args):
         print("inner noisy cycle")
         return {"status": "waiting_for_signal", "ok": True}
 
     monkeypatch.setattr(
         runtime_post_submit_next_attempt_cycle,
-        "_build_cycle_packet",
-        fake_build_cycle_packet,
+        "_build_cycle_artifact",
+        fake_build_cycle_artifact,
     )
     monkeypatch.setattr(
         sys,

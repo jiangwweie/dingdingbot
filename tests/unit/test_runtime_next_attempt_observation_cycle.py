@@ -109,16 +109,16 @@ def test_observation_cycle_blocks_before_signal_when_gate_blocks(monkeypatch):
     async def fake_signal(args, *, output_path):
         raise AssertionError("signal should not run when gate blocks")
 
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_packet", fake_gate)
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_packet", fake_signal)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_artifact", fake_gate)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_artifact", fake_signal)
 
     payload = __import__("asyncio").run(
-        runtime_next_attempt_observation_cycle._build_cycle_packet(_args())
+        runtime_next_attempt_observation_cycle._build_cycle_artifact(_args())
     )
 
     assert payload["status"] == "blocked"
     assert payload["blocked_stage"] == "next_attempt_gate"
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
+    assert payload["observation_cycle_plan"]["creates_shadow_candidate"] is False
     assert payload["safety_invariants"]["exchange_write_called"] is False
 
 
@@ -130,19 +130,19 @@ def test_observation_cycle_waits_when_signal_observe_only(monkeypatch):
         assert output_path is None
         return _observe_signal()
 
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_packet", fake_gate)
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_packet", fake_signal)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_artifact", fake_gate)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_artifact", fake_signal)
 
     payload = __import__("asyncio").run(
-        runtime_next_attempt_observation_cycle._build_cycle_packet(_args())
+        runtime_next_attempt_observation_cycle._build_cycle_artifact(_args())
     )
 
     assert payload["status"] == "waiting_for_signal"
     assert payload["blocked_stage"] == "strategy_signal"
-    assert payload["operator_command_plan"]["next_step"] == (
+    assert payload["observation_cycle_plan"]["next_step"] == (
         "observe_only_or_wait_for_next_closed_bar"
     )
-    assert payload["operator_command_plan"]["creates_execution_intent"] is False
+    assert payload["observation_cycle_plan"]["creates_execution_intent"] is False
     assert payload["safety_invariants"]["order_lifecycle_called"] is False
 
 
@@ -159,20 +159,20 @@ def test_observation_cycle_ready_for_prepare_without_mutating_records(monkeypatc
     def fake_prepare(args, *, signal_input_json):
         raise AssertionError("prepare should require explicit allow flag")
 
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_packet", fake_gate)
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_packet", fake_signal)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_artifact", fake_gate)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_artifact", fake_signal)
     monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_run_prepare_flow", fake_prepare)
 
     payload = __import__("asyncio").run(
-        runtime_next_attempt_observation_cycle._build_cycle_packet(
+        runtime_next_attempt_observation_cycle._build_cycle_artifact(
             _args(signal_output_json=str(signal_path))
         )
     )
 
     assert payload["status"] == "ready_for_prepare"
-    assert payload["operator_command_plan"]["signal_input_json"] == str(signal_path)
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
-    assert payload["operator_command_plan"]["creates_execution_intent"] is False
+    assert payload["observation_cycle_plan"]["signal_input_json"] == str(signal_path)
+    assert payload["observation_cycle_plan"]["creates_shadow_candidate"] is False
+    assert payload["observation_cycle_plan"]["creates_execution_intent"] is False
     assert payload["safety_invariants"]["default_read_only"] is True
 
 
@@ -198,12 +198,12 @@ def test_observation_cycle_can_prepare_records_only_with_explicit_flag(monkeypat
             },
         }
 
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_packet", fake_gate)
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_packet", fake_signal)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_gate_artifact", fake_gate)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_signal_artifact", fake_signal)
     monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_run_prepare_flow", fake_prepare)
 
     payload = __import__("asyncio").run(
-        runtime_next_attempt_observation_cycle._build_cycle_packet(
+        runtime_next_attempt_observation_cycle._build_cycle_artifact(
             _args(
                 allow_prepare_records=True,
                 signal_output_json=str(signal_path),
@@ -212,10 +212,10 @@ def test_observation_cycle_can_prepare_records_only_with_explicit_flag(monkeypat
     )
 
     assert payload["status"] == "ready_for_final_gate_preflight"
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert payload["operator_command_plan"]["creates_execution_intent"] is True
-    assert payload["operator_command_plan"]["places_order"] is False
-    assert payload["operator_command_plan"]["live_submit_allowed"] is False
+    assert payload["observation_cycle_plan"]["creates_shadow_candidate"] is True
+    assert payload["observation_cycle_plan"]["creates_execution_intent"] is True
+    assert payload["observation_cycle_plan"]["places_order"] is False
+    assert payload["observation_cycle_plan"]["live_submit_allowed"] is False
     assert payload["safety_invariants"]["exchange_write_called"] is False
     assert payload["safety_invariants"]["order_created"] is False
 
@@ -225,7 +225,7 @@ def test_observation_cycle_cli_stdout_is_json_only(monkeypatch, capsys):
         print("noisy dependency")
         return {"status": "waiting_for_signal", "ok": True}
 
-    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_cycle_packet", fake_cycle)
+    monkeypatch.setattr(runtime_next_attempt_observation_cycle, "_build_cycle_artifact", fake_cycle)
     monkeypatch.setattr(
         sys,
         "argv",

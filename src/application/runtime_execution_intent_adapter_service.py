@@ -107,9 +107,9 @@ from src.domain.runtime_execution_intent_local_order_binding import (
     RuntimeExecutionIntentLocalOrderBindingStatus,
     build_runtime_execution_intent_local_order_binding,
 )
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreview,
-    build_runtime_execution_exchange_submit_packet_preview,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreview,
+    build_runtime_execution_exchange_submit_preview,
 )
 from src.domain.runtime_execution_exchange_submit_enablement import (
     RuntimeExecutionExchangeSubmitEnablementDecision,
@@ -933,7 +933,7 @@ class RuntimeExecutionIntentAdapterService:
         self,
         authorization_id: str,
     ) -> dict[str, str]:
-        """Resolve already-recorded deterministic evidence IDs for review packets.
+        """Resolve already-recorded deterministic evidence IDs for review artifacts.
 
         This is a read-only convenience for Owner/Codex review surfaces. It
         does not create evidence, approve missing evidence, mutate runtime
@@ -1906,10 +1906,10 @@ class RuntimeExecutionIntentAdapterService:
             now_ms=_now_ms(),
         )
 
-    async def exchange_submit_packet_preview_for_authorization(
+    async def exchange_submit_preview_for_authorization(
         self,
         authorization_id: str,
-    ) -> RuntimeExecutionExchangeSubmitPacketPreview:
+    ) -> RuntimeExecutionExchangeSubmitPreview:
         binding = await self.intent_local_order_binding_for_authorization(
             authorization_id
         )
@@ -1929,7 +1929,7 @@ class RuntimeExecutionIntentAdapterService:
                 order = await self._order_lifecycle_service.get_order(order_id)
                 if order is not None:
                     local_orders.append(order)
-        return build_runtime_execution_exchange_submit_packet_preview(
+        return build_runtime_execution_exchange_submit_preview(
             binding=binding,
             local_orders=local_orders,
             now_ms=_now_ms(),
@@ -1956,11 +1956,11 @@ class RuntimeExecutionIntentAdapterService:
         ),
         expires_at_ms: int | None = None,
     ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
-        packet_preview = await self.exchange_submit_packet_preview_for_authorization(
+        submit_preview = await self.exchange_submit_preview_for_authorization(
             authorization_id
         )
         return build_runtime_execution_exchange_submit_action_authorization(
-            packet_preview=packet_preview,
+            submit_preview=submit_preview,
             trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
             submit_idempotency_policy_id=submit_idempotency_policy_id,
             attempt_outcome_policy_id=attempt_outcome_policy_id,
@@ -2064,15 +2064,15 @@ class RuntimeExecutionIntentAdapterService:
         exchange_submit_action_authorization_id: str | None = None,
         deployment_readiness_evidence_id: str | None = None,
     ) -> RuntimeExecutionExchangeSubmitEnablementDecision:
-        packet_preview = await self.exchange_submit_packet_preview_for_authorization(
+        submit_preview = await self.exchange_submit_preview_for_authorization(
             authorization_id
         )
         evidence_blockers, evidence_warnings = (
             await self._validate_first_real_submit_prerequisite_evidence(
                 authorization_id=authorization_id,
-                execution_intent_id=packet_preview.execution_intent_id,
-                runtime_instance_id=packet_preview.runtime_instance_id,
-                symbol=packet_preview.symbol,
+                execution_intent_id=submit_preview.execution_intent_id,
+                runtime_instance_id=submit_preview.runtime_instance_id,
+                symbol=submit_preview.symbol,
                 trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
                 submit_idempotency_policy_id=submit_idempotency_policy_id,
                 attempt_outcome_policy_id=attempt_outcome_policy_id,
@@ -2096,7 +2096,7 @@ class RuntimeExecutionIntentAdapterService:
             )
         )
         return build_runtime_execution_exchange_submit_enablement_decision(
-            packet_preview=packet_preview,
+            submit_preview=submit_preview,
             trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
             submit_idempotency_policy_id=submit_idempotency_policy_id,
             attempt_outcome_policy_id=attempt_outcome_policy_id,
@@ -2481,7 +2481,7 @@ class RuntimeExecutionIntentAdapterService:
                 authorization_id
             )
         )
-        packet_preview = await self.exchange_submit_packet_preview_for_authorization(
+        submit_preview = await self.exchange_submit_preview_for_authorization(
             authorization_id
         )
         execution_mode = _exchange_submit_execution_mode(
@@ -2496,19 +2496,19 @@ class RuntimeExecutionIntentAdapterService:
         ):
             blockers.append("exchange_submit_enablement_decision_not_ready")
             blockers.extend(decision.blockers)
-        if packet_preview.authorization_id != authorization_id:
-            blockers.append("exchange_submit_packet_authorization_mismatch")
-        if packet_preview.execution_intent_id != decision.execution_intent_id:
-            blockers.append("exchange_submit_packet_intent_mismatch")
-        if not packet_preview.entry_submit_request_preview:
+        if submit_preview.authorization_id != authorization_id:
+            blockers.append("exchange_submit_preview_authorization_mismatch")
+        if submit_preview.execution_intent_id != decision.execution_intent_id:
+            blockers.append("exchange_submit_preview_intent_mismatch")
+        if not submit_preview.entry_submit_request_preview:
             blockers.append("entry_exchange_submit_request_preview_missing")
-        if not packet_preview.protection_submit_request_previews:
+        if not submit_preview.protection_submit_request_previews:
             blockers.append("protection_exchange_submit_request_previews_missing")
 
         if not exchange_submit_execution_enabled:
             return build_runtime_exchange_submit_execution_disabled_result(
                 enablement_decision=decision,
-                packet_preview=packet_preview,
+                submit_preview=submit_preview,
                 now_ms=_now_ms(),
                 additional_blockers=blockers,
                 additional_warnings=[
@@ -2582,7 +2582,7 @@ class RuntimeExecutionIntentAdapterService:
         else:
             recovery_blockers, recovery_warnings = (
                 await self._validate_no_blocking_recovery_tasks_for_exchange_submit(
-                    symbol=packet_preview.symbol,
+                    symbol=submit_preview.symbol,
                     execution_intent_id=decision.execution_intent_id,
                 )
             )
@@ -2596,8 +2596,8 @@ class RuntimeExecutionIntentAdapterService:
         blockers.extend(readiness_blockers)
         warnings.extend(readiness_warnings)
         market_rule_blockers, market_rule_warnings = (
-            await self._validate_exchange_submit_packet_market_rules_for_execution(
-                packet_preview=packet_preview,
+            await self._validate_exchange_submit_preview_market_rules_for_execution(
+                submit_preview=submit_preview,
                 trusted_submit_fact_snapshot_id=(
                     decision.trusted_submit_fact_snapshot_id
                 ),
@@ -2608,7 +2608,7 @@ class RuntimeExecutionIntentAdapterService:
         if blockers:
             return build_runtime_exchange_submit_execution_blocked_result(
                 enablement_decision=decision,
-                packet_preview=packet_preview,
+                submit_preview=submit_preview,
                 blockers=blockers,
                 warnings=warnings,
                 now_ms=_now_ms(),
@@ -2618,7 +2618,7 @@ class RuntimeExecutionIntentAdapterService:
 
         lock_result = build_runtime_exchange_submit_execution_lock_result(
             enablement_decision=decision,
-            packet_preview=packet_preview,
+            submit_preview=submit_preview,
             now_ms=_now_ms(),
             execution_mode=execution_mode,
         )
@@ -2641,8 +2641,8 @@ class RuntimeExecutionIntentAdapterService:
 
         submitted_orders = []
         exchange_call_count = 0
-        requests = [packet_preview.entry_submit_request_preview] + list(
-            packet_preview.protection_submit_request_previews
+        requests = [submit_preview.entry_submit_request_preview] + list(
+            submit_preview.protection_submit_request_previews
         )
         for request in requests:
             if request is None:
@@ -2662,7 +2662,7 @@ class RuntimeExecutionIntentAdapterService:
             if not getattr(placement_result, "is_success", False):
                 failed_result = build_runtime_exchange_submit_execution_failed_result(
                     enablement_decision=decision,
-                    packet_preview=packet_preview,
+                    submit_preview=submit_preview,
                     submitted_orders=submitted_orders,
                     failed_local_order_id=request.local_order_id,
                     failed_order_role=request.order_role.value,
@@ -2714,7 +2714,7 @@ class RuntimeExecutionIntentAdapterService:
 
         result = build_runtime_exchange_submit_execution_submitted_result(
             enablement_decision=decision,
-            packet_preview=packet_preview,
+            submit_preview=submit_preview,
             submitted_orders=submitted_orders,
             exchange_call_count=exchange_call_count,
             warnings=warnings,
@@ -3046,7 +3046,7 @@ class RuntimeExecutionIntentAdapterService:
                 authorization_id
             )
         )
-        packet_preview = await self.exchange_submit_packet_preview_for_authorization(
+        submit_preview = await self.exchange_submit_preview_for_authorization(
             authorization_id
         )
         additional_blockers: list[str] = []
@@ -3068,7 +3068,7 @@ class RuntimeExecutionIntentAdapterService:
         else:
             recovery_task_ids = (
                 await self._blocking_recovery_task_ids_for_exchange_submit(
-                    symbol=packet_preview.symbol,
+                    symbol=submit_preview.symbol,
                     execution_intent_id=decision.execution_intent_id,
                 )
             )
@@ -3086,10 +3086,12 @@ class RuntimeExecutionIntentAdapterService:
             additional_blockers.append(
                 "exchange_submit_enablement_decision_authorization_mismatch"
             )
-        if packet_preview.authorization_id != authorization_id:
-            additional_blockers.append("exchange_submit_packet_authorization_mismatch")
-        if packet_preview.execution_intent_id != decision.execution_intent_id:
-            additional_blockers.append("exchange_submit_packet_intent_mismatch")
+        if submit_preview.authorization_id != authorization_id:
+            additional_blockers.append(
+                "exchange_submit_preview_authorization_mismatch"
+            )
+        if submit_preview.execution_intent_id != decision.execution_intent_id:
+            additional_blockers.append("exchange_submit_preview_intent_mismatch")
 
         return build_runtime_execution_submit_rehearsal(
             exchange_submit_enablement_decision=decision,
@@ -3152,10 +3154,10 @@ class RuntimeExecutionIntentAdapterService:
         )
         return _dedupe(blockers), _dedupe(warnings)
 
-    async def _validate_exchange_submit_packet_market_rules_for_execution(
+    async def _validate_exchange_submit_preview_market_rules_for_execution(
         self,
         *,
-        packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+        submit_preview: RuntimeExecutionExchangeSubmitPreview,
         trusted_submit_fact_snapshot_id: str | None,
     ) -> tuple[list[str], list[str]]:
         blockers: list[str] = []
@@ -3180,7 +3182,7 @@ class RuntimeExecutionIntentAdapterService:
         tick_size = _market_step_from_metadata(
             metadata.get("tick_size"), metadata.get("price_precision")
         )
-        for request in packet_preview.submit_request_previews:
+        for request in submit_preview.submit_request_previews:
             amount = request.amount
             if min_qty is not None and amount < min_qty:
                 blockers.append(

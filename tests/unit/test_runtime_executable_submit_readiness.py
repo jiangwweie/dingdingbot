@@ -2,10 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from src.domain.runtime_executable_submit_readiness import (
-    RuntimeExecutableSubmitReadinessPacket,
+    RuntimeExecutableSubmitReadinessArtifact,
     RuntimeExecutableSubmitReadinessEvidence,
     RuntimeExecutableSubmitReadinessStatus,
-    build_runtime_executable_submit_readiness_packet,
+    build_runtime_executable_submit_readiness_artifact,
 )
 
 
@@ -36,17 +36,17 @@ def _evidence(**overrides):
 def _packet(**overrides):
     values = {
         "runtime_instance_id": "runtime-1",
-        "source_strategy_planning_packet_id": "strategy-plan-1",
+        "source_strategy_planning_artifact_id": "strategy-plan-1",
         "source_authorization_id": "consumed-auth-1",
         "strategy_planning_status": "ready_for_final_gate_preflight",
         "signal_evaluation_id": "signal-eval-1",
         "order_candidate_id": "order-candidate-1",
-        "source_release_packet_id": "release-1",
+        "source_release_evidence_id": "release-1",
         "evidence": _evidence(),
         "now_ms": 1_765_000_000_000,
     }
     values.update(overrides)
-    return build_runtime_executable_submit_readiness_packet(**values)
+    return build_runtime_executable_submit_readiness_artifact(**values)
 
 
 def test_runtime_grant_path_ready_without_legacy_rehearsal_id():
@@ -116,10 +116,10 @@ def test_blocks_missing_trusted_facts_and_duplicate_guard():
     assert "duplicate_submit_guard_not_ready" in packet.blockers
 
 
-def test_legacy_first_real_submit_packet_blockers_are_warnings_on_runtime_grant_path():
+def test_legacy_first_real_submit_source_blockers_are_warnings_on_runtime_grant_path():
     packet = _packet(
-        first_real_submit_packet_status="blocked",
-        first_real_submit_packet_blockers=[
+        first_real_submit_source_status="blocked",
+        first_real_submit_source_blockers=[
             "submit_rehearsal_not_ready",
             "first_real_submit_runtime_submit_rehearsal_id_missing",
         ],
@@ -129,26 +129,26 @@ def test_legacy_first_real_submit_packet_blockers_are_warnings_on_runtime_grant_
         RuntimeExecutableSubmitReadinessStatus.READY_FOR_EXECUTABLE_SUBMIT
     )
     assert (
-        "first_real_submit_packet_not_ready_but_runtime_grant_path_used"
+        "first_real_submit_source_not_ready_but_runtime_grant_path_used"
         in packet.warnings
     )
     assert (
-        "first_real_submit_packet:submit_rehearsal_not_ready"
+        "first_real_submit_source:submit_rehearsal_not_ready"
         in packet.warnings
     )
     assert packet.blockers == []
 
 
-def test_first_real_submit_packet_blocks_when_runtime_evidence_is_incomplete():
+def test_first_real_submit_source_blocks_when_runtime_evidence_is_incomplete():
     packet = _packet(
         evidence=_evidence(runtime_grant_authorization_id=None),
-        first_real_submit_packet_status="blocked",
-        first_real_submit_packet_blockers=["submit_rehearsal_not_ready"],
+        first_real_submit_source_status="blocked",
+        first_real_submit_source_blockers=["submit_rehearsal_not_ready"],
     )
 
     assert packet.status == RuntimeExecutableSubmitReadinessStatus.BLOCKED
-    assert "first_real_submit_packet_not_ready" in packet.blockers
-    assert "first_real_submit_packet:submit_rehearsal_not_ready" in packet.blockers
+    assert "first_real_submit_source_not_ready" in packet.blockers
+    assert "first_real_submit_source:submit_rehearsal_not_ready" in packet.blockers
 
 
 def test_rejects_execution_metadata():
@@ -157,13 +157,13 @@ def test_rejects_execution_metadata():
     payload["metadata"] = {"submit_order": True}
 
     with pytest.raises(ValidationError, match="forbidden execution field"):
-        RuntimeExecutableSubmitReadinessPacket.model_validate(payload)
+        RuntimeExecutableSubmitReadinessArtifact.model_validate(payload)
 
 
 def test_builder_rejects_execution_metadata():
-    packet = build_runtime_executable_submit_readiness_packet(
+    packet = build_runtime_executable_submit_readiness_artifact(
         runtime_instance_id="runtime-1",
-        source_strategy_planning_packet_id="strategy-plan-1",
+        source_strategy_planning_artifact_id="strategy-plan-1",
         source_authorization_id="auth-1",
         strategy_planning_status="ready_for_final_gate_preflight",
         signal_evaluation_id="signal-eval-1",
@@ -177,4 +177,4 @@ def test_builder_rejects_execution_metadata():
     payload["metadata"] = {"exchange_payload": {"x": 1}}
 
     with pytest.raises(ValidationError, match="forbidden execution field"):
-        RuntimeExecutableSubmitReadinessPacket.model_validate(payload)
+        RuntimeExecutableSubmitReadinessArtifact.model_validate(payload)

@@ -136,7 +136,7 @@ class _Client:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "prepared_packet_blocked",
+                    "status": "prepared_evidence_blocked",
                     "available_evidence_ids": {
                         "trusted_submit_fact_snapshot_id": "facts-rtf018",
                         "submit_idempotency_policy_id": "idem-rtf018",
@@ -145,7 +145,7 @@ class _Client:
                         ),
                     },
                     "blockers": [
-                        "first_real_submit_packet_unavailable:"
+                        "first_real_submit_evidence_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ],
                 },

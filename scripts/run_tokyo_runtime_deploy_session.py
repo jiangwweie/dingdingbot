@@ -27,8 +27,6 @@ def main(argv: list[str] | None = None) -> int:
     reports = []
     if args.deploy_report_json:
         reports.append(("runtime_deploy", _read_json(Path(args.deploy_report_json))))
-    if args.frontend_report_json:
-        reports.append(("frontend_publish", _read_json(Path(args.frontend_report_json))))
     if args.daily_check_json:
         reports.append(("postdeploy_daily_check", _read_json(Path(args.daily_check_json))))
     elif args.run_daily_check:
@@ -37,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
                 "postdeploy_daily_check",
                 _run_daily_check(
                     expected_runtime_head=args.expected_runtime_head,
-                    expected_frontend_head=args.expected_frontend_head,
                     mode=args.daily_check_mode,
                 ),
             )
@@ -122,11 +119,12 @@ def build_deploy_session_report(
         }),
         "owner_summary": {
             "state": _owner_state_for_status(status=status, highest_level=highest_level),
-            "current_action": _current_action_for_status(
+            "non_authority_checkpoint": _non_authority_checkpoint_for_status(
                 status=status,
                 blockers=blockers,
                 product_gaps=product_gaps,
             ),
+            "checkpoint_source": "deploy_session_status_projection",
             "owner_intervention_required": bool(blockers),
             "risk_level": highest_level,
             "server_mutation": "yes" if mutates_remote else "no",
@@ -221,7 +219,9 @@ def _session_step(*, name: str, report: dict[str, Any]) -> dict[str, Any]:
             or safety.get("order_created")
         ),
         "owner_state": str(owner_summary.get("state") or ""),
-        "current_action": str(owner_summary.get("current_action") or ""),
+        "non_authority_checkpoint": str(
+            owner_summary.get("non_authority_checkpoint") or ""
+        ),
         "blockers": blockers,
         "warnings": warnings,
         "product_gaps": product_gaps,
@@ -253,7 +253,7 @@ def _owner_state_for_status(*, status: str, highest_level: str) -> str:
     return "部署会话已核验"
 
 
-def _current_action_for_status(
+def _non_authority_checkpoint_for_status(
     *,
     status: str,
     blockers: list[str],
@@ -273,7 +273,6 @@ def _current_action_for_status(
 def _run_daily_check(
     *,
     expected_runtime_head: str | None,
-    expected_frontend_head: str | None,
     mode: str,
 ) -> dict[str, Any]:
     command = [sys.executable, str(DAILY_CHECK_SCRIPT), "--json"]
@@ -285,8 +284,6 @@ def _run_daily_check(
         return _daily_check_mode_error(mode)
     if expected_runtime_head:
         command.extend(["--expected-runtime-head", expected_runtime_head])
-    if expected_frontend_head:
-        command.extend(["--expected-frontend-head", expected_frontend_head])
     completed = subprocess.run(
         command,
         check=False,
@@ -321,7 +318,8 @@ def _daily_check_mode_error(mode: str) -> dict[str, Any]:
         },
         "owner_summary": {
             "state": "暂不可用",
-            "current_action": "修正部署会话日检模式",
+            "non_authority_checkpoint": "修正部署会话日检模式",
+            "checkpoint_source": "deploy_session_daily_check_error_projection",
         },
         "checks": {
             "blockers": [f"unknown_daily_check_mode:{mode}"],
@@ -347,7 +345,8 @@ def _daily_check_error(reason: str, completed: subprocess.CompletedProcess[str])
         },
         "owner_summary": {
             "state": "暂不可用",
-            "current_action": "检查日检命令",
+            "non_authority_checkpoint": "检查日检命令",
+            "checkpoint_source": "deploy_session_daily_check_error_projection",
         },
         "checks": {
             "blockers": [reason],
@@ -386,7 +385,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Print an Owner-readable Markdown progress summary.",
     )
     parser.add_argument("--deploy-report-json")
-    parser.add_argument("--frontend-report-json")
     parser.add_argument("--daily-check-json")
     parser.add_argument("--run-daily-check", action="store_true")
     parser.add_argument(
@@ -400,7 +398,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--expected-runtime-head")
-    parser.add_argument("--expected-frontend-head")
     parser.add_argument("--output-json")
     return parser.parse_args(argv)
 
@@ -420,7 +417,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         f"- 报告时间: {report.get('generated_at_utc') or 'unknown'}",
         f"- 当前阶段: {owner.get('state') or report.get('status') or 'unknown'}",
-        f"- 当前动作: {owner.get('current_action') or 'unknown'}",
+        f"- 当前检查点: {owner.get('non_authority_checkpoint') or 'unknown'}",
         f"- 风险等级: {owner.get('risk_level') or interaction.get('level') or 'unknown'}",
         f"- Owner 介入: {_yes_no(bool(owner.get('owner_intervention_required')))}",
         f"- 交互等级: {interaction.get('level') or 'unknown'}",
@@ -432,7 +429,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         "## Steps",
         "",
-        "| Step | Status | Interaction | Remote | Server mutation | Real-order approach | Current action |",
+        "| Step | Status | Interaction | Remote | Server mutation | Real-order approach | Checkpoint |",
         "| --- | --- | --- | ---: | --- | --- | --- |",
     ]
     for step in steps:
@@ -448,7 +445,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
                     str(step.get("remote_interaction_count") or 0),
                     _yes_no(bool(step.get("mutates_remote_files"))),
                     _yes_no(bool(step.get("approaches_real_order"))),
-                    str(step.get("current_action") or "unknown"),
+                    str(step.get("non_authority_checkpoint") or "unknown"),
                 ]
             )
             + " |"
@@ -475,7 +472,7 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"mutates_remote_files={str(interaction['mutates_remote_files']).lower()}")
     print(f"approaches_real_order={str(interaction['approaches_real_order']).lower()}")
     print(f"owner_state={owner['state']}")
-    print(f"current_action={owner['current_action']}")
+    print(f"non_authority_checkpoint={owner['non_authority_checkpoint']}")
     if checks["blockers"]:
         print("blockers=" + ",".join(checks["blockers"]))
     if checks["product_gaps"]:

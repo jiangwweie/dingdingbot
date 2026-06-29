@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column("adapter_result_id", sa.String(length=520), primary_key=True),
         sa.Column("enablement_decision_id", sa.String(length=500), nullable=False),
         sa.Column("gate_id", sa.String(length=460), nullable=False),
-        sa.Column("packet_preview_id", sa.String(length=460), nullable=False),
+        sa.Column("submit_preview_id", sa.String(length=460), nullable=False),
         sa.Column("binding_id", sa.String(length=460), nullable=False),
         sa.Column(
             "local_registration_adapter_result_id",

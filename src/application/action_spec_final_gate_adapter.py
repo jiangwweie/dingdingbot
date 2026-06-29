@@ -55,7 +55,7 @@ STRATEGY_WARNING_CODES = {
     "liquidity wick",
     "incomplete signal markers",
     "fee/funding/slippage gaps",
-    "incomplete review UI",
+    "incomplete review surface",
     "non-core read-model degradation",
 }
 
@@ -131,7 +131,7 @@ class ActionSpecDraftInput(ActionSpecFinalGateModel):
     final_gate_adapter_ref: Optional[str] = None
     action_entry_payload_ref: Optional[str] = None
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -201,7 +201,7 @@ class NormalizedActionSpec(ActionSpecFinalGateModel):
     official_final_gate_required: Literal[True] = True
     operation_layer_required: Literal[True] = True
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -229,7 +229,7 @@ class FinalGatePreview(ActionSpecFinalGateModel):
     official_final_gate_boundary: str = "official_final_gate_only"
     operation_layer_required: Literal[True] = True
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False

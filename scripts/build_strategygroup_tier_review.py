@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build or validate the current StrategyGroup tier review packet.
+"""Build or validate the current StrategyGroup tier review artifact.
 
-The tier review packet turns registry rows plus current tier policy and the
-generated Decision Ledger into one current next-action decision per
+The tier review artifact turns registry rows plus current tier policy and the
+Strategy Asset State into one current strategy checkpoint per
 StrategyGroup. It is local governance evidence only and never grants live
 authority.
 """
@@ -13,10 +13,19 @@ import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    legacy_authority_mirror_present_errors,
+)
+from src.domain.runtime_readiness_state import false_flag_errors  # noqa: E402
+
 DEFAULT_REGISTRY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
@@ -24,9 +33,6 @@ DEFAULT_REGISTRY_JSON = (
 DEFAULT_TIER_POLICY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
-)
-DEFAULT_DECISION_LEDGER_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
@@ -54,19 +60,17 @@ REQUIRED_ROW_FIELDS = [
     "strategy_group_id",
     "current_tier",
     "registry_trial_eligible",
-    "actionable_now",
     "current_decision",
     "promotion_scope",
     "promotion_target",
-    "decision_source",
-    "recommended_next_action",
-    "owner_decision_needed",
+    "tier_review_source",
+    "recommended_strategy_checkpoint",
+    "owner_policy_required",
     "required_next_evidence",
     "do_not_promote_reason",
     "authority_boundary",
 ]
 SAFETY_INVARIANTS = {
-    "real_order_authority": False,
     "calls_finalgate": False,
     "calls_operation_layer": False,
     "calls_exchange_write": False,
@@ -76,18 +80,22 @@ SAFETY_INVARIANTS = {
     "withdrawal_or_transfer": False,
 }
 AUTHORITY_BOUNDARY = (
-    "tier_review_support_only; actionable_now=false; real_order_authority=false; "
-    "no_exchange_write; no_live_profile_or_sizing_change"
+    "tier_review_support_only; runtime_safety_gate_required; "
+    "no_real_order_scope_change; no_exchange_write; no_live_profile_or_sizing_change"
 )
 
 
-def build_tier_review_packet(
+def build_tier_review_artifact(
     registry: dict[str, Any],
     tier_policy: dict[str, Any],
-    decision_ledger: dict[str, Any] | None,
+    strategy_asset_state_source: dict[str, Any],
 ) -> dict[str, Any]:
-    ledger_rows, ledger_status = _ledger_rows_and_status(decision_ledger)
-    ledger_by_group = {row["strategy_group_id"]: row for row in ledger_rows}
+    strategy_asset_rows, strategy_asset_state_status = _strategy_asset_rows_and_status(
+        strategy_asset_state_source
+    )
+    strategy_asset_by_group = {
+        row["strategy_group_id"]: row for row in strategy_asset_rows
+    }
     registry_rows = _dict_rows(registry.get("rows"))
     policy_groups = _as_dict(tier_policy.get("current_strategy_groups"))
 
@@ -95,11 +103,20 @@ def build_tier_review_packet(
     for registry_row in registry_rows:
         group = str(registry_row.get("strategy_group_id") or "")
         policy_row = _as_dict(policy_groups.get(group))
-        current_tier = str(policy_row.get("tier") or registry_row.get("default_tier") or "")
-        ledger_row = ledger_by_group.get(group)
-        rows.append(_build_review_row(registry_row, policy_row, ledger_row, current_tier))
+        current_tier = str(
+            policy_row.get("tier") or registry_row.get("default_tier") or ""
+        )
+        strategy_asset_row = strategy_asset_by_group.get(group)
+        rows.append(
+            _build_review_row(
+                registry_row,
+                policy_row,
+                strategy_asset_row,
+                current_tier,
+            )
+        )
 
-    packet = {
+    artifact = {
         "schema": "brc.strategygroup_tier_review.v1",
         "status": "tier_review_ready",
         "scope": "strategygroup_tier_review_current",
@@ -112,28 +129,31 @@ def build_tier_review_packet(
                 "docs/current/strategy-group-handoffs/"
                 "main-control-runtime-tier-policy.json"
             ),
-            "decision_ledger": (
-                "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+            "strategy_asset_state": (
+                "caller_supplied"
             ),
         },
-        "ledger_status": ledger_status,
-        "actionability_contract": {
-            "actionable_now_source": "runtime_state_only",
-            "static_tier_review_must_not_set_actionable_now_true": True,
+        "strategy_asset_state_status": strategy_asset_state_status,
+        "runtime_authority_contract": {
+            "runtime_authority_sources": [
+                "Tradeability Decision",
+                "Runtime Safety State",
+            ],
+            "static_tier_review_must_not_grant_runtime_authority": True,
             "strategy_uncertainty_is_not_execution_blocker": True,
             "owner_scoped_risk_acceptance_may_promote_trial_eligibility": True,
-            "owner_scoped_risk_acceptance_cannot_set_actionable_now_true": True,
+            "owner_scoped_risk_acceptance_cannot_grant_runtime_authority": True,
         },
         "safety_invariants": deepcopy(SAFETY_INVARIANTS),
         "required_row_fields": REQUIRED_ROW_FIELDS,
         "rows": rows,
-        "decision_counts": _decision_counts(rows),
+        "recommended_action_counts": _recommended_action_counts(rows),
     }
-    return packet
+    return artifact
 
 
-def build_owner_markdown(packet: dict[str, Any]) -> str:
-    rows = _dict_rows(packet.get("rows"))
+def build_owner_markdown(artifact: dict[str, Any]) -> str:
+    rows = _dict_rows(artifact.get("rows"))
     lines = [
         "---",
         "title: STRATEGYGROUP_TIER_REVIEW_CURRENT",
@@ -146,9 +166,9 @@ def build_owner_markdown(packet: dict[str, Any]) -> str:
         "",
         "## 目的",
         "",
-        "这份 review 把 StrategyGroup 从“策略资产是什么”推进到“下一步怎么走”。它消费 Registry Baseline、Runtime Tier Policy 和 Decision Ledger，给每个策略组一条当前推进判断。",
+        "这份 review 把 StrategyGroup 从“策略资产是什么”推进到“下一步怎么走”。它消费 Registry Baseline、Runtime Tier Policy 和 Strategy Asset State，给每个策略组一条当前推进判断。",
         "",
-        "静态 review 不代表当前可以下单。`actionable_now` 只能由运行时根据新鲜信号、账户、保护、订单和交易所事实判断，因此这里始终为 `false`。",
+        "静态 review 不输出行级可下单字段。当前是否可以下单只能由运行时安全门根据新鲜信号、账户、保护、订单和交易所事实判断。",
         "",
         "## 总览",
         "",
@@ -213,28 +233,36 @@ def validate_inputs(
     return errors
 
 
-def validate_packet(packet: dict[str, Any]) -> list[str]:
+def validate_artifact(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if packet.get("schema") != "brc.strategygroup_tier_review.v1":
+    if artifact.get("schema") != "brc.strategygroup_tier_review.v1":
         errors.append("schema_mismatch")
-    rows = _dict_rows(packet.get("rows"))
+    rows = _dict_rows(artifact.get("rows"))
     groups = [str(row.get("strategy_group_id") or "") for row in rows]
     if groups != EXPECTED_GROUPS:
         errors.append(f"row_group_order_mismatch:{groups}")
-    safety = _as_dict(packet.get("safety_invariants"))
-    for key, expected in SAFETY_INVARIANTS.items():
-        if safety.get(key) is not expected:
-            errors.append(f"safety_invariant_not_false:{key}")
+    safety = _as_dict(artifact.get("safety_invariants"))
+    errors.extend(
+        false_flag_errors(
+            safety,
+            error_prefix="safety_invariant",
+            false_keys=tuple(SAFETY_INVARIANTS),
+        )
+    )
     for row in rows:
         group = str(row.get("strategy_group_id") or "unknown")
         for field in REQUIRED_ROW_FIELDS:
             if field not in row:
                 errors.append(f"{group}.missing_field:{field}")
-        if row.get("actionable_now") is True:
-            errors.append(f"{group}.actionable_now_true")
+        errors.extend(
+            legacy_authority_mirror_present_errors(
+                row,
+                label_prefix=f"{group}.tier_review_row_",
+            )
+        )
         if row.get("authority_boundary") != AUTHORITY_BOUNDARY:
             errors.append(f"{group}.authority_boundary_mismatch")
-        if row.get("recommended_next_action") not in {
+        if row.get("recommended_strategy_checkpoint") not in {
             "keep",
             "revise",
             "promote",
@@ -244,54 +272,59 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
             "do_not_go_live",
             "wait_for_live_outcome",
         }:
-            errors.append(f"{group}.unexpected_recommended_next_action")
+            errors.append(f"{group}.unexpected_recommended_strategy_checkpoint")
         if row.get("current_decision") in {"promote", "promote_review_only"}:
             scope = str(row.get("promotion_scope") or "not_applicable")
             if scope == "not_applicable":
                 errors.append(f"{group}.missing_promotion_scope")
         row_safety = _as_dict(row.get("safety_invariants"))
-        for key in (
-            "real_order_authority",
-            "calls_finalgate",
-            "calls_operation_layer",
-            "calls_exchange_write",
-            "places_order",
-        ):
-            if row_safety.get(key) is not False:
-                errors.append(f"{group}.row_safety_invariant_not_false:{key}")
+        errors.extend(
+            false_flag_errors(
+                row_safety,
+                error_prefix=f"{group}.row_safety_invariant",
+                false_keys=(
+                    "calls_finalgate",
+                    "calls_operation_layer",
+                    "calls_exchange_write",
+                    "places_order",
+                ),
+            )
+        )
     return errors
 
 
 def load_inputs(
     registry_path: Path,
     tier_policy_path: Path,
-    decision_ledger_path: Path,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    strategy_asset_state_source_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     registry = _load_json(registry_path)
     tier_policy = _load_json(tier_policy_path)
-    decision_ledger = None
-    if decision_ledger_path.exists():
-        decision_ledger = _load_json(decision_ledger_path)
-    return registry, tier_policy, decision_ledger
+    strategy_asset_state_source = _load_json(strategy_asset_state_source_path)
+    return registry, tier_policy, strategy_asset_state_source
 
 
 def _build_review_row(
     registry_row: dict[str, Any],
     policy_row: dict[str, Any],
-    ledger_row: dict[str, Any] | None,
+    strategy_asset_row: dict[str, Any] | None,
     current_tier: str,
 ) -> dict[str, Any]:
     group = str(registry_row.get("strategy_group_id") or "")
-    if ledger_row:
-        return _row_from_ledger(registry_row, ledger_row, current_tier)
+    if strategy_asset_row:
+        return _row_from_strategy_asset_state(
+            registry_row,
+            strategy_asset_row,
+            current_tier,
+        )
     if group == "MPG-001":
         return _base_row(
             registry_row,
             current_tier,
             current_decision="preserve_p0_live_lane_waiting_for_market",
-            decision_source="registry_and_p0_runtime_policy",
-            recommended_next_action="wait_for_live_outcome",
-            owner_decision_needed=False,
+            tier_review_source="registry_and_p0_runtime_policy",
+            recommended_strategy_checkpoint="wait_for_live_outcome",
+            owner_policy_required=False,
             required_next_evidence=(
                 "fresh selected signal plus first allocated-subaccount live outcome"
             ),
@@ -300,14 +333,14 @@ def _build_review_row(
             ),
         )
 
-    policy_reason = str(policy_row.get("reason") or "no current Decision Ledger row")
+    policy_reason = str(policy_row.get("reason") or "no current Strategy Asset State row")
     return _base_row(
         registry_row,
         current_tier,
         current_decision="keep_current_tier_no_promotion_evidence",
-        decision_source="registry_and_tier_policy",
-        recommended_next_action="keep",
-        owner_decision_needed=False,
+        tier_review_source="registry_and_tier_policy",
+        recommended_strategy_checkpoint="keep",
+        owner_policy_required=False,
         required_next_evidence=str(
             registry_row.get("required_next_evidence") or "decision-changing evidence"
         ),
@@ -318,14 +351,16 @@ def _build_review_row(
     )
 
 
-def _row_from_ledger(
+def _row_from_strategy_asset_state(
     registry_row: dict[str, Any],
-    ledger_row: dict[str, Any],
+    strategy_asset_row: dict[str, Any],
     current_tier: str,
 ) -> dict[str, Any]:
-    decision = str(ledger_row.get("decision") or "")
-    promotion_target = str(ledger_row.get("promotion_target") or "not_applicable")
-    promotion_scope = _display_promotion_scope(ledger_row)
+    decision = str(strategy_asset_row.get("current_decision") or "")
+    promotion_target = str(
+        strategy_asset_row.get("promotion_target") or "not_applicable"
+    )
+    promotion_scope = _display_promotion_scope(strategy_asset_row)
     display_decision = _display_decision(decision, promotion_target)
     action = {
         "keep_observing": "keep",
@@ -340,30 +375,37 @@ def _row_from_ledger(
         "block_for_safety": "do_not_go_live",
     }.get(decision, "do_not_go_live")
     if decision == "keep_observing":
-        reason = "current ledger supports continued observation, not tier promotion"
+        reason = (
+            "current Strategy Asset State supports continued observation, "
+            "not tier promotion"
+        )
     elif decision == "revise":
-        reason = "current ledger requires revision before any tier change"
+        reason = "current Strategy Asset State requires revision before any tier change"
     elif decision == "park":
-        reason = "current ledger parks this StrategyGroup until new evidence"
+        reason = (
+            "current Strategy Asset State parks this StrategyGroup until new evidence"
+        )
     else:
-        reason = "current ledger does not provide live-scope authority"
+        reason = "current Strategy Asset State does not provide live-scope authority"
     return _base_row(
         registry_row,
         current_tier,
         current_decision=display_decision,
         promotion_scope=promotion_scope,
         promotion_target=promotion_target,
-        decision_source="decision_ledger",
-        recommended_next_action=action,
-        owner_decision_needed=action == "promote",
+        tier_review_source=str(
+            strategy_asset_row.get("tier_review_source") or "strategy_asset_state"
+        ),
+        recommended_strategy_checkpoint=action,
+        owner_policy_required=action == "promote",
         required_next_evidence=str(
-            ledger_row.get("required_next_evidence")
+            strategy_asset_row.get("required_next_evidence")
             or registry_row.get("required_next_evidence")
             or "decision-changing evidence"
         ),
         do_not_promote_reason=reason,
-        ledger_reason=str(ledger_row.get("reason") or ""),
-        next_checkpoint=str(ledger_row.get("next_checkpoint") or ""),
+        strategy_asset_state_reason=str(strategy_asset_row.get("reason") or ""),
+        next_checkpoint=str(strategy_asset_row.get("next_checkpoint") or ""),
     )
 
 
@@ -372,14 +414,14 @@ def _base_row(
     current_tier: str,
     *,
     current_decision: str,
-    decision_source: str,
-    recommended_next_action: str,
-    owner_decision_needed: bool,
+    tier_review_source: str,
+    recommended_strategy_checkpoint: str,
+    owner_policy_required: bool,
     required_next_evidence: str,
     do_not_promote_reason: str,
     promotion_scope: str = "not_applicable",
     promotion_target: str = "not_applicable",
-    ledger_reason: str = "",
+    strategy_asset_state_reason: str = "",
     next_checkpoint: str = "",
 ) -> dict[str, Any]:
     return {
@@ -387,25 +429,23 @@ def _base_row(
         "owner_label": str(registry_row.get("owner_label") or ""),
         "current_tier": current_tier,
         "registry_trial_eligible": bool(registry_row.get("trial_eligible")),
-        "actionable_now": False,
         "current_decision": current_decision,
         "promotion_scope": promotion_scope,
         "promotion_target": promotion_target,
-        "decision_source": decision_source,
-        "recommended_next_action": recommended_next_action,
-        "owner_decision_needed": owner_decision_needed,
+        "tier_review_source": tier_review_source,
+        "recommended_strategy_checkpoint": recommended_strategy_checkpoint,
+        "owner_policy_required": owner_policy_required,
         "required_next_evidence": required_next_evidence,
         "do_not_promote_reason": do_not_promote_reason,
         "strategy_uncertainty_is_execution_blocker": False,
         "owner_scoped_risk_acceptance_path": (
-            "may support trial eligibility or tier review, but cannot set "
-            "runtime actionability to true or bypass runtime safety gates"
+            "may support trial eligibility or tier review, but cannot grant "
+            "runtime authority or bypass runtime safety gates"
         ),
         "authority_boundary": AUTHORITY_BOUNDARY,
-        "ledger_reason": ledger_reason,
+        "strategy_asset_state_reason": strategy_asset_state_reason,
         "next_checkpoint": next_checkpoint or required_next_evidence,
         "safety_invariants": {
-            "real_order_authority": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -420,35 +460,57 @@ def _display_decision(decision: str, promotion_target: str) -> str:
     return decision
 
 
-def _display_promotion_scope(ledger_row: dict[str, Any]) -> str:
-    promotion_target = str(ledger_row.get("promotion_target") or "")
+def _display_promotion_scope(strategy_asset_row: dict[str, Any]) -> str:
+    promotion_target = str(strategy_asset_row.get("promotion_target") or "")
     if promotion_target == "promotion_evidence_review_only":
         return "review_only"
-    return str(ledger_row.get("promotion_scope") or "not_applicable")
+    return str(strategy_asset_row.get("promotion_scope") or "not_applicable")
 
 
-def _ledger_rows_and_status(
-    decision_ledger: dict[str, Any] | None,
+def _strategy_asset_rows_and_status(
+    strategy_asset_state_source: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str]:
-    if decision_ledger is None:
-        return [], "missing_generated_view"
-    rows = _dict_rows(decision_ledger.get("ledger_rows"))
-    if not rows:
-        return [], "present_empty"
-    return rows, str(decision_ledger.get("status") or "present")
+    strategy_asset_state = _as_dict(
+        strategy_asset_state_source.get("strategy_asset_state")
+    )
+    asset_rows = _dict_rows(strategy_asset_state.get("asset_rows"))
+    if asset_rows:
+        return [
+            _strategy_asset_row_from_strategy_asset_state(row)
+            for row in asset_rows
+        ], "strategy_asset_state_ready"
+    return [], "missing_strategy_asset_state"
 
 
-def _decision_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+def _strategy_asset_row_from_strategy_asset_state(
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "strategy_group_id": str(row.get("strategy_group_id") or "unknown"),
+        "tier": str(row.get("current_tier") or "unknown"),
+        "opportunity_type": str(row.get("opportunity_type") or "unknown"),
+        "current_decision": str(row.get("current_decision") or "keep_observing"),
+        "promotion_scope": str(row.get("promotion_scope") or "not_applicable"),
+        "promotion_target": str(row.get("promotion_target") or "not_applicable"),
+        "reason": str(row.get("reason") or ""),
+        "required_next_evidence": str(row.get("required_next_evidence") or ""),
+        "authority_boundary": str(row.get("authority_boundary") or ""),
+        "next_checkpoint": str(row.get("next_checkpoint") or ""),
+        "tier_review_source": "strategy_asset_state",
+    }
+
+
+def _recommended_action_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
-        action = str(row.get("recommended_next_action") or "unknown")
+        action = str(row.get("recommended_strategy_checkpoint") or "unknown")
         counts[action] = counts.get(action, 0) + 1
     return dict(sorted(counts.items()))
 
 
 def _summary_table(rows: list[dict[str, Any]]) -> str:
     lines = [
-        "| StrategyGroup | 当前层级 | 可试运行 | 当前判断 | 推荐动作 | Owner 需决策 |",
+        "| StrategyGroup | 当前层级 | 可试运行 | 当前判断 | 推荐策略检查点 | Owner 政策需求 |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
@@ -458,8 +520,8 @@ def _summary_table(rows: list[dict[str, Any]]) -> str:
                 row.get("current_tier"),
                 str(row.get("registry_trial_eligible")).lower(),
                 row.get("current_decision"),
-                row.get("recommended_next_action"),
-                str(row.get("owner_decision_needed")).lower(),
+                row.get("recommended_strategy_checkpoint"),
+                str(row.get("owner_policy_required")).lower(),
             )
         )
     return "\n".join(lines)
@@ -473,9 +535,9 @@ def _row_section(row: dict[str, Any]) -> list[str]:
         f"- 当前判断: `{row.get('current_decision')}`",
         f"- 晋级范围: `{row.get('promotion_scope')}`",
         f"- 晋级目标: `{row.get('promotion_target')}`",
-        f"- 推荐动作: `{row.get('recommended_next_action')}`",
+        f"- 推荐策略检查点: `{row.get('recommended_strategy_checkpoint')}`",
         f"- 判断来源: `{row.get('decision_source')}`",
-        f"- Owner 需决策: `{str(row.get('owner_decision_needed')).lower()}`",
+        f"- Owner 政策需求: `{str(row.get('owner_policy_required')).lower()}`",
         f"- 下一证据: {row.get('required_next_evidence')}",
         f"- 暂不晋级原因: {row.get('do_not_promote_reason')}",
         "",
@@ -489,14 +551,14 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _write_files(packet: dict[str, Any], json_path: Path, md_path: Path) -> None:
+def _write_files(artifact: dict[str, Any], json_path: Path, md_path: Path) -> None:
     json_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    md_path.write_text(build_owner_markdown(packet), encoding="utf-8")
+    md_path.write_text(build_owner_markdown(artifact), encoding="utf-8")
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -511,7 +573,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry-json", default=str(DEFAULT_REGISTRY_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
-    parser.add_argument("--decision-ledger-json", default=str(DEFAULT_DECISION_LEDGER_JSON))
+    parser.add_argument(
+        "--strategy-asset-state-json",
+        dest="strategy_asset_state_source_json",
+        metavar="STRATEGY_ASSET_STATE_JSON",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-md", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
@@ -520,19 +586,27 @@ def main(argv: list[str] | None = None) -> int:
         help="Validate existing output files instead of writing them.",
     )
     args = parser.parse_args(argv)
+    if not args.strategy_asset_state_source_json:
+        parser.error("--strategy-asset-state-json is required")
 
     registry_path = Path(args.registry_json).expanduser()
     tier_policy_path = Path(args.tier_policy_json).expanduser()
-    decision_ledger_path = Path(args.decision_ledger_json).expanduser()
+    strategy_asset_state_source_path = Path(
+        args.strategy_asset_state_source_json
+    ).expanduser()
     output_json = Path(args.output_json).expanduser()
     output_md = Path(args.output_md).expanduser()
 
-    registry, tier_policy, decision_ledger = load_inputs(
-        registry_path, tier_policy_path, decision_ledger_path
+    registry, tier_policy, strategy_asset_state_source = load_inputs(
+        registry_path, tier_policy_path, strategy_asset_state_source_path
     )
-    expected = build_tier_review_packet(registry, tier_policy, decision_ledger)
+    expected = build_tier_review_artifact(
+        registry,
+        tier_policy,
+        strategy_asset_state_source,
+    )
     errors = validate_inputs(registry, tier_policy)
-    errors.extend(validate_packet(expected))
+    errors.extend(validate_artifact(expected))
 
     if args.check:
         if not output_json.exists():
@@ -543,14 +617,14 @@ def main(argv: list[str] | None = None) -> int:
             existing = _load_json(output_json)
             if existing != expected:
                 errors.append("json_output_drift")
-            errors.extend(validate_packet(existing))
+            errors.extend(validate_artifact(existing))
         if output_md.exists():
             markdown = output_md.read_text(encoding="utf-8")
             for group in EXPECTED_GROUPS:
                 if group not in markdown:
                     errors.append(f"markdown_missing_group:{group}")
-            if "actionable_now" not in markdown:
-                errors.append("markdown_missing_actionable_boundary")
+            if "运行时安全门" not in markdown:
+                errors.append("markdown_missing_runtime_safety_boundary")
     else:
         _write_files(expected, output_json, output_md)
 
@@ -560,8 +634,8 @@ def main(argv: list[str] | None = None) -> int:
         "json_path": str(output_json),
         "markdown_path": str(output_md),
         "row_count": len(expected["rows"]),
-        "ledger_status": expected["ledger_status"],
-        "decision_counts": expected["decision_counts"],
+        "strategy_asset_state_status": expected["strategy_asset_state_status"],
+        "recommended_action_counts": expected["recommended_action_counts"],
         "errors": errors,
         "safety_invariants": expected["safety_invariants"],
     }

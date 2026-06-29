@@ -4,8 +4,8 @@
 RTF-075 proves the intended non-executing path with a deterministic CPM long
 fixture:
 
-ready operator packet
--> runtime_live_signal_shadow_planning_bridge
+ready operator artifact
+-> runtime_live_signal_shadow_planning_projection
 -> real RuntimeNextAttemptStrategyPlanningService
 -> real RuntimeStrategySignalPlanningService
 -> shadow SignalEvaluation / shadow OrderCandidate with entry/stop/TP/runner.
@@ -30,7 +30,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_live_signal_shadow_planning_bridge as bridge  # noqa: E402
+from scripts import runtime_live_signal_shadow_planning_projection as projection  # noqa: E402
 from src.application.runtime_execution_planning_service import (  # noqa: E402
     RuntimeExecutionPlanningService,
 )
@@ -60,7 +60,7 @@ from src.application.trial_readiness_account_facts import (  # noqa: E402
     TrialReadinessAccountFacts,
 )
 from src.domain.runtime_post_submit_finalize import (  # noqa: E402
-    RuntimePostSubmitFinalizePacket,
+    RuntimePostSubmitFinalizePayload,
 )
 from src.domain.signal_evaluation import (  # noqa: E402
     OrderCandidate,
@@ -186,8 +186,8 @@ def build_contract_fixture_report(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     runtime = _runtime()
     signal_input = _signal_input()
-    post_submit = _post_submit_finalize_packet(runtime)
-    operator_packet = {
+    post_submit_payload = _post_submit_finalize_payload(runtime)
+    operator_evidence = {
         "scope": "runtime_live_signal_operator_cycle",
         "status": "ready_for_prepare",
         "runtime_instance_id": runtime.runtime_instance_id,
@@ -200,20 +200,20 @@ def build_contract_fixture_report(output_dir: Path) -> dict[str, Any]:
     _write_json(output_dir / "signal-input.json", signal_input.model_dump(mode="json"))
     _write_json(
         output_dir / "post-submit-finalize.json",
-        post_submit.model_dump(mode="json"),
+        post_submit_payload.model_dump(mode="json"),
     )
-    _write_json(output_dir / "operator-ready.json", operator_packet)
+    _write_json(output_dir / "operator-ready.json", operator_evidence)
 
-    bridge_args = argparse.Namespace(
+    projection_args = argparse.Namespace(
         runtime_instance_id=runtime.runtime_instance_id,
-        operator_packet_json=str(output_dir / "operator-ready.json"),
-        post_submit_finalize_packet_json=str(output_dir / "post-submit-finalize.json"),
+        operator_evidence_json=str(output_dir / "operator-ready.json"),
+        post_submit_finalize_artifact_json=str(output_dir / "post-submit-finalize.json"),
         env_file=None,
         api_base="http://fixture",
         context_id="context-rtf075-contract",
         expires_at_ms=None,
         metadata_json='{"rtf075_contract_fixture": true}',
-        output_dir=str(output_dir / "bridge-artifacts"),
+        output_dir=str(output_dir / "projection-artifacts"),
         flow_id="rtf075-ready-signal",
         output_json=None,
     )
@@ -223,37 +223,40 @@ def build_contract_fixture_report(output_dir: Path) -> dict[str, Any]:
 
     def planning_builder(args: argparse.Namespace) -> dict[str, Any]:
         return asyncio.run(
-            _build_planning_packet(
+            _build_planning_artifact(
                 args,
                 runtime=runtime,
                 planning_service=planning_service,
             )
         )
 
-    bridge_packet = bridge._build_packet(bridge_args, planning_builder=planning_builder)
-    _write_json(output_dir / "bridge-report.json", bridge_packet)
+    projection_artifact = projection._build_projection(
+        projection_args,
+        planning_builder=planning_builder,
+    )
+    _write_json(output_dir / "projection-report.json", projection_artifact)
     report = _report(
-        bridge_packet=bridge_packet,
+        projection_artifact=projection_artifact,
         store=store,
     )
     _write_json(output_dir / "contract-report.json", report)
     return report
 
 
-async def _build_planning_packet(
+async def _build_planning_artifact(
     args: argparse.Namespace,
     *,
     runtime: StrategyRuntimeInstance,
     planning_service: RuntimeNextAttemptStrategyPlanningService,
 ) -> dict[str, Any]:
-    post_submit = RuntimePostSubmitFinalizePacket.model_validate(
-        _read_json(Path(args.post_submit_finalize_packet_json))
+    post_submit_payload = RuntimePostSubmitFinalizePayload.model_validate(
+        _read_json(Path(args.post_submit_finalize_payload_json))
     )
     signal_input = StrategyFamilySignalInput.model_validate(
         _read_json(Path(args.signal_input_json))
     )
-    packet = await planning_service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=post_submit,
+    artifact = await planning_service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=post_submit_payload,
         signal_input=signal_input,
         runtime=runtime,
         context_id=args.context_id,
@@ -262,12 +265,12 @@ async def _build_planning_packet(
     )
     return {
         "scope": "runtime_next_attempt_strategy_plan_api_flow",
-        "status": packet.status.value,
-        "runtime_instance_id": packet.runtime_instance_id,
+        "status": artifact.status.value,
+        "runtime_instance_id": artifact.runtime_instance_id,
         "http_status": 200,
-        "api_payload": packet.model_dump(mode="json"),
-        "blockers": list(packet.blockers),
-        "warnings": list(packet.warnings),
+        "api_payload": artifact.model_dump(mode="json"),
+        "blockers": list(artifact.blockers),
+        "warnings": list(artifact.warnings),
         "safety_invariants": {
             "uses_official_trading_console_api": False,
             "uses_real_strategy_planning_service": True,
@@ -318,12 +321,12 @@ def _planning_service(
     )
 
 
-def _report(*, bridge_packet: dict[str, Any], store: _ShadowStore) -> dict[str, Any]:
+def _report(*, projection_artifact: dict[str, Any], store: _ShadowStore) -> dict[str, Any]:
     candidate = store.candidate
     proposal = None
     if candidate is not None:
         proposal = candidate.metadata.get("planning_proposal")
-    checks = _checks(bridge_packet=bridge_packet, candidate=candidate, proposal=proposal)
+    checks = _checks(projection_artifact=projection_artifact, candidate=candidate, proposal=proposal)
     return {
         "scope": "runtime_ready_signal_shadow_planning_contract_fixture",
         "status": (
@@ -331,17 +334,17 @@ def _report(*, bridge_packet: dict[str, Any], store: _ShadowStore) -> dict[str, 
             if _contract_passed(checks)
             else "blocked"
         ),
-        "bridge_status": bridge_packet.get("status"),
-        "runtime_instance_id": bridge_packet.get("runtime_instance_id"),
-        "signal_evaluation_id": bridge_packet.get("signal_evaluation_id"),
-        "order_candidate_id": bridge_packet.get("order_candidate_id"),
+        "projection_status": projection_artifact.get("status"),
+        "runtime_instance_id": projection_artifact.get("runtime_instance_id"),
+        "signal_evaluation_id": projection_artifact.get("signal_evaluation_id"),
+        "order_candidate_id": projection_artifact.get("order_candidate_id"),
         "proposal": proposal,
         "candidate_snapshot": (
             candidate.model_dump(mode="json") if candidate is not None else None
         ),
         "checks": checks,
-        "blockers": list(bridge_packet.get("blockers") or []),
-        "warnings": list(bridge_packet.get("warnings") or []),
+        "blockers": list(projection_artifact.get("blockers") or []),
+        "warnings": list(projection_artifact.get("warnings") or []),
         "safety_invariants": {
             "fixture_only": True,
             "uses_real_strategy_planning_service": True,
@@ -366,14 +369,14 @@ def _report(*, bridge_packet: dict[str, Any], store: _ShadowStore) -> dict[str, 
 
 def _checks(
     *,
-    bridge_packet: dict[str, Any],
+    projection_artifact: dict[str, Any],
     candidate: OrderCandidate | None,
     proposal: dict[str, Any] | None,
 ) -> dict[str, Any]:
     tp_refs = proposal.get("take_profit_references", []) if isinstance(proposal, dict) else []
     return {
         "ready_for_final_gate_preflight": (
-            bridge_packet.get("status") == "ready_for_final_gate_preflight"
+            projection_artifact.get("status") == "ready_for_final_gate_preflight"
         ),
         "shadow_signal_evaluation_created": candidate is not None,
         "shadow_order_candidate_created": candidate is not None,
@@ -462,12 +465,12 @@ def _runtime() -> StrategyRuntimeInstance:
     )
 
 
-def _post_submit_finalize_packet(
+def _post_submit_finalize_payload(
     runtime: StrategyRuntimeInstance,
-) -> RuntimePostSubmitFinalizePacket:
-    return RuntimePostSubmitFinalizePacket.model_validate(
+) -> RuntimePostSubmitFinalizePayload:
+    return RuntimePostSubmitFinalizePayload.model_validate(
         {
-            "packet_id": "post-submit-rtf075-contract",
+            "post_submit_finalize_payload_id": "post-submit-rtf075-contract",
             "authorization_id": "auth-rtf075-consumed",
             "runtime_instance_id": runtime.runtime_instance_id,
             "exchange_submit_execution_result_id": "submit-result-rtf075-contract",
@@ -509,7 +512,6 @@ def _post_submit_finalize_packet(
             "blockers": [],
             "warnings": [],
             "not_execution_authority": True,
-            "runtime_state_mutated_by_packet": False,
             "execution_intent_created": False,
             "order_created": False,
             "order_cancelled": False,

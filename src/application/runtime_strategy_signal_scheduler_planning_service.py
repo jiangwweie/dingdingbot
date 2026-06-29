@@ -1,6 +1,6 @@
-"""Explicit scheduler handoff into shadow runtime strategy planning.
+"""Explicit scheduler adapter into shadow runtime strategy planning.
 
-This service is the non-executing bridge after scheduler readiness. It keeps
+This service is the non-executing adapter after scheduler readiness. It keeps
 ``RuntimeStrategySignalSchedulerAssemblyService`` read-only, then calls the B0
 shadow planner only when a caller explicitly enables shadow candidate creation.
 

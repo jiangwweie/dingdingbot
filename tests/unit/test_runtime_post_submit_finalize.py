@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from scripts.runtime_post_submit_finalize_dry_run import build_packet_from_fixture
+from scripts.runtime_post_submit_finalize_dry_run import build_payload_from_fixture
 from src.application.runtime_post_submit_finalize_service import (
     RuntimePostSubmitFinalizeService,
 )
@@ -16,8 +16,9 @@ from src.domain.runtime_execution_post_submit_budget_settlement import (
 )
 from src.domain.runtime_post_submit_finalize import (
     RuntimeNextAttemptGateStatus,
+    RuntimePostSubmitFinalizePayload,
     RuntimePostSubmitFinalizeStatus,
-    build_runtime_post_submit_finalize_packet,
+    build_runtime_post_submit_finalize_payload,
 )
 from tests.unit.test_runtime_execution_submit_outcome_review import (
     NOW_MS,
@@ -60,7 +61,7 @@ def test_post_submit_finalize_ready_after_no_fill_settlement():
         blocks_new_entries_until_resolved=False,
     )
 
-    packet = build_runtime_post_submit_finalize_packet(
+    packet = build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=runtime,
         exchange_submit_execution_result=result,
@@ -87,8 +88,38 @@ def test_post_submit_finalize_ready_after_no_fill_settlement():
     assert packet.post_submit_reconciliation_matched is True
     assert packet.post_submit_budget_settled is True
     assert packet.submit_outcome_review_recorded is True
+    payload = packet.model_dump(mode="python")
+    assert payload["runtime_state_mutated_by_payload"] is False
+    assert "runtime_state_mutated_by_packet" not in payload
     assert packet.exchange_called is False
     assert packet.order_lifecycle_called is False
+
+
+def test_post_submit_finalize_rejects_legacy_packet_mutation_flag():
+    payload = build_runtime_post_submit_finalize_payload(
+        authorization_id="auth-1",
+        runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
+        exchange_submit_execution_result=_submitted_result(),
+        submit_outcome_review=_ready_review_no_fill_cancelled(),
+        post_submit_budget_settlement=_settlement(
+            status=RuntimeExecutionPostSubmitBudgetSettlementStatus
+            .RELEASED_RESERVED_BUDGET,
+            budget_reserved_after=Decimal("0"),
+            budget_remaining_after=Decimal("30"),
+            budget_released=True,
+            reserved_budget_remains_held=False,
+            requires_reconciliation_before_retry=True,
+            blocks_new_entries_until_resolved=False,
+        ),
+        active_positions_count=0,
+        closed_review_required=False,
+        now_ms=NOW_MS,
+    ).model_dump(mode="python")
+    payload["runtime_state_mutated_by_packet"] = False
+    payload.pop("runtime_state_mutated_by_payload")
+
+    with pytest.raises(ValueError):
+        RuntimePostSubmitFinalizePayload.model_validate(payload)
 
 
 def test_post_submit_finalize_blocks_next_attempt_when_active_position_slot_used():
@@ -108,7 +139,7 @@ def test_post_submit_finalize_blocks_next_attempt_when_active_position_slot_used
         blocks_new_entries_until_resolved=False,
     )
 
-    packet = build_runtime_post_submit_finalize_packet(
+    packet = build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=runtime,
         exchange_submit_execution_result=result,
@@ -135,7 +166,7 @@ def test_post_submit_finalize_blocks_next_attempt_when_active_position_slot_used
 
 
 def test_post_submit_finalize_blocks_missing_trusted_active_position_fact():
-    packet = build_runtime_post_submit_finalize_packet(
+    packet = build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=_runtime(),
         exchange_submit_execution_result=_submitted_result(),
@@ -378,7 +409,7 @@ def test_post_submit_finalize_dry_run_fixture_outputs_json(tmp_path):
     fixture = tmp_path / "fixture.json"
     fixture.write_text(json.dumps(payload))
 
-    packet = build_packet_from_fixture(payload)
+    post_submit_finalize_payload = build_payload_from_fixture(payload)
     completed = subprocess.run(
         [
             sys.executable,
@@ -393,7 +424,7 @@ def test_post_submit_finalize_dry_run_fixture_outputs_json(tmp_path):
     )
     stdout = json.loads(completed.stdout)
 
-    assert packet["status"] == "finalized_ready_for_next_attempt"
+    assert post_submit_finalize_payload["status"] == "finalized_ready_for_next_attempt"
     assert stdout["status"] == "finalized_ready_for_next_attempt"
     assert stdout["next_attempt_gate"]["requires_fresh_authorization"] is True
 

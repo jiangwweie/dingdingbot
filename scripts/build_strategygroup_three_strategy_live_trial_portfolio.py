@@ -13,10 +13,19 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    LEGACY_AUTHORITY_MIRROR_KEYS,
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_REGISTRY_JSON = (
     REPO_ROOT
@@ -25,30 +34,6 @@ DEFAULT_REGISTRY_JSON = (
 DEFAULT_TIER_POLICY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
-)
-DEFAULT_CAPITAL_TRIAL_BRIDGE_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json"
-)
-DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json"
-)
-DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json"
-)
-DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.json"
-)
-DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.json"
-)
-DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
-)
-DEFAULT_SIGNAL_COVERAGE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
@@ -61,6 +46,7 @@ DEFAULT_OUTPUT_MD = (
 
 SCHEMA = "brc.three_strategy_live_trial_portfolio.v1"
 SELECTED_STRATEGY_GROUPS = ("MPG-001", "BRF2-001", "SOR-001")
+TRIAL_ENVELOPE_ID = "three_strategy_live_trial_envelope_v1"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,83 +54,96 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--registry-json", default=str(DEFAULT_REGISTRY_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
     parser.add_argument(
-        "--capital-trial-readiness-bridge-json",
-        default=str(DEFAULT_CAPITAL_TRIAL_BRIDGE_JSON),
+        "--capital-trial-envelope-projection-json",
     )
     parser.add_argument(
         "--trial-asset-admission-proposal-json",
-        default=str(DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON),
     )
     parser.add_argument(
         "--brf2-owner-trial-policy-scope-json",
-        default=str(DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON),
     )
     parser.add_argument(
         "--brf2-required-facts-mapping-json",
-        default=str(DEFAULT_BRF2_REQUIRED_FACTS_MAPPING_JSON),
     )
     parser.add_argument(
         "--brf2-runtime-signal-capture-json",
-        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON),
     )
     parser.add_argument(
         "--trial-grade-signal-gate-audit-json",
-        default=str(DEFAULT_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON),
     )
     parser.add_argument(
         "--signal-coverage-json",
-        default=str(DEFAULT_SIGNAL_COVERAGE_JSON),
     )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_three_strategy_live_trial_portfolio(
+    artifact = build_three_strategy_live_trial_portfolio(
         registry=_read_json(Path(args.registry_json)),
         tier_policy=_read_json(Path(args.tier_policy_json)),
-        capital_trial_bridge=_read_json(Path(args.capital_trial_readiness_bridge_json)),
+        capital_trial_envelope_projection=_read_optional_json(
+            Path(args.capital_trial_envelope_projection_json)
+        )
+        if args.capital_trial_envelope_projection_json
+        else {},
         trial_asset_admission_proposal=_read_optional_json(
             Path(args.trial_asset_admission_proposal_json)
-        ),
+        )
+        if args.trial_asset_admission_proposal_json
+        else {},
         brf2_owner_trial_policy_scope=_read_optional_json(
             Path(args.brf2_owner_trial_policy_scope_json)
-        ),
+        )
+        if args.brf2_owner_trial_policy_scope_json
+        else {},
         brf2_required_facts_mapping=_read_optional_json(
             Path(args.brf2_required_facts_mapping_json)
-        ),
+        )
+        if args.brf2_required_facts_mapping_json
+        else {},
         brf2_runtime_signal_capture=_read_optional_json(
             Path(args.brf2_runtime_signal_capture_json)
-        ),
+        )
+        if args.brf2_runtime_signal_capture_json
+        else {},
         trial_grade_signal_gate_audit=_read_optional_json(
             Path(args.trial_grade_signal_gate_audit_json)
-        ),
-        signal_coverage=_read_optional_json(Path(args.signal_coverage_json)),
+        )
+        if args.trial_grade_signal_gate_audit_json
+        else {},
+        signal_coverage=_read_optional_json(Path(args.signal_coverage_json))
+        if args.signal_coverage_json
+        else {},
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, artifact)
+    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "seat_count": packet["seat_count"],
-                "selected_strategy_groups": packet["selected_strategy_groups"],
-                "objective_met": packet["objective_met"],
+                "status": artifact["status"],
+                "seat_count": artifact["seat_count"],
+                "selected_strategy_groups": artifact["selected_strategy_groups"],
+                "objective_met": artifact["objective_met"],
                 "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
         )
     )
-    return 0 if packet["status"] == "three_strategy_live_trial_portfolio_ready" else 2
+    return (
+        0
+        if artifact["status"] == "three_strategy_live_trial_portfolio_ready"
+        else 2
+    )
 
 
 def build_three_strategy_live_trial_portfolio(
     *,
     registry: dict[str, Any],
     tier_policy: dict[str, Any],
-    capital_trial_bridge: dict[str, Any],
+    capital_trial_envelope_projection: dict[str, Any],
     trial_asset_admission_proposal: dict[str, Any] | None = None,
     brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
     brf2_required_facts_mapping: dict[str, Any] | None = None,
@@ -155,7 +154,7 @@ def build_three_strategy_live_trial_portfolio(
 ) -> dict[str, Any]:
     registry_rows = _rows_by_id(registry.get("rows"))
     tier_rows = _as_dict(tier_policy.get("current_strategy_groups"))
-    selected = _as_dict(capital_trial_bridge.get("selected_non_mpg_trial_candidate"))
+    selected = _as_dict(capital_trial_envelope_projection.get("selected_non_mpg_trial_candidate"))
     proposal = _as_dict((trial_asset_admission_proposal or {}).get("proposal"))
     owner_policy_scope = brf2_owner_trial_policy_scope or {}
     required_facts_mapping = brf2_required_facts_mapping or {}
@@ -176,6 +175,7 @@ def build_three_strategy_live_trial_portfolio(
         trial_grade_signal_gate_audit or {},
     )
     selected_strategy_groups = list(SELECTED_STRATEGY_GROUPS)
+    trial_envelope = _portfolio_trial_envelope(seats)
     seat_count = len(selected_strategy_groups)
     first_blockers = {
         strategy_id: seats[strategy_id]["first_blocker"]
@@ -201,11 +201,8 @@ def build_three_strategy_live_trial_portfolio(
         "portfolio_goal": "at_least_3_live_trial_strategygroups",
         "selected_strategy_groups": selected_strategy_groups,
         "seat_count": seat_count,
+        "trial_envelope": trial_envelope,
         "seat_readiness": seats,
-        "tradeability_summary": {
-            strategy_id: seats[strategy_id]["tradeability_projection"]
-            for strategy_id in selected_strategy_groups
-        },
         "first_blockers": first_blockers,
         "owner_policy_required": owner_policy_required,
         "runtime_authority_boundary": {
@@ -232,7 +229,7 @@ def build_three_strategy_live_trial_portfolio(
             "replacement_used": False,
             "selected_replacement": "",
             "reason": "SOR-001 has sufficient current registry, tier, handoff, and RequiredFacts support",
-            "fallback_order": ["FBS-001", "TEQ-001", "BTPC-001"],
+            "replacement_candidate_order": ["FBS-001", "TEQ-001", "BTPC-001"],
         },
         "objective_met": objective_met,
         "checks": {
@@ -256,8 +253,12 @@ def build_three_strategy_live_trial_portfolio(
                 bool(seats[strategy_id]["review_hooks"])
                 for strategy_id in selected_strategy_groups
             ),
-            "trial_grade_30u_standby_ready": stage_5_standby["ready"],
-            "trial_grade_30u_standby_count": stage_5_standby["standby_count"],
+            "all_seats_reference_trial_envelope": all(
+                seats[strategy_id].get("trial_envelope_id") == TRIAL_ENVELOPE_ID
+                for strategy_id in selected_strategy_groups
+            ),
+            "controlled_live_standby_ready": stage_5_standby["ready"],
+            "controlled_live_standby_count": stage_5_standby["standby_count"],
             "stage_5_waiting_live_opportunity": stage_5_standby["ready"],
             "action_time_preflight_pending_fresh_signal": stage_5_standby[
                 "action_time_preflight_pending_fresh_signal"
@@ -266,11 +267,9 @@ def build_three_strategy_live_trial_portfolio(
                 "hard_safety_gates_relaxed"
             ],
             "objective_met": objective_met,
-            "actionable_now": False,
-            "real_order_authority": False,
         },
         "next_engineering_bottleneck": next_bottlenecks,
-        "final_evidence_packet": {
+        "final_portfolio_evidence": {
             "closed_engineering_problem": (
                 "single-strategy waiting view replaced by a machine-checkable "
                 "three-seat live-trial portfolio read model"
@@ -281,38 +280,36 @@ def build_three_strategy_live_trial_portfolio(
                 "trial-grade standby, authority boundary, and review hooks"
             ),
             "three_strategy_portfolio_status": status,
+            "trial_envelope_id": trial_envelope["trial_envelope_id"],
             "stage_5_live_opportunity_standby_status": stage_5_standby["status"],
             "brf2_policy_scope_recorded": _policy_recorded(owner_policy_scope),
             "brf2_stage_after_policy": seats["BRF2-001"].get("stage", ""),
             "brf2_new_first_blocker": _as_dict(
                 seats["BRF2-001"].get("first_blocker")
             ).get("first_blocker_class", ""),
-            "strategy_seat_table": [
-                seats[strategy_id] for strategy_id in selected_strategy_groups
-            ],
             "remaining_first_blockers": first_blockers,
             "next_live_submit_condition": (
                 "fresh seat-scoped signal plus RequiredFacts, candidate evidence, "
                 "action-time FinalGate, and official Operation Layer"
             ),
             "tests_run": [
-                "python3 -m py_compile scripts/build_strategygroup_three_strategy_live_trial_portfolio.py scripts/build_strategygroup_tradeability_verdict.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-                "python3 -m pytest tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py tests/unit/test_strategygroup_tradeability_verdict.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py -q",
+                "python3 -m py_compile scripts/build_strategygroup_three_strategy_live_trial_portfolio.py scripts/build_strategygroup_tradeability_decision.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+                "python3 -m pytest tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py tests/unit/test_strategygroup_tradeability_decision.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py -q",
                 "python3 -m pytest tests/unit/test_strategygroup_current_artifact_contract.py -q",
                 "git diff --check",
             ],
             "files_changed": [
                 "scripts/build_strategygroup_three_strategy_live_trial_portfolio.py",
-                "scripts/build_strategygroup_tradeability_verdict.py",
+                "scripts/build_strategygroup_tradeability_decision.py",
                 "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
                 "tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py",
-                "tests/unit/test_strategygroup_tradeability_verdict.py",
+                "tests/unit/test_strategygroup_tradeability_decision.py",
                 "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
                 "tests/unit/test_strategygroup_current_artifact_contract.py",
                 "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
                 "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.md",
-                "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json",
-                "output/runtime-monitor/latest-strategygroup-tradeability-verdict.md",
+                "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
+                "output/runtime-monitor/latest-strategygroup-tradeability-decision.md",
                 "output/runtime-monitor/latest-local-monitor-sequence.json",
                 "output/runtime-monitor/latest-local-monitor-sequence.md",
             ],
@@ -339,6 +336,8 @@ def _mpg_seat(
         "tier_policy_mode": _as_dict(tier_rows.get("MPG-001")).get("mode", "unknown"),
         "experiment_worthiness_review_closed": True,
         "loss_envelope_expressed": True,
+        "trial_envelope_id": TRIAL_ENVELOPE_ID,
+        "trial_envelope_role": "existing_runtime_policy_boundary_member",
         "policy_scope": {
             "capital_scope": "existing_owner_allocated_subaccount_boundary",
             "symbol_scope": ["runtime_selected_momentum_symbol"],
@@ -376,20 +375,19 @@ def _mpg_seat(
             "live_submit_ready": False,
         },
         "first_blocker": {
-            "verdict": "not_tradable_market_wait",
+            "decision_state": "not_tradable_market_wait",
             "first_blocker_class": "fresh_executable_signal_absent",
             "blocker_owner": "market",
-            "next_action": "continue_armed_observation_until_fresh_signal",
+            "repair_checkpoint": "continue_armed_observation_until_fresh_signal",
         },
-        "tradeability_projection": {
-            "can_trade": False,
-            "verdict": "not_tradable_market_wait",
+        "tradeability_decision_evidence": {
+            "decision_state": "not_tradable_market_wait",
             "next_state_after_blocker_removed": "live_submit_ready",
         },
         "authority_boundary": _authority_boundary(),
         "review_hooks": [
             "post_submit_review_ledger",
-            "strategygroup_decision_ledger",
+            "strategy_asset_state",
             "runtime_budget_settlement_review",
         ],
         "next_bottleneck": "fresh_signal_wait",
@@ -413,7 +411,12 @@ def _brf2_seat(
         == "brf2_watcher_fact_input_missing"
     )
     required_facts = _string_list(
-        required_facts_mapping.get("required_fact_keys")
+        [
+            item.get("fact_key")
+            for item in _dict_rows(
+                required_facts_mapping.get("required_fact_observation_specs")
+            )
+        ]
         or [
             item.get("fact_key")
             for item in _dict_rows(required_facts_mapping.get("required_facts"))
@@ -423,7 +426,12 @@ def _brf2_seat(
         or selected.get("required_facts_draft")
     )
     disable_facts = _string_list(
-        required_facts_mapping.get("disable_fact_keys")
+        [
+            item.get("fact_key")
+            for item in _dict_rows(
+                required_facts_mapping.get("disable_fact_observation_specs")
+            )
+        ]
         or [
             item.get("fact_key")
             for item in _dict_rows(required_facts_mapping.get("disable_facts"))
@@ -453,11 +461,11 @@ def _brf2_seat(
         }
     )
     stage = (
-        "armed_observation"
+        "trial_asset_admission_candidate"
+        if not policy_recorded
+        else "armed_observation"
         if mapping_ready
         else "admitted_trial_asset"
-        if policy_recorded
-        else "trial_asset_admission_candidate"
     )
     owner_policy_required = not policy_recorded
     owner_policy_status = (
@@ -466,35 +474,34 @@ def _brf2_seat(
         else "trial_scope_policy_missing_machine_checkable"
     )
     first_blocker = (
-        runtime_capture_blocker
+        {
+            "decision_state": "not_tradable_policy",
+            "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
+            "blocker_owner": "owner",
+            "repair_checkpoint": "record_owner_trial_scope_policy",
+        }
+        if not policy_recorded
+        else runtime_capture_blocker
         if mapping_ready and runtime_capture_blocker
         else
         {
-            "verdict": "not_tradable_market_wait",
+            "decision_state": "not_tradable_market_wait",
             "first_blocker_class": "fresh_brf2_short_signal_absent",
             "blocker_owner": "market",
-            "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+            "repair_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
         }
         if mapping_ready
         else
         {
-            "verdict": "not_tradable_facts",
+            "decision_state": "not_tradable_facts",
             "first_blocker_class": "required_facts_mapping_gap",
             "blocker_owner": "engineering",
-            "next_action": "close_brf2_required_facts_mapping_for_armed_observation",
-        }
-        if policy_recorded
-        else {
-            "verdict": "not_tradable_policy",
-            "first_blocker_class": "owner_trial_scope_or_capital_policy_missing",
-            "blocker_owner": "owner",
-            "next_action": "record_owner_trial_scope_policy",
+            "repair_checkpoint": "close_brf2_required_facts_mapping_for_armed_observation",
         }
     )
-    tradeability_projection = (
+    tradeability_decision_evidence = (
         {
-            "can_trade": False,
-            "verdict": str(runtime_capture_blocker.get("verdict")),
+            "decision_state": str(runtime_capture_blocker.get("decision_state")),
             "next_state_after_blocker_removed": "armed_observation"
             if runtime_fact_input_missing
             else "live_submit_ready",
@@ -502,21 +509,18 @@ def _brf2_seat(
         if mapping_ready and runtime_capture_blocker
         else
         {
-            "can_trade": False,
-            "verdict": "not_tradable_market_wait",
+            "decision_state": "not_tradable_market_wait",
             "next_state_after_blocker_removed": "live_submit_ready",
         }
         if mapping_ready
         else
         {
-            "can_trade": False,
-            "verdict": "not_tradable_facts",
+            "decision_state": "not_tradable_facts",
             "next_state_after_blocker_removed": "armed_observation",
         }
         if policy_recorded
         else {
-            "can_trade": False,
-            "verdict": "not_tradable_policy",
+            "decision_state": "not_tradable_policy",
             "next_state_after_blocker_removed": "admitted_trial_asset",
         }
     )
@@ -544,6 +548,8 @@ def _brf2_seat(
         "tier_policy_mode": "trial_asset_admission_candidate",
         "experiment_worthiness_review_closed": True,
         "loss_envelope_expressed": True,
+        "trial_envelope_id": TRIAL_ENVELOPE_ID,
+        "trial_envelope_role": "owner_recorded_30u_trial_policy_member",
         "trial_policy_proposal_ready": True,
         "admitted_trial_asset_proposal_ready": bool(proposal),
         "armed_observation_plan_ready": True,
@@ -619,10 +625,10 @@ def _brf2_seat(
             "live_submit_ready": False,
         },
         "first_blocker": first_blocker,
-        "tradeability_projection": tradeability_projection,
+        "tradeability_decision_evidence": tradeability_decision_evidence,
         "authority_boundary": _authority_boundary(),
         "review_hooks": [
-            "strategygroup_decision_ledger",
+            "strategy_asset_state",
             "trial_attempt_review_ledger",
             "post_submit_review_ledger_after_real_attempt",
         ],
@@ -639,58 +645,58 @@ def _brf2_seat(
     }
 
 
-def _policy_recorded(packet: dict[str, Any]) -> bool:
-    policy = _as_dict(packet.get("policy"))
+def _policy_recorded(artifact: dict[str, Any]) -> bool:
+    policy = _as_dict(artifact.get("policy"))
     return (
-        packet.get("status") == "brf2_owner_trial_policy_scope_recorded"
-        and packet.get("brf2_policy_scope_recorded") is True
-        and packet.get("owner_policy_scope_missing") is False
+        artifact.get("status") == "brf2_owner_trial_policy_scope_recorded"
+        and artifact.get("brf2_policy_scope_recorded") is True
+        and artifact.get("owner_policy_scope_missing") is False
         and policy.get("strategy_group_id") == "BRF2-001"
     )
 
 
-def _brf2_required_facts_mapping_ready(packet: dict[str, Any]) -> bool:
+def _brf2_required_facts_mapping_ready(artifact: dict[str, Any]) -> bool:
     return (
-        packet.get("status") == "brf2_required_facts_mapping_ready"
-        and packet.get("strategy_group_id") == "BRF2-001"
-        and packet.get("required_facts_mapping_ready") is True
-        and packet.get("after_next_state") == "armed_observation"
+        artifact.get("status") == "brf2_required_facts_mapping_ready"
+        and artifact.get("strategy_group_id") == "BRF2-001"
+        and artifact.get("required_facts_mapping_ready") is True
+        and artifact.get("after_next_state") == "armed_observation"
     )
 
 
-def _brf2_runtime_capture_first_blocker(packet: dict[str, Any]) -> dict[str, str]:
-    if packet.get("status") != "brf2_runtime_signal_capture_ready":
+def _brf2_runtime_capture_first_blocker(artifact: dict[str, Any]) -> dict[str, str]:
+    if artifact.get("status") != "brf2_runtime_signal_capture_ready":
         return {}
-    preview = _as_dict(packet.get("signal_detector_preview"))
+    preview = _as_dict(artifact.get("signal_detector_preview"))
     signal_state = str(preview.get("current_signal_state") or "")
     first_blocker_class = str(
         preview.get("first_blocker_class") or "fresh_brf2_short_signal_absent"
     )
     blocker_owner = str(preview.get("first_blocker_owner") or "market")
-    next_action = str(
-        preview.get("next_action")
+    repair_checkpoint = str(
+        preview.get("signal_capture_checkpoint")
         or "continue_brf2_armed_observation_until_fresh_signal"
     )
     if signal_state == "fact_input_missing":
         return {
-            "verdict": "not_tradable_facts",
+            "decision_state": "not_tradable_facts",
             "first_blocker_class": first_blocker_class,
             "blocker_owner": blocker_owner,
-            "next_action": next_action,
+            "repair_checkpoint": repair_checkpoint,
         }
     if signal_state == "blocked_by_disable_fact":
         return {
-            "verdict": "not_tradable_market_wait",
+            "decision_state": "not_tradable_market_wait",
             "first_blocker_class": first_blocker_class,
             "blocker_owner": blocker_owner,
-            "next_action": next_action,
+            "repair_checkpoint": repair_checkpoint,
         }
     if signal_state == "fresh_signal_present":
         return {
-            "verdict": "not_tradable_execution_gate",
+            "decision_state": "not_tradable_execution_gate",
             "first_blocker_class": "brf2_candidate_authorization_evidence_not_created",
             "blocker_owner": "runtime",
-            "next_action": "build_brf2_non_executing_candidate_packet_for_action_time_chain",
+            "repair_checkpoint": "build_brf2_shadow_candidate_evidence_for_action_time_chain",
         }
     return {}
 
@@ -711,7 +717,7 @@ def _brf2_recorded_policy_scope(policy: dict[str, Any]) -> dict[str, Any]:
         "max_consecutive_losses": policy.get("max_consecutive_losses"),
         "valid_until": policy.get("valid_until"),
         "profile": "runtime_profile_and_action_time_exchange_facts",
-        "authority_boundary": policy.get("authority_boundary"),
+        "authority_boundary": _owner_policy_boundary_text(policy),
         "missing_policy_fields": [],
     }
 
@@ -734,27 +740,40 @@ def _sor_seat(
         "tier_policy_mode": _as_dict(tier_rows.get("SOR-001")).get("mode", "unknown"),
         "experiment_worthiness_review_closed": True,
         "loss_envelope_expressed": True,
+        "trial_envelope_id": TRIAL_ENVELOPE_ID,
+        "trial_envelope_role": "controlled_subaccount_policy_boundary_member",
         "observed_no_action_count": no_action_count,
         "policy_scope": {
             "capital_scope": {
-                "amount": "30",
                 "currency": "USDT",
-                "type": "trial_grade_audit_envelope_not_sizing_default",
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
             },
             "symbol_scope": ["session_eligible_perps"],
             "side_scope": ["short", "long_revival_only"],
             "leverage_scenario": "trial_grade_scenario_not_production_authority",
             "attempt_cap": 3,
-            "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
             "profile": "existing_observation_profile_boundary",
         },
         "owner_policy_required": False,
-        "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
+        "owner_policy_status": "controlled_subaccount_observation_policy_recorded_not_production_authority",
         "symbol_scope": ["session_eligible_perps"],
         "side_scope": ["short", "long_revival_only"],
         "leverage_scenario": "trial_grade_scenario_not_production_authority",
         "attempt_cap": 3,
-        "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+        "loss_unit": {
+            "currency": "USDT",
+            "calculation": "action_time_exchange_available_balance / attempt_cap",
+            "balance_source": "action_time_exchange_available_balance",
+            "basis": "controlled subaccount dynamic allocation / attempt cap",
+        },
         "pause_conditions": [
             "outside_session_window",
             "post_open_decay_disable_state_true",
@@ -779,24 +798,31 @@ def _sor_seat(
             "live_submit_ready": False,
         },
         "first_blocker": {
-            "verdict": "not_tradable_market_wait",
+            "decision_state": "not_tradable_market_wait",
             "first_blocker_class": "fresh_session_range_signal_absent",
             "blocker_owner": "market",
-            "next_action": "continue_session_range_armed_observation_until_fresh_signal",
+            "repair_checkpoint": "continue_session_range_armed_observation_until_fresh_signal",
         },
-        "tradeability_projection": {
-            "can_trade": False,
-            "verdict": "not_tradable_market_wait",
+        "tradeability_decision_evidence": {
+            "decision_state": "not_tradable_market_wait",
             "next_state_after_blocker_removed": "live_submit_ready",
         },
         "authority_boundary": _authority_boundary(),
         "review_hooks": [
-            "strategygroup_decision_ledger",
+            "strategy_asset_state",
             "session_range_trial_review_ledger",
             "post_submit_review_ledger_after_real_attempt",
         ],
         "next_bottleneck": "fresh_signal_wait",
-}
+    }
+
+
+def _required_facts(handoff: dict[str, Any]) -> list[str]:
+    facts: list[str] = []
+    required = _as_dict(handoff.get("required_facts"))
+    for values in required.values():
+        facts.extend(_string_list(values))
+    return list(dict.fromkeys(facts))
 
 
 def _attach_trial_grade_standby(
@@ -828,8 +854,8 @@ def _attach_trial_grade_standby(
         )
         standby_ready = (
             signal_status["trial_grade_audit_ready"]
-            and signal_status["trial_grade_policy_scope"] == "30U_bounded_trial_only"
-            and signal_status["trial_grade_signal_can_prepare_30u_trial"]
+            and signal_status["trial_grade_policy_scope"] == "controlled_subaccount_live_scope"
+            and signal_status["trial_grade_signal_can_prepare_controlled_live"]
             and not signal_status["production_grade_authority_changed"]
             and seat.get("admitted_or_selected_as_live_trial_asset") is True
             and seat.get("owner_policy_required") is False
@@ -839,11 +865,19 @@ def _attach_trial_grade_standby(
             and not hard_safety_gates_relaxed
             and not signal_status["trial_grade_signal_can_bypass_hard_safety_gates"]
         )
-        runtime_readiness["trial_grade_30u_standby_ready"] = standby_ready
+        runtime_readiness["controlled_live_standby_ready"] = standby_ready
         runtime_readiness["stage_5_waiting_live_opportunity_ready"] = standby_ready
         runtime_readiness["action_time_preflight_pending_fresh_signal"] = standby_ready
         runtime_readiness["trial_grade_policy_scope"] = policy_update.get(
             "scope", "missing"
+        )
+        runtime_readiness["readiness_stage_evidence"] = (
+            _seat_readiness_stage_evidence(
+                strategy_id=strategy_id,
+                seat=seat,
+                runtime_readiness=runtime_readiness,
+                blocker=blocker,
+            )
         )
         seat["runtime_readiness"] = runtime_readiness
         seat["trial_grade_signal_status"] = signal_status
@@ -872,9 +906,6 @@ def _attach_trial_grade_standby(
         "hard_safety_gates_relaxed": hard_safety_gates_relaxed,
         "action_time_preflight_pending_fresh_signal": ready,
         "fresh_signal_required_before_live_submit": True,
-        "live_submit_ready_now": False,
-        "actionable_now": False,
-        "real_order_authority": False,
         "calls_finalgate": False,
         "calls_operation_layer": False,
         "calls_exchange_write": False,
@@ -901,6 +932,37 @@ def _standby_required_facts_ready(
     return True
 
 
+def _seat_readiness_stage_evidence(
+    *,
+    strategy_id: str,
+    seat: dict[str, Any],
+    runtime_readiness: dict[str, Any],
+    blocker: dict[str, Any],
+) -> dict[str, Any]:
+    market_wait = blocker.get("blocker_owner") == "market"
+    live_submit_ready = runtime_readiness.get("live_submit_ready") is True
+    return {
+        "source": "three_strategy_live_trial_portfolio.runtime_readiness",
+        "trial_eligible": seat.get("admitted_or_selected_as_live_trial_asset") is True,
+        "tiny_live_ready": runtime_readiness.get("tiny_live_ready") is True,
+        "pre_live_rehearsal_ready": False,
+        "live_submit_ready": live_submit_ready,
+        "ready_for_finalgate_checkpoint": False,
+        "fresh_signal_state": "none" if market_wait else "blocked",
+        "live_submit_ready_false_reason": (
+            "no_fresh_signal"
+            if market_wait
+            else str(runtime_readiness.get("blocked_by") or "not_live_submit_ready")
+        ),
+        "can_create_execution_attempt": False,
+        "scoped_strategy_group_ids": [strategy_id],
+        "trial_eligible_source": "Strategy Asset State / Owner policy",
+        "tiny_live_ready_source": "Tradeability Decision / Runtime Safety State",
+        "pre_live_rehearsal_ready_source": "Runtime Safety rehearsal",
+        "live_submit_ready_source": "Runtime Safety action-time chain",
+    }
+
+
 def _trial_grade_signal_status(
     *,
     strategy_id: str,
@@ -911,7 +973,9 @@ def _trial_grade_signal_status(
 ) -> dict[str, Any]:
     assessment = _as_dict(row.get("signal_grade_current_assessment"))
     counts_30d = _as_dict(
-        _as_dict(_as_dict(row.get("verified_recent_window_counts")).get("windows_days")).get("30")
+        _as_dict(
+            _as_dict(row.get("verified_recent_window_counts")).get("windows_days")
+        ).get("30")
     )
     projection = _as_dict(row.get("fixture_replay_projection"))
     tomorrow = _as_dict(row.get("tomorrow_same_structure_assessment"))
@@ -940,26 +1004,90 @@ def _trial_grade_signal_status(
         "max_loss_estimate_usdt": str(
             projection.get("max_loss_estimate_usdt") or ""
         ),
-        "would_enter_30u_trial_if_same_structure": (
-            tomorrow.get("would_enter_30u_trial") is True
+        "would_enter_controlled_live_trial_if_same_structure": (
+            tomorrow.get("would_enter_controlled_live_trial") is True
         ),
-        "trial_grade_signal_can_prepare_30u_trial": (
-            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        "trial_grade_signal_can_prepare_controlled_live": (
+            authority.get("trial_grade_signal_can_prepare_controlled_live") is True
         ),
         "trial_grade_signal_can_bypass_hard_safety_gates": (
             authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
         ),
-        "actionable_now": False,
-        "real_order_authority": False,
     }
 
 
-def _required_facts(handoff: dict[str, Any]) -> list[str]:
-    facts: list[str] = []
-    required = _as_dict(handoff.get("required_facts"))
-    for values in required.values():
-        facts.extend(_string_list(values))
-    return list(dict.fromkeys(facts))
+def _portfolio_trial_envelope(seats: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    brf2_policy = _as_dict(_as_dict(seats.get("BRF2-001")).get("policy_scope"))
+    capital = _as_dict(brf2_policy.get("capital_scope"))
+    loss_unit = brf2_policy.get("loss_unit")
+    max_notional = _as_dict(brf2_policy.get("max_notional"))
+    explicit_owner_policy_strategy_groups = (
+        ["BRF2-001"] if capital.get("amount_source") and capital.get("currency") else []
+    )
+    return {
+        "trial_envelope_id": TRIAL_ENVELOPE_ID,
+        "state_family": "Strategy Policy / Trial Envelope",
+        "primary_policy_source": True,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+        "scope": "three_strategy_live_trial_portfolio_shared_policy_boundary",
+        "applies_to_strategy_groups": list(SELECTED_STRATEGY_GROUPS),
+        "explicit_owner_policy_strategy_groups": explicit_owner_policy_strategy_groups,
+        "capital": capital
+        if capital
+        else {
+            "status": "owner_policy_required",
+            "source": "brf2_owner_trial_policy_scope_missing",
+        },
+        "attempt_cap": brf2_policy.get("attempt_cap", "owner_policy_required"),
+        "loss_unit": loss_unit if loss_unit is not None else "owner_policy_required",
+        "daily_loss_cap_units": brf2_policy.get(
+            "daily_loss_cap_units", "owner_policy_required"
+        ),
+        "max_consecutive_losses": brf2_policy.get(
+            "max_consecutive_losses", "owner_policy_required"
+        ),
+        "leverage_scenario": brf2_policy.get(
+            "leverage_scenario", "owner_policy_required"
+        ),
+        "max_notional": max_notional,
+        "protection_required": True,
+        "review_required": True,
+        "pause_conditions": _unique_nested_list(seats, "pause_conditions"),
+        "kill_conditions": _unique_nested_list(seats, "kill_conditions"),
+        "review_hooks": _unique_nested_list(seats, "review_hooks"),
+        "seat_policy_summaries": {
+            strategy_id: _seat_policy_summary(seat)
+            for strategy_id, seat in seats.items()
+        },
+        "boundary": (
+            "read_model_policy_boundary_only; no_live_profile_change; "
+            "action_time_finalgate_and_operation_layer_still_required"
+        ),
+    }
+
+
+def _seat_policy_summary(seat: dict[str, Any]) -> dict[str, Any]:
+    policy_scope = _as_dict(seat.get("policy_scope"))
+    return {
+        "strategy_group_id": seat.get("strategy_group_id"),
+        "stage": seat.get("stage"),
+        "owner_policy_status": seat.get("owner_policy_status"),
+        "owner_policy_required": seat.get("owner_policy_required"),
+        "capital_scope": policy_scope.get("capital_scope", "not_applicable"),
+        "attempt_cap": policy_scope.get("attempt_cap", "owner_policy_required"),
+        "loss_unit": policy_scope.get("loss_unit", "owner_policy_required"),
+        "symbol_scope": _string_list(policy_scope.get("symbol_scope")),
+        "side_scope": _string_list(policy_scope.get("side_scope")),
+        "trial_envelope_role": seat.get("trial_envelope_role"),
+    }
+
+
+def _unique_nested_list(seats: dict[str, dict[str, Any]], field: str) -> list[str]:
+    values: list[str] = []
+    for seat in seats.values():
+        values.extend(_string_list(seat.get(field)))
+    return list(dict.fromkeys(values))
 
 
 def _next_bottlenecks(seats: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -1001,8 +1129,8 @@ def _rows_by_id(value: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def _status(packet: dict[str, Any]) -> str:
-    return str(packet.get("status") or "")
+def _status(artifact: dict[str, Any]) -> str:
+    return str(artifact.get("status") or "")
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -1013,79 +1141,77 @@ def _int(value: Any, default: int = 0) -> int:
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_three_strategy_live_trial_portfolio",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_three_strategy_live_trial_portfolio")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "registry_authority_changed": False,
-        "tier_policy_changed": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "withdrawal_or_transfer_created": False,
-    }
-
-
-def _authority_boundary() -> str:
-    return (
-        "portfolio_read_model_only; actionable_now=false; "
-        "real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write"
+    return non_executing_safety_invariants(
+        extra_false_keys=(
+            "registry_authority_changed",
+            "tier_policy_changed",
+        ),
     )
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
+def _authority_boundary() -> str:
+    return "portfolio_read_model_only; no_finalgate_no_operation_layer_no_exchange_write"
+
+
+def _owner_policy_boundary_text(policy: dict[str, Any]) -> str:
+    boundary = str(policy.get("authority_boundary") or "")
+    if not boundary:
+        return ""
+    parts = [
+        part.strip()
+        for part in boundary.split(";")
+        if part.strip()
+        and part.strip().split("=", maxsplit=1)[0]
+        not in LEGACY_AUTHORITY_MIRROR_KEYS
+    ]
+    return "; ".join(parts)
+
+
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
         "## Three Strategy Live Trial Portfolio",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Generated: `{artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
-        f"- Portfolio goal: `{packet['portfolio_goal']}`",
-        f"- Seat count: `{packet['seat_count']}`",
-        f"- Objective met: `{_yes_no(packet['objective_met'])}`",
+        f"- Portfolio goal: `{artifact['portfolio_goal']}`",
+        f"- Seat count: `{artifact['seat_count']}`",
+        f"- Objective met: `{_yes_no(artifact['objective_met'])}`",
         "",
         "## Seats",
         "",
-        "| Seat | StrategyGroup | Stage | Verdict | First Blocker | Owner | Next Action |",
+        "| Seat | StrategyGroup | Stage | Decision State | First Blocker | Owner | Repair Checkpoint |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for strategy_id in packet["selected_strategy_groups"]:
-        seat = packet["seat_readiness"][strategy_id]
+    for strategy_id in artifact["selected_strategy_groups"]:
+        seat = artifact["seat_readiness"][strategy_id]
         blocker = seat["first_blocker"]
         lines.append(
             "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 seat["seat"],
                 strategy_id,
                 seat["stage"],
-                blocker["verdict"],
+                blocker["decision_state"],
                 blocker["first_blocker_class"],
                 blocker["blocker_owner"],
-                blocker["next_action"],
+                blocker["repair_checkpoint"],
             )
         )
     lines.extend(
         [
             "",
+            "## Trial Envelope",
+            "",
+            f"- Trial envelope: `{artifact['trial_envelope']['trial_envelope_id']}`",
+            "",
             "## Boundary",
             "",
             "- Portfolio artifact is non-executing.",
             "- It does not call FinalGate, Operation Layer, or exchange write.",
-            "- It does not set actionable_now or real_order_authority.",
         ]
     )
     return "\n".join(lines) + "\n"

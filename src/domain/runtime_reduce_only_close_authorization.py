@@ -1,7 +1,7 @@
-"""Standing-recovery readiness packet for a runtime reduce-only close.
+"""Standing-recovery readiness evidence for a runtime reduce-only close.
 
 This module is pure domain logic. It turns an already-built active-position
-exit plan into a standing-authorization readiness packet. It never closes
+exit plan into a standing-authorization readiness evidence. It never closes
 positions, creates orders, calls an exchange, or grants execution authority by
 itself. Real reduce-only recovery still requires the official action-time
 FinalGate and Operation Layer path.
@@ -27,7 +27,7 @@ STANDING_REDUCE_ONLY_RECOVERY_SCOPE = (
 )
 
 
-class RuntimeReduceOnlyCloseOwnerPacketStatus(str, Enum):
+class RuntimeReduceOnlyCloseOwnerEvidenceStatus(str, Enum):
     BLOCKED = "blocked"
     READY_FOR_OWNER_AUTHORIZATION = "ready_for_owner_authorization"
     READY_FOR_STANDING_RECOVERY_AUTHORIZATION = (
@@ -35,11 +35,11 @@ class RuntimeReduceOnlyCloseOwnerPacketStatus(str, Enum):
     )
 
 
-class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
+class RuntimeReduceOnlyCloseOwnerEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    packet_id: str = Field(min_length=1, max_length=320)
-    status: RuntimeReduceOnlyCloseOwnerPacketStatus
+    evidence_id: str = Field(min_length=1, max_length=320)
+    status: RuntimeReduceOnlyCloseOwnerEvidenceStatus
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     side: str = Field(min_length=1, max_length=32)
@@ -58,8 +58,8 @@ class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
     finalgate_required: Literal[True] = True
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    recommended_owner_decision: str
-    packet_only: Literal[True] = True
+    recommended_recovery_action: str
+    reduce_only_close_owner_evidence_only: Literal[True] = True
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
     not_execution_authority: Literal[True] = True
@@ -76,41 +76,41 @@ class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
     created_at_ms: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def _status_contract(self) -> "RuntimeReduceOnlyCloseOwnerPacket":
-        if self.status == RuntimeReduceOnlyCloseOwnerPacketStatus.BLOCKED:
+    def _status_contract(self) -> "RuntimeReduceOnlyCloseOwnerEvidence":
+        if self.status == RuntimeReduceOnlyCloseOwnerEvidenceStatus.BLOCKED:
             if not self.blockers:
-                raise ValueError("blocked reduce-only close packet requires blockers")
+                raise ValueError("blocked reduce-only close evidence requires blockers")
             if self.owner_approval_value is not None:
-                raise ValueError("blocked reduce-only close packet cannot expose approval value")
-        if self.status == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_OWNER_AUTHORIZATION:
+                raise ValueError("blocked reduce-only close evidence cannot expose approval value")
+        if self.status == RuntimeReduceOnlyCloseOwnerEvidenceStatus.READY_FOR_OWNER_AUTHORIZATION:
             if not self.owner_approval_value:
-                raise ValueError("ready reduce-only close packet requires approval value")
+                raise ValueError("ready reduce-only close evidence requires approval value")
             if self.close_quantity is None or self.close_quantity <= Decimal("0"):
-                raise ValueError("ready reduce-only close packet requires positive close quantity")
+                raise ValueError("ready reduce-only close evidence requires positive close quantity")
             if not self.reduce_only_side:
-                raise ValueError("ready reduce-only close packet requires reduce-only side")
+                raise ValueError("ready reduce-only close evidence requires reduce-only side")
         if (
             self.status
-            == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
+            == RuntimeReduceOnlyCloseOwnerEvidenceStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
         ):
             if self.owner_approval_required:
-                raise ValueError("standing recovery packet must not require owner approval")
+                raise ValueError("standing recovery evidence must not require owner approval")
             if self.owner_approval_value is not None:
-                raise ValueError("standing recovery packet must not expose owner approval value")
+                raise ValueError("standing recovery evidence must not expose owner approval value")
             if not self.standing_authorization_scope:
-                raise ValueError("standing recovery packet requires standing scope")
+                raise ValueError("standing recovery evidence requires standing scope")
             if self.close_quantity is None or self.close_quantity <= Decimal("0"):
-                raise ValueError("standing recovery packet requires positive close quantity")
+                raise ValueError("standing recovery evidence requires positive close quantity")
             if not self.reduce_only_side:
-                raise ValueError("standing recovery packet requires reduce-only side")
+                raise ValueError("standing recovery evidence requires reduce-only side")
         return self
 
 
-def build_runtime_reduce_only_close_owner_packet(
+def build_runtime_reduce_only_close_owner_evidence(
     *,
     exit_plan: RuntimePositionExitPlan,
     now_ms: int,
-) -> RuntimeReduceOnlyCloseOwnerPacket:
+) -> RuntimeReduceOnlyCloseOwnerEvidence:
     blockers = list(exit_plan.blockers)
     warnings = list(exit_plan.warnings)
 
@@ -128,15 +128,15 @@ def build_runtime_reduce_only_close_owner_packet(
         blockers.append("reduce_only_side_missing")
 
     ready = not blockers
-    return RuntimeReduceOnlyCloseOwnerPacket(
-        packet_id=(
-            "runtime-reduce-only-close-owner-packet-"
+    return RuntimeReduceOnlyCloseOwnerEvidence(
+        evidence_id=(
+            "runtime-reduce-only-close-owner-evidence-"
             f"{exit_plan.runtime_instance_id}-{now_ms}"
         ),
         status=(
-            RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
+            RuntimeReduceOnlyCloseOwnerEvidenceStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
             if ready
-            else RuntimeReduceOnlyCloseOwnerPacketStatus.BLOCKED
+            else RuntimeReduceOnlyCloseOwnerEvidenceStatus.BLOCKED
         ),
         runtime_instance_id=exit_plan.runtime_instance_id,
         symbol=exit_plan.symbol,
@@ -154,7 +154,7 @@ def build_runtime_reduce_only_close_owner_packet(
         ),
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
-        recommended_owner_decision=(
+        recommended_recovery_action=(
             "prepare_official_reduce_only_recovery"
             if ready
             else "repair_exit_plan_before_reduce_only_recovery"

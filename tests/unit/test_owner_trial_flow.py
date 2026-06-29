@@ -20,9 +20,9 @@ from src.application.owner_trial_flow import (
     OwnerTrialFlowError,
     OwnerTrialFlowService,
 )
-from src.application.bnb_live_execution_bridge import (
-    BnbLiveExecutionBridgeDryRunRequest,
-    BnbLiveExecutionBridgeDryRunService,
+from src.application.bnb_live_execution_boundary import (
+    BnbLiveExecutionBoundaryDryRunRequest,
+    BnbLiveExecutionBoundaryDryRunService,
 )
 from src.application.production_strategy_family_admission import GenericActionSpec
 from src.application.owner_bounded_execution import (
@@ -115,7 +115,7 @@ async def _service() -> tuple[OwnerTrialFlowService, object]:
     return OwnerTrialFlowService(PgOwnerTrialFlowRepository(session_maker)), engine
 
 
-async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBridgeDryRunService, object]:
+async def _boundary_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBoundaryDryRunService, object]:
     service, engine = await _service()
     session_maker = service._repository._session_maker
     async with engine.begin() as conn:
@@ -142,7 +142,7 @@ async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBrid
                 ")"
             )
         )
-    bridge = BnbLiveExecutionBridgeDryRunService(
+    boundary = BnbLiveExecutionBoundaryDryRunService(
         owner_trial_flow_service=service,
         session_maker=session_maker,
         env={
@@ -153,12 +153,12 @@ async def _bridge_service() -> tuple[OwnerTrialFlowService, BnbLiveExecutionBrid
             "BRC_EXECUTION_PERMISSION_MAX": "read_only",
         },
     )
-    return service, bridge, engine
+    return service, boundary, engine
 
 
-async def _bridge_service_with_full_execution_tables() -> tuple[
+async def _boundary_service_with_full_execution_tables() -> tuple[
     OwnerTrialFlowService,
-    BnbLiveExecutionBridgeDryRunService,
+    BnbLiveExecutionBoundaryDryRunService,
     object,
 ]:
     service, engine = await _service()
@@ -168,7 +168,7 @@ async def _bridge_service_with_full_execution_tables() -> tuple[
         await conn.run_sync(PGExecutionIntentORM.__table__.create)
         await conn.run_sync(PGPositionORM.__table__.create)
         await conn.run_sync(PGBrcExecutionResultORM.__table__.create)
-    bridge = BnbLiveExecutionBridgeDryRunService(
+    boundary = BnbLiveExecutionBoundaryDryRunService(
         owner_trial_flow_service=service,
         session_maker=session_maker,
         env={
@@ -179,7 +179,7 @@ async def _bridge_service_with_full_execution_tables() -> tuple[
             "BRC_EXECUTION_PERMISSION_MAX": "read_only",
         },
     )
-    return service, bridge, engine
+    return service, boundary, engine
 
 
 async def _acknowledge_all(service: OwnerTrialFlowService):
@@ -606,7 +606,8 @@ def _assert_success_execution_result_envelope(
     assert ledger["costs"]["funding"]["status"] == "not_available"
     assert ledger["costs"]["slippage"]["status"] == "not_available"
     assert ledger["tp_sl_result"]["status"] == "protected"
-    assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
+    assert "review_decision" not in ledger
+    assert ledger["review_outcome"]["allowed_values"] == ["promote", "revise", "park"]
     assert ledger["hard_blockers"] == []
     assert audit_refs == [authorization_id, payload["execution_intent_id"]]
     assert review_refs == [payload["review_record_id"]]
@@ -653,7 +654,8 @@ def _assert_failure_execution_result_envelope(
     assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
     assert ledger["strategy_outcome"] == "failed_requires_owner_review"
     assert ledger["costs"]["fees"]["status"] == "not_available"
-    assert ledger["review_decision"]["allowed_values"] == ["revise", "park"]
+    assert "review_decision" not in ledger
+    assert ledger["review_outcome"]["allowed_values"] == ["revise", "park"]
     assert audit_refs == [authorization_id, error.execution_intent_id]
     assert review_refs == [row["operation_id"]]
     assert final_state["consumed"] is False
@@ -663,7 +665,7 @@ def _assert_failure_execution_result_envelope(
 
 def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, boundary, engine = await _boundary_service_with_full_execution_tables()
         try:
             current = await service.current(carrier_id="TF-001-live-readonly-v0")
             assert current.selected_carrier_id == "TF-001-live-readonly-v0"
@@ -698,8 +700,8 @@ def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_ord
                 operator_id="owner",
             )
 
-            result = await bridge.run(
-                BnbLiveExecutionBridgeDryRunRequest(
+            result = await boundary.run(
+                BnbLiveExecutionBoundaryDryRunRequest(
                     carrier_id="TF-001-live-readonly-v0",
                     symbol="SOL/USDT:USDT",
                     side="long",
@@ -737,7 +739,7 @@ def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_ord
 
 def test_trend_authorization_draft_rejects_exact_scope_mismatches():
     async def scenario():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         try:
             acknowledgement = await _acknowledge_all_trend(service)
             bad_requests = [
@@ -799,7 +801,7 @@ def test_trend_live_authorization_rejects_exact_scope_mismatches():
 
 def test_scoped_runtime_safety_clearance_requires_unused_authorization():
     async def scenario():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             authorization = await service.activate_live_authorization(
@@ -868,7 +870,7 @@ def test_scoped_runtime_safety_clearance_requires_unused_authorization():
 
 def test_trend_final_gate_dry_run_blocks_exact_scope_mismatches_without_intent_or_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, boundary, engine = await _boundary_service_with_full_execution_tables()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -894,8 +896,8 @@ def test_trend_final_gate_dry_run_blocks_exact_scope_mismatches_without_intent_o
                     "protection_plan_type": "single_tp_plus_sl",
                 }
                 payload.update(patch)
-                result = await bridge.run(
-                    BnbLiveExecutionBridgeDryRunRequest(**payload),
+                result = await boundary.run(
+                    BnbLiveExecutionBoundaryDryRunRequest(**payload),
                     fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
                 )
 
@@ -919,10 +921,10 @@ def test_trend_final_gate_dry_run_blocks_exact_scope_mismatches_without_intent_o
 
 def test_trend_bounded_execution_readiness_blocks_tampered_exact_scope():
     async def scenario():
-        service, bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, boundary, engine = await _boundary_service_with_full_execution_tables()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -970,8 +972,8 @@ def test_trend_bounded_execution_readiness_blocks_tampered_exact_scope():
 
                 assert readiness.ready is False
                 assert blocker in readiness.blockers
-                assert readiness.creates_execution_intent_on_click is False
-                assert readiness.creates_order_on_click is False
+                assert readiness.creates_execution_intent_when_invoked is False
+                assert readiness.creates_order_when_invoked is False
 
             async with session_maker() as session:
                 intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
@@ -1283,7 +1285,7 @@ def test_consumed_live_authorization_allows_fresh_draft_rehearsal():
 
 def test_closed_live_trial_intents_do_not_block_fresh_bnb_authorization_draft():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         try:
             first_draft = await _create_valid_draft(service)
@@ -1327,7 +1329,7 @@ def test_closed_live_trial_intents_do_not_block_fresh_bnb_authorization_draft():
             assert second_draft.execution_intent_created is False
             assert second_draft.order_created is False
 
-            _ = bridge
+            _ = boundary
         finally:
             await engine.dispose()
 
@@ -1458,7 +1460,7 @@ def test_trend_owner_trial_flow_api_path_authorizes_and_execute_preflight_blocks
             "blockers": ["test_gateway_absent"],
         }
 
-    service, _bridge, engine = asyncio.run(_bridge_service())
+    service, _boundary, engine = asyncio.run(_boundary_service())
     api_brc_console._owner_trial_flow_service = service
     monkeypatch.setenv("TRADING_ENV", "live")
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
@@ -1725,12 +1727,12 @@ def test_owner_trial_flow_mainline_repository_is_pg_only():
     assert api_brc_console.PgOwnerTrialFlowRepository is PgOwnerTrialFlowRepository
 
 
-def test_bnb_live_execution_bridge_blocks_without_explicit_authorization_and_creates_nothing():
+def test_bnb_live_execution_boundary_blocks_without_explicit_authorization_and_creates_nothing():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
-            result = await bridge.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            result = await boundary.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "missing_explicit_owner_live_authorization" in result.hard_blockers
             assert result.table_audit.execution_intents is True
             assert result.table_audit.orders is True
@@ -1758,9 +1760,9 @@ def test_bnb_live_execution_bridge_blocks_without_explicit_authorization_and_cre
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard():
+def test_bnb_live_execution_boundary_uses_authorization_but_stops_on_startup_guard():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -1769,9 +1771,9 @@ def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard
                 operator_id="owner",
             )
 
-            result = await bridge.run(fact_snapshot=_clear_fact_snapshot())
+            result = await boundary.run(fact_snapshot=_clear_fact_snapshot())
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert result.final_preflight_result == "blocked"
             assert "startup_guard_status_unavailable_runtime_not_started" not in result.hard_blockers
             assert (
@@ -1806,9 +1808,9 @@ def test_bnb_live_execution_bridge_uses_authorization_but_stops_on_startup_guard
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_blocks_startup_guard_not_armed_and_gks_blocked():
+def test_bnb_live_execution_boundary_blocks_startup_guard_not_armed_and_gks_blocked():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -1817,7 +1819,7 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_not_armed_and_gks_blocke
                 operator_id="owner",
             )
 
-            result = await bridge.run(
+            result = await boundary.run(
                 fact_snapshot=_clear_fact_snapshot(
                     startup_guard_clear=True,
                     startup_guard_armed=False,
@@ -1825,7 +1827,7 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_not_armed_and_gks_blocke
                 )
             )
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "startup_guard_not_armed" in result.hard_blockers
             assert "gks_active" in result.hard_blockers
             assert result.final_gate_read_model.runtime_safety_state == "startup_guard_not_armed"
@@ -1846,9 +1848,9 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_not_armed_and_gks_blocke
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_blocks_startup_guard_not_started():
+def test_bnb_live_execution_boundary_blocks_startup_guard_not_started():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -1871,9 +1873,9 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_not_started():
                 ),
             )
 
-            result = await bridge.run(fact_snapshot=snapshot)
+            result = await boundary.run(fact_snapshot=snapshot)
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "startup_guard_runtime_not_started" in result.hard_blockers
             assert "startup_guard_not_started" in result.hard_blockers
             assert result.final_gate_read_model.runtime_safety_state == "startup_guard_not_started"
@@ -1886,9 +1888,9 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_not_started():
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_blocks_startup_guard_blocked_separately_from_not_armed():
+def test_bnb_live_execution_boundary_blocks_startup_guard_blocked_separately_from_not_armed():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -1911,9 +1913,9 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_blocked_separately_from_
                 ),
             )
 
-            result = await bridge.run(fact_snapshot=snapshot)
+            result = await boundary.run(fact_snapshot=snapshot)
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "startup_guard_blocked" in result.hard_blockers
             assert "startup_guard_not_armed" not in result.hard_blockers
             assert result.final_gate_read_model.runtime_safety_state == "startup_guard_blocked"
@@ -1927,9 +1929,9 @@ def test_bnb_live_execution_bridge_blocks_startup_guard_blocked_separately_from_
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_blocks_gks_unavailable():
+def test_bnb_live_execution_boundary_blocks_gks_unavailable():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -1951,9 +1953,9 @@ def test_bnb_live_execution_bridge_blocks_gks_unavailable():
                 ),
             )
 
-            result = await bridge.run(fact_snapshot=snapshot)
+            result = await boundary.run(fact_snapshot=snapshot)
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "gks_status_required_before_rehearsal" in result.hard_blockers
             assert result.execution_plan_preview.status == "preview_blocked_by_hard_gates"
             assert "gks_status_required_before_rehearsal" in result.execution_plan_preview.exact_blockers
@@ -1971,10 +1973,10 @@ def test_bnb_live_execution_bridge_blocks_gks_unavailable():
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
+def test_bnb_live_execution_boundary_blocks_fact_conflicts_and_missing_tables():
     async def scenario():
         service, engine = await _service()
-        bridge = BnbLiveExecutionBridgeDryRunService(
+        boundary = BnbLiveExecutionBoundaryDryRunService(
             owner_trial_flow_service=service,
             session_maker=service._repository._session_maker,
             env={
@@ -1993,7 +1995,7 @@ def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
                 operator_id="owner",
             )
 
-            result = await bridge.run(
+            result = await boundary.run(
                 fact_snapshot=_clear_fact_snapshot(
                     startup_guard_clear=True,
                     active_position_count=1,
@@ -2005,7 +2007,7 @@ def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
                 )
             )
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "active_position_conflict" in result.hard_blockers
             assert "open_order_conflict" in result.hard_blockers
             assert "gks_active" in result.hard_blockers
@@ -2034,9 +2036,9 @@ def test_bnb_live_execution_bridge_blocks_fact_conflicts_and_missing_tables():
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_state():
+def test_bnb_live_execution_boundary_reaches_dry_run_boundary_without_executable_state():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -2045,9 +2047,9 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
                 operator_id="owner",
             )
 
-            result = await bridge.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
+            result = await boundary.run(fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True))
 
-            assert result.bridge_status == "dry_run_reached_execution_boundary"
+            assert result.projection_status == "dry_run_reached_execution_boundary"
             assert result.final_preflight_result == "passed"
             assert result.hard_blockers == []
             assert result.authorization_state.exists is True
@@ -2073,14 +2075,17 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
             assert result.strategy_warnings_block_execution is False
             assert result.owner_execution_trigger.visible is True
             assert result.owner_execution_trigger.enabled is True
-            assert result.owner_execution_trigger.status == "ready_for_owner_click"
+            assert result.owner_execution_trigger.status == "ready_for_owner_action"
             assert result.owner_execution_trigger.endpoint == (
                 f"/api/brc/owner-trial-flow/authorizations/"
                 f"{result.execution_plan_preview.authorization_id}/execute"
             )
             assert result.owner_execution_trigger.blockers == []
-            assert result.owner_execution_trigger.creates_execution_intent_on_click is True
-            assert result.owner_execution_trigger.creates_order_on_click is True
+            assert (
+                result.owner_execution_trigger.creates_execution_intent_when_invoked
+                is True
+            )
+            assert result.owner_execution_trigger.creates_order_when_invoked is True
             assert result.owner_execution_trigger.order_permission_granted is False
             assert result.owner_execution_trigger.exact_scope == {
                 "carrier_id": "MI-001-BNB-LONG",
@@ -2161,7 +2166,7 @@ def test_owner_bounded_execution_registry_registers_scoped_owner_action_carriers
 
 def test_owner_trial_flow_accepts_notional_derived_mr_eth_computed_scope():
     async def scenario():
-        service, _, engine = await _bridge_service()
+        service, _, engine = await _boundary_service()
         try:
             acknowledgement = await _acknowledge_all_mr_eth(service)
             draft = await service.create_authorization_draft(
@@ -2207,7 +2212,7 @@ def test_owner_trial_flow_accepts_notional_derived_mr_eth_computed_scope():
 
 def test_owner_trial_flow_blocks_notional_derived_mr_eth_above_carrier_cap():
     async def scenario():
-        service, _, engine = await _bridge_service()
+        service, _, engine = await _boundary_service()
         try:
             acknowledgement = await _acknowledge_all_mr_eth(service)
             with pytest.raises(OwnerTrialFlowError) as exc_info:
@@ -2234,10 +2239,10 @@ def test_owner_trial_flow_blocks_notional_derived_mr_eth_above_carrier_cap():
 
 def test_owner_bounded_execution_blocks_missing_protection_price_source_before_intent_or_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -2273,7 +2278,7 @@ def test_owner_bounded_execution_blocks_missing_protection_price_source_before_i
 
 def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_blocker():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -2293,7 +2298,7 @@ def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_b
             ),
         )
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
         )
@@ -2337,7 +2342,7 @@ def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_b
 
 def test_owner_bounded_execution_mr_eth_scope_builds_protection_plan_before_entry():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -2357,7 +2362,7 @@ def test_owner_bounded_execution_mr_eth_scope_builds_protection_plan_before_entr
             ),
         )
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
         )
@@ -2410,7 +2415,7 @@ def test_owner_bounded_execution_mr_eth_scope_builds_protection_plan_before_entr
 
 def test_owner_bounded_execution_mr_btc_planner_config_stays_blocked_outside_eth_scope():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
@@ -2427,7 +2432,7 @@ def test_owner_bounded_execution_mr_btc_planner_config_stays_blocked_outside_eth
             ),
         )
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
         )
@@ -2524,7 +2529,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
             self.entry_orders.append(order)
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -2548,7 +2553,7 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
         order_repo = _RecordingOrderRepository()
         projection = FakePositionProjection()
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
@@ -2696,7 +2701,7 @@ def test_owner_bounded_execution_trend_fake_gateway_closes_entry_protection_revi
             )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -2719,7 +2724,7 @@ def test_owner_bounded_execution_trend_fake_gateway_closes_entry_protection_revi
         intent_repo = _RecordingIntentRepository()
         order_repo = _RecordingOrderRepository()
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
@@ -2853,7 +2858,7 @@ def test_owner_bounded_execution_result_audit_records_consumed_final_state():
             )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -2873,7 +2878,7 @@ def test_owner_bounded_execution_result_audit_records_consumed_final_state():
             ),
         )
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(FakeWriteGateway()),
@@ -2922,10 +2927,10 @@ def test_owner_bounded_execution_result_audit_records_consumed_final_state():
 
 def test_owner_bounded_execution_result_pg_write_failure_is_explicit_blocker():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -2956,8 +2961,8 @@ def test_owner_bounded_execution_result_pg_write_failure_is_explicit_blocker():
                         protection_status="protected",
                         consumed=True,
                     ),
-                    final_gate=await bridge.run(
-                        BnbLiveExecutionBridgeDryRunRequest(),
+                    final_gate=await boundary.run(
+                        BnbLiveExecutionBoundaryDryRunRequest(),
                         fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
                     ),
                 )
@@ -2992,7 +2997,7 @@ def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_auth
             )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE brc_execution_results"))
@@ -3015,7 +3020,7 @@ def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_auth
         intent_repo = _RecordingIntentRepository()
         order_repo = _RecordingOrderRepository()
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
@@ -3138,7 +3143,7 @@ def test_owner_bounded_execution_protection_failure_records_partial_state_withou
             )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, boundary, engine = await _boundary_service_with_full_execution_tables()
         session_maker = service._repository._session_maker
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
@@ -3158,7 +3163,7 @@ def test_owner_bounded_execution_protection_failure_records_partial_state_withou
         intent_repo = _RecordingIntentRepository()
         order_repo = _RecordingOrderRepository()
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
@@ -3286,7 +3291,7 @@ def test_owner_bounded_execution_sl_failure_records_partial_state_without_consum
             )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, boundary, engine = await _boundary_service_with_full_execution_tables()
         session_maker = service._repository._session_maker
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
@@ -3306,7 +3311,7 @@ def test_owner_bounded_execution_sl_failure_records_partial_state_without_consum
         intent_repo = _RecordingIntentRepository()
         order_repo = _RecordingOrderRepository()
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
             protection_planner_service=protection_service,
             order_executor=ExchangeGatewayBoundedOrderExecutor(gateway),
@@ -3498,10 +3503,10 @@ def test_pg_order_repository_preserves_exchange_reduce_only_audit_fields():
 
 def test_owner_bounded_execution_rejects_unsupported_carrier_before_intent_or_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3548,10 +3553,10 @@ def test_owner_bounded_execution_rejects_unsupported_carrier_before_intent_or_or
 
 def test_owner_bounded_execution_rejects_consumed_or_duplicate_authorization():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3615,10 +3620,10 @@ def test_owner_bounded_execution_rejects_consumed_or_duplicate_authorization():
 
 def test_owner_bounded_execution_allows_retryable_failed_pre_order_intent():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3653,10 +3658,10 @@ def test_owner_bounded_execution_allows_retryable_failed_pre_order_intent():
 
 def test_owner_bounded_execution_blocks_ambiguous_failed_retry_state():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3690,10 +3695,10 @@ def test_owner_bounded_execution_blocks_ambiguous_failed_retry_state():
 
 def test_owner_bounded_execution_blocks_failed_intent_with_local_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3733,10 +3738,10 @@ def test_owner_bounded_execution_blocks_failed_intent_with_local_order():
 
 def test_owner_bounded_execution_final_gate_failure_blocks_before_intent_or_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         session_maker = service._repository._session_maker
         execute_service = OwnerBoundedExecutionService(
-            final_gate_service=bridge,
+            final_gate_service=boundary,
             session_maker=session_maker,
         )
         try:
@@ -3776,7 +3781,7 @@ def test_owner_bounded_execution_api_route_blocks_without_intent_or_order(monkey
             return _clear_fact_snapshot(startup_guard_clear=True)
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -3857,7 +3862,7 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
             }
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -3946,7 +3951,7 @@ def test_owner_bounded_execution_api_route_collects_facts_from_authorization_sco
             )
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_trend_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4072,7 +4077,7 @@ def test_owner_bounded_execution_api_route_trend_fake_gateway_executes_full_chai
             )
 
     async def setup():
-        service, _bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, _boundary, engine = await _boundary_service_with_full_execution_tables()
         draft = await _create_valid_trend_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4162,7 +4167,8 @@ def test_owner_bounded_execution_api_route_trend_fake_gateway_executes_full_chai
         assert ledger["tp_sl_result"]["status"] == "protected_open"
         assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
         assert ledger["strategy_outcome"] == "pending_post_action_review"
-        assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
+        assert "review_decision" not in ledger
+        assert ledger["review_outcome"]["allowed_values"] == ["promote", "revise", "park"]
 
         async def persisted_state():
             session_maker = service._repository._session_maker
@@ -4313,7 +4319,7 @@ def test_owner_bounded_execution_api_route_bnb_fake_gateway_regression_full_chai
             )
 
     async def setup():
-        service, _bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, _boundary, engine = await _boundary_service_with_full_execution_tables()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4460,7 +4466,7 @@ def test_owner_bounded_execution_readiness_api_blocks_existing_failed_order_with
     from src.interfaces.operator_auth import OperatorSession, require_operator_session
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4504,8 +4510,10 @@ def test_owner_bounded_execution_readiness_api_blocks_existing_failed_order_with
         payload = response.json()
         assert payload["authorization_id"] == authorization_id
         assert payload["ready"] is False
-        assert payload["creates_execution_intent_on_click"] is False
-        assert payload["creates_order_on_click"] is False
+        assert payload["creates_execution_intent_when_invoked"] is False
+        assert payload["creates_order_when_invoked"] is False
+        assert "creates_execution_intent_on_click" not in payload
+        assert "creates_order_on_click" not in payload
         assert payload["order_permission_granted"] is False
         assert "duplicate_execution_intent_for_authorization" in payload["blockers"]
         assert "previous_intent_has_order_id" in payload["blockers"]
@@ -4533,7 +4541,7 @@ def test_owner_bounded_execution_state_api_surfaces_failed_attempt_evidence(monk
     from src.interfaces.operator_auth import OperatorSession, require_operator_session
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4626,7 +4634,7 @@ def test_owner_bounded_execution_final_gate_dry_run_api_plan_without_fact_collec
     from src.interfaces.operator_auth import OperatorSession, require_operator_session
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_trend_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4677,7 +4685,7 @@ def test_owner_bounded_execution_final_gate_dry_run_blocks_stale_authorization_b
     from src.interfaces.operator_auth import OperatorSession, require_operator_session
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         first_draft = await _create_valid_trend_draft(service)
         first_authorization = await service.activate_live_authorization(
             first_draft.draft_id,
@@ -4755,7 +4763,7 @@ def test_owner_bounded_execution_final_gate_dry_run_api_run_with_fake_facts(monk
         }
 
     async def setup():
-        service, _bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, _boundary, engine = await _boundary_service_with_full_execution_tables()
         draft = await _create_valid_trend_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4834,7 +4842,7 @@ def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_busin
             raise RuntimeError("simulated recording failure")
 
     async def setup():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         draft = await _create_valid_draft(service)
         authorization = await service.activate_live_authorization(
             draft.draft_id,
@@ -4902,9 +4910,9 @@ def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_busin
         asyncio.run(engine.dispose())
 
 
-def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
+def test_bnb_live_execution_boundary_rejects_wrong_scope_and_permission_env():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -4912,7 +4920,7 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
                 _activation_request(),
                 operator_id="owner",
             )
-            unsafe_env_bridge = BnbLiveExecutionBridgeDryRunService(
+            unsafe_env_boundary = BnbLiveExecutionBoundaryDryRunService(
                 owner_trial_flow_service=service,
                 session_maker=service._repository._session_maker,
                 env={
@@ -4924,8 +4932,8 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
                 },
             )
 
-            result = await unsafe_env_bridge.run(
-                BnbLiveExecutionBridgeDryRunRequest(
+            result = await unsafe_env_boundary.run(
+                BnbLiveExecutionBoundaryDryRunRequest(
                     symbol="SOL/USDT:USDT",
                     side="short",
                     max_notional="19",
@@ -4933,7 +4941,7 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
                 fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
             )
 
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "symbol_mismatch" in result.hard_blockers
             assert "side_mismatch" in result.hard_blockers
             assert "cap_mismatch" in result.hard_blockers
@@ -5069,9 +5077,9 @@ def test_owner_bounded_gateway_binding_requires_canonical_exchange_credentials(m
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission_env():
+def test_bnb_live_execution_boundary_official_execute_mode_allows_order_permission_env():
     async def scenario():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -5079,7 +5087,7 @@ def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission
                 _activation_request(),
                 operator_id="owner",
             )
-            bridge = BnbLiveExecutionBridgeDryRunService(
+            boundary = BnbLiveExecutionBoundaryDryRunService(
                 owner_trial_flow_service=service,
                 session_maker=service._repository._session_maker,
                 env={
@@ -5092,7 +5100,7 @@ def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission
                 permission_mode="official_execute",
             )
 
-            result = await bridge.run(
+            result = await boundary.run(
                 fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
             )
 
@@ -5112,7 +5120,7 @@ def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission
 
 def test_generic_action_spec_final_gate_consumes_trend_exact_scope_without_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -5121,7 +5129,7 @@ def test_generic_action_spec_final_gate_consumes_trend_exact_scope_without_order
                 operator_id="owner",
             )
 
-            result = await bridge.run_action_spec(
+            result = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5163,7 +5171,7 @@ def test_generic_action_spec_final_gate_consumes_trend_exact_scope_without_order
 
 def test_generic_action_spec_final_gate_consumes_mr_btc_exact_scope_without_order():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_mr_btc_draft(service)
             await service.activate_live_authorization(
@@ -5172,7 +5180,7 @@ def test_generic_action_spec_final_gate_consumes_mr_btc_exact_scope_without_orde
                 operator_id="owner",
             )
 
-            result = await bridge.run_action_spec(
+            result = await boundary.run_action_spec(
                 _trend_generic_action_spec(
                     family="Mean reversion",
                     strategy_family_id="MR-001-live-readonly-v0",
@@ -5218,7 +5226,7 @@ def test_generic_action_spec_final_gate_consumes_mr_btc_exact_scope_without_orde
 
 def test_generic_action_spec_final_gate_requires_market_metadata_fact():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -5227,7 +5235,7 @@ def test_generic_action_spec_final_gate_requires_market_metadata_fact():
                 operator_id="owner",
             )
 
-            result = await bridge.run_action_spec(
+            result = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5252,7 +5260,7 @@ def test_generic_action_spec_final_gate_requires_market_metadata_fact():
 
 def test_generic_action_spec_final_gate_checks_market_min_notional_and_precision():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -5261,7 +5269,7 @@ def test_generic_action_spec_final_gate_checks_market_min_notional_and_precision
                 operator_id="owner",
             )
 
-            below_min_notional = await bridge.run_action_spec(
+            below_min_notional = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5276,7 +5284,7 @@ def test_generic_action_spec_final_gate_checks_market_min_notional_and_precision
             assert below_min_notional.non_permissions["execution_intent_created"] is False
             assert below_min_notional.non_permissions["order_created"] is False
 
-            step_mismatch = await bridge.run_action_spec(
+            step_mismatch = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5298,7 +5306,7 @@ def test_generic_action_spec_final_gate_checks_market_min_notional_and_precision
 
 def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_recording_readiness():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -5307,7 +5315,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
                 operator_id="owner",
             )
 
-            missing_reconciliation = await bridge.run_action_spec(
+            missing_reconciliation = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5322,7 +5330,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
             assert missing_reconciliation.non_permissions["execution_intent_created"] is False
             assert missing_reconciliation.non_permissions["order_created"] is False
 
-            blocked_reconciliation = await bridge.run_action_spec(
+            blocked_reconciliation = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_replace_fact(
                     _clear_fact_snapshot(
@@ -5348,7 +5356,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
             assert blocked_reconciliation.non_permissions["execution_intent_created"] is False
             assert blocked_reconciliation.non_permissions["order_created"] is False
 
-            missing_protection = await bridge.run_action_spec(
+            missing_protection = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5363,7 +5371,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
             assert missing_protection.non_permissions["execution_intent_created"] is False
             assert missing_protection.non_permissions["order_created"] is False
 
-            missing_recording = await bridge.run_action_spec(
+            missing_recording = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5378,7 +5386,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
             assert missing_recording.non_permissions["execution_intent_created"] is False
             assert missing_recording.non_permissions["order_created"] is False
 
-            not_ready = await bridge.run_action_spec(
+            not_ready = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(
                     candidate_id="TF-001-live-readonly-v0",
@@ -5404,7 +5412,7 @@ def test_generic_action_spec_final_gate_requires_reconciliation_protection_and_r
 
 def test_generic_action_spec_final_gate_fails_closed_for_wrong_scope_and_fact_binding():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_trend_draft(service)
             await service.activate_live_authorization(
@@ -5433,7 +5441,7 @@ def test_generic_action_spec_final_gate_fails_closed_for_wrong_scope_and_fact_bi
                 ),
             ]
             for expected_blocker, spec in wrong_specs:
-                result = await bridge.run_action_spec(
+                result = await boundary.run_action_spec(
                     spec,
                     fact_snapshot=_clear_fact_snapshot(
                         candidate_id="TF-001-live-readonly-v0",
@@ -5447,7 +5455,7 @@ def test_generic_action_spec_final_gate_fails_closed_for_wrong_scope_and_fact_bi
                 assert result.non_permissions["execution_intent_created"] is False
                 assert result.non_permissions["order_created"] is False
 
-            wrong_fact_result = await bridge.run_action_spec(
+            wrong_fact_result = await boundary.run_action_spec(
                 _trend_generic_action_spec(),
                 fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
             )
@@ -5462,9 +5470,9 @@ def test_generic_action_spec_final_gate_fails_closed_for_wrong_scope_and_fact_bi
 
 def test_generic_action_spec_final_gate_fails_closed_for_non_catalog_carrier():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
-            result = await bridge.run_action_spec(
+            result = await boundary.run_action_spec(
                 _trend_generic_action_spec(
                     carrier_id="VE-001-live-readonly-v0",
                     strategy_family_id="VE-001-live-readonly-v0",
@@ -5490,9 +5498,9 @@ def test_generic_action_spec_final_gate_fails_closed_for_non_catalog_carrier():
 
 def test_generic_action_spec_final_gate_keeps_volatility_non_action_and_mr_wrong_scope_blocked():
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
-            volatility = await bridge.run_action_spec(
+            volatility = await boundary.run_action_spec(
                 _trend_generic_action_spec(
                     family="Volatility expansion",
                     strategy_family_id="VB-001-live-readonly-v0",
@@ -5517,7 +5525,7 @@ def test_generic_action_spec_final_gate_keeps_volatility_non_action_and_mr_wrong
             assert volatility.non_permissions["order_created"] is False
             assert volatility.owner_execution_trigger.enabled is False
 
-            mr_wrong_scope = await bridge.run_action_spec(
+            mr_wrong_scope = await boundary.run_action_spec(
                 _trend_generic_action_spec(
                     family="Mean reversion",
                     strategy_family_id="MR-001-live-readonly-v0",
@@ -5548,12 +5556,12 @@ def test_generic_action_spec_final_gate_keeps_volatility_non_action_and_mr_wrong
     asyncio.run(scenario())
 
 
-def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(monkeypatch):
+def test_bnb_live_execution_boundary_api_dry_run_does_not_create_intent_or_order(monkeypatch):
     from src.interfaces import api_brc_console
     from src.interfaces.api import app
     from src.interfaces.operator_auth import OperatorSession, require_operator_session
 
-    service, bridge_service, engine = asyncio.run(_bridge_service())
+    service, boundary_service, engine = asyncio.run(_boundary_service())
     api_brc_console._owner_trial_flow_service = service
     app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
         username="owner",
@@ -5573,13 +5581,13 @@ def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(m
     )
     monkeypatch.setattr(
         api_brc_console,
-        "BnbLiveExecutionBridgeDryRunService",
-        lambda **_kwargs: bridge_service,
+        "BnbLiveExecutionBoundaryDryRunService",
+        lambda **_kwargs: boundary_service,
     )
 
     try:
         with TestClient(app) as client:
-            response = client.post("/api/brc/owner-trial-flow/live-execution-bridge/dry-run", json={})
+            response = client.post("/api/brc/owner-trial-flow/live-execution-boundary/dry-run", json={})
             assert response.status_code == 200
             payload = response.json()
             assert payload["dry_run_only"] is True
@@ -5674,7 +5682,7 @@ def test_preflight_collector_uses_owner_bounded_gateway_for_market_and_protectio
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
 
     async def scenario():
-        service, _bridge, engine = await _bridge_service_with_full_execution_tables()
+        service, _boundary, engine = await _boundary_service_with_full_execution_tables()
         try:
             profile = api_brc_console._strategy_profile_for_owner_action_scope(
                 carrier_id="TF-001-live-readonly-v0",
@@ -5769,7 +5777,7 @@ def test_preflight_recording_readiness_requires_full_result_envelope(monkeypatch
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
 
     async def scenario():
-        service, _bridge, engine = await _bridge_service()
+        service, _boundary, engine = await _boundary_service()
         try:
             profile = api_brc_console._strategy_profile_for_owner_action_scope(
                 carrier_id="TF-001-live-readonly-v0",
@@ -6345,7 +6353,7 @@ def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeyp
     )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -6369,8 +6377,8 @@ def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeyp
             assert facts["startup_guard"].evidence["runtime_started"] is False
             assert facts["startup_guard"].evidence["runtime_safety_context_bound"] is True
 
-            result = await bridge.run(fact_snapshot=snapshot)
-            assert result.bridge_status == "dry_run_reached_execution_boundary"
+            result = await boundary.run(fact_snapshot=snapshot)
+            assert result.projection_status == "dry_run_reached_execution_boundary"
             assert result.final_preflight_result == "passed"
             assert result.hard_blockers == []
             assert result.final_gate_read_model.gks.state == "clear"
@@ -6578,7 +6586,7 @@ def test_bnb_final_gate_missing_scoped_runtime_safety_clearance_blocks(monkeypat
     )
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -6596,8 +6604,8 @@ def test_bnb_final_gate_missing_scoped_runtime_safety_clearance_blocks(monkeypat
             assert facts["startup_guard"].status == "unavailable"
             assert facts["startup_guard"].blocker == "startup_guard_runtime_not_started"
 
-            result = await bridge.run(fact_snapshot=snapshot)
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            result = await boundary.run(fact_snapshot=snapshot)
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "gks_blocked" in result.hard_blockers
             assert "gks_active" in result.hard_blockers
             assert "startup_guard_runtime_not_started" in result.hard_blockers
@@ -6844,7 +6852,7 @@ def test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment(mon
     monkeypatch.setattr(api_brc_console, "_bnb_final_gate_read_only_client", fail_if_called)
 
     async def scenario():
-        service, bridge, engine = await _bridge_service()
+        service, boundary, engine = await _boundary_service()
         try:
             draft = await _create_valid_draft(service)
             await service.activate_live_authorization(
@@ -6852,7 +6860,7 @@ def test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment(mon
                 _activation_request(),
                 operator_id="owner",
             )
-            bridge._env = {
+            boundary._env = {
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "true",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
@@ -6863,10 +6871,10 @@ def test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment(mon
             profile = build_bnb_strategy_trial_readiness().strategy_profile
             collector = api_brc_console._strategy_trial_preflight_fact_collector(FakeApiModule())
             snapshot = await collector.collect(profile)
-            result = await bridge.run(fact_snapshot=snapshot)
+            result = await boundary.run(fact_snapshot=snapshot)
 
             assert result.final_preflight_result == "blocked"
-            assert result.bridge_status == "blocked_before_execution_boundary"
+            assert result.projection_status == "blocked_before_execution_boundary"
             assert "exchange_testnet_false" in result.hard_blockers
             assert result.environment_checks["exchange_testnet_false"] is False
             assert result.non_permissions["execution_intent_created"] is False

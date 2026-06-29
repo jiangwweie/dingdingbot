@@ -40,32 +40,32 @@ READY_FOR_PREPARE_STATUS = cycle_script.READY_FOR_PREPARE_STATUS
 READY_FOR_FINAL_GATE_PREFLIGHT = cycle_script.READY_FOR_FINAL_GATE_PREFLIGHT
 
 
-async def build_supervisor_packet(
+async def build_supervisor_artifact(
     args: argparse.Namespace,
     *,
     cycle_builder: CycleBuilder | None = None,
 ) -> dict[str, Any]:
     output_dir = Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
-    builder = cycle_builder or cycle_script._build_packet
+    builder = cycle_builder or cycle_script._build_cycle_artifact
     cycles: list[dict[str, Any]] = []
     stop_reason = "max_cycles_reached"
     blockers: list[str] = []
 
     for index in range(max(args.max_cycles, 1)):
         cycle_args = _cycle_args(args, output_dir=output_dir, cycle_index=index + 1)
-        packet = await builder(cycle_args)
+        artifact = await builder(cycle_args)
         cycle_path = output_dir / f"cycle-{index + 1:03d}.json"
-        _write_json(cycle_path, packet)
-        cycles.append(_cycle_summary(packet, cycle_path=cycle_path, cycle_index=index + 1))
+        _write_json(cycle_path, artifact)
+        cycles.append(_cycle_summary(artifact, cycle_path=cycle_path, cycle_index=index + 1))
 
-        forbidden = _forbidden_effects(packet)
+        forbidden = _forbidden_effects(artifact)
         if forbidden:
             blockers.extend(f"cycle_{index + 1}:{item}" for item in forbidden)
             stop_reason = "forbidden_effect_detected"
             break
 
-        status = str(packet.get("status") or "")
+        status = str(artifact.get("status") or "")
         if status == WAITING_STATUS:
             if index + 1 < max(args.max_cycles, 1) and args.interval_seconds > 0:
                 time.sleep(args.interval_seconds)
@@ -82,7 +82,7 @@ async def build_supervisor_packet(
         break
 
     status = _supervisor_status(stop_reason=stop_reason, blockers=blockers)
-    packet = {
+    artifact = {
         "scope": "runtime_live_signal_operator_supervisor",
         "status": status,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -96,7 +96,7 @@ async def build_supervisor_packet(
         "cycle_summaries": cycles,
         "blockers": _dedupe(blockers),
         "warnings": [],
-        "operator_command_plan": {
+        "live_operator_supervisor_plan": {
             "next_step": _next_step(status=status, stop_reason=stop_reason),
             "allow_prepare_records": bool(args.allow_prepare_records),
             "continue_observation_allowed": status == "supervisor_waiting_for_signal",
@@ -115,8 +115,8 @@ async def build_supervisor_packet(
         ),
     }
     if args.output_json:
-        _write_json(Path(args.output_json).expanduser(), packet)
-    return packet
+        _write_json(Path(args.output_json).expanduser(), artifact)
+    return artifact
 
 
 def _cycle_args(
@@ -149,28 +149,28 @@ def _cycle_args(
 
 
 def _cycle_summary(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     *,
     cycle_path: Path,
     cycle_index: int,
 ) -> dict[str, Any]:
-    plan = packet.get("operator_command_plan")
+    plan = artifact.get("live_operator_plan")
     if not isinstance(plan, dict):
         plan = {}
-    safety = packet.get("safety_invariants")
+    safety = artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
-    routing = packet.get("routing_packet")
+    routing = artifact.get("routing_evidence")
     if not isinstance(routing, dict):
         routing = {}
     return {
         "cycle_index": cycle_index,
         "cycle_path": str(cycle_path),
-        "status": packet.get("status"),
+        "status": artifact.get("status"),
         "routing_status": routing.get("status"),
         "routing_source_selector_status": routing.get("source_selector_status"),
-        "blockers": list(packet.get("blockers") or []),
-        "signal_input_json": packet.get("signal_input_json"),
+        "blockers": list(artifact.get("blockers") or []),
+        "signal_input_json": artifact.get("signal_input_json"),
         "next_step": plan.get("next_step"),
         "prepared_authorization_id": plan.get("prepared_authorization_id"),
         "requires_owner_runtime_profile_confirmation": plan.get(
@@ -184,12 +184,12 @@ def _cycle_summary(
             safety.get("recorded_execution_intent_created")
         ),
         "submit_authorization_created": bool(safety.get("submit_authorization_created")),
-        "forbidden_effects": _forbidden_effects(packet),
+        "forbidden_effects": _forbidden_effects(artifact),
     }
 
 
-def _forbidden_effects(packet: dict[str, Any]) -> list[str]:
-    safety = packet.get("safety_invariants")
+def _forbidden_effects(artifact: dict[str, Any]) -> list[str]:
+    safety = artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
     effects: list[str] = []
@@ -307,7 +307,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-base")
     parser.add_argument(
         "--source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
+        choices=["sample", "local_sqlite_read_only", "live_market"],
         default="live_market",
     )
     parser.add_argument("--capital-base", default="30")
@@ -341,9 +341,9 @@ def _main(
 ) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = asyncio.run(build_supervisor_packet(args, cycle_builder=cycle_builder))
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = asyncio.run(build_supervisor_artifact(args, cycle_builder=cycle_builder))
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         "supervisor_waiting_for_signal",
         "supervisor_profile_review_required",
         "supervisor_prepare_review_required",

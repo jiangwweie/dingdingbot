@@ -10,7 +10,6 @@
   ],
   "candidate_rows": [
     {
-      "actionable_now": false,
       "disable_or_review_facts_draft": [
         "disable_strong_reclaim_proxy",
         "disable_low_structure_loss_atr_lt_0_15",
@@ -29,7 +28,7 @@
       "operation_layer_input": false,
       "order_created": false,
       "order_sizing_change": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "disable_strong_reclaim_proxy",
           "disable_low_structure_loss_atr_lt_0_15",
@@ -41,7 +40,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -51,7 +51,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -75,8 +75,7 @@
         "stop_hit_count": 3
       },
       "promotion_scope": "intake_only",
-      "promotion_target": "paper_observation_or_candidate_trade_packet",
-      "real_order_authority": false,
+      "promotion_target": "paper_observation_or_experiment_evidence",
       "required_facts_draft": [
         "closed_1h_ohlcv",
         "closed_4h_trend",
@@ -110,20 +109,18 @@
         ]
       },
       "source_intake_status": "tiny_live_intake_candidate",
+      "source_non_executing_trial_readiness": false,
       "source_recommended_runtime_stage": "tiny_live_intake_candidate_with_path_risk",
       "source_reports": [
         "brf2-right-tail-trial-envelope.json",
         "brf2-path-stop-hit-attribution.json",
         "BRF2-001-handoff-pack.json"
       ],
-      "source_tiny_live_ready": false,
       "strategy_direction": "bear_rally_failure_right_tail_short",
       "strategy_group_id": "BRF2-001",
-      "tier_policy_change": false,
-      "tiny_live_ready": false
+      "tier_policy_change": false
     },
     {
-      "actionable_now": false,
       "disable_or_review_facts_draft": [
         "range_regime_detector_v0",
         "us_late_session_role_filter",
@@ -143,7 +140,7 @@
       "operation_layer_input": false,
       "order_created": false,
       "order_sizing_change": false,
-      "paper_observation_packet_shape": {
+      "paper_observation_evidence_shape": {
         "disable_or_review_facts_draft": [
           "range_regime_detector_v0",
           "us_late_session_role_filter",
@@ -156,7 +153,8 @@
           "Operation Layer",
           "exchange_write",
           "live RequiredFacts",
-          "actionable_now"
+          "Tradeability Decision authority",
+          "Runtime Safety State authority"
         ],
         "must_record": [
           "would_enter_timestamp",
@@ -166,7 +164,7 @@
           "required_facts_snapshot",
           "disable_or_review_fact_snapshot",
           "paper_forward_outcome",
-          "review_ledger_decision"
+          "review_outcome"
         ],
         "record_type": "paper_observation_only",
         "required_facts_draft": [
@@ -191,7 +189,6 @@
       },
       "promotion_scope": "not_applicable",
       "promotion_target": "not_applicable",
-      "real_order_authority": false,
       "required_facts_draft": [
         "closed_1h_ohlcv",
         "range_width_72h",
@@ -224,45 +221,18 @@
         ]
       },
       "source_intake_status": "tiny_live_intake_candidate",
+      "source_non_executing_trial_readiness": false,
       "source_recommended_runtime_stage": "tiny_live_intake_candidate_with_path_risk",
       "source_reports": [
         "rbr2-mean-reversion-role-validation.json",
         "RBR2-001-handoff-pack.json"
       ],
-      "source_tiny_live_ready": false,
       "strategy_direction": "range_upper_boundary_mean_reversion_short",
       "strategy_group_id": "RBR2-001",
-      "tier_policy_change": false,
-      "tiny_live_ready": false
+      "tier_policy_change": false
     }
   ],
-  "decision_ledger_rows": [
-    {
-      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=intake_only; promotion_target=paper_observation_or_candidate_trade_packet; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
-      "decision": "promote",
-      "next_checkpoint": "BRF2-001_paper_observation_admission_packet",
-      "opportunity_type": "research_intake",
-      "promotion_scope": "intake_only",
-      "promotion_target": "paper_observation_or_candidate_trade_packet",
-      "reason": "research_intake:paper_observation_admission_candidate; direction:bear_rally_failure_right_tail_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:intake_only",
-      "required_next_evidence": "paper_observation_packet_shape_requiredfacts_disable_facts_and_review_ledger_mapping",
-      "strategy_group_id": "BRF2-001",
-      "tier": "unknown"
-    },
-    {
-      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=not_applicable; promotion_target=not_applicable; tiny_live_ready=false; actionable_now=false; real_order_authority=false; no_finalgate_no_operation_layer_no_exchange_write",
-      "decision": "keep_observing",
-      "next_checkpoint": "RBR2-001_role_only_range_detector_classifier_merge_note",
-      "opportunity_type": "research_intake",
-      "promotion_scope": "not_applicable",
-      "promotion_target": "not_applicable",
-      "reason": "research_intake:role_only_intake_candidate; direction:range_upper_boundary_mean_reversion_short; source_tiny_live_ready:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:not_applicable",
-      "required_next_evidence": "range_detector_facts_and_failed_upside_expansion_classifier_merge_review",
-      "strategy_group_id": "RBR2-001",
-      "tier": "unknown"
-    }
-  ],
-  "generated_at_utc": "2026-06-23T02:06:27.443992Z",
+  "generated_at_utc": "2026-06-28T19:14:03.363167Z",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -275,26 +245,26 @@
   },
   "not_absorbed_authority_fields": [
     "tiny_live_ready",
-    "actionable_now",
+    "runtime actionability",
     "FinalGate input",
     "Operation Layer input",
-    "real_order_authority",
+    "real-order authority",
     "live_profile_change",
     "order_sizing_change",
     "tier_policy_change"
   ],
   "owner_progress_projection": {
     "no_live_permission": true,
-    "owner_decision_required_now": false,
     "owner_intervention_required": false,
+    "owner_policy_confirmation_required_now": false,
     "owner_summary": "Strategy-research intake candidates are visible to main control as review-only assets; live permission is unchanged.",
-    "p0_5_state": "research_intake_review_active",
-    "p0_state": "waiting_for_market"
+    "p0_state": "waiting_for_market",
+    "signal_observation_state": "research_intake_review_active"
   },
   "paper_observation_admission": {
     "candidate_count": 1,
     "live_permission_change": false,
-    "next_checkpoint": "build_paper_observation_packets_before_any_tiny_live_ready",
+    "next_checkpoint": "build_paper_observation_evidence_before_any_tiny_live_ready",
     "strategy_group_ids": [
       "BRF2-001"
     ]
@@ -313,7 +283,6 @@
     ]
   },
   "safety_invariants": {
-    "actionable_now": false,
     "exchange_write_called": false,
     "final_gate_called": false,
     "live_profile_changed": false,
@@ -321,7 +290,6 @@
     "operation_layer_called": false,
     "order_created": false,
     "order_sizing_changed": false,
-    "real_order_authority": false,
     "registry_authority_changed": false,
     "research_input_is_not_execution_authority": true,
     "server_files_mutated": false,
@@ -335,7 +303,7 @@
   "scope": "main_control_research_intake_review_only",
   "source_status": {
     "candidate_count": 2,
-    "research_intake_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json",
+    "research_intake_json": "/Users/jiangwei/Documents/final-system-refactor-20260623/docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json",
     "source_forbidden_effects": [],
     "source_schema": "brc.strategy_research_tiny_live_intake_candidates.v1",
     "source_scope": "strategy_research_only",
@@ -343,8 +311,35 @@
     "summary_objective_met": true
   },
   "status": "research_intake_review_ready",
+  "strategy_decision_provenance_rows": [
+    {
+      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=intake_only; promotion_target=paper_observation_or_experiment_evidence; non_executing_trial_readiness=false; runtime_safety_gate_required; no_official_live_order_authority; no_finalgate_no_operation_layer_no_exchange_write",
+      "current_decision": "promote",
+      "next_checkpoint": "BRF2-001_paper_observation_admission_evidence",
+      "opportunity_type": "research_intake",
+      "promotion_scope": "intake_only",
+      "promotion_target": "paper_observation_or_experiment_evidence",
+      "reason": "research_intake:paper_observation_admission_candidate; direction:bear_rally_failure_right_tail_short; source_non_executing_trial_readiness:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:intake_only",
+      "required_next_evidence": "paper_observation_evidence_shape_requiredfacts_disable_facts_and_review_ledger_mapping",
+      "strategy_asset_seed_source": "curated_research_intake_strategy_asset_seed",
+      "strategy_group_id": "BRF2-001",
+      "tier": "unknown"
+    },
+    {
+      "authority_boundary": "main_control_research_intake_review_only; research_input_not_execution_authority; promotion_scope=not_applicable; promotion_target=not_applicable; non_executing_trial_readiness=false; runtime_safety_gate_required; no_official_live_order_authority; no_finalgate_no_operation_layer_no_exchange_write",
+      "current_decision": "keep_observing",
+      "next_checkpoint": "RBR2-001_role_only_range_detector_classifier_merge_note",
+      "opportunity_type": "research_intake",
+      "promotion_scope": "not_applicable",
+      "promotion_target": "not_applicable",
+      "reason": "research_intake:role_only_intake_candidate; direction:range_upper_boundary_mean_reversion_short; source_non_executing_trial_readiness:false; main_control_absorbs_asset_not_execution_authority; promotion_scope:not_applicable",
+      "required_next_evidence": "range_detector_facts_and_failed_upside_expansion_classifier_merge_review",
+      "strategy_asset_seed_source": "curated_research_intake_strategy_asset_seed",
+      "strategy_group_id": "RBR2-001",
+      "tier": "unknown"
+    }
+  ],
   "summary": {
-    "actionable_now_count": 0,
     "candidate_count": 2,
     "exchange_write_count": 0,
     "finalgate_input_count": 0,
@@ -352,10 +347,8 @@
     "operation_layer_input_count": 0,
     "paper_observation_admission_candidate_count": 1,
     "paper_observation_ready_count": 2,
-    "real_order_authority_count": 0,
     "role_only_intake_candidate_count": 1,
-    "source_tiny_live_ready_count": 0,
-    "tier_policy_change_count": 0,
-    "tiny_live_ready_count": 0
+    "source_non_executing_trial_readiness_count": 0,
+    "tier_policy_change_count": 0
   }
 }

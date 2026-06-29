@@ -24,7 +24,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.build_runtime_strategy_signal_input_packet import (  # noqa: E402
+from scripts.build_runtime_strategy_signal_input_artifact import (  # noqa: E402
     _build_signal_input,
 )
 from src.application.runtime_strategy_signal_evaluation_service import (  # noqa: E402

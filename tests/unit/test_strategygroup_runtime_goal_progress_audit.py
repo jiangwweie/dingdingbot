@@ -77,6 +77,9 @@ def _tier_policy(**overrides):
 def _daily_check(**overrides):
     base = {
         "status": "waiting_for_market",
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
         "current_read_interaction": {
             "level": "L0_local_cache_read",
             "remote_interaction_count": 0,
@@ -116,8 +119,17 @@ def _daily_check(**overrides):
             "runtime_execution_goal_chain_ready_segment_count": 7,
             "runtime_execution_goal_chain_missing_or_failed_segments": [],
         },
+        "owner_runtime_state": {
+            "runtime_status": "waiting_for_market",
+            "monitor_status": "fresh",
+            "owner_status": "waiting_for_opportunity",
+            "owner_intervention_required": False,
+            "monitor_refresh_needed": False,
+            "monitor_refresh_reasons": [],
+            "waiting_for_market": True,
+        },
         "notification": {
-            "decision": "DONT_NOTIFY",
+            "notification_result": "DONT_NOTIFY",
             "reason": "healthy_waiting_for_market",
         },
         "safety_invariants": {
@@ -137,10 +149,42 @@ def _daily_check(**overrides):
     return base
 
 
+def _set_daily_owner_runtime_state(
+    daily_check: dict,
+    *,
+    runtime_status: str,
+    monitor_status: str = "fresh",
+    owner_status: str | None = None,
+    waiting_for_market: bool | None = None,
+) -> None:
+    resolved_owner_status = owner_status or (
+        "waiting_for_opportunity"
+        if runtime_status == "waiting_for_market"
+        else runtime_status
+    )
+    resolved_waiting = (
+        runtime_status == "waiting_for_market"
+        if waiting_for_market is None
+        else waiting_for_market
+    )
+    daily_check["runtime_status"] = runtime_status
+    daily_check["monitor_status"] = monitor_status
+    daily_check["owner_status"] = resolved_owner_status
+    daily_check["owner_runtime_state"] = {
+        "runtime_status": runtime_status,
+        "monitor_status": monitor_status,
+        "owner_status": resolved_owner_status,
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": monitor_status in {"needs_refresh", "deployment_issue"},
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": resolved_waiting,
+    }
+
+
 def _live_cutover_readiness(**overrides):
     live_closure_required_evidence_keys = [
         "live_watcher_signal_packet_id",
-        "required_facts_readiness_packet_id",
+        "required_facts_readiness_artifact_id",
         "candidate_id",
         "runtime_grant_id",
         "fresh_submit_authorization_id",
@@ -148,7 +192,7 @@ def _live_cutover_readiness(**overrides):
         "operation_layer_submit_authorization_id",
         "exchange_submit_execution_result_id",
         "exchange_native_hard_stop_order_id",
-        "runtime_post_submit_finalize_packet_id",
+        "runtime_post_submit_finalize_payload_id",
         "post_submit_reconciliation_evidence_id",
         "post_submit_budget_settlement_id",
         "submit_outcome_review_id",
@@ -189,6 +233,7 @@ def _live_cutover_readiness(**overrides):
                 "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
             },
         },
+        "check_groups": [{"name": "dry_run_safety", "status": "ready"}],
     }
     base.update(overrides)
     return base
@@ -240,9 +285,9 @@ def _strategy_review_evidence_closure_wave(**overrides):
         "phase_status": {
             "phase_1_owner_perception_projection": "ready",
             "phase_2_evidence_closure_queue": "ready",
-            "phase_3_next_owner_decision_package": "ready_for_owner_policy_decision",
+            "phase_3_next_owner_policy_package": "ready_for_owner_policy",
         },
-        "evidence_closure_packets": [
+        "evidence_closure_artifacts": [
             {"strategy_group_id": "BRF-001"},
             {"strategy_group_id": "BTPC-001"},
             {"strategy_group_id": "LSR-001"},
@@ -250,18 +295,17 @@ def _strategy_review_evidence_closure_wave(**overrides):
             {"strategy_group_id": "CPM-RO-001"},
             {"strategy_group_id": "MPG-001"},
         ],
-        "next_owner_decision_package": {
-            "status": "next_owner_decision_package_ready",
+        "next_owner_policy_package": {
+            "status": "next_owner_policy_package_ready",
             "owner_policy_confirmation_required_now": True,
             "runtime_owner_intervention_required": False,
-            "decision_count": 6,
+            "owner_policy_item_count": 6,
         },
         "interaction": {
             "level": "L0_local_review_only_evidence_closure_wave",
             "remote_interaction_count": 0,
         },
         "safety_invariants": {
-            "real_order_authority": False,
             "exchange_write_called": False,
             "final_gate_called": False,
             "operation_layer_called": False,
@@ -278,13 +322,13 @@ def _strategy_review_evidence_closure_wave(**overrides):
 
 def _strategy_review_deep_dive_wave(**overrides):
     base = {
-        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "status": "review_only_deep_dive_ready_for_owner_policy",
         "phase_status": {
             "phase_1_owner_perception_projection": "ready",
             "phase_2_six_line_deep_dive": "ready",
-            "phase_3_owner_policy_decision_package": "ready_for_owner_policy_decision",
+            "phase_3_owner_policy_package": "ready_for_owner_policy",
         },
-        "deep_dive_packets": [
+        "deep_dive_artifacts": [
             {"strategy_group_id": "BRF-001"},
             {"strategy_group_id": "BTPC-001"},
             {"strategy_group_id": "LSR-001"},
@@ -292,18 +336,20 @@ def _strategy_review_deep_dive_wave(**overrides):
             {"strategy_group_id": "CPM-RO-001"},
             {"strategy_group_id": "MPG-001"},
         ],
-        "owner_decision_package": {
-            "status": "owner_policy_decision_package_ready",
+        "deep_dive_packets": [
+            {"strategy_group_id": "legacy-packet-compatibility-only"},
+        ],
+        "owner_policy_package": {
+            "status": "owner_policy_package_ready",
             "owner_policy_confirmation_required_now": True,
             "runtime_owner_intervention_required": False,
-            "decision_count": 6,
+            "owner_policy_item_count": 6,
         },
         "interaction": {
             "level": "L0_local_review_only_deep_dive",
             "remote_interaction_count": 0,
         },
         "safety_invariants": {
-            "real_order_authority": False,
             "exchange_write_called": False,
             "final_gate_called": False,
             "operation_layer_called": False,
@@ -325,7 +371,7 @@ def _strategygroup_portfolio_board(**overrides):
             "portfolio_row_count": 10,
             "trial_candidate_count": 5,
             "engineering_continuation_count": 9,
-            "owner_policy_decision_count": 4,
+            "owner_policy_queue_count": 4,
         },
         "trial_candidate_pool": {
             "candidate_count": 5,
@@ -342,9 +388,9 @@ def _strategygroup_portfolio_board(**overrides):
         },
         "owner_progress_projection": {
             "p0_state": "waiting_for_market",
-            "p0_5_state": "portfolio_screening_active",
+            "signal_observation_state": "portfolio_screening_active",
             "owner_intervention_required": False,
-            "owner_policy_decision_required_later": True,
+            "owner_policy_confirmation_required_later": True,
             "no_live_permission": True,
         },
         "interaction": {
@@ -352,7 +398,6 @@ def _strategygroup_portfolio_board(**overrides):
             "remote_interaction_count": 0,
         },
         "safety_invariants": {
-            "real_order_authority": False,
             "exchange_write_called": False,
             "calls_exchange_write": False,
             "final_gate_called": False,
@@ -374,38 +419,40 @@ def _strategygroup_portfolio_board(**overrides):
     return base
 
 
-def _strategygroup_capital_trial_bridge(**overrides):
+def _strategygroup_capital_trial_envelope_projection(**overrides):
     base = {
-        "status": "capital_trial_readiness_bridge_ready",
+        "status": "trial_envelope_projection_ready",
+        "projection_schema": "brc.strategygroup_capital_trial_envelope_projection.v1",
+        "projection_status": "trial_envelope_projection_ready",
+        "projection_metadata": {
+            "artifact_role": "trial_envelope_projection",
+            "strategygroup_lifecycle_owner": False,
+            "tradeability_decision_source": False,
+            "runtime_truth_source": False,
+        },
         "capital_trial_summary": {
             "eligibility_row_count": 5,
             "non_mpg_trial_candidate_count": 5,
             "selected_non_mpg_strategy_group_id": "MI-001",
             "selected_candidate_status": "trial_prepare_candidate_pending_owner_policy",
-            "trial_packet_generated": True,
-            "actionable_now_count": 0,
+            "trial_envelope_generated": True,
             "live_permission_change_count": 0,
-            "real_order_authority_count": 0,
             "owner_policy_checkpoint_count": 1,
         },
-        "trial_packet_v0": {
-            "schema": "brc.strategygroup_capital_trial_packet.v0",
+        "trial_envelope_v0": {
+            "schema": "brc.strategygroup_capital_trial_envelope.v0",
             "strategy_group_id": "MI-001",
-            "actionable_now": False,
             "live_permission_change": False,
-            "real_order_authority": False,
         },
         "owner_policy_checkpoint": {
             "status": "owner_policy_required_later",
             "runtime_owner_intervention_required": False,
         },
         "interaction": {
-            "level": "L0_local_capital_trial_readiness_bridge",
+            "level": "L0_local_capital_trial_envelope_projection",
             "remote_interaction_count": 0,
         },
         "safety_invariants": {
-            "actionable_now": False,
-            "real_order_authority": False,
             "exchange_write_called": False,
             "calls_exchange_write": False,
             "final_gate_called": False,
@@ -427,7 +474,7 @@ def _strategygroup_capital_trial_bridge(**overrides):
     return base
 
 
-def test_goal_progress_waiting_for_market_with_p05_ready():
+def test_goal_progress_waiting_for_market_with_signal_observation_ready():
     module = _load_module()
 
     report = module.build_goal_progress_report(
@@ -438,15 +485,40 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
 
     assert report["schema"] == "brc.strategygroup_runtime_goal_progress_audit.v1"
     assert report["scope"] == "strategygroup_runtime_goal_progress_audit"
+    assert "checks" not in report
     assert report["status"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L0_local_goal_progress_audit"
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["owner_summary"]["state"] == "等待机会"
-    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续等待市场机会"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "goal_progress_status_projection"
+    )
     assert report["owner_summary"]["p0"] == "waiting_for_market"
-    assert report["owner_summary"]["p05"] == "ready"
-    assert report["checks"]["p05_ready"] is True
-    assert report["checks"]["blockers"] == []
+    assert report["owner_summary"]["signal_observation_state"] == "ready"
+    assert report["signal_observation"] == {
+        "grade_code": "signal-observation-grade-review",
+        "ready": True,
+        "state": "ready",
+    }
+    assert report["owner_runtime_state"] == {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": True,
+    }
+    assert report["owner_runtime_issues"] == {
+        "blockers": [],
+        "product_gaps": [],
+        "blocker_count": 0,
+        "product_gap_count": 0,
+    }
+    assert report["signal_observation"]["ready"] is True
+    assert report["owner_runtime_issues"]["blockers"] == []
     assert report["completion_boundary"] == {
         "completion_blocker_class": "waiting_for_market",
         "disabled_smoke_treated_as_real_execution_proof": False,
@@ -470,7 +542,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
             "operation_layer_evidence_relay_checked": True,
             "operation_layer_standing_authorization_relay_checked": True,
             "required_facts_readiness_checked": True,
-            "scoped_pipeline_operation_layer_handoff_checked": True,
+            "scoped_pipeline_operation_layer_submit_projection_checked": True,
             "selected_strategygroup_dispatch_guard_checked": True,
         },
         "finalgate_to_operation_layer_evidence_covered": True,
@@ -540,22 +612,55 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     }
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
-    assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
-    assert tracks["p05_engineering_rehearsal_loop"]["status"] == "ready"
-    assert "chain_ready_segments=3" in tracks["p05_engineering_rehearsal_loop"][
+    assert tracks["runtime_interaction_projection"]["status"] == "ready"
+    assert tracks["engineering_rehearsal_projection"]["status"] == "ready"
+    assert "chain_ready_segments=3" in tracks["engineering_rehearsal_projection"][
         "evidence"
     ]
-    assert "missing_chain_segments=0" in tracks["p05_engineering_rehearsal_loop"][
+    assert "missing_chain_segments=0" in tracks["engineering_rehearsal_projection"][
         "evidence"
     ]
     assert "goal_chain_ready_segments=7" in tracks[
-        "p05_engineering_rehearsal_loop"
+        "engineering_rehearsal_projection"
     ]["evidence"]
     assert "missing_goal_chain_segments=0" in tracks[
-        "p05_engineering_rehearsal_loop"
+        "engineering_rehearsal_projection"
     ]["evidence"]
-    assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
-    assert tracks["p05_safety_invariants"]["status"] == "ready"
+    assert tracks["owner_visibility_projection"]["status"] == "ready"
+    assert tracks["safety_invariants_projection"]["status"] == "ready"
+
+
+def test_goal_progress_owner_runtime_issues_use_shared_projection(monkeypatch):
+    module = _load_module()
+    calls = []
+    original = module.owner_runtime_issues_projection
+
+    def spy_owner_runtime_issues_projection(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(
+        module,
+        "owner_runtime_issues_projection",
+        spy_owner_runtime_issues_projection,
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert calls
+    assert calls[-1]["gap_key"] == "product_gaps"
+    assert calls[-1]["gap_count_key"] == "product_gap_count"
+    assert calls[-1]["include_counts"] is True
+    assert report["owner_runtime_issues"] == {
+        "blockers": [],
+        "product_gaps": [],
+        "blocker_count": 0,
+        "product_gap_count": 0,
+    }
 
 
 def test_goal_progress_projects_strategy_review_evidence_closure_without_runtime_intervention():
@@ -570,29 +675,29 @@ def test_goal_progress_projects_strategy_review_evidence_closure_without_runtime
 
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["checks"]["p05_ready"] is True
-    assert report["checks"]["product_gaps"] == []
+    assert report["signal_observation"]["ready"] is True
+    assert report["owner_runtime_issues"]["product_gaps"] == []
     boundary = report["strategy_review_evidence_closure_boundary"]
     assert boundary["status"] == "review_only_evidence_closure_wave_ready"
     assert boundary["phase_1_status"] == "ready"
     assert boundary["phase_2_status"] == "ready"
-    assert boundary["phase_3_status"] == "ready_for_owner_policy_decision"
-    assert boundary["evidence_packet_count"] == 6
-    assert boundary["next_owner_decision_count"] == 6
+    assert boundary["phase_3_status"] == "ready_for_owner_policy"
+    assert boundary["evidence_artifact_count"] == 6
+    assert boundary["next_owner_policy_item_count"] == 6
     assert boundary["owner_policy_confirmation_required_now"] is True
     assert boundary["runtime_owner_intervention_required"] is False
-    assert boundary["real_order_authority"] is False
+    assert "real_order_authority" not in boundary
 
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_strategy_review_evidence_closure"]["status"] == "ready"
-    assert tracks["p05_strategy_review_evidence_closure"]["owner_state"] == (
+    assert tracks["strategy_review_evidence_closure_projection"]["status"] == "ready"
+    assert tracks["strategy_review_evidence_closure_projection"]["owner_state"] == (
         "策略政策待确认"
     )
     text = module._owner_progress_text(report)
     assert "## Strategy Review Evidence Closure Boundary" in text
     assert "- Owner policy confirmation required now: 是" in text
     assert "- Runtime Owner intervention required: 否" in text
-    assert "- Real order authority: 否" in text
+    assert "- Real order authority:" not in text
 
 
 def test_goal_progress_projects_strategy_review_deep_dive_without_runtime_intervention():
@@ -607,29 +712,57 @@ def test_goal_progress_projects_strategy_review_deep_dive_without_runtime_interv
 
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["checks"]["p05_ready"] is True
-    assert report["checks"]["product_gaps"] == []
+    assert report["signal_observation"]["ready"] is True
+    assert report["owner_runtime_issues"]["product_gaps"] == []
     boundary = report["strategy_review_deep_dive_boundary"]
-    assert boundary["status"] == "review_only_deep_dive_ready_for_owner_decision"
+    assert boundary["status"] == "review_only_deep_dive_ready_for_owner_policy"
     assert boundary["phase_1_status"] == "ready"
     assert boundary["phase_2_status"] == "ready"
-    assert boundary["phase_3_status"] == "ready_for_owner_policy_decision"
-    assert boundary["deep_dive_packet_count"] == 6
-    assert boundary["next_owner_decision_count"] == 6
+    assert boundary["phase_3_status"] == "ready_for_owner_policy"
+    assert boundary["deep_dive_artifact_count"] == 6
+    assert boundary["next_owner_policy_item_count"] == 6
     assert boundary["owner_policy_confirmation_required_now"] is True
     assert boundary["runtime_owner_intervention_required"] is False
-    assert boundary["real_order_authority"] is False
+    assert "real_order_authority" not in boundary
 
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_strategy_review_deep_dive"]["status"] == "ready"
-    assert tracks["p05_strategy_review_deep_dive"]["owner_state"] == (
+    assert tracks["strategy_review_deep_dive_projection"]["status"] == "ready"
+    assert tracks["strategy_review_deep_dive_projection"]["owner_state"] == (
         "六条线等待政策决策"
     )
     text = module._owner_progress_text(report)
     assert "## Strategy Review Deep Dive Boundary" in text
     assert "- Owner policy confirmation required now: 是" in text
     assert "- Runtime Owner intervention required: 否" in text
-    assert "- Real order authority: 否" in text
+    assert "- Real order authority:" not in text
+
+
+def test_goal_progress_projection_list_counts_default_to_zero_for_non_lists():
+    module = _load_module()
+    evidence_artifact = _strategy_review_evidence_closure_wave(
+        evidence_closure_artifacts={"strategy_group_id": "BRF-001"},
+    )
+    deep_dive_artifact = _strategy_review_deep_dive_wave(
+        deep_dive_artifacts={"strategy_group_id": "BRF-001"},
+        deep_dive_packets=[
+            {"strategy_group_id": "legacy-packet-compatibility-only"}
+        ],
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategy_review_evidence_closure_wave=evidence_artifact,
+        strategy_review_deep_dive_wave=deep_dive_artifact,
+    )
+
+    assert report["strategy_review_evidence_closure_boundary"][
+        "evidence_artifact_count"
+    ] == 0
+    assert report["strategy_review_deep_dive_boundary"][
+        "deep_dive_artifact_count"
+    ] == 0
 
 
 def test_goal_progress_projects_portfolio_board_without_runtime_intervention():
@@ -644,59 +777,296 @@ def test_goal_progress_projects_portfolio_board_without_runtime_intervention():
 
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["owner_summary"]["p05_strategy_portfolio"] == (
+    assert report["owner_summary"]["strategy_portfolio"] == (
         "portfolio_screening_active"
     )
-    assert report["checks"]["p05_ready"] is True
-    assert report["checks"]["product_gaps"] == []
+    assert report["signal_observation"]["ready"] is True
+    assert report["owner_runtime_issues"]["product_gaps"] == []
     boundary = report["strategygroup_portfolio_board_boundary"]
     assert boundary["status"] == "portfolio_board_ready"
     assert boundary["portfolio_row_count"] == 10
     assert boundary["trial_candidate_count"] == 5
     assert boundary["engineering_continuation_count"] == 9
-    assert boundary["owner_policy_decision_count"] == 4
-    assert boundary["actionable_now_count"] == 0
+    assert boundary["owner_policy_queue_count"] == 4
+    assert "actionable_now_count" not in boundary
     assert boundary["live_permission_change_count"] == 0
     assert boundary["runtime_owner_intervention_required"] is False
-    assert boundary["real_order_authority"] is False
+    assert "real_order_authority" not in boundary
     assert boundary["reject_reasons"] == []
 
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_strategygroup_portfolio_board"]["status"] == "ready"
-    assert tracks["p05_strategygroup_portfolio_board"]["owner_state"] == (
+    assert tracks["strategygroup_portfolio_projection"]["status"] == "ready"
+    assert tracks["strategygroup_portfolio_projection"]["owner_state"] == (
         "策略组合筛选中"
     )
     text = module._owner_progress_text(report)
     assert "## StrategyGroup Portfolio Board Boundary" in text
     assert "- Portfolio row count: 10" in text
     assert "- Trial candidate count: 5" in text
-    assert "- Actionable now count: 0" in text
+    assert "- Actionable now count:" not in text
     assert "- Live permission change count: 0" in text
     assert "- Runtime Owner intervention required: 否" in text
-    assert "- Real order authority: 否" in text
+    assert "- Real order authority:" not in text
 
 
-def test_goal_progress_projects_capital_trial_bridge_without_runtime_intervention():
+def test_goal_progress_projection_counts_accept_string_numbers_and_default_to_zero():
+    module = _load_module()
+    packet = _strategygroup_portfolio_board(
+        portfolio_summary={
+            "portfolio_row_count": "10",
+            "trial_candidate_count": "5",
+            "engineering_continuation_count": None,
+            "owner_policy_queue_count": "",
+        },
+        trial_candidate_pool={
+            "candidate_count": "5",
+            "actionable_now_count": "0",
+            "live_permission_change_count": None,
+            "rows": [],
+        },
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_portfolio_board=packet,
+    )
+
+    boundary = report["strategygroup_portfolio_board_boundary"]
+    assert boundary["portfolio_row_count"] == 10
+    assert boundary["trial_candidate_count"] == 5
+    assert boundary["engineering_continuation_count"] == 0
+    assert boundary["owner_policy_queue_count"] == 0
+    assert "actionable_now_count" not in boundary
+    assert boundary["live_permission_change_count"] == 0
+    assert "portfolio_row_count_below_10" not in boundary["reject_reasons"]
+    assert "trial_pool_actionable_now_not_zero" not in boundary["reject_reasons"]
+    assert (
+        "trial_pool_live_permission_change_not_zero"
+        not in boundary["reject_reasons"]
+    )
+
+
+def test_goal_progress_rejects_review_projection_legacy_authority_mirror_presence():
+    module = _load_module()
+    packet = _strategy_review_evidence_closure_wave()
+    packet["next_owner_policy_package"].update(
+        {
+            "owner_policy_confirmation_required_now": "true",
+            "runtime_owner_intervention_required": "true",
+        }
+    )
+    packet["safety_invariants"]["real_order_authority"] = "true"
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategy_review_evidence_closure_wave=packet,
+    )
+
+    boundary = report["strategy_review_evidence_closure_boundary"]
+    assert boundary["owner_policy_confirmation_required_now"] is False
+    assert boundary["runtime_owner_intervention_required"] is False
+    assert "real_order_authority" not in boundary
+    assert "forbidden_effect:real_order_authority" not in boundary["reject_reasons"]
+    assert (
+        "legacy_authority_mirror_present:real_order_authority"
+        in boundary["reject_reasons"]
+    )
+
+    packet["safety_invariants"]["real_order_authority"] = True
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategy_review_evidence_closure_wave=packet,
+    )
+    boundary = report["strategy_review_evidence_closure_boundary"]
+    assert "forbidden_effect:real_order_authority" not in boundary["reject_reasons"]
+    assert (
+        "legacy_authority_mirror_present:real_order_authority"
+        in boundary["reject_reasons"]
+    )
+
+
+def test_goal_progress_projection_false_flags_remain_strict_booleans():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["capital_trial_summary"]["trial_envelope_generated"] = "true"
+    packet["trial_envelope_v0"].update(
+        {
+            "actionable_now": "false",
+            "live_permission_change": "false",
+            "real_order_authority": "false",
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert boundary["trial_envelope_generated"] is False
+    assert "trial_envelope_not_generated" in boundary["reject_reasons"]
+    assert (
+        "trial_envelope.legacy_authority_mirror_present:actionable_now"
+        in boundary["reject_reasons"]
+    )
+    assert (
+        "trial_envelope_live_permission_change_not_false"
+        in boundary["reject_reasons"]
+    )
+    assert (
+        "trial_envelope.legacy_authority_mirror_present:real_order_authority"
+        in boundary["reject_reasons"]
+    )
+
+
+def test_goal_progress_projection_text_fields_keep_existing_defaults():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["projection_status"] = ""
+    packet["projection_schema"] = None
+    packet["projection_metadata"]["artifact_role"] = ""
+    packet["capital_trial_summary"]["selected_candidate_status"] = ""
+    packet["trial_envelope_v0"].update(
+        {
+            "policy_outcome": "",
+            "reason": None,
+            "promotion_scope": "",
+            "promotion_target": None,
+            "next_checkpoint": "",
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert boundary["projection_status"] == "unknown"
+    assert boundary["projection_schema"] == ""
+    assert boundary["projection_role"] == "trial_envelope_projection"
+    assert boundary["selected_candidate_status"] == "unknown"
+    assert boundary["policy_outcome"] == "pending"
+    assert boundary["reason"] == ""
+    assert boundary["promotion_scope"] == "not_applicable"
+    assert boundary["promotion_target"] == "not_applicable"
+    assert boundary["next_checkpoint"] == ""
+    assert "projection_status_not_ready" in boundary["reject_reasons"]
+
+
+def test_goal_progress_rejects_capital_trial_projection_basic_safety_counts():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["capital_trial_summary"].update(
+        {
+            "actionable_now_count": 1,
+            "live_permission_change_count": 1,
+            "real_order_authority_count": 1,
+        }
+    )
+    packet["trial_envelope_v0"].update(
+        {
+            "actionable_now": True,
+            "live_permission_change": True,
+            "real_order_authority": True,
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert "actionable_now_count_not_zero" not in boundary["reject_reasons"]
+    assert "live_permission_change_count_not_zero" in boundary["reject_reasons"]
+    assert "real_order_authority_count_not_zero" not in boundary["reject_reasons"]
+    assert (
+        "trial_envelope.legacy_authority_mirror_present:actionable_now"
+        in boundary["reject_reasons"]
+    )
+    assert (
+        "trial_envelope_live_permission_change_not_false"
+        in boundary["reject_reasons"]
+    )
+    assert (
+        "trial_envelope.legacy_authority_mirror_present:real_order_authority"
+        in boundary["reject_reasons"]
+    )
+
+
+def test_goal_progress_rejects_capital_trial_projection_admission_selection_gaps():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["projection_status"] = "draft"
+    packet["capital_trial_summary"].update(
+        {
+            "eligibility_row_count": 4,
+            "non_mpg_trial_candidate_count": 0,
+            "selected_non_mpg_strategy_group_id": "MPG-001",
+            "trial_envelope_generated": False,
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert "projection_status_not_ready" in boundary["reject_reasons"]
+    assert "eligibility_row_count_below_5" in boundary["reject_reasons"]
+    assert "non_mpg_trial_candidate_missing" in boundary["reject_reasons"]
+    assert "selected_non_mpg_candidate_invalid" in boundary["reject_reasons"]
+    assert "trial_envelope_not_generated" in boundary["reject_reasons"]
+    assert boundary["strategygroup_lifecycle_owner"] is False
+    assert boundary["tradeability_decision_source"] is False
+    assert boundary["runtime_truth_source"] is False
+
+
+def test_goal_progress_projects_capital_trial_envelope_projection_without_runtime_intervention():
     module = _load_module()
 
     report = module.build_goal_progress_report(
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        strategygroup_capital_trial_readiness_bridge=(
-            _strategygroup_capital_trial_bridge()
+        strategygroup_capital_trial_envelope_projection=(
+            _strategygroup_capital_trial_envelope_projection()
         ),
     )
 
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["owner_summary"]["p05_capital_trial"] == (
+    assert report["owner_summary"]["capital_trial"] == (
         "trial_prepare_candidate_pending_owner_policy"
     )
-    assert report["checks"]["p05_ready"] is True
-    assert report["checks"]["product_gaps"] == []
-    boundary = report["strategygroup_capital_trial_readiness_bridge_boundary"]
-    assert boundary["status"] == "capital_trial_readiness_bridge_ready"
+    assert report["signal_observation"]["ready"] is True
+    assert report["owner_runtime_issues"]["product_gaps"] == []
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert boundary["status"] == "trial_envelope_projection_ready"
+    assert boundary["projection_status"] == "trial_envelope_projection_ready"
+    assert boundary["projection_schema"] == (
+        "brc.strategygroup_capital_trial_envelope_projection.v1"
+    )
+    assert boundary["projection_role"] == "trial_envelope_projection"
+    assert boundary["strategygroup_lifecycle_owner"] is False
+    assert boundary["tradeability_decision_source"] is False
+    assert boundary["runtime_truth_source"] is False
     assert boundary["eligibility_row_count"] == 5
     assert boundary["non_mpg_trial_candidate_count"] == 5
     assert boundary["selected_non_mpg_strategy_group_id"] == "MI-001"
@@ -704,38 +1074,41 @@ def test_goal_progress_projects_capital_trial_bridge_without_runtime_interventio
         "trial_prepare_candidate_pending_owner_policy"
     )
     assert boundary["promotion_scope"] == "not_applicable"
-    assert boundary["tiny_live_ready"] is False
-    assert boundary["trial_packet_generated"] is True
-    assert boundary["actionable_now_count"] == 0
+    assert "tiny_live_ready" not in boundary
+    assert boundary["trial_envelope_generated"] is True
+    assert "actionable_now_count" not in boundary
     assert boundary["live_permission_change_count"] == 0
-    assert boundary["real_order_authority_count"] == 0
+    assert "real_order_authority_count" not in boundary
     assert boundary["runtime_owner_intervention_required"] is False
-    assert boundary["real_order_authority"] is False
     assert boundary["reject_reasons"] == []
 
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_strategygroup_capital_trial_readiness_bridge"][
+    assert tracks["capital_trial_readiness_projection"][
         "status"
     ] == "ready"
-    assert tracks["p05_strategygroup_capital_trial_readiness_bridge"][
+    assert tracks["capital_trial_readiness_projection"][
         "owner_state"
     ] == "资金试验候选准备中"
     text = module._owner_progress_text(report)
-    assert "## StrategyGroup Capital Trial Readiness Bridge Boundary" in text
+    assert "## StrategyGroup Capital Trial Envelope Projection Boundary" in text
     assert "- Selected non-MPG StrategyGroup: MI-001" in text
-    assert "- Trial packet generated: 是" in text
-    assert "- Actionable now count: 0" in text
+    assert "- Trial envelope generated: 是" in text
+    assert "- Actionable now count:" not in text
     assert "- Live permission change count: 0" in text
+    assert "- Real order authority count:" not in text
     assert "- Runtime Owner intervention required: 否" in text
-    assert "- Real order authority: 否" in text
+    capital_trial_text = text.split(
+        "## StrategyGroup Capital Trial Envelope Projection Boundary", 1
+    )[1].split("## Tracks", 1)[0]
+    assert "- Real order authority:" not in capital_trial_text
 
 
-def test_goal_progress_rejects_unscoped_promote_in_capital_trial_packet():
+def test_goal_progress_rejects_unscoped_promote_in_capital_trial_envelope():
     module = _load_module()
-    packet = _strategygroup_capital_trial_bridge()
-    packet["trial_packet_v0"].update(
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["trial_envelope_v0"].update(
         {
-            "decision": "promote",
+            "policy_outcome": "promote",
             "promotion_scope": "not_applicable",
             "tiny_live_ready": False,
             "authority_boundary": {
@@ -749,12 +1122,80 @@ def test_goal_progress_rejects_unscoped_promote_in_capital_trial_packet():
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        strategygroup_capital_trial_readiness_bridge=packet,
+        strategygroup_capital_trial_envelope_projection=packet,
     )
 
-    boundary = report["strategygroup_capital_trial_readiness_bridge_boundary"]
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
     assert "unscoped_promote_forbidden" in boundary["reject_reasons"]
     assert "authority_boundary_promotion_scope_missing" in boundary["reject_reasons"]
+
+
+def test_goal_progress_accepts_projection_promote_only_as_intake_evidence():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["trial_envelope_v0"].update(
+        {
+            "policy_outcome": "promote",
+            "promotion_scope": "intake_only",
+            "promotion_target": "trial_asset_admission_candidate",
+            "tiny_live_ready": False,
+            "authority_boundary": {
+                "promotion_scope": "intake_only",
+                "unscoped_promote": False,
+            },
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert boundary["policy_outcome"] == "promote"
+    assert boundary["promotion_scope"] == "intake_only"
+    assert boundary["promotion_target"] == "trial_asset_admission_candidate"
+    assert "tiny_live_ready" not in boundary
+    assert "actionable_now_count" not in boundary
+    assert "real_order_authority_count" not in boundary
+    assert "real_order_authority" not in boundary
+    assert boundary["reject_reasons"] == []
+
+
+def test_goal_progress_rejects_capital_trial_projection_claiming_judgment_authority():
+    module = _load_module()
+    packet = _strategygroup_capital_trial_envelope_projection()
+    packet["owner_policy_checkpoint"][
+        "runtime_owner_intervention_required"
+    ] = True
+    packet["projection_metadata"].update(
+        {
+            "strategygroup_lifecycle_owner": True,
+            "tradeability_decision_source": True,
+            "runtime_truth_source": True,
+        }
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        strategygroup_capital_trial_envelope_projection=packet,
+    )
+
+    boundary = report["strategygroup_capital_trial_envelope_projection_boundary"]
+    assert (
+        "owner_policy_checkpoint_became_runtime_intervention"
+        in boundary["reject_reasons"]
+    )
+    assert "projection_claimed_lifecycle_owner" in boundary["reject_reasons"]
+    assert (
+        "projection_claimed_tradeability_decision_source"
+        in boundary["reject_reasons"]
+    )
+    assert "projection_claimed_runtime_truth_source" in boundary["reject_reasons"]
 
 
 def test_goal_progress_default_live_cutover_path_uses_runtime_monitor_latest():
@@ -783,8 +1224,14 @@ def test_goal_progress_accepts_processing_owner_visibility_without_product_gap()
         "category": "processing",
         "label": "处理中",
     }
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="processing",
+        owner_status="processing",
+        waiting_for_market=False,
+    )
     daily_check["notification"] = {
-        "decision": "NOTIFY",
+        "notification_result": "NOTIFY",
         "reason": "processing",
         "message": "系统正在处理真实订单闭环证据",
         "owner_intervention_required": False,
@@ -799,10 +1246,14 @@ def test_goal_progress_accepts_processing_owner_visibility_without_product_gap()
 
     assert report["status"] == "processing"
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "goal_progress_status_projection"
+    )
     assert report["owner_summary"]["p0"] == "processing"
-    assert report["owner_summary"]["p05"] == "ready"
-    assert report["checks"]["product_gaps"] == []
+    assert report["owner_summary"]["signal_observation_state"] == "ready"
+    assert report["owner_runtime_issues"]["product_gaps"] == []
     assert report["completion_boundary"]["status"] == (
         "not_complete_runtime_processing"
     )
@@ -812,7 +1263,36 @@ def test_goal_progress_accepts_processing_owner_visibility_without_product_gap()
     assert report["live_closure_evidence_boundary"]["status"] == "in_progress"
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "processing"
-    assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
+    assert tracks["owner_visibility_projection"]["status"] == "ready"
+
+
+def test_goal_progress_top_level_processing_status_does_not_drive_processing():
+    module = _load_module()
+    daily_check = _daily_check(status="processing")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["owner_summary"]["state"] = "运行中"
+    daily_check["owner_summary"]["current_action"] = "无需操作"
+    daily_check["owner_summary"]["visibility"] = {
+        "category": "ready",
+        "label": "运行中",
+    }
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="ready",
+        owner_status="running",
+        waiting_for_market=False,
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] != "processing"
+    assert report["owner_summary"]["p0"] == "ready"
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p0_live_closure"]["status"] == "ready"
 
 
 def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp_path):
@@ -835,7 +1315,7 @@ def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp
         daily_check=daily_check,
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_artifact(
             output_dir=tmp_path / "cutover",
             generated_at_ms=1781753000000,
         ),
@@ -843,8 +1323,12 @@ def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp
 
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["state"] == "等待机会"
-    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
-    assert report["checks"]["product_gaps"] == []
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续等待市场机会"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "goal_progress_status_projection"
+    )
+    assert report["owner_runtime_issues"]["product_gaps"] == []
     assert report["completion_boundary"]["status"] == (
         "not_complete_waiting_for_market"
     )
@@ -877,7 +1361,7 @@ def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp
     )
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
-    assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
+    assert tracks["owner_visibility_projection"]["status"] == "ready"
 
 
 def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
@@ -885,6 +1369,12 @@ def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
     daily_check = _daily_check(status="ready")
     daily_check["checks"]["waiting_for_market"] = False
     daily_check["owner_summary"]["visibility"]["category"] = "running"
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="running",
+        owner_status="running",
+        waiting_for_market=False,
+    )
     live_cutover = _live_cutover_readiness()
     expected_evidence_keys = live_cutover["live_closure_cutover_contract"][
         "required_evidence_keys"
@@ -936,6 +1426,12 @@ def test_goal_progress_degrades_on_rejected_live_closure_evidence():
     daily_check = _daily_check(status="ready")
     daily_check["checks"]["waiting_for_market"] = False
     daily_check["owner_summary"]["visibility"]["category"] = "running"
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="running",
+        owner_status="running",
+        waiting_for_market=False,
+    )
 
     report = module.build_goal_progress_report(
         daily_check=daily_check,
@@ -959,7 +1455,7 @@ def test_goal_progress_degrades_on_rejected_live_closure_evidence():
 
     assert report["status"] == "degraded"
     assert report["live_closure_evidence_boundary"]["status"] == "rejected"
-    assert "live_closure_evidence:replay_signal" in report["checks"]["product_gaps"]
+    assert "live_closure_evidence:replay_signal" in report["owner_runtime_issues"]["product_gaps"]
     assert report["completion_boundary"]["goal_complete"] is False
 
 
@@ -970,6 +1466,12 @@ def test_goal_progress_rejects_completion_flags_without_live_closure_evidence():
     daily_check["checks"]["first_bounded_real_order_complete"] = True
     daily_check["checks"]["real_order_closure_proven"] = True
     daily_check["owner_summary"]["visibility"]["category"] = "running"
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="running",
+        owner_status="running",
+        waiting_for_market=False,
+    )
 
     report = module.build_goal_progress_report(
         daily_check=daily_check,
@@ -984,7 +1486,7 @@ def test_goal_progress_rejects_completion_flags_without_live_closure_evidence():
     assert report["completion_boundary"]["real_order_closure_proven"] is False
     assert (
         "live_closure_completion_claim_without_verified_evidence"
-        in report["checks"]["product_gaps"]
+        in report["owner_runtime_issues"]["product_gaps"]
     )
 
 
@@ -994,7 +1496,7 @@ def test_goal_progress_owner_progress_text_has_track_table(tmp_path):
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_artifact(
             output_dir=tmp_path / "cutover-owner-text",
             generated_at_ms=1781753000000,
         ),
@@ -1049,13 +1551,14 @@ def test_goal_progress_owner_progress_text_has_track_table(tmp_path):
     assert "- Status: not_generated" in text
     assert "- Next fresh signal cutover ready: 是" in text
     assert "- Current real submit allowed: 否" in text
-    assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
+    assert "| Runtime Interaction Projection | ready | 已就绪 |" in text
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
     assert "missing_chain_segments=0" in text
     assert "goal_chain_ready_segments=7" in text
     assert "missing_goal_chain_segments=0" in text
-    assert "- P0.5 ready: 是" in text
+    assert "## Owner Runtime State" in text
+    assert "- Signal Observation ready: 是" in text
 
 
 def test_goal_progress_accepts_live_cutover_readiness_boundary(tmp_path):
@@ -1064,7 +1567,7 @@ def test_goal_progress_accepts_live_cutover_readiness_boundary(tmp_path):
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_artifact(
             output_dir=tmp_path / "cutover",
             generated_at_ms=1781753000000,
         ),
@@ -1093,7 +1596,7 @@ def test_goal_progress_accepts_live_cutover_readiness_boundary(tmp_path):
         "live_closure_required_stage_count": 9,
         "live_closure_required_evidence_keys": [
             "live_watcher_signal_packet_id",
-            "required_facts_readiness_packet_id",
+            "required_facts_readiness_artifact_id",
             "candidate_id",
             "runtime_grant_id",
             "fresh_submit_authorization_id",
@@ -1101,18 +1604,18 @@ def test_goal_progress_accepts_live_cutover_readiness_boundary(tmp_path):
             "operation_layer_submit_authorization_id",
             "exchange_submit_execution_result_id",
             "exchange_native_hard_stop_order_id",
-            "runtime_post_submit_finalize_packet_id",
+            "runtime_post_submit_finalize_payload_id",
             "post_submit_reconciliation_evidence_id",
             "post_submit_budget_settlement_id",
             "submit_outcome_review_id",
         ],
     }
-    assert report["checks"]["product_gaps"] == []
+    assert report["owner_runtime_issues"]["product_gaps"] == []
 
 
 def test_goal_progress_embeds_p0_completion_audit_boundary(tmp_path):
     module = _load_module()
-    live_cutover = live_cutover_script.build_cutover_readiness_packet(
+    live_cutover = live_cutover_script.build_cutover_readiness_artifact(
         output_dir=tmp_path / "cutover",
         generated_at_ms=1781753000000,
     )
@@ -1146,7 +1649,7 @@ def test_goal_progress_embeds_p0_completion_audit_boundary(tmp_path):
         "source_status": "live_cutover_waiting_for_fresh_signal",
         "status": "not_complete_waiting_for_market",
     }
-    assert report["checks"]["product_gaps"] == []
+    assert report["owner_runtime_issues"]["product_gaps"] == []
 
 
 def test_goal_progress_degrades_on_missing_live_closure_contract():
@@ -1170,7 +1673,7 @@ def test_goal_progress_degrades_on_missing_live_closure_contract():
     assert (
         "live_cutover_readiness:live_closure_cutover_contract:"
         "missing_or_not_ready"
-    ) in report["checks"]["product_gaps"]
+    ) in report["owner_runtime_issues"]["product_gaps"]
 
 
 def test_goal_progress_degrades_on_live_cutover_non_market_gap():
@@ -1195,7 +1698,7 @@ def test_goal_progress_degrades_on_live_cutover_non_market_gap():
     assert (
         "live_cutover_readiness:operation_layer_relay:"
         "operation_layer_evidence_relay_checked"
-    ) in report["checks"]["product_gaps"]
+    ) in report["owner_runtime_issues"]["product_gaps"]
 
 
 def test_goal_progress_marks_non_market_gap_as_degraded():
@@ -1212,16 +1715,16 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
     )
 
     assert report["status"] == "degraded"
-    assert report["owner_summary"]["p05"] == "needs_work"
+    assert report["owner_summary"]["signal_observation_state"] == "needs_work"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["completion_boundary"]["goal_complete"] is False
     assert report["completion_boundary"]["status"] == "not_complete_product_gap"
     assert report["completion_boundary"]["completion_blocker_class"] == "missing_fact"
     assert report["completion_boundary"]["waiting_for_real_fresh_signal"] is False
     assert report["completion_boundary"]["dry_run_readiness_proven"] is False
-    assert "runtime_dry_run_audit_not_passed" in report["checks"]["product_gaps"]
+    assert "runtime_dry_run_audit_not_passed" in report["owner_runtime_issues"]["product_gaps"]
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_engineering_rehearsal_loop"]["status"] == "blocked"
+    assert tracks["engineering_rehearsal_projection"]["status"] == "blocked"
 
 
 def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_missing():
@@ -1252,9 +1755,10 @@ def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_miss
         ]
         is False
     )
-    assert "missing_dry_run_check:post_submit_exit_outcome_matrix_checked" in report[
-        "checks"
-    ]["product_gaps"]
+    assert (
+        "missing_dry_run_check:post_submit_exit_outcome_matrix_checked"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
 
 
 def test_goal_progress_marks_entry_fast_chain_boundary_needs_work_when_fast_chain_missing():
@@ -1278,10 +1782,14 @@ def test_goal_progress_marks_entry_fast_chain_boundary_needs_work_when_fast_chai
     assert report["entry_fast_chain_boundary"][
         "fresh_signal_to_candidate_authorization_covered"
     ] is False
-    assert "entry_fast_chain_boundary_not_ready" in report["checks"]["product_gaps"]
-    assert "missing_dry_run_check:fresh_signal_fast_auto_chain_checked" in report[
-        "checks"
-    ]["product_gaps"]
+    assert (
+        "entry_fast_chain_boundary_not_ready"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
+    assert (
+        "missing_dry_run_check:fresh_signal_fast_auto_chain_checked"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
 
 
 def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guard_missing():
@@ -1306,9 +1814,10 @@ def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guar
     assert report["strategygroup_tier_boundary"]["checks"][
         "only_mpg_tiny_real_order_eligible_checked"
     ] is False
-    assert "missing_dry_run_check:only_mpg_tiny_real_order_eligible_checked" in report[
-        "checks"
-    ]["product_gaps"]
+    assert (
+        "missing_dry_run_check:only_mpg_tiny_real_order_eligible_checked"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
 
 
 def test_goal_progress_marks_tier_boundary_needs_work_when_allocated_subaccount_missing():
@@ -1332,9 +1841,9 @@ def test_goal_progress_marks_tier_boundary_needs_work_when_allocated_subaccount_
     ] is False
     assert (
         "missing_dry_run_check:allocated_subaccount_profile_boundary_checked"
-        in report["checks"]["product_gaps"]
+        in report["owner_runtime_issues"]["product_gaps"]
     )
-    assert "strategygroup_tier_boundary_not_ready" in report["checks"]["product_gaps"]
+    assert "strategygroup_tier_boundary_not_ready" in report["owner_runtime_issues"]["product_gaps"]
 
 
 def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_policy_missing():
@@ -1352,7 +1861,7 @@ def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_policy_
         "tier_policy_source_readable"
     ] is False
     assert report["completion_boundary"]["waiting_for_real_fresh_signal"] is False
-    assert "strategygroup_tier_boundary_not_ready" in report["checks"]["product_gaps"]
+    assert "strategygroup_tier_boundary_not_ready" in report["owner_runtime_issues"]["product_gaps"]
     assert report["strategygroup_tier_boundary"][
         "tier_policy_is_execution_authority"
     ] is True
@@ -1372,11 +1881,12 @@ def test_goal_progress_marks_missing_chain_segment_as_degraded():
     )
 
     assert report["status"] == "degraded"
-    assert "missing_chain_segment:operation_layer_evidence_relay_checked" in report[
-        "checks"
-    ]["product_gaps"]
+    assert (
+        "missing_chain_segment:operation_layer_evidence_relay_checked"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
     tracks = {track["id"]: track for track in report["tracks"]}
-    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    rehearsal = tracks["engineering_rehearsal_projection"]
     assert rehearsal["status"] == "blocked"
     assert "chain_ready_segments=1" in rehearsal["evidence"]
     assert "missing_chain_segments=1" in rehearsal["evidence"]
@@ -1387,7 +1897,7 @@ def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
     checks = dict(_daily_check()["checks"])
     checks["runtime_execution_goal_chain_ready_segment_count"] = 5
     checks["runtime_execution_goal_chain_missing_or_failed_segments"] = [
-        "official_operation_layer_evidence_handoff"
+        "official_operation_layer_evidence_relay_projection"
     ]
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
@@ -1397,11 +1907,11 @@ def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
 
     assert report["status"] == "degraded"
     assert (
-        "missing_goal_chain_segment:official_operation_layer_evidence_handoff"
-        in report["checks"]["product_gaps"]
+        "missing_goal_chain_segment:official_operation_layer_evidence_relay_projection"
+        in report["owner_runtime_issues"]["product_gaps"]
     )
     tracks = {track["id"]: track for track in report["tracks"]}
-    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    rehearsal = tracks["engineering_rehearsal_projection"]
     assert rehearsal["status"] == "blocked"
     assert "goal_chain_ready_segments=5" in rehearsal["evidence"]
     assert "missing_goal_chain_segments=1" in rehearsal["evidence"]
@@ -1421,7 +1931,7 @@ def test_goal_progress_keeps_chain_segment_count_unknown_when_daily_check_lacks_
     )
 
     tracks = {track["id"]: track for track in report["tracks"]}
-    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    rehearsal = tracks["engineering_rehearsal_projection"]
     assert rehearsal["status"] == "ready"
     assert "chain_ready_segments=unknown" in rehearsal["evidence"]
     assert "missing_chain_segments=0" in rehearsal["evidence"]
@@ -1445,9 +1955,10 @@ def test_goal_progress_rejects_remote_interaction_in_local_audit():
     )
 
     assert report["status"] == "degraded"
-    assert "local_goal_progress_expected_zero_remote_interaction" in report["checks"][
-        "product_gaps"
-    ]
+    assert (
+        "local_goal_progress_expected_zero_remote_interaction"
+        in report["owner_runtime_issues"]["product_gaps"]
+    )
 
 
 def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
@@ -1463,14 +1974,19 @@ def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
         "label": "监控状态需刷新",
     }
     daily_check["notification"] = {
-        "decision": "NOTIFY",
+        "notification_result": "NOTIFY",
         "reason": "runtime_progress_cache_stale",
         "owner_intervention_required": False,
     }
-    daily_check["checks"]["monitor_refresh_needed"] = True
-    daily_check["checks"]["monitor_refresh_reasons"] = [
-        "runtime_progress_cache_stale"
-    ]
+    daily_check["owner_runtime_state"] = {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "needs_refresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": True,
+        "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
+        "waiting_for_market": True,
+    }
 
     report = module.build_goal_progress_report(
         daily_check=daily_check,
@@ -1482,19 +1998,325 @@ def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "needs_refresh"
     assert report["owner_status"] == "waiting_for_opportunity"
-    assert report["checks"]["blockers"] == []
-    assert report["checks"]["product_gaps"] == []
-    assert report["checks"]["monitor_refresh_needed"] is True
-    assert report["checks"]["refresh_required"] is True
-    assert report["checks"]["automation_notify"] is True
-    assert report["checks"]["owner_notify"] is False
+    assert report["owner_runtime_issues"]["blockers"] == []
+    assert report["owner_runtime_issues"]["product_gaps"] == []
+    assert report["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert report["notification"]["refresh_required"] is True
+    assert report["notification"]["automation_notify"] is True
+    assert report["notification"]["owner_notify"] is False
+    assert "hard_safety_stop" not in report["owner_runtime_issues"]["blockers"]
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["completion_boundary"]["status"] == "not_complete_waiting_for_market"
     assert report["completion_boundary"]["completion_blocker_class"] == "waiting_for_market"
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
-    assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
+    assert tracks["runtime_interaction_projection"]["status"] == "ready"
+
+
+def test_goal_progress_prefers_typed_owner_runtime_state_over_legacy_checks():
+    module = _load_module()
+    daily_check = _daily_check()
+    daily_check["checks"]["monitor_refresh_needed"] = True
+    daily_check["checks"]["monitor_refresh_reasons"] = ["legacy_stale_refresh_mirror"]
+    daily_check["owner_runtime_state"] = {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": True,
+    }
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["monitor_status"] == "fresh"
+    assert report["owner_runtime_state"]["monitor_refresh_needed"] is False
+    assert report["owner_runtime_state"]["monitor_refresh_reasons"] == []
+    assert report["notification"]["refresh_required"] is False
+
+
+def test_goal_progress_legacy_daily_check_monitor_checks_do_not_drive_refresh():
+    module = _load_module()
+    daily_check = _daily_check(status="waiting_for_market")
+    daily_check["runtime_status"] = "waiting_for_market"
+    daily_check.pop("monitor_status", None)
+    daily_check["owner_status"] = "waiting_for_opportunity"
+    daily_check["owner_runtime_state"] = {}
+    daily_check["checks"]["monitor_refresh_needed"] = True
+    daily_check["checks"]["monitor_refresh_reasons"] = ["legacy_cache_stale"]
+    daily_check["notification"] = {
+        "notification_result": "NOTIFY",
+        "reason": "legacy_cache_stale",
+        "owner_intervention_required": False,
+    }
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["monitor_status"] == "unknown"
+    assert report["owner_runtime_state"]["monitor_refresh_needed"] is False
+    assert report["owner_runtime_state"]["monitor_refresh_reasons"] == []
+    assert report["owner_runtime_issues"]["blockers"] == []
+
+
+def test_goal_progress_uses_shared_artifact_monitor_refresh_classifier():
+    module = _load_module()
+    daily_check = _daily_check(status=module.MONITOR_REFRESH_STATUS)
+    daily_check["runtime_status"] = "waiting_for_market"
+    daily_check["monitor_status"] = "fresh"
+    daily_check["owner_runtime_state"] = {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": True,
+    }
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == module.MONITOR_REFRESH_STATUS
+    assert report["runtime_status"] == "waiting_for_market"
+    assert report["monitor_status"] == "needs_refresh"
+    assert report["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert report["owner_runtime_state"]["monitor_refresh_reasons"] == []
+    assert report["notification"]["refresh_required"] is True
+    assert report["notification"] == module.monitor_notification_projection(
+        monitor_refresh_needed=True,
+        owner_notify=False,
+        owner_intervention_required=False,
+        source_notification=daily_check["notification"],
+        source_prefix="daily_check",
+    )
+
+
+def test_goal_progress_waiting_helper_prefers_typed_owner_runtime_state():
+    module = _load_module()
+    daily_check = _daily_check(status="unknown")
+    daily_check["runtime_status"] = "processing"
+    daily_check["owner_runtime_state"] = {
+        "runtime_status": "waiting_for_market",
+        "waiting_for_market": True,
+    }
+
+    waiting = module._daily_check_waiting_for_market(
+        daily_check=daily_check,
+    )
+
+    assert waiting is True
+
+
+def test_goal_progress_waiting_helper_uses_explicit_runtime_status_compatibility():
+    module = _load_module()
+    daily_check = _daily_check(status="unknown")
+    daily_check["runtime_status"] = "waiting_for_market"
+    daily_check["owner_runtime_state"] = {}
+
+    waiting = module._daily_check_waiting_for_market(
+        daily_check=daily_check,
+    )
+
+    assert waiting is True
+
+
+def test_goal_progress_waiting_helper_does_not_use_old_checks_waiting():
+    module = _load_module()
+    daily_check = _daily_check(status="unknown")
+    daily_check.pop("runtime_status", None)
+    daily_check.pop("monitor_status", None)
+    daily_check.pop("owner_status", None)
+    daily_check["owner_runtime_state"] = {}
+    daily_check["checks"]["waiting_for_market"] = True
+
+    waiting = module._daily_check_waiting_for_market(
+        daily_check=daily_check,
+    )
+
+    assert waiting is False
+
+
+def test_goal_progress_p0_track_does_not_use_old_checks_waiting():
+    module = _load_module()
+    daily_check = _daily_check(status="unknown")
+    daily_check.pop("runtime_status", None)
+    daily_check.pop("monitor_status", None)
+    daily_check.pop("owner_status", None)
+    daily_check["owner_runtime_state"] = {}
+    daily_check["checks"]["waiting_for_market"] = True
+
+    track = module._p0_track(
+        daily_check=daily_check,
+        checks=daily_check["checks"],
+        owner=daily_check["owner_summary"],
+        visibility=daily_check["owner_summary"]["visibility"],
+    )
+
+    assert track["status"] == "ready"
+    assert "next_action" not in track
+    assert track["progress_checkpoint"] == "fresh signal 已出现时推进官方链路"
+
+
+def test_goal_progress_p0_track_does_not_use_top_level_waiting_status():
+    module = _load_module()
+    daily_check = _daily_check(status="waiting_for_market")
+    daily_check.pop("runtime_status", None)
+    daily_check.pop("monitor_status", None)
+    daily_check.pop("owner_status", None)
+    daily_check["owner_runtime_state"] = {}
+    daily_check["checks"]["waiting_for_market"] = False
+
+    track = module._p0_track(
+        daily_check=daily_check,
+        checks=daily_check["checks"],
+        owner=daily_check["owner_summary"],
+        visibility=daily_check["owner_summary"]["visibility"],
+    )
+
+    assert track["status"] == "ready"
+    assert "next_action" not in track
+    assert track["progress_checkpoint"] == "fresh signal 已出现时推进官方链路"
+
+
+def test_goal_progress_p0_track_retains_explicit_runtime_waiting_status():
+    module = _load_module()
+    daily_check = _daily_check(status="unknown")
+    daily_check["runtime_status"] = "waiting_for_market"
+    daily_check.pop("monitor_status", None)
+    daily_check.pop("owner_status", None)
+    daily_check["owner_runtime_state"] = {}
+    daily_check["checks"]["waiting_for_market"] = False
+
+    track = module._p0_track(
+        daily_check=daily_check,
+        checks=daily_check["checks"],
+        owner=daily_check["owner_summary"],
+        visibility=daily_check["owner_summary"]["visibility"],
+    )
+
+    assert track["status"] == "waiting_for_market"
+    assert "next_action" not in track
+    assert track["progress_checkpoint"] == "等待 fresh signal 后推进官方链路"
+
+
+def test_goal_progress_live_closure_normalization_ignores_old_checks_waiting():
+    module = _load_module()
+
+    boundary = module._live_closure_evidence_boundary(
+        live_closure_evidence_verification=None,
+        checks={
+            "waiting_for_market": True,
+            "runtime_live_closure_evidence_status": "live_closure_in_progress",
+            "real_order_readiness_summary": {
+                "waiting_keys": ["fresh_signal"],
+            },
+        },
+        waiting_for_market=False,
+        live_cutover_readiness_boundary={
+            "live_closure_required_stage_count": 2,
+            "live_closure_required_evidence_keys": ["fresh_signal", "candidate"],
+            "market_dependent_waiting_keys": ["fresh_signal"],
+        },
+    )
+
+    assert boundary["status"] == "in_progress"
+    assert boundary["normalization_reason"] is None
+
+
+def test_goal_progress_live_closure_normalization_retains_explicit_waiting():
+    module = _load_module()
+
+    boundary = module._live_closure_evidence_boundary(
+        live_closure_evidence_verification=None,
+        checks={
+            "waiting_for_market": False,
+            "runtime_live_closure_evidence_status": "live_closure_in_progress",
+            "real_order_readiness_summary": {
+                "waiting_keys": ["fresh_signal"],
+            },
+        },
+        waiting_for_market=True,
+        live_cutover_readiness_boundary={
+            "live_closure_required_stage_count": 2,
+            "live_closure_required_evidence_keys": ["fresh_signal", "candidate"],
+            "market_dependent_waiting_keys": ["fresh_signal"],
+        },
+    )
+
+    assert boundary["status"] == "not_generated"
+    assert boundary["normalization_reason"] == "waiting_for_market_no_fresh_signal"
+
+
+def test_goal_progress_owner_labels_use_shared_monitor_mapping():
+    module = _load_module()
+
+    def owner_state(status: str) -> str:
+        return module.monitor_owner_state_label_for(
+            status,
+            local_labels=module.OWNER_PROGRESS_STATE_LABELS,
+            default_label="暂不可用",
+        )
+
+    def owner_action(status: str) -> str:
+        return module.monitor_owner_action_label_for(
+            status,
+            local_labels=module.OWNER_PROGRESS_ACTION_LABELS,
+            default_label="刷新或修复 runtime monitor 权威状态",
+        )
+
+    expected = {
+        module.MONITOR_REFRESH_STATUS: (
+            "等待机会",
+            "刷新本地 runtime monitor 缓存",
+        ),
+        module.DEPLOYMENT_ISSUE_STATUS: (
+            "暂不可用",
+            "刷新或修复 runtime monitor 权威状态",
+        ),
+        "needs_refresh": (
+            "监控状态需刷新",
+            "刷新本地 runtime monitor 缓存",
+        ),
+        "complete": ("已完成", "归档当前目标进度"),
+        "processing": ("处理中", "等待系统完成收口"),
+        "degraded": ("非市场收口待处理", "处理非市场收口缺口"),
+        "blocked": ("暂不可用", "处理目标进度阻断"),
+        "unknown": ("暂不可用", "刷新或修复 runtime monitor 权威状态"),
+    }
+    for status, (state, action) in expected.items():
+        assert owner_state(status) == state
+        assert owner_action(status) == action
+
+
+def test_goal_progress_p0_ready_without_owner_label_fails_closed():
+    module = _load_module()
+
+    track = module._p0_track(
+        daily_check={"status": "ready"},
+        checks={"waiting_for_market": False, "blockers": []},
+        owner={},
+        visibility={},
+    )
+
+    assert track["status"] == "ready"
+    assert track["owner_state"] == "暂不可用"
+    assert "next_action" not in track
+    assert track["progress_checkpoint"] == "刷新或修复 runtime monitor 权威状态"
 
 
 def test_goal_progress_keeps_deployment_issue_out_of_owner_decision():
@@ -1512,7 +2334,7 @@ def test_goal_progress_keeps_deployment_issue_out_of_owner_decision():
         "owner_intervention_required": False,
     }
     daily_check["notification"] = {
-        "decision": "NOTIFY",
+        "notification_result": "NOTIFY",
         "reason": "runtime_head_mismatch",
         "owner_intervention_required": False,
     }
@@ -1532,8 +2354,8 @@ def test_goal_progress_keeps_deployment_issue_out_of_owner_decision():
     assert report["runtime_status"] == "temporarily_unavailable"
     assert report["monitor_status"] == "deployment_issue"
     assert report["owner_status"] == "temporarily_unavailable"
-    assert report["checks"]["blockers"] == []
-    assert report["checks"]["owner_notify"] is False
+    assert report["owner_runtime_issues"]["blockers"] == []
+    assert report["notification"]["owner_notify"] is False
     assert report["owner_summary"]["owner_intervention_required"] is False
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
@@ -1629,7 +2451,7 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert "## StrategyGroup Tier Boundary" in progress
     assert "## Live Cutover Readiness Boundary" in progress
     assert "- Next fresh signal cutover ready: 是" in progress
-    assert "- P0.5 ready: 是" in progress
+    assert "- Signal Observation ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []
 
@@ -1647,6 +2469,12 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
     daily_check = _daily_check(status="ready")
     daily_check["checks"]["waiting_for_market"] = False
     daily_check["owner_summary"]["visibility"]["category"] = "running"
+    _set_daily_owner_runtime_state(
+        daily_check,
+        runtime_status="running",
+        owner_status="running",
+        waiting_for_market=False,
+    )
     daily_check_path.write_text(
         json.dumps(daily_check, ensure_ascii=False),
         encoding="utf-8",
@@ -1680,11 +2508,11 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                         "live_watcher_signal_packet_id-1"
                     ),
                     "present_evidence_keys": [
-                        "required_facts_readiness_packet_id",
+                        "required_facts_readiness_artifact_id",
                         "candidate_id",
                     ],
                     "matched_evidence_keys": [
-                        "required_facts_readiness_packet_id",
+                        "required_facts_readiness_artifact_id",
                         "candidate_id",
                     ],
                     "missing_source_match_keys": [],
@@ -1738,13 +2566,13 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                         "exchange_submit_execution_result_id-1"
                     ),
                     "present_evidence_keys": [
-                        "runtime_post_submit_finalize_packet_id",
+                        "runtime_post_submit_finalize_payload_id",
                         "post_submit_reconciliation_evidence_id",
                         "post_submit_budget_settlement_id",
                         "submit_outcome_review_id",
                     ],
                     "matched_evidence_keys": [
-                        "runtime_post_submit_finalize_packet_id",
+                        "runtime_post_submit_finalize_payload_id",
                         "post_submit_reconciliation_evidence_id",
                         "post_submit_budget_settlement_id",
                         "submit_outcome_review_id",

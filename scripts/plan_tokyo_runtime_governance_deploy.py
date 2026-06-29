@@ -360,7 +360,7 @@ def _plan_phases(
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/verify_runtime_submit_rehearsal_pre_live_packet.py --json "
+                "scripts/verify_runtime_submit_rehearsal_pre_live_evidence.py --json "
                 "--skip-current-head-deployed-check",
             ],
             "stop_if": [
@@ -369,7 +369,7 @@ def _plan_phases(
                 "scheduled-observation shadow-planning rehearsal does not pass",
                 "runtime submit pre-live technical rehearsal does not pass",
                 "runtime submit pre-live registration draft chain does not pass",
-                "runtime submit pre-live packet contains forbidden execution flags",
+                "runtime submit pre-live evidence contains forbidden execution flags",
             ],
         },
         {

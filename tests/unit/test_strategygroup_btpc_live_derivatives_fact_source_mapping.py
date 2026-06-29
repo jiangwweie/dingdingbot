@@ -29,8 +29,11 @@ def _load_module():
 
 def _btpc_l2_decision() -> dict:
     return {
-        "status": "btpc_l2_keep_revise_fact_source_decision_ready",
-        "decision": {
+        "status": "btpc_l2_keep_revise_fact_source_review_ready",
+        "review_outcome_state": {
+            "state_family": "Review Outcome State",
+            "source_role": "btpc_l2_keep_revise_fact_source_provenance",
+            "tradeability_decision_source": False,
             "keep_l2_shadow_observation": True,
             "l2_promotion_recommended_now": False,
             "l4_scope_change_recommended": False,
@@ -39,17 +42,15 @@ def _btpc_l2_decision() -> dict:
         "action_rows": [
             {
                 "action": "attach_live_derivatives_fact_sources_before_btpc_live_eligibility",
-                "decision_area": "live_fact_source",
+                "review_area": "live_fact_source",
                 "live_required_fact_authority": False,
-                "real_order_authority": False,
                 "candidate_or_finalgate_authority": False,
                 "operation_layer_authority": False,
                 "exchange_write_authority": False,
             },
             {
                 "action": "review_btpc_strong_uptrend_conflict_disable_rule",
-                "decision_area": "classifier_rule",
-                "real_order_authority": False,
+                "review_area": "classifier_rule",
                 "candidate_or_finalgate_authority": False,
                 "operation_layer_authority": False,
                 "exchange_write_authority": False,
@@ -111,30 +112,40 @@ def _btpc_handoff() -> dict:
 def test_btpc_live_fact_source_mapping_records_live_sources_without_authority() -> None:
     module = _load_module()
 
-    packet = module.build_btpc_live_derivatives_fact_source_mapping(
-        btpc_l2_decision_packet=_btpc_l2_decision(),
+    artifact = module.build_btpc_live_derivatives_fact_source_mapping(
+        btpc_l2_review_artifact=_btpc_l2_decision(),
         btpc_handoff=_btpc_handoff(),
     )
 
     assert (
-        packet["status"]
+        artifact["status"]
         == "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority"
     )
-    assert packet["counts"]["expected_live_fact_source_count"] == 8
-    assert packet["counts"]["mapping_ready_count"] == 8
-    assert packet["counts"]["source_attachment_pending_count"] == 8
-    assert packet["counts"]["live_required_fact_satisfied_count"] == 0
-    assert packet["counts"]["live_required_fact_gap_count"] == 8
-    assert packet["counts"]["derivatives_fact_source_count"] == 7
-    assert packet["counts"]["risk_fact_source_count"] == 1
-    assert packet["decision"]["live_derivatives_fact_source_mapping_ready"] is True
-    assert packet["decision"]["mapping_satisfies_live_required_facts"] is False
-    assert packet["decision"]["source_attachment_required_before_live_eligibility"] is True
-    assert packet["decision"]["l2_promotion_recommended_now"] is False
-    assert packet["decision"]["l4_scope_change_recommended"] is False
-    assert packet["decision"]["real_order_scope_change_recommended"] is False
+    assert artifact["counts"]["expected_live_fact_source_count"] == 8
+    assert artifact["counts"]["mapping_ready_count"] == 8
+    assert artifact["counts"]["source_attachment_pending_count"] == 8
+    assert artifact["counts"]["live_required_fact_satisfied_count"] == 0
+    assert artifact["counts"]["live_required_fact_gap_count"] == 8
+    assert artifact["counts"]["derivatives_fact_source_count"] == 7
+    assert artifact["counts"]["risk_fact_source_count"] == 1
+    assert "real_order_authorized_count" not in artifact["counts"]
+    assert "real_order_authority" not in artifact["btpc_state"]
+    assert "decision" not in artifact
+    review_outcome = artifact["review_outcome_state"]
+    assert review_outcome["state_family"] == "Review Outcome State"
+    assert (
+        review_outcome["source_role"]
+        == "btpc_live_derivatives_fact_source_mapping_provenance"
+    )
+    assert review_outcome["tradeability_decision_source"] is False
+    assert review_outcome["live_derivatives_fact_source_mapping_ready"] is True
+    assert review_outcome["mapping_satisfies_live_required_facts"] is False
+    assert review_outcome["source_attachment_required_before_live_eligibility"] is True
+    assert review_outcome["l2_promotion_recommended_now"] is False
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert review_outcome["real_order_scope_change_recommended"] is False
 
-    rows = {row["required_fact"]: row for row in packet["source_rows"]}
+    rows = {row["required_fact"]: row for row in artifact["source_rows"]}
     assert rows["historical_open_interest_window"]["source_route"] == (
         "open_interest_history_window"
     )
@@ -150,37 +161,78 @@ def test_btpc_live_fact_source_mapping_records_live_sources_without_authority() 
     assert all(row["live_required_fact_satisfied"] is False for row in rows.values())
     assert all(row["can_feed_finalgate"] is False for row in rows.values())
     assert all(row["can_feed_operation_layer"] is False for row in rows.values())
-    assert all(row["real_order_authority"] is False for row in rows.values())
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["interaction"]["approaches_real_order"] is False
-    assert packet["interaction"]["calls_finalgate"] is False
-    assert packet["interaction"]["calls_operation_layer"] is False
-    assert packet["interaction"]["calls_exchange_write"] is False
-    assert packet["interaction"]["places_order"] is False
-    assert packet["safety_invariants"]["mapping_is_not_live_required_fact"] is True
-    assert packet["safety_invariants"]["does_not_lower_owner_selected_leverage"] is True
-    assert packet["safety_invariants"]["does_not_change_live_profile_or_sizing_defaults"] is True
+    assert all("real_order_authority" not in row for row in rows.values())
+    assert all(row["exchange_write_authority"] is False for row in rows.values())
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert artifact["interaction"]["approaches_real_order"] is False
+    assert artifact["interaction"]["calls_finalgate"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["interaction"]["calls_exchange_write"] is False
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["mapping_is_not_live_required_fact"] is True
+    assert artifact["safety_invariants"]["does_not_lower_owner_selected_leverage"] is True
+    assert artifact["safety_invariants"]["does_not_change_live_profile_or_sizing_defaults"] is True
+    assert "operator_command_plan" not in artifact
+    assert "execution_intent_created" not in artifact["safety_invariants"]
 
 
 def test_btpc_live_fact_source_mapping_blocks_forbidden_live_authority() -> None:
     module = _load_module()
     decision = _btpc_l2_decision()
-    decision["decision"]["real_order_scope_change_recommended"] = True
+    decision["review_outcome_state"]["real_order_scope_change_recommended"] = True
 
-    packet = module.build_btpc_live_derivatives_fact_source_mapping(
-        btpc_l2_decision_packet=decision,
+    artifact = module.build_btpc_live_derivatives_fact_source_mapping(
+        btpc_l2_review_artifact=decision,
         btpc_handoff=_btpc_handoff(),
     )
 
-    assert packet["status"] == "blocked_forbidden_effect"
+    assert artifact["status"] == "blocked_forbidden_effect"
     assert (
         "btpc_l2_decision.real_order_scope_change_recommended"
-        in packet["safety_invariants"]["source_forbidden_effects"]
+        in artifact["safety_invariants"]["source_forbidden_effects"]
     )
-    assert packet["decision"]["default_next_step"] == (
+    assert artifact["review_outcome_state"]["default_next_step"] == (
         "stop_and_repair_btpc_live_fact_source_mapping_source_forbidden_effects"
     )
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+
+
+def test_btpc_live_fact_source_mapping_rejects_source_authority_mirror_fields() -> None:
+    module = _load_module()
+    decision = _btpc_l2_decision()
+    decision["safety_invariants"]["real_order_authority"] = False
+    decision["review_outcome_state"]["actionable_now"] = False
+    decision["action_rows"][0]["real_order_authority"] = False
+    handoff = _btpc_handoff()
+    handoff["execution_boundary"]["actionable_now"] = False
+
+    artifact = module.build_btpc_live_derivatives_fact_source_mapping(
+        btpc_l2_review_artifact=decision,
+        btpc_handoff=handoff,
+    )
+
+    assert artifact["status"] == "blocked_forbidden_effect"
+    effects = artifact["safety_invariants"]["source_forbidden_effects"]
+    assert (
+        "btpc_l2_review.safety_invariants."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert (
+        "btpc_l2_review.review_outcome_state."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in effects
+    assert (
+        "btpc_l2_review.action_rows."
+        "attach_live_derivatives_fact_sources_before_btpc_live_eligibility."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert (
+        "btpc_handoff.execution_boundary."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in effects
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
 
 
 def test_btpc_live_fact_source_mapping_cli_writes_outputs(
@@ -197,7 +249,7 @@ def test_btpc_live_fact_source_mapping_cli_writes_outputs(
 
     exit_code = module.main(
         [
-            "--btpc-l2-decision-json",
+            "--btpc-l2-review-json",
             str(decision_path),
             "--btpc-handoff-json",
             str(handoff_path),
@@ -220,3 +272,4 @@ def test_btpc_live_fact_source_mapping_cli_writes_outputs(
     owner_text = owner_path.read_text(encoding="utf-8")
     assert "BTPC Live Derivatives Fact Source Mapping" in owner_text
     assert "Live RequiredFacts satisfied by mapping: `false`" in owner_text
+    assert "Real order authority" not in owner_text

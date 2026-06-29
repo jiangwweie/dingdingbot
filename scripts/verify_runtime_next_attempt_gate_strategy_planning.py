@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify next-attempt gate -> strategy planning locally.
 
-This verifier proves that a finalized post-submit runtime packet can move into
+This verifier proves that a finalized post-submit runtime payload can move into
 fresh strategy-signal planning without reusing the consumed authorization, and
 without creating executable intents, orders, OrderLifecycle calls, exchange
 writes, withdrawals, or transfers.
@@ -23,7 +23,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.build_runtime_strategy_signal_input_packet import (  # noqa: E402
+from scripts.build_runtime_strategy_signal_input_artifact import (  # noqa: E402
     _build_signal_input,
 )
 from src.application.runtime_next_attempt_strategy_planning_service import (  # noqa: E402
@@ -69,8 +69,8 @@ from src.domain.runtime_execution_submit_outcome_review import (  # noqa: E402
     build_runtime_execution_submit_outcome_review,
 )
 from src.domain.runtime_post_submit_finalize import (  # noqa: E402
-    RuntimePostSubmitFinalizePacket,
-    build_runtime_post_submit_finalize_packet,
+    RuntimePostSubmitFinalizePayload,
+    build_runtime_post_submit_finalize_payload,
 )
 from src.domain.signal_evaluation import (  # noqa: E402
     OrderCandidate,
@@ -275,7 +275,7 @@ def _execution_result(runtime: StrategyRuntimeInstance) -> RuntimeExecutionExcha
     return RuntimeExecutionExchangeSubmitExecutionResult(
         execution_result_id=f"exchange-submit-result-{suffix}",
         enablement_decision_id=f"exchange-submit-enable-{suffix}",
-        packet_preview_id=f"packet-preview-{suffix}",
+        submit_preview_id=f"submit-preview-{suffix}",
         binding_id=runtime.trial_binding_id,
         authorization_id=f"auth-{suffix}-consumed",
         execution_intent_id=f"intent-{suffix}",
@@ -414,11 +414,11 @@ def _settlement(runtime: StrategyRuntimeInstance) -> RuntimeExecutionPostSubmitB
     )
 
 
-def _finalize_packet(
+def _finalize_payload(
     runtime: StrategyRuntimeInstance,
     *,
     active_positions_count: int | None,
-) -> RuntimePostSubmitFinalizePacket:
+) -> RuntimePostSubmitFinalizePayload:
     result = _execution_result(runtime)
     review = build_runtime_execution_submit_outcome_review(
         exchange_submit_execution_result=result,
@@ -429,7 +429,7 @@ def _finalize_packet(
         post_submit_reconciliation_report=_reconciliation(runtime),
         now_ms=NOW_MS,
     )
-    return build_runtime_post_submit_finalize_packet(
+    return build_runtime_post_submit_finalize_payload(
         authorization_id=result.authorization_id,
         runtime=runtime,
         exchange_submit_execution_result=result,
@@ -509,69 +509,71 @@ async def _scenario(
         side=side,
         suffix=scenario_id,
     )
-    finalize_packet = _finalize_packet(
+    finalize_payload = _finalize_payload(
         runtime,
         active_positions_count=active_positions_count,
     )
     planner = _planner(suffix=scenario_id)
     service = RuntimeNextAttemptStrategyPlanningService(strategy_signal_planner=planner)
-    packet = await service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=finalize_packet,
+    artifact = await service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=finalize_payload,
         signal_input=_signal_input(runtime, suffix=scenario_id),
         runtime=runtime,
         context_id=f"strategy-context-rtf049-{scenario_id}",
         expires_at_ms=NOW_MS + 15 * 60 * 1000,
         metadata={"rtf049": True, "local_in_memory_only": True},
     )
-    should_call_planner = finalize_packet.status.value == "finalized_ready_for_next_attempt"
+    should_call_planner = (
+        finalize_payload.status.value == "finalized_ready_for_next_attempt"
+    )
     checks = {
-        "expected_status": packet.status == expected_status,
+        "expected_status": artifact.status == expected_status,
         "planner_call_boundary": (
             planner.calls == 1 if should_call_planner else planner.calls == 0
         ),
         "consumed_authorization_replay_only": (
-            packet.consumed_authorization_replay_only is True
-            and packet.old_authorization_submit_retry_allowed is False
+            artifact.consumed_authorization_replay_only is True
+            and artifact.old_authorization_submit_retry_allowed is False
         ),
-        "fresh_signal_required": packet.requires_fresh_strategy_signal is True,
+        "fresh_signal_required": artifact.requires_fresh_strategy_signal is True,
         "fresh_authorization_required_before_submit": (
-            packet.requires_fresh_authorization_before_submit is True
+            artifact.requires_fresh_authorization_before_submit is True
         ),
         "pre_submit_rehearsal_retry_disallowed": (
-            packet.pre_submit_rehearsal_retry_allowed is False
+            artifact.pre_submit_rehearsal_retry_allowed is False
         ),
         "no_execution_side_effects": (
-            packet.execution_intent_created is False
-            and packet.executable_execution_intent_created is False
-            and packet.order_created is False
-            and packet.order_lifecycle_called is False
-            and packet.exchange_called is False
-            and packet.exchange_order_submitted is False
-            and packet.withdrawal_or_transfer_created is False
+            artifact.execution_intent_created is False
+            and artifact.executable_execution_intent_created is False
+            and artifact.order_created is False
+            and artifact.order_lifecycle_called is False
+            and artifact.exchange_called is False
+            and artifact.exchange_order_submitted is False
+            and artifact.withdrawal_or_transfer_created is False
         ),
     }
-    if packet.status == RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT:
+    if artifact.status == RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT:
         checks["shadow_candidate_created"] = (
-            packet.order_candidate_id is not None
-            and packet.candidate_planning_status
+            artifact.order_candidate_id is not None
+            and artifact.candidate_planning_status
             == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
-            and packet.operator_command_plan.get("requires_official_final_gate") is True
+            and artifact.strategy_planning_plan.get("requires_official_final_gate") is True
         )
     else:
-        checks["shadow_candidate_created"] = packet.order_candidate_id is None
+        checks["shadow_candidate_created"] = artifact.order_candidate_id is None
     return {
         "scenario_id": scenario_id,
         "status": "passed" if all(checks.values()) else "failed",
-        "post_submit_status": finalize_packet.status.value,
-        "next_attempt_gate_status": finalize_packet.next_attempt_gate.status.value,
-        "strategy_planning_status": packet.status.value,
+        "post_submit_status": finalize_payload.status.value,
+        "next_attempt_gate_status": finalize_payload.next_attempt_gate.status.value,
+        "strategy_planning_status": artifact.status.value,
         "planner_calls": planner.calls,
-        "order_candidate_id": packet.order_candidate_id,
-        "blockers": list(packet.blockers),
-        "warnings": list(packet.warnings),
+        "order_candidate_id": artifact.order_candidate_id,
+        "blockers": list(artifact.blockers),
+        "warnings": list(artifact.warnings),
         "checks": checks,
-        "post_submit_finalize_packet": _json_value(finalize_packet),
-        "strategy_planning_packet": _json_value(packet),
+        "post_submit_finalize_payload": _json_value(finalize_payload),
+        "strategy_planning_artifact": _json_value(artifact),
     }
 
 

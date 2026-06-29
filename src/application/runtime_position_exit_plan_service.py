@@ -6,7 +6,7 @@ import time
 from typing import Any, Protocol
 
 from src.domain.runtime_live_position_monitor import (
-    build_runtime_live_position_monitor_packet,
+    build_runtime_live_position_monitor_artifact,
 )
 from src.domain.runtime_position_exit_plan import (
     RuntimePositionExitPlan,
@@ -122,7 +122,7 @@ class RuntimePositionExitPlanService:
             except Exception:
                 reconciliation_result = None
 
-        monitor = build_runtime_live_position_monitor_packet(
+        monitor = build_runtime_live_position_monitor_artifact(
             runtime=runtime,
             local_positions=list(local_positions),
             local_open_orders=list(local_open_orders),

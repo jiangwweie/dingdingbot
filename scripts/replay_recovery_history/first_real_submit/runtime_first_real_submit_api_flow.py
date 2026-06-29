@@ -898,7 +898,7 @@ class FirstRealSubmitApiFlow:
             "exchange_submit_adapter_result_id",
             _body(exchange_adapter).get("adapter_result_id"),
         )
-        self._preview_enablement_packet()
+        self._preview_enablement_evidence()
         if self._config.preview_disabled_first_real_submit_action:
             self._preview_disabled_first_real_submit_action()
 
@@ -1055,16 +1055,16 @@ class FirstRealSubmitApiFlow:
             body.get("status") if isinstance(body, dict) else None,
         )
 
-    def _preview_enablement_packet(self) -> None:
+    def _preview_enablement_evidence(self) -> None:
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
             return
-        packet = self._step(
-            "preview_first_real_submit_enablement_packet",
+        evidence = self._step(
+            "preview_first_real_submit_enablement_evidence",
             "GET",
             (
                 "/api/trading-console/"
-                "runtime-execution-first-real-submit-enablement-packets/"
+                "runtime-execution-first-real-submit-enablement-evidence/"
                 f"authorizations/{authorization_id}"
             ),
             query={
@@ -1106,7 +1106,10 @@ class FirstRealSubmitApiFlow:
                 "short_side_conservative_profile_confirmed": True,
             },
         )
-        self.state.remember("first_real_submit_packet_status", _body(packet).get("status"))
+        self.state.remember(
+            "first_real_submit_enablement_status",
+            _body(evidence).get("status"),
+        )
 
     def _derive_action_ids(self, authorization_id: str) -> None:
         self.state.remember(

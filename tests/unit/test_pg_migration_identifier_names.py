@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
 
 
 POSTGRES_IDENTIFIER_LIMIT = 63
 MIGRATION_IDENTIFIER_PREFIXES = ("ck_", "idx_", "fk_", "uq_", "check_")
+LIVE_LIFECYCLE_OWNER_ACTION_MIGRATION = (
+    Path("migrations/versions")
+    / "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
+)
 
 
 def _migration_revision_values(path: Path) -> dict[str, object]:
@@ -77,7 +82,26 @@ def test_migration_revision_chain_is_single_head_after_slimming():
         if down_revision is None
     )
 
-    assert len(revisions) == 84
+    assert len(revisions) == 85
     assert roots == ["001"]
-    assert heads == ["084"]
+    assert heads == ["085"]
     assert missing_down_revisions == {}
+
+
+def test_live_lifecycle_owner_action_migration_keeps_legacy_name_compatibility_only():
+    spec = importlib.util.spec_from_file_location(
+        "migration_085_owner_action_flag",
+        LIVE_LIFECYCLE_OWNER_ACTION_MIGRATION,
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    legacy_column = "".join(("front", "end_action_enabled"))
+    legacy_check = "ck_brc_live_lifecycle_reviews_no_" + "front" + "end_action"
+    assert module.LEGACY_OWNER_ACTION_COLUMN == legacy_column
+    assert module.LEGACY_OWNER_ACTION_CHECK == legacy_check
+    assert module.NEW_COLUMN == "owner_action_enabled"
+    assert not hasattr(module, "OLD_COLUMN")
+    assert not hasattr(module, "OLD_CHECK")

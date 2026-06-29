@@ -9,12 +9,12 @@ from src.domain.runtime_execution_submit_authorization import (
     RuntimeExecutionSubmitAuthorization,
 )
 from src.domain.runtime_fresh_submit_authorization_resolution import (
-    RuntimeFreshSubmitAuthorizationResolutionPacket,
+    RuntimeFreshSubmitAuthorizationResolutionArtifact,
     RuntimeFreshSubmitAuthorizationResolutionSource,
-    build_runtime_fresh_submit_authorization_resolution_packet,
+    build_runtime_fresh_submit_authorization_resolution_artifact,
 )
 from src.domain.runtime_official_submit_handoff import (
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
 )
 
 
@@ -22,12 +22,6 @@ class RuntimeSubmitAuthorizationLookupPort(Protocol):
     async def get(
         self,
         authorization_id: str,
-    ) -> RuntimeExecutionSubmitAuthorization | None:
-        ...
-
-    async def get_by_order_candidate_id(
-        self,
-        order_candidate_id: str,
     ) -> RuntimeExecutionSubmitAuthorization | None:
         ...
 
@@ -47,12 +41,11 @@ class RuntimeFreshSubmitAuthorizationResolutionService:
     async def resolve_for_handoff(
         self,
         *,
-        handoff: RuntimeOfficialSubmitHandoffPacket,
+        handoff: RuntimeOfficialSubmitHandoffArtifact,
         requested_fresh_submit_authorization_id: str | None = None,
-        allow_order_candidate_fallback: bool = True,
         additional_blockers: list[str] | None = None,
         additional_warnings: list[str] | None = None,
-    ) -> RuntimeFreshSubmitAuthorizationResolutionPacket:
+    ) -> RuntimeFreshSubmitAuthorizationResolutionArtifact:
         repository_available = self._submit_authorization_repository is not None
         authorization: RuntimeExecutionSubmitAuthorization | None = None
         source = RuntimeFreshSubmitAuthorizationResolutionSource.UNRESOLVED
@@ -70,32 +63,9 @@ class RuntimeFreshSubmitAuthorizationResolutionService:
                     RuntimeFreshSubmitAuthorizationResolutionSource
                     .HANDOFF_AUTHORIZATION_ID
                 )
-        if (
-            repository_available
-            and authorization is None
-            and allow_order_candidate_fallback
-        ):
-            order_candidate_id = _optional_str(
-                handoff.readiness_snapshot.get("order_candidate_id")
-            )
-            if order_candidate_id:
-                authorization = (
-                    await self._submit_authorization_repository
-                    .get_by_order_candidate_id(order_candidate_id)
-                )
-                source = (
-                    RuntimeFreshSubmitAuthorizationResolutionSource
-                    .ORDER_CANDIDATE_LATEST
-                )
 
         warnings = list(additional_warnings or [])
-        if (
-            source
-            == RuntimeFreshSubmitAuthorizationResolutionSource.ORDER_CANDIDATE_LATEST
-            and _optional_str(requested_fresh_submit_authorization_id)
-        ):
-            warnings.append("explicit_fresh_authorization_not_found_used_candidate_fallback")
-        return build_runtime_fresh_submit_authorization_resolution_packet(
+        return build_runtime_fresh_submit_authorization_resolution_artifact(
             handoff=handoff,
             authorization=authorization,
             resolution_source=source,

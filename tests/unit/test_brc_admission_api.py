@@ -7,7 +7,7 @@ from src.domain.brc_admission import (
     AdmissionDecision,
     AdmissionDecisionValue,
     AdmissionExecutionMode,
-    AdmissionEvidencePacket,
+    AdmissionEvidence,
     AdmissionRequest,
     AdmissionTrialBinding,
     AdmissionTrialBindingStatus,
@@ -43,8 +43,8 @@ class _FakeAdmissionService:
             playbook_catalog_snapshot_json={"id": "PB-004-BRC-CONTROLLED-TESTNET"},
             created_at_ms=_now(),
         )
-        self.evidence = AdmissionEvidencePacket(
-            evidence_packet_id="evidence-test",
+        self.evidence = AdmissionEvidence(
+            admission_evidence_id="evidence-test",
             strategy_family_version_id="sfv-test",
             payload_json={},
             mandatory_complete=False,
@@ -58,7 +58,7 @@ class _FakeAdmissionService:
         self.request = AdmissionRequest(
             admission_request_id="admission-req-test",
             strategy_family_version_id="sfv-test",
-            evidence_packet_id="evidence-test",
+            admission_evidence_id="evidence-test",
             owner_market_regime_input_id="regime-test",
             trial_env=TrialEnv.TESTNET,
             trial_stage=TrialStage.FUNDED_VALIDATION,
@@ -76,7 +76,7 @@ class _FakeAdmissionService:
             strategy_family_version_id="sfv-test",
             playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
             owner_market_regime_input_id="regime-test",
-            evidence_packet_id="evidence-test",
+            admission_evidence_id="evidence-test",
             admission_rule_config_id="rules-v1",
             trial_constraint_snapshot_id="constraint-test",
             execution_mode=AdmissionExecutionMode.AUTO_WITHIN_BUDGET,
@@ -122,7 +122,7 @@ class _FakeAdmissionService:
     async def create_strategy_family_version(self, **kwargs):
         return self.version
 
-    async def create_evidence_packet(self, **kwargs):
+    async def create_admission_evidence(self, **kwargs):
         return self.evidence
 
     async def create_owner_regime_input(self, **kwargs):
@@ -204,7 +204,7 @@ def test_brc_admission_create_and_evaluate_endpoints(monkeypatch):
                 "/api/brc/admissions/requests",
                 json={
                     "strategy_family_version_id": "sfv-test",
-                    "evidence_packet_id": "evidence-test",
+                    "admission_evidence_id": "evidence-test",
                     "owner_market_regime_input_id": "regime-test",
                     "trial_env": "testnet",
                     "trial_stage": "funded_validation",

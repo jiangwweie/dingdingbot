@@ -1,15 +1,33 @@
 #!/usr/bin/env python3
-"""Build the StrategyGroup pre-live rehearsal readiness packet."""
+"""Build the StrategyGroup pre-live rehearsal readiness artifact."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from src.domain.runtime_readiness_state import (  # noqa: E402
+    AUTHORITATIVE_SOURCE_FALSE_KEYS,
+    NON_EXECUTING_SIDE_EFFECT_FALSE_KEYS,
+    false_flag_errors,
+    non_authoritative_state_errors,
+)
+from strategygroup_non_executing_projection import (  # noqa: E402
+    LEGACY_AUTHORITY_MIRROR_KEYS,
+    non_executing_interaction,
+)
+
 DEFAULT_QUALITY_WAVE_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
@@ -42,7 +60,6 @@ EXPECTED_INPUT_STATUSES = {
     "lifecycle_rehearsal": "lifecycle_rehearsal_ready",
 }
 
-
 def build_pre_live_rehearsal_readiness(
     *,
     quality_wave: dict[str, Any],
@@ -59,28 +76,38 @@ def build_pre_live_rehearsal_readiness(
     input_rows = [
         {
             "input": name,
-            "status": packet.get("status"),
+            "status": artifact.get("status"),
             "expected_status": EXPECTED_INPUT_STATUSES[name],
-            "ready": packet.get("status") == EXPECTED_INPUT_STATUSES[name],
+            "ready": artifact.get("status") == EXPECTED_INPUT_STATUSES[name],
         }
-        for name, packet in inputs.items()
+        for name, artifact in inputs.items()
     ]
     errors = _validate_inputs(inputs)
     status = "pre_live_rehearsal_ready" if not errors else "pre_live_rehearsal_not_ready"
+    runtime_readiness_state = {
+        "state_family": "Runtime Readiness State",
+        "source_role": "pre_live_rehearsal_readiness_evidence",
+        "readiness_scope": "pre_live_rehearsal",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "execution_attempt_source": False,
+        "pre_live_rehearsal_ready": not errors,
+        "live_submit_ready": False,
+        "live_outcome_calibrated": False,
+        "deploy_worthy_local_checkpoint": not errors,
+        "default_next_step": (
+            "stage_worthy_local_checkpoint_ready_for_owner_deploy_decision"
+            if not errors
+            else "repair_pre_live_rehearsal_inputs"
+        ),
+    }
     return {
         "schema": "brc.strategygroup_pre_live_rehearsal_readiness.v1",
         "scope": "strategygroup_pre_live_rehearsal_readiness",
         "status": status,
-        "interaction": {
-            "level": "L0_local_pre_live_rehearsal_readiness",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_pre_live_rehearsal_readiness"
+        ),
         "input_rows": input_rows,
         "strategygroup_decision_impact": _strategygroup_decision_impact(quality_wave),
         "closed_engineering_problem": (
@@ -114,25 +141,11 @@ def build_pre_live_rehearsal_readiness(
             "actual_reconciliation_settlement",
             "realized_pnl_review",
         ],
-        "decision": {
-            "pre_live_rehearsal_ready": not errors,
-            "live_submit_ready": False,
-            "live_outcome_calibrated": False,
-            "actionable_now": False,
-            "real_order_authority": False,
-            "deploy_worthy_local_checkpoint": not errors,
-            "default_next_step": (
-                "stage_worthy_local_checkpoint_ready_for_owner_deploy_decision"
-                if not errors
-                else "repair_pre_live_rehearsal_inputs"
-            ),
-        },
+        "runtime_readiness_state": runtime_readiness_state,
         "safety_invariants": {
             "local_readiness_only": True,
-            "actionable_now": False,
             "live_submit_ready": False,
             "live_outcome_calibrated": False,
-            "real_order_authority": False,
             "final_gate_called": False,
             "operation_layer_called": False,
             "exchange_write_called": False,
@@ -145,53 +158,83 @@ def build_pre_live_rehearsal_readiness(
     }
 
 
-def validate_packet(packet: dict[str, Any]) -> list[str]:
+def validate_artifact(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if packet.get("schema") != "brc.strategygroup_pre_live_rehearsal_readiness.v1":
+    if artifact.get("schema") != "brc.strategygroup_pre_live_rehearsal_readiness.v1":
         errors.append("schema_mismatch")
-    if packet.get("status") != "pre_live_rehearsal_ready":
-        errors.append(f"status_not_ready:{packet.get('status')}")
-    decision = _as_dict(packet.get("decision"))
-    if decision.get("pre_live_rehearsal_ready") is not True:
-        errors.append("pre_live_rehearsal_ready_not_true")
-    for key in ("live_submit_ready", "live_outcome_calibrated", "actionable_now", "real_order_authority"):
-        if decision.get(key) is not False:
-            errors.append(f"decision_not_false:{key}")
-    if not packet.get("remaining_live_submit_dependencies"):
-        errors.append("missing_live_submit_dependencies")
-    if not packet.get("remaining_live_outcome_calibration_dependencies"):
-        errors.append("missing_live_outcome_calibration_dependencies")
-    safety = _as_dict(packet.get("safety_invariants"))
-    for key in (
-        "actionable_now",
-        "live_submit_ready",
-        "live_outcome_calibrated",
-        "real_order_authority",
-        "final_gate_called",
-        "operation_layer_called",
-        "exchange_write_called",
-        "order_created",
-        "live_profile_changed",
-        "order_sizing_defaults_changed",
-        "withdrawal_or_transfer_created",
+    if "decision" in artifact:
+        errors.append("top_level_decision_removed")
+    if artifact.get("status") != "pre_live_rehearsal_ready":
+        errors.append(f"status_not_ready:{artifact.get('status')}")
+    runtime_readiness = _as_dict(artifact.get("runtime_readiness_state"))
+    if runtime_readiness.get("state_family") != "Runtime Readiness State":
+        errors.append("runtime_readiness_state_family_mismatch")
+    if (
+        runtime_readiness.get("source_role")
+        != "pre_live_rehearsal_readiness_evidence"
     ):
-        if safety.get(key) is not False:
-            errors.append(f"safety_invariant_not_false:{key}")
+        errors.append("runtime_readiness_state_source_role_mismatch")
+    if runtime_readiness.get("pre_live_rehearsal_ready") is not True:
+        errors.append("pre_live_rehearsal_ready_not_true")
+    errors.extend(
+        non_authoritative_state_errors(
+            runtime_readiness,
+            error_prefix="runtime_readiness_state",
+            false_keys=(
+                *AUTHORITATIVE_SOURCE_FALSE_KEYS,
+                "live_submit_ready",
+                "live_outcome_calibrated",
+            ),
+        )
+    )
+    for removed_mirror in LEGACY_AUTHORITY_MIRROR_KEYS:
+        if removed_mirror in runtime_readiness:
+            errors.append(
+                "runtime_readiness_state."
+                f"legacy_authority_mirror_present:{removed_mirror}"
+            )
+    if not artifact.get("remaining_live_submit_dependencies"):
+        errors.append("missing_live_submit_dependencies")
+    if not artifact.get("remaining_live_outcome_calibration_dependencies"):
+        errors.append("missing_live_outcome_calibration_dependencies")
+    safety = _as_dict(artifact.get("safety_invariants"))
+    errors.extend(
+        false_flag_errors(
+            safety,
+            error_prefix="safety_invariant",
+            false_keys=(
+                "live_submit_ready",
+                "live_outcome_calibrated",
+                *NON_EXECUTING_SIDE_EFFECT_FALSE_KEYS,
+            ),
+        )
+    )
+    for removed_mirror in LEGACY_AUTHORITY_MIRROR_KEYS:
+        if removed_mirror in safety:
+            errors.append(
+                f"safety_invariant.legacy_authority_mirror_present:{removed_mirror}"
+            )
     return errors
 
 
 def _validate_inputs(inputs: dict[str, dict[str, Any]]) -> list[str]:
     errors: list[str] = []
-    for name, packet in inputs.items():
+    for name, artifact in inputs.items():
         expected = EXPECTED_INPUT_STATUSES[name]
-        if packet.get("status") != expected:
-            errors.append(f"{name}.unexpected_status:{packet.get('status')}")
-        for effect in _forbidden_effects(packet):
+        if artifact.get("status") != expected:
+            errors.append(f"{name}.unexpected_status:{artifact.get('status')}")
+        if name == "quality_wave":
+            provenance = _as_dict(artifact.get("strategy_asset_state_provenance"))
+            if provenance.get("source_role") != "quality_evidence_provenance":
+                errors.append("quality_wave.strategy_asset_state_provenance_missing")
+            if not _dict_rows(provenance.get("rows")):
+                errors.append("quality_wave.strategy_asset_state_provenance_rows_missing")
+        for effect in _forbidden_effects(artifact):
             errors.append(f"{name}.{effect}")
     return errors
 
 
-def _forbidden_effects(packet: dict[str, Any]) -> list[str]:
+def _forbidden_effects(artifact: dict[str, Any]) -> list[str]:
     effects: list[str] = []
     for section, keys in (
         (
@@ -208,8 +251,6 @@ def _forbidden_effects(packet: dict[str, Any]) -> list[str]:
         (
             "safety_invariants",
             [
-                "actionable_now",
-                "real_order_authority",
                 "final_gate_called",
                 "operation_layer_called",
                 "exchange_write_called",
@@ -220,25 +261,34 @@ def _forbidden_effects(packet: dict[str, Any]) -> list[str]:
             ],
         ),
     ):
-        values = _as_dict(packet.get(section))
+        values = _as_dict(artifact.get(section))
         for key in keys:
             if values.get(key) is True:
                 effects.append(f"{section}.{key}")
+        if section == "safety_invariants":
+            for key in LEGACY_AUTHORITY_MIRROR_KEYS:
+                if values.get(key) is True:
+                    effects.append(
+                        f"{section}.legacy_authority_mirror_present:{key}"
+                    )
     return sorted(set(effects))
 
 
 def _strategygroup_decision_impact(quality_wave: dict[str, Any]) -> list[dict[str, Any]]:
     output = []
-    for row in _dict_rows(quality_wave.get("rows")):
+    provenance = _as_dict(quality_wave.get("strategy_asset_state_provenance"))
+    provenance_rows = _dict_rows(provenance.get("rows"))
+    source_role = str(provenance.get("source_role") or "")
+    for row in provenance_rows:
         group = str(row.get("strategy_group_id") or "")
         output.append(
             {
                 "strategy_group_id": group,
                 "current_tier": row.get("current_tier"),
                 "current_decision": row.get("current_decision"),
+                "source_role": source_role,
+                "primary_judgment_source": False,
                 "decision_impact": _impact_for_row(row),
-                "actionable_now": False,
-                "real_order_authority": False,
             }
         )
     return output
@@ -255,7 +305,7 @@ def _impact_for_row(row: dict[str, Any]) -> str:
     return "current decision retained"
 
 
-def build_markdown(packet: dict[str, Any]) -> str:
+def build_markdown(artifact: dict[str, Any]) -> str:
     return "\n".join(
         [
             "---",
@@ -269,24 +319,32 @@ def build_markdown(packet: dict[str, Any]) -> str:
             "",
             "## Summary",
             "",
-            f"- Status: `{packet.get('status')}`",
+            f"- Status: `{artifact.get('status')}`",
             "- Pre-live rehearsal ready: `{}`".format(
-                _as_dict(packet.get("decision")).get("pre_live_rehearsal_ready")
+                _as_dict(artifact.get("runtime_readiness_state")).get(
+                    "pre_live_rehearsal_ready"
+                )
             ),
             "- Live submit ready: `false`",
-            "- Real order authority: `false`",
             "",
             "## Inputs",
             "",
-            _input_table(_dict_rows(packet.get("input_rows"))),
+            _input_table(_dict_rows(artifact.get("input_rows"))),
             "",
             "## StrategyGroup Decision Impact",
             "",
-            _impact_table(_dict_rows(packet.get("strategygroup_decision_impact"))),
+            _impact_table(_dict_rows(artifact.get("strategygroup_decision_impact"))),
             "",
             "## Next Engineering Bottleneck",
             "",
-            str(packet.get("next_engineering_bottleneck") or ""),
+            str(artifact.get("next_engineering_bottleneck") or ""),
+            "",
+            "## Runtime Readiness State",
+            "",
+            f"- Source role: `{_as_dict(artifact.get('runtime_readiness_state')).get('source_role')}`",
+            f"- Tradeability decision source: `{_as_dict(artifact.get('runtime_readiness_state')).get('tradeability_decision_source')}`",
+            f"- Execution Attempt source: `{_as_dict(artifact.get('runtime_readiness_state')).get('execution_attempt_source')}`",
+            f"- Default next step: `{_as_dict(artifact.get('runtime_readiness_state')).get('default_next_step')}`",
         ]
     ).rstrip() + "\n"
 
@@ -354,8 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.check:
-        packet = _load_json(Path(args.output_json).expanduser())
-        errors = validate_packet(packet)
+        artifact = _load_json(Path(args.output_json).expanduser())
+        errors = validate_artifact(artifact)
         result = {
             "status": "passed" if not errors else "failed",
             "error_count": len(errors),
@@ -364,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if not errors else 2
 
-    packet = build_pre_live_rehearsal_readiness(
+    artifact = build_pre_live_rehearsal_readiness(
         quality_wave=_load_json(Path(args.quality_wave_json).expanduser()),
         handoff_boundary=_load_json(Path(args.handoff_boundary_json).expanduser()),
         btpc_guard=_load_json(Path(args.btpc_guard_json).expanduser()),
@@ -372,11 +430,11 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.lifecycle_rehearsal_json).expanduser()
         ),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     _write_text(Path(args.output_json).expanduser(), payload + "\n")
-    _write_text(Path(args.output_owner_progress).expanduser(), build_markdown(packet))
+    _write_text(Path(args.output_owner_progress).expanduser(), build_markdown(artifact))
     print(payload)
-    return 0 if packet["status"] == "pre_live_rehearsal_ready" else 2
+    return 0 if artifact["status"] == "pre_live_rehearsal_ready" else 2
 
 
 if __name__ == "__main__":

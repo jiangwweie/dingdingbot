@@ -14,7 +14,7 @@ def _daily_check(**overrides):
             "remote_interaction_count": 0,
         },
         "checks": {"fresh_signal_notification_policy_checked": True},
-        "notification": {"decision": "DONT_NOTIFY"},
+        "notification": {"notification_result": "DONT_NOTIFY"},
     }
     base.update(overrides)
     return base
@@ -53,7 +53,7 @@ def _dry_run_audit(**overrides):
         "disabled_smoke_not_real_execution_proof": True,
         "expanded_watcher_scope_execution_guard_checked": True,
         "fresh_signal_fast_auto_chain_checked": True,
-        "non_executing_prepare_auto_bridge_checked": True,
+        "execution_attempt_rehearsal_prepare_checked": True,
         "only_mpg_tiny_real_order_eligible_checked": True,
         "allocated_subaccount_profile_boundary_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
@@ -65,7 +65,7 @@ def _dry_run_audit(**overrides):
         "post_submit_finalize_result_identity_guard_checked": True,
         "reduce_only_recovery_standing_authorization_checked": True,
         "required_facts_readiness_checked": True,
-        "scoped_pipeline_operation_layer_handoff_checked": True,
+        "scoped_pipeline_operation_layer_submit_projection_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "strategygroup_adapter_boundary_checked": True,
     }
@@ -87,8 +87,8 @@ def _live_cutover(**overrides):
         "first_live_lane": "selected_strategygroup_allocated_subaccount",
         "next_fresh_signal_cutover_ready": True,
         "current_real_submit_allowed": False,
-        "current_real_submit_blocker": "no_live_fresh_signal_in_this_local_packet",
-        "sections": [
+        "current_real_submit_blocker": "no_live_fresh_signal_in_this_local_artifact",
+        "check_groups": [
             {"name": "strategy_scope", "status": "ready"},
             {"name": "entry_fast_chain", "status": "ready"},
             {"name": "operation_layer_relay", "status": "ready"},
@@ -100,7 +100,7 @@ def _live_cutover(**overrides):
         "live_closure_cutover_contract": {
             "required_evidence_keys": [
                 "live_watcher_signal_packet_id",
-                "required_facts_readiness_packet_id",
+                "required_facts_readiness_artifact_id",
                 "candidate_id",
                 "runtime_grant_id",
                 "fresh_submit_authorization_id",
@@ -108,7 +108,7 @@ def _live_cutover(**overrides):
                 "operation_layer_submit_authorization_id",
                 "exchange_submit_execution_result_id",
                 "exchange_native_hard_stop_order_id",
-                "runtime_post_submit_finalize_packet_id",
+                "runtime_post_submit_finalize_payload_id",
                 "post_submit_reconciliation_evidence_id",
                 "post_submit_budget_settlement_id",
                 "submit_outcome_review_id",
@@ -178,7 +178,7 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "fresh"
     assert report["owner_status"] == "waiting_for_opportunity"
-    assert report["owner_decision_required"] is False
+    assert report["owner_intervention_required"] is False
     assert report["goal_complete"] is False
     assert report["non_market_gaps"] == []
     assert report["input_source_gaps"] == []
@@ -214,7 +214,51 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     )
 
 
-def test_completion_audit_default_daily_check_uses_current_schema_packet():
+def test_completion_audit_reads_owner_runtime_projection_statuses():
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(
+            runtime_status="waiting_for_market",
+            monitor_status="fresh",
+        ),
+        goal_progress=_goal_progress(
+            runtime_status="processing",
+            monitor_status="needs_refresh",
+            owner_status="needs_intervention",
+        ),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["runtime_status"] == "processing"
+    assert report["monitor_status"] == "needs_refresh"
+    assert report["owner_intervention_required"] is True
+    assert report["owner_status"] == "needs_intervention"
+
+
+def test_completion_audit_ignores_legacy_checks_owner_intervention_mirror():
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(
+            runtime_status="waiting_for_market",
+            monitor_status="fresh",
+            checks={
+                "fresh_signal_notification_policy_checked": True,
+                "owner_intervention_required": True,
+            },
+        ),
+        goal_progress=_goal_progress(
+            checks={"owner_intervention_required": True},
+        ),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["owner_intervention_required"] is False
+    assert report["owner_status"] == "waiting_for_opportunity"
+
+
+def test_completion_audit_default_daily_check_uses_current_schema_artifact():
     assert script.DEFAULT_DAILY_CHECK_JSON.name == "latest-daily-check.json"
     assert "cache-only" not in str(script.DEFAULT_DAILY_CHECK_JSON)
 
@@ -253,10 +297,10 @@ def test_completion_audit_prefers_current_boundaries_over_legacy_dry_run_keys():
         "strategygroup_adapter_boundary_checked",
         "fresh_signal_fast_auto_chain_checked",
         "required_facts_readiness_checked",
-        "non_executing_prepare_auto_bridge_checked",
+        "execution_attempt_rehearsal_prepare_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "operation_layer_evidence_relay_checked",
-        "scoped_pipeline_operation_layer_handoff_checked",
+        "scoped_pipeline_operation_layer_submit_projection_checked",
         "operation_layer_authorization_chain_guard_checked",
         "operation_layer_hard_safety_blocker_matrix_checked",
         "operation_layer_blocker_review_policy_checked",
@@ -283,7 +327,7 @@ def test_completion_audit_prefers_current_boundaries_over_legacy_dry_run_keys():
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "fresh"
     assert report["owner_status"] == "waiting_for_opportunity"
-    assert report["owner_decision_required"] is False
+    assert report["owner_intervention_required"] is False
     assert report["non_market_gaps"] == []
     assert report["goal_complete"] is False
 
@@ -671,11 +715,11 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     )
 
     assert exit_code == 0
-    packet = json.loads(output.read_text(encoding="utf-8"))
+    report = json.loads(output.read_text(encoding="utf-8"))
     owner_text = owner.read_text(encoding="utf-8")
-    assert packet["status"] == "not_complete_waiting_for_market"
-    assert packet["input_source_gaps"] == []
-    assert packet["input_sources"]["daily_check"] == {
+    assert report["status"] == "not_complete_waiting_for_market"
+    assert report["input_source_gaps"] == []
+    assert report["input_sources"]["daily_check"] == {
         "exists": True,
         "generated_at_ms": None,
         "generated_at_utc": "2026-06-18T08:00:00+00:00",
@@ -694,7 +738,7 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     assert "## Input Source Gaps" in owner_text
 
 
-def test_completion_audit_cli_writes_repair_packet_when_dry_run_input_missing(tmp_path):
+def test_completion_audit_cli_writes_repair_artifact_when_dry_run_input_missing(tmp_path):
     daily = tmp_path / "daily.json"
     goal = tmp_path / "goal.json"
     dry = tmp_path / "missing-dry.json"
@@ -722,12 +766,12 @@ def test_completion_audit_cli_writes_repair_packet_when_dry_run_input_missing(tm
         ]
     )
 
-    packet = json.loads(output.read_text(encoding="utf-8"))
+    report = json.loads(output.read_text(encoding="utf-8"))
     owner_text = owner.read_text(encoding="utf-8")
     assert exit_code == 2
-    assert packet["status"] == "needs_non_market_repair"
-    assert "dry_run_audit:exists" in packet["input_source_gaps"]
-    assert "dry_run_audit:schema" in packet["input_source_gaps"]
+    assert report["status"] == "needs_non_market_repair"
+    assert "dry_run_audit:exists" in report["input_source_gaps"]
+    assert "dry_run_audit:schema" in report["input_source_gaps"]
     assert "dry_run_audit:exists" in owner_text
     assert "FileNotFoundError" not in owner_text
 
@@ -769,5 +813,5 @@ def test_completion_audit_cli_treats_runtime_processing_as_success(tmp_path):
     )
 
     assert exit_code == 0
-    packet = json.loads(output.read_text(encoding="utf-8"))
-    assert packet["status"] == "not_complete_runtime_processing"
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "not_complete_runtime_processing"

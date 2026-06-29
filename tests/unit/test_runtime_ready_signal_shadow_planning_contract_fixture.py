@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 
 from scripts import runtime_ready_signal_shadow_planning_contract_fixture as script
@@ -9,7 +10,7 @@ def test_ready_signal_contract_fixture_reaches_shadow_candidate_planning(tmp_pat
     report = script.build_contract_fixture_report(tmp_path / "rtf075")
 
     assert report["status"] == "ready_signal_shadow_planning_contract_passed"
-    assert report["bridge_status"] == "ready_for_final_gate_preflight"
+    assert report["projection_status"] == "ready_for_final_gate_preflight"
     assert report["order_candidate_id"] == "order-candidate-rtf075-contract"
     checks = report["checks"]
     assert checks["shadow_signal_evaluation_created"] is True
@@ -33,25 +34,33 @@ def test_ready_signal_contract_fixture_outputs_audit_artifacts(tmp_path):
     report = script.build_contract_fixture_report(output_dir)
 
     contract_path = output_dir / "contract-report.json"
-    bridge_path = output_dir / "bridge-report.json"
+    projection_path = output_dir / "projection-report.json"
     planning_path = (
         output_dir
-        / "bridge-artifacts"
+        / "projection-artifacts"
         / "rtf075-ready-signal-strategy-planning-flow.json"
     )
     assert contract_path.exists()
-    assert bridge_path.exists()
+    assert projection_path.exists()
     assert planning_path.exists()
     assert json.loads(contract_path.read_text())["status"] == report["status"]
-    bridge_packet = json.loads(bridge_path.read_text())
-    planning_packet = json.loads(planning_path.read_text())
-    assert bridge_packet["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert bridge_packet["operator_command_plan"]["places_order"] is False
-    assert planning_packet["api_payload"]["candidate_planning_result"]["proposal"][
+    projection_artifact = json.loads(projection_path.read_text())
+    planning_artifact = json.loads(planning_path.read_text())
+    assert "operator_command_plan" not in projection_artifact
+    assert projection_artifact["shadow_planning_plan"]["creates_shadow_candidate"] is True
+    assert projection_artifact["shadow_planning_plan"]["places_order"] is False
+    assert planning_artifact["api_payload"]["candidate_planning_result"]["proposal"][
         "stop_source"
     ] == "cpm_pullback_low"
-    assert planning_packet["api_payload"]["execution_intent_created"] is False
-    assert planning_packet["api_payload"]["order_created"] is False
+    assert planning_artifact["api_payload"]["execution_intent_created"] is False
+    assert planning_artifact["api_payload"]["order_created"] is False
+
+
+def test_ready_signal_contract_fixture_source_uses_artifact_boundary_wording():
+    assert "ready operator packet" not in (script.__doc__ or "")
+    assert "ready operator artifact" in (script.__doc__ or "")
+    source = inspect.getsource(script._post_submit_finalize_payload)
+    assert "runtime_state_mutated_by_packet" not in source
 
 
 def test_ready_signal_contract_fixture_cli_stdout_is_json_only(monkeypatch, capsys, tmp_path):

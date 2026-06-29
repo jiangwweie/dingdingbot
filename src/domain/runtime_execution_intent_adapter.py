@@ -1,7 +1,8 @@
 """Non-executing adapter preview for runtime candidates to ExecutionIntent.
 
-This module defines a bridge contract only. It does not create ExecutionIntent
-records and does not project OrderCandidate into legacy SignalResult.
+This module defines adapter preview and binding contracts only. It does not
+create ExecutionIntent records and does not project OrderCandidate into legacy
+SignalResult.
 """
 
 from __future__ import annotations
@@ -132,7 +133,7 @@ def build_runtime_execution_intent_creation_preview(
         created_at_ms=now_ms,
         metadata={
             "scope": "runtime_execution_intent_adapter_preview",
-            "non_executing_bridge": True,
+            "non_executing_projection": True,
             "does_not_project_legacy_signal_result": True,
         },
     )

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Resolve readiness evidence for a real strategy signal path.
 
-The resolver is deliberately conservative: it may assemble a
-RuntimeExecutableSubmitReadinessEvidence packet from explicit trusted evidence
-IDs, but it must not invent FinalGate, account, position, idempotency, or
-protection facts.
+The resolver is deliberately conservative: it may assemble
+RuntimeExecutableSubmitReadinessEvidence from explicit trusted evidence IDs,
+but it must not invent FinalGate, account, position, idempotency, or protection
+facts.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _read_json_file(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("api_payload", "packet", "body"):
+    for key in ("api_payload", "artifact", "body"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -201,7 +201,7 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
         "status": status,
         "runtime_instance_id": args.runtime_instance_id,
         "intent_draft_source_status": _source_status(source),
-        "intent_draft_source_packet_id": source.get("packet_id"),
+        "intent_draft_source_artifact_id": source.get("artifact_id"),
         "signal_evaluation_id": source.get("signal_evaluation_id"),
         "order_candidate_id": source.get("order_candidate_id"),
         "runtime_execution_intent_draft_id": source.get(

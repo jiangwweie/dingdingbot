@@ -13,7 +13,7 @@ class _Client:
             "status": "ready_for_final_gate_preflight",
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {
+            "strategy_planning_plan": {
                 "places_order": False,
                 "calls_order_lifecycle": False,
             },
@@ -59,7 +59,7 @@ def _write_inputs(tmp_path):
         "blockers": [],
         "warnings": [],
         "not_execution_authority": True,
-        "runtime_state_mutated_by_packet": False,
+        "runtime_state_mutated_by_payload": False,
         "execution_intent_created": False,
         "order_created": False,
         "order_cancelled": False,
@@ -105,7 +105,7 @@ def _args(tmp_path, **overrides):
     post_path, signal_path = _write_inputs(tmp_path)
     values = {
         "runtime_instance_id": "runtime-1",
-        "post_submit_finalize_packet_json": str(post_path),
+        "post_submit_finalize_payload_json": str(post_path),
         "signal_input_json": str(signal_path),
         "env_file": None,
         "api_base": "http://unit",
@@ -117,17 +117,17 @@ def _args(tmp_path, **overrides):
     return type("Args", (), values)()
 
 
-def test_next_attempt_strategy_plan_api_flow_posts_packet_and_signal(tmp_path):
+def test_next_attempt_strategy_plan_api_flow_posts_payload_and_signal(tmp_path):
     client = _Client()
 
-    packet = runtime_next_attempt_strategy_plan_api_flow._build_packet(
+    artifact = runtime_next_attempt_strategy_plan_api_flow._build_artifact(
         _args(tmp_path),
         client=client,
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["method"] == "POST"
@@ -135,7 +135,8 @@ def test_next_attempt_strategy_plan_api_flow_posts_packet_and_signal(tmp_path):
         "/api/trading-console/strategy-runtimes/runtime-1/"
         "next-attempt-strategy-plans"
     )
-    assert call["body"]["post_submit_finalize_packet"]["authorization_id"] == "auth-1"
+    assert "post_submit_finalize_packet" not in call["body"]
+    assert call["body"]["post_submit_finalize_payload"]["authorization_id"] == "auth-1"
     assert call["body"]["signal_input"]["evaluation_id"] == "eval-1"
     assert call["body"]["metadata"]["runtime_next_attempt_strategy_plan_api_flow"] is True
     assert call["body"]["metadata"]["owner"] == "unit"
@@ -143,29 +144,29 @@ def test_next_attempt_strategy_plan_api_flow_posts_packet_and_signal(tmp_path):
 
 
 def test_next_attempt_strategy_plan_api_flow_keeps_blocked_http_errors(tmp_path):
-    packet = runtime_next_attempt_strategy_plan_api_flow._build_packet(
+    artifact = runtime_next_attempt_strategy_plan_api_flow._build_artifact(
         _args(tmp_path),
         client=_Client(http_status=503, body={"detail": "unavailable"}),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "next_attempt_strategy_plan_api"
-    assert "next_attempt_strategy_plan_api_http_503" in packet["blockers"]
-    assert packet["safety_invariants"]["position_opened"] is False
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "next_attempt_strategy_plan_api"
+    assert "next_attempt_strategy_plan_api_http_503" in artifact["blockers"]
+    assert artifact["safety_invariants"]["position_opened"] is False
 
 
 def test_next_attempt_strategy_plan_api_flow_cli_stdout_is_json_only(
     monkeypatch,
     capsys,
 ):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy api flow")
         return {"status": "waiting_for_signal", "ok": True}
 
     monkeypatch.setattr(
         runtime_next_attempt_strategy_plan_api_flow,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,
@@ -174,7 +175,7 @@ def test_next_attempt_strategy_plan_api_flow_cli_stdout_is_json_only(
             "runtime_next_attempt_strategy_plan_api_flow.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--post-submit-finalize-packet-json",
+            "--post-submit-finalize-payload-json",
             "post.json",
             "--signal-input-json",
             "signal.json",

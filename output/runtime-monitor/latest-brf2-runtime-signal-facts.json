@@ -1,16 +1,9 @@
 {
   "checks": {
-    "action_time_required_facts_satisfied": false,
-    "actionable_now": false,
     "brf2_source_row_present": true,
-    "calls_exchange_write": false,
-    "calls_finalgate": false,
-    "calls_operation_layer": false,
     "derived_proxy_not_action_time_authority": true,
     "fact_input_present": true,
     "missing_watcher_input": false,
-    "places_order": false,
-    "real_order_authority": false,
     "source_is_brf_reference_row": true,
     "source_strategy_group_id": "BRF-001",
     "watcher_tick_present": true
@@ -27,12 +20,13 @@
     "usable_for_market_wait_classification": true,
     "usable_for_operation_layer": false
   },
+  "fact_input_checkpoint": "run_brf2_runtime_signal_capture",
   "fact_input_present": true,
   "facts": {
     "closed_1h_ohlcv": {
       "detail": {
         "closed_bar": true,
-        "latest_open_time_ms": 1779318000000,
+        "latest_open_time_ms": 1770039600000,
         "timeframe": "1h"
       },
       "fresh": true,
@@ -42,7 +36,7 @@
     "closed_5m_ohlcv": {
       "detail": {
         "authority": "readonly_proxy_not_action_time_required_fact",
-        "market_bar_timestamp_ms": 1779318000000,
+        "market_bar_timestamp_ms": 1770039600000,
         "proxy_is_not_action_time_live_required_fact": true,
         "proxy_source": "latest_closed_strategy_observation_tick",
         "timeframe": "5m"
@@ -62,34 +56,36 @@
     "rally_context": {
       "detail": {
         "htf_context": "trend_down",
-        "rally_extension_confirmed": false,
-        "rally_pct": "1.1053"
+        "rally_extension_confirmed": true,
+        "rally_pct": "10.6796"
       },
       "fresh": true,
       "source": "brf_price_action_evaluator_evidence",
-      "status": "not_satisfied"
+      "status": "bear_or_weak_reclaim"
     },
     "rally_extension_invalidates_failure_state": {
       "detail": {
-        "squeeze_warning": false
+        "squeeze_warning": true
       },
       "fresh": true,
       "source": "brf_price_action_evaluator_evidence",
-      "status": "false"
+      "status": "active"
     },
     "rally_failure_trigger_state": {
       "detail": {
-        "close_reversal_pct": "0.0125",
+        "close_reversal_pct": "7.0175",
         "reason_codes": [
-          "brf_no_action_no_rally_extension"
+          "brf_bear_rally_extended",
+          "brf_rally_high_rejected",
+          "brf_short_squeeze_risk_reviewed"
         ],
-        "rejection_confirmed": false,
-        "rejection_upper_wick_ratio": "0.0539",
-        "signal_type": "no_action"
+        "rejection_confirmed": true,
+        "rejection_upper_wick_ratio": "0.3333",
+        "signal_type": "would_enter"
       },
       "fresh": true,
       "source": "brf_price_action_evaluator_evidence",
-      "status": "not_confirmed"
+      "status": "confirmed"
     },
     "short_squeeze_risk_state": {
       "detail": {
@@ -97,17 +93,17 @@
         "conservative_short_profile_required": true,
         "hard_stop_required": true,
         "owner_confirm_each_entry_required": false,
-        "rally_extension_pct": "1.1053",
+        "rally_extension_pct": "10.6796",
         "reference": "rally_high_or_atr_reference",
         "runtime_confirmation_mode": "runtime_bounded_auto_attempts",
         "runtime_profile_confirmation_required": true,
-        "squeeze_risk_level": "bounded_review",
-        "squeeze_warning": false,
+        "squeeze_risk_level": "elevated",
+        "squeeze_warning": true,
         "status": "reviewed"
       },
       "fresh": true,
       "source": "brf_short_squeeze_review_proxy",
-      "status": "bounded"
+      "status": "red"
     },
     "spread_liquidity_state": {
       "detail": {
@@ -129,10 +125,10 @@
   },
   "first_blocker": {
     "class": "none",
-    "next_action": "run_brf2_runtime_signal_capture",
-    "owner": "runtime"
+    "owner": "runtime",
+    "repair_checkpoint": "run_brf2_runtime_signal_capture"
   },
-  "generated_at_utc": "2026-06-23T10:44:11.901366+00:00",
+  "generated_at_utc": "2026-06-28T19:14:04.243301+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -143,45 +139,41 @@
     "places_order": false,
     "remote_interaction_count": 0
   },
-  "next_action": "run_brf2_runtime_signal_capture",
   "safety_invariants": {
-    "actionable_now": false,
     "authorization_evidence_created": false,
     "calls_exchange_write": false,
     "calls_finalgate": false,
     "calls_operation_layer": false,
-    "execution_intent_created": false,
     "live_profile_changed": false,
     "order_sizing_changed": false,
     "places_order": false,
-    "real_order_authority": false,
     "withdrawal_or_transfer_created": false
   },
   "schema": "brc.brf2_runtime_signal_facts.v1",
   "scope": "brf2_runtime_signal_facts_read_model",
   "signal_context": {
-    "closed_at_utc": "2026-05-20T23:00:00+00:00",
+    "closed_at_utc": "2026-02-02T13:40:00+00:00",
     "exchange_symbol": "BTC/USDT:USDT",
     "market": "binance_usdm",
     "runtime_instance_id": "",
-    "signal_packet_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
+    "signal_observation_id": "BRF-001-BTC-SHORT:brf-9d221c462ba943dcc6370db0:1770039600000",
     "source": "brf_reference_readonly_preview_derived_brf2_fact_input",
     "source_candidate_id": "BRF-001-BTC-SHORT",
-    "source_signal_type": "no_action",
+    "source_signal_type": "would_enter",
     "source_strategy_group_id": "BRF-001",
     "symbol": "BTC/USDT:USDT",
     "timeframe": "1h_closed_observation_with_5m_proxy"
   },
-  "source_path": "generated:local_sqlite_fallback:strategy_group_preview",
+  "source_path": "generated:local_sqlite_read_only:strategy_group_preview",
   "source_signal_context": {
-    "closed_at_utc": "2026-05-20T23:00:00+00:00",
+    "closed_at_utc": "2026-02-02T13:40:00+00:00",
     "exchange_symbol": "BTC/USDT:USDT",
     "market": "binance_usdm",
     "runtime_instance_id": "",
-    "signal_packet_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
+    "signal_observation_id": "BRF-001-BTC-SHORT:brf-9d221c462ba943dcc6370db0:1770039600000",
     "source": "brf_reference_readonly_preview_derived_brf2_fact_input",
     "source_candidate_id": "BRF-001-BTC-SHORT",
-    "source_signal_type": "no_action",
+    "source_signal_type": "would_enter",
     "source_strategy_group_id": "BRF-001",
     "symbol": "BTC/USDT:USDT",
     "timeframe": "1h_closed_observation_with_5m_proxy"

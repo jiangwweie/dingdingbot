@@ -1,7 +1,7 @@
 """Event-driven LLM advisory plane.
 
 This service is deliberately outside the execution chain. It consumes typed
-events and structured packets, persists advisory output, and may push a Feishu
+events and structured artifacts, persists advisory output, and may push a Feishu
 notification. Owner confirmation still belongs to the canonical console/runtime
 governance path.
 """
@@ -498,7 +498,7 @@ def format_feishu_advisory_message(
 def _advisory_system_prompt(registered_strategy_family_ids: set[str]) -> str:
     return (
         "You are the BRC Owner Copilot advisory engine. Consume only the provided "
-        "typed event and context packet. Return JSON only with keys: "
+        "typed event and context artifact. Return JSON only with keys: "
         "recommendation_type, summary, confidence, recommended_strategy_family_ids, "
         "observe_only_strategy_family_ids, reason_codes, risk_notes, missing_facts, "
         "research_idea_notes. You may recommend only registered strategy families: "

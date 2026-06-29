@@ -1,0 +1,365 @@
+{
+  "broader_observation": {
+    "dominant_no_action_reasons": [
+      {
+        "count": 1,
+        "reason_code": "btpc_disable_stale_signal_before_l2_review"
+      },
+      {
+        "count": 1,
+        "reason_code": "lsr_disable_long_preview_conflicts_with_short_revival_lead"
+      },
+      {
+        "count": 1,
+        "reason_code": "vcb_no_action_volume_expansion_missing"
+      }
+    ],
+    "high_priority_no_action_signals": [
+      {
+        "candidate_id": "BTPC-001-AVAX-SHORT",
+        "confidence": "0.25",
+        "coverage_review_priority": "P0_5",
+        "human_summary": "BTPC v1 rejects stale shadow signals before any L2 promotion review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "l2_shadow_candidate_observation_enabled",
+        "policy_recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+        "reason_codes": [
+          "btpc_disable_stale_signal_before_l2_review"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "BTPC-001-v0",
+        "strategy_group_id": "BTPC-001",
+        "symbol": "AVAX/USDT:USDT"
+      },
+      {
+        "candidate_id": "LSR-001-XRP-LONG",
+        "confidence": "0.25",
+        "coverage_review_priority": "P1",
+        "human_summary": "LSR v1 disables the old long sweep preview until the short-revival rewrite passes review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_rewrite_required",
+        "policy_recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
+        "reason_codes": [
+          "lsr_disable_long_preview_conflicts_with_short_revival_lead"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "LSR-001-v0",
+        "strategy_group_id": "LSR-001",
+        "symbol": "XRP/USDT:USDT"
+      },
+      {
+        "candidate_id": "VCB-001-LINK-LONG",
+        "confidence": "0.25",
+        "coverage_review_priority": "P1",
+        "human_summary": "VCB v1 requires volume expansion before true-breakout review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_classifier_redesign_required",
+        "policy_recommended_action": "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned",
+        "reason_codes": [
+          "vcb_no_action_volume_expansion_missing"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "VCB-001-v0",
+        "strategy_group_id": "VCB-001",
+        "symbol": "LINK/USDT:USDT"
+      }
+    ],
+    "invalid_signals": [],
+    "no_action_sample": [
+      {
+        "candidate_id": "BTPC-001-AVAX-SHORT",
+        "confidence": "0.25",
+        "coverage_review_priority": "P0_5",
+        "human_summary": "BTPC v1 rejects stale shadow signals before any L2 promotion review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "l2_shadow_candidate_observation_enabled",
+        "policy_recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+        "reason_codes": [
+          "btpc_disable_stale_signal_before_l2_review"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "BTPC-001-v0",
+        "strategy_group_id": "BTPC-001",
+        "symbol": "AVAX/USDT:USDT"
+      },
+      {
+        "candidate_id": "LSR-001-XRP-LONG",
+        "confidence": "0.25",
+        "coverage_review_priority": "P1",
+        "human_summary": "LSR v1 disables the old long sweep preview until the short-revival rewrite passes review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_rewrite_required",
+        "policy_recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
+        "reason_codes": [
+          "lsr_disable_long_preview_conflicts_with_short_revival_lead"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "LSR-001-v0",
+        "strategy_group_id": "LSR-001",
+        "symbol": "XRP/USDT:USDT"
+      },
+      {
+        "candidate_id": "VCB-001-LINK-LONG",
+        "confidence": "0.25",
+        "coverage_review_priority": "P1",
+        "human_summary": "VCB v1 requires volume expansion before true-breakout review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_classifier_redesign_required",
+        "policy_recommended_action": "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned",
+        "reason_codes": [
+          "vcb_no_action_volume_expansion_missing"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "VCB-001-v0",
+        "strategy_group_id": "VCB-001",
+        "symbol": "LINK/USDT:USDT"
+      }
+    ],
+    "side_counts": {
+      "long": 3,
+      "none": 3,
+      "short": 2
+    },
+    "strategy_group_counts": {
+      "BRF-001": 1,
+      "BTPC-001": 1,
+      "CPM-RO-001": 1,
+      "LSR-001": 1,
+      "MI-001": 2,
+      "RBR-001": 1,
+      "VCB-001": 1
+    },
+    "symbol_counts": {
+      "ADA/USDT:USDT": 1,
+      "AVAX/USDT:USDT": 1,
+      "BNB/USDT:USDT": 1,
+      "BTC/USDT:USDT": 1,
+      "ETH/USDT:USDT": 1,
+      "LINK/USDT:USDT": 1,
+      "SOL/USDT:USDT": 1,
+      "XRP/USDT:USDT": 1
+    },
+    "would_enter_signals": [
+      {
+        "candidate_id": "MI-001-SOL-LONG",
+        "confidence": "0.65",
+        "coverage_review_priority": null,
+        "human_summary": "MI-001 would-enter long observation: 12h close-to-close momentum impulse crossed threshold.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "mi001_12h_momentum_impulse",
+          "observe_only_review_required"
+        ],
+        "side": "long",
+        "signal_type": "would_enter",
+        "strategy_family_version_id": "MI-001-smoke-v0",
+        "strategy_group_id": "MI-001",
+        "symbol": "SOL/USDT:USDT"
+      },
+      {
+        "candidate_id": "MI-001-BNB-LONG",
+        "confidence": "0.65",
+        "coverage_review_priority": null,
+        "human_summary": "MI-001 would-enter long observation: 12h close-to-close momentum impulse crossed threshold.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "mi001_12h_momentum_impulse",
+          "observe_only_review_required"
+        ],
+        "side": "long",
+        "signal_type": "would_enter",
+        "strategy_family_version_id": "MI-001-smoke-v0",
+        "strategy_group_id": "MI-001",
+        "symbol": "BNB/USDT:USDT"
+      },
+      {
+        "candidate_id": "CPM-RO-001",
+        "confidence": "0.70",
+        "coverage_review_priority": null,
+        "human_summary": "CPM v0 long pullback-reclaim structure detected.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "cpm_long_htf_trend_intact",
+          "cpm_long_pullback_depth_normal",
+          "cpm_long_reclaim_confirmed"
+        ],
+        "side": "long",
+        "signal_type": "would_enter",
+        "strategy_family_version_id": "CPM-RO-001-v0",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETH/USDT:USDT"
+      },
+      {
+        "candidate_id": "BRF-001-BTC-SHORT",
+        "confidence": "0.64",
+        "coverage_review_priority": "P0_5",
+        "human_summary": "BRF v0 bear-rally-failure short structure detected for review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+        "policy_recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+        "reason_codes": [
+          "brf_bear_rally_extended",
+          "brf_rally_high_rejected",
+          "brf_short_squeeze_risk_reviewed"
+        ],
+        "side": "short",
+        "signal_type": "would_enter",
+        "strategy_family_version_id": "BRF-001-v0",
+        "strategy_group_id": "BRF-001",
+        "symbol": "BTC/USDT:USDT"
+      },
+      {
+        "candidate_id": "RBR-001-ADA-SHORT",
+        "confidence": "0.57",
+        "coverage_review_priority": "P2",
+        "human_summary": "RBR v0 range-boundary reversion detected for review.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_parked_negative_evidence",
+        "policy_recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+        "reason_codes": [
+          "rbr_range_context",
+          "rbr_boundary_rejection_confirmed"
+        ],
+        "side": "short",
+        "signal_type": "would_enter",
+        "strategy_family_version_id": "RBR-001-v0",
+        "strategy_group_id": "RBR-001",
+        "symbol": "ADA/USDT:USDT"
+      }
+    ]
+  },
+  "checks": {
+    "broader_actionable_would_enter_signal_count": 4,
+    "broader_candidate_count": 8,
+    "broader_current_signal_count": 8,
+    "broader_high_priority_no_action_signal_count": 3,
+    "broader_invalid_signal_count": 0,
+    "broader_low_priority_would_enter_signal_count": 1,
+    "broader_no_action_signal_count": 3,
+    "broader_would_enter_signal_count": 5,
+    "coverage_gap": true,
+    "forbidden_effects": [],
+    "runtime_no_action_signal_count": 0,
+    "runtime_ready_signal_count": 0,
+    "runtime_signal_summary_count": 0
+  },
+  "diagnosis": {
+    "broader_high_priority_no_action_review_available": true,
+    "broader_observation_has_actionable_would_enter": true,
+    "broader_observation_has_low_priority_would_enter": true,
+    "broader_observation_has_would_enter": true,
+    "broader_signals_are_observe_only": true,
+    "does_not_authorize_real_order": true,
+    "does_not_expand_runtime_scope": true,
+    "mainline_runtime_is_waiting": true,
+    "next_step": "review_broader_observe_only_signals_before_runtime_scope_change",
+    "owner_summary": "主线暂未触发，但宽观察面已有观察级机会，需要评估是否扩展策略覆盖。",
+    "recommended_actions": [
+      "review_broader_signal_quality",
+      "decide_future_strategygroup_scope_or_observe_only_promotion",
+      "keep_current_live_submit_path_waiting_for_selected_runtime_signal"
+    ]
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_signal_coverage",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "public_market_read_only": false,
+    "remote_interaction_count": 0
+  },
+  "mainline_runtime": {
+    "dominant_no_action_reasons": [],
+    "no_action_sample": [],
+    "ready_signals": [],
+    "side_counts": {},
+    "strategy_group_counts": {},
+    "symbol_counts": {}
+  },
+  "owner_state": "coverage_review_needed",
+  "safety_invariants": {
+    "broader_signals_are_not_execution_authority": true,
+    "exchange_write_called": false,
+    "final_gate_called": false,
+    "local_diagnostic_only": true,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "runtime_started": false,
+    "server_files_mutated": false,
+    "server_interaction": false,
+    "shadow_candidate_created": false,
+    "source_forbidden_effects": [],
+    "strategy_parameters_changed": false,
+    "synthetic_or_preview_signal_not_live_submit_authority": true,
+    "withdrawal_or_transfer_created": false
+  },
+  "scope": "strategygroup_signal_coverage_diagnostic",
+  "source": {
+    "broader_market_source": "local_sqlite_v3_dev_closed_klines_read_only",
+    "broader_preview_status": "preview_built",
+    "broader_source_requested": "local_sqlite_read_only",
+    "runtime_summary_path_default": "output/strategygroup-runtime-pilot/current-run-tokyo-reports/latest-summary.json",
+    "runtime_summary_status": "runtime_summary_missing"
+  },
+  "status": "mainline_no_signal_broader_would_enter"
+}

@@ -12,7 +12,6 @@ last_verified: 2026-06-20
 - Status: `pre_live_rehearsal_ready`
 - Pre-live rehearsal ready: `True`
 - Live submit ready: `false`
-- Real order authority: `false`
 
 ## Inputs
 
@@ -36,3 +35,10 @@ last_verified: 2026-06-20
 ## Next Engineering Bottleneck
 
 live_submit dependencies: fresh selected signal, action-time live RequiredFacts, candidate/auth evidence, FinalGate, Operation Layer, protection/account/exchange facts; then live_outcome_calibration from real fill, slippage, protection, settlement, and realized PnL.
+
+## Runtime Readiness State
+
+- Source role: `pre_live_rehearsal_readiness_evidence`
+- Tradeability decision source: `False`
+- Execution Attempt source: `False`
+- Default next step: `stage_worthy_local_checkpoint_ready_for_owner_deploy_decision`

@@ -19,9 +19,20 @@ def test_official_exchange_submit_execution_result_boundary_passes(tmp_path):
     assert report["exchange_submit_execution_result_id"].startswith(
         "runtime-exchange-submit-execution-result-"
     )
+    assert "operator_command_plan" not in report
+    assert report["exchange_submit_execution_result_boundary_plan"] == {
+        "next_step": "build_controlled_gateway_action_proof",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "live_submit_allowed": False,
+        "exchange_submit_execution_enabled": False,
+        "calls_exchange_gateway": False,
+        "calls_order_lifecycle_submit": False,
+        "executes_real_submit": False,
+    }
 
     checks = report["checks"]
-    assert checks["exchange_boundary_packet_passed"] is True
+    assert checks["exchange_boundary_artifact_passed"] is True
     assert checks["exchange_adapter_result_armed"] is True
     assert checks["exchange_execution_result_disabled"] is True
     assert checks["exchange_execution_enabled_false"] is True
@@ -42,7 +53,7 @@ def test_official_exchange_submit_execution_result_boundary_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_exchange_submit_execution_result_boundary_outputs_packet(
+def test_official_exchange_submit_execution_result_boundary_outputs_artifact(
     tmp_path,
 ):
     output_dir = tmp_path / "rtf086"
@@ -51,9 +62,9 @@ def test_official_exchange_submit_execution_result_boundary_outputs_packet(
 
     expected_files = [
         "contract-report.json",
-        "exchange-submit-boundary-packet.json",
+        "exchange-submit-boundary-artifact.json",
         "exchange-submit-execution-result.json",
-        "exchange-submit-execution-result-boundary-packet.json",
+        "exchange-submit-execution-result-boundary-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -61,20 +72,20 @@ def test_official_exchange_submit_execution_result_boundary_outputs_packet(
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
+    artifact = json.loads(
         (
             output_dir
-            / "exchange-submit-execution-result-boundary-packet.json"
+            / "exchange-submit-execution-result-boundary-artifact.json"
         ).read_text()
     )
-    assert packet["status"] == "exchange_submit_execution_disabled_boundary"
-    assert packet["statuses"]["exchange_submit_adapter_result"] == (
+    assert artifact["status"] == "exchange_submit_execution_disabled_boundary"
+    assert artifact["statuses"]["exchange_submit_adapter_result"] == (
         "exchange_submit_adapter_armed"
     )
-    assert packet["statuses"]["exchange_submit_execution_result"] == (
+    assert artifact["statuses"]["exchange_submit_execution_result"] == (
         "exchange_submit_execution_disabled"
     )
-    result = packet["exchange_submit_execution_result"]
+    result = artifact["exchange_submit_execution_result"]
     assert result["status"] == "exchange_submit_execution_disabled"
     assert result["exchange_submit_execution_enabled"] is False
     assert result["execution_mode"] == "disabled"
@@ -88,9 +99,9 @@ def test_official_exchange_submit_execution_result_boundary_outputs_packet(
     assert result["submitted_local_order_ids"] == []
     assert result["submitted_exchange_order_ids"] == []
     assert result["blockers"] == []
-    assert packet["safety_invariants"]["exchange_submit_execution_enabled"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_submit_called"] is False
+    assert artifact["safety_invariants"]["exchange_submit_execution_enabled"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_submit_called"] is False
 
 
 def test_official_exchange_submit_execution_result_boundary_cli_stdout_is_json_only(

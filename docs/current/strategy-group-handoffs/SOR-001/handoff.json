@@ -38,8 +38,8 @@
     "closed_candle_only": true,
     "confidence_min": "0.58",
     "side": "short",
-    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
-    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+    "stale_behavior": "mark_signal_observation_stale_and_block_candidate_prepare",
+    "conflict_behavior": "mark_signal_observation_conflict_and_block_candidate_prepare"
   },
   "required_facts": {
     "market": [
@@ -102,30 +102,30 @@
     "no_stop_loss_plan",
     "risk_boundary_mismatch"
   ],
-  "sample_signal_packet": {
+  "sample_signal_artifact": {
     "status": "ready_for_shadow_candidate_prepare",
     "strategy_group_id": "SOR-001",
     "side": "short",
     "freshness": "fresh",
     "not_execution_authority": true
   },
-  "sample_no_signal_packet": {
+  "sample_no_signal_artifact": {
     "status": "no_signal",
     "strategy_group_id": "SOR-001",
-    "next_action": "continue_watcher_observation"
+    "next_observation_step": "continue_watcher_observation"
   },
-  "sample_stale_signal_packet": {
+  "sample_stale_signal_artifact": {
     "status": "stale_signal",
     "strategy_group_id": "SOR-001",
     "blocked_reason": "signal_freshness_window_expired"
   },
-  "sample_conflict_packet": {
+  "sample_conflict_artifact": {
     "status": "signal_conflict",
     "strategy_group_id": "SOR-001",
     "blocked_reason": "strategy_signal_conflict_or_session_context_missing"
   },
   "execution_boundary": {
-    "research_handoff_only": true,
+    "research_intake_source_only": true,
     "runtime_registration_authorized": false,
     "candidate_creation_authorized": false,
     "final_gate_input": false,

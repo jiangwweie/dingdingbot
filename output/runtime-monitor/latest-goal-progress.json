@@ -1,0 +1,453 @@
+{
+  "completion_boundary": {
+    "completion_blocker_class": "waiting_for_market",
+    "disabled_smoke_treated_as_real_execution_proof": false,
+    "dry_run_readiness_proven": true,
+    "first_bounded_real_order_complete": false,
+    "goal_complete": false,
+    "live_closure_evidence_status": "not_generated",
+    "mock_signal_treated_as_real_signal": false,
+    "real_order_closure_proven": false,
+    "reason": "waiting_for_real_fresh_selected_strategygroup_signal",
+    "status": "not_complete_waiting_for_market",
+    "waiting_for_real_fresh_signal": true
+  },
+  "entry_fast_chain_boundary": {
+    "candidate_authorization_to_finalgate_covered": true,
+    "checks": {
+      "all_selected_strategygroups_reach_finalgate_dispatch_checked": true,
+      "fresh_signal_fast_auto_chain_checked": true,
+      "operation_layer_authorization_chain_guard_checked": true,
+      "operation_layer_blocker_review_policy_checked": true,
+      "operation_layer_evidence_relay_checked": true,
+      "operation_layer_standing_authorization_relay_checked": true,
+      "required_facts_readiness_checked": true,
+      "scoped_pipeline_operation_layer_submit_projection_checked": true,
+      "selected_strategygroup_dispatch_guard_checked": true
+    },
+    "finalgate_to_operation_layer_evidence_covered": true,
+    "fresh_signal_to_candidate_authorization_covered": true,
+    "operation_layer_authorization_guard_covered": true,
+    "operation_layer_blocker_review_policy_covered": true,
+    "real_action_time_finalgate_proven": false,
+    "real_operation_layer_submit_proven": false,
+    "real_order_dependent_remaining": true,
+    "required_facts_gate_covered": true,
+    "status": "ready"
+  },
+  "exit_hardening_boundary": {
+    "active_position_remains_open_policy_covered": true,
+    "entry_filled_protection_failed_reduce_only_recovery_covered": true,
+    "entry_filled_protection_ok_covered": true,
+    "exchange_native_hard_stop_required_after_entry": true,
+    "exchange_submit_failed_before_acceptance_policy_covered": true,
+    "partial_fill_policy_covered": true,
+    "position_closed_by_sl_tp_or_reduce_only_recovery_covered": true,
+    "post_submit_exit_outcome_matrix_checked": true,
+    "real_order_dependent_remaining": true,
+    "real_post_submit_close_reconcile_settle_proven": false,
+    "reduce_only_recovery_standing_authorization_checked": true,
+    "status": "ready"
+  },
+  "generated_at_utc": "2026-06-29T11:49:51.126892+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_goal_progress_audit",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "live_closure_evidence_boundary": {
+    "completed_stage_count": 0,
+    "expected_evidence_keys": [
+      "live_watcher_signal_packet_id",
+      "required_facts_readiness_artifact_id",
+      "candidate_id",
+      "runtime_grant_id",
+      "fresh_submit_authorization_id",
+      "action_time_finalgate_packet_id",
+      "operation_layer_submit_authorization_id",
+      "exchange_submit_execution_result_id",
+      "exchange_native_hard_stop_order_id",
+      "runtime_post_submit_finalize_payload_id",
+      "post_submit_reconciliation_evidence_id",
+      "post_submit_budget_settlement_id",
+      "submit_outcome_review_id"
+    ],
+    "expected_stage_count": 9,
+    "first_bounded_real_order_complete": false,
+    "first_incomplete_stage": null,
+    "market_dependent_waiting_keys": [
+      "fresh_signal",
+      "candidate_authorization",
+      "action_time_finalgate",
+      "official_operation_layer",
+      "real_exchange_acceptance",
+      "post_submit_real_reconciliation"
+    ],
+    "missing_evidence_keys": [],
+    "normalization_reason": null,
+    "owner_state": "未生成",
+    "raw_source_status": "not_generated",
+    "real_order_closure_proven": false,
+    "reject_reasons": [],
+    "source_status": "not_generated",
+    "stage_count": 9,
+    "status": "not_generated"
+  },
+  "live_cutover_readiness_boundary": {
+    "current_real_submit_allowed": false,
+    "entry_fast_chain_ready": true,
+    "exit_hardening_ready": true,
+    "live_closure_cutover_contract_ready": true,
+    "live_closure_required_evidence_keys": [
+      "live_watcher_signal_packet_id",
+      "required_facts_readiness_artifact_id",
+      "candidate_id",
+      "runtime_grant_id",
+      "fresh_submit_authorization_id",
+      "action_time_finalgate_packet_id",
+      "operation_layer_submit_authorization_id",
+      "exchange_submit_execution_result_id",
+      "exchange_native_hard_stop_order_id",
+      "runtime_post_submit_finalize_payload_id",
+      "post_submit_reconciliation_evidence_id",
+      "post_submit_budget_settlement_id",
+      "submit_outcome_review_id"
+    ],
+    "live_closure_required_stage_count": 9,
+    "market_dependent_waiting_keys": [
+      "fresh_signal",
+      "candidate_authorization",
+      "action_time_finalgate",
+      "official_operation_layer",
+      "real_exchange_acceptance",
+      "post_submit_real_reconciliation"
+    ],
+    "next_fresh_signal_cutover_ready": true,
+    "non_market_blockers": [],
+    "owner_state": "等待机会",
+    "source_status": "live_cutover_waiting_for_fresh_signal",
+    "status": "ready",
+    "strategygroup_tier_ready": true
+  },
+  "monitor_status": "needs_refresh",
+  "notification": {
+    "automation_notify": true,
+    "daily_check_notification_result": "NOTIFY",
+    "daily_check_reason": "runtime_progress_cache_stale",
+    "owner_intervention_required": false,
+    "owner_notify": false,
+    "refresh_required": true
+  },
+  "owner_runtime_issues": {
+    "blocker_count": 0,
+    "blockers": [],
+    "product_gap_count": 0,
+    "product_gaps": []
+  },
+  "owner_runtime_state": {
+    "monitor_refresh_needed": true,
+    "monitor_refresh_reasons": [
+      "runtime_progress_cache_stale"
+    ],
+    "monitor_status": "needs_refresh",
+    "owner_intervention_required": false,
+    "owner_status": "waiting_for_opportunity",
+    "runtime_status": "waiting_for_market",
+    "waiting_for_market": true
+  },
+  "owner_status": "waiting_for_opportunity",
+  "owner_summary": {
+    "capital_trial": "short_experiment_evidence_pending_owner_policy",
+    "checkpoint_source": "goal_progress_status_projection",
+    "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
+    "owner_intervention_required": false,
+    "p0": "waiting_for_market",
+    "risk_level": "L0 local audit",
+    "signal_observation_state": "ready",
+    "state": "等待机会",
+    "strategy_portfolio": "portfolio_screening_active"
+  },
+  "p0_completion_audit_boundary": {
+    "goal_complete": false,
+    "market_dependent_remaining": [
+      "fresh signal -> RequiredFacts -> candidate/auth fast chain",
+      "candidate/auth -> action-time FinalGate -> official Operation Layer evidence relay",
+      "real submit must happen only through official Operation Layer",
+      "entry accepted -> exchange-native hard stop/protection/recovery",
+      "post-submit finalize / reconciliation / budget settlement / review closure"
+    ],
+    "market_dependent_remaining_count": 5,
+    "non_market_gap_count": 0,
+    "non_market_gap_keys": [],
+    "source_status": "live_cutover_waiting_for_fresh_signal",
+    "status": "not_complete_waiting_for_market"
+  },
+  "runtime_status": "waiting_for_market",
+  "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
+  "scope": "strategygroup_runtime_goal_progress_audit",
+  "signal_observation": {
+    "grade_code": "signal-observation-grade-review",
+    "ready": true,
+    "state": "ready"
+  },
+  "source_paths": {
+    "baseline_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/RUNTIME_MONITOR_BASELINE.json",
+    "daily_check_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-daily-check.json",
+    "goal_progress_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.json",
+    "goal_progress_owner_progress_md": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.md",
+    "live_closure_evidence_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence.json",
+    "live_closure_evidence_verification_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence-verification.json",
+    "live_cutover_readiness_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-live-cutover-readiness.json",
+    "p0_completion_audit_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+    "strategy_review_deep_dive_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json",
+    "strategy_review_evidence_closure_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json",
+    "strategygroup_capital_trial_envelope_projection_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
+    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+    "tier_policy_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+  },
+  "status": "waiting_for_market_monitor_refresh_needed",
+  "strategy_review_deep_dive_boundary": {
+    "deep_dive_artifact_count": 6,
+    "next_owner_policy_item_count": 6,
+    "owner_policy_confirmation_required_now": true,
+    "phase_1_status": "ready",
+    "phase_2_status": "ready",
+    "phase_3_status": "ready_for_owner_policy_review",
+    "reject_reasons": [],
+    "runtime_owner_intervention_required": false,
+    "status": "review_only_deep_dive_ready_for_owner_policy"
+  },
+  "strategy_review_evidence_closure_boundary": {
+    "evidence_artifact_count": 6,
+    "next_owner_policy_item_count": 6,
+    "owner_policy_confirmation_required_now": true,
+    "phase_1_status": "ready",
+    "phase_2_status": "ready",
+    "phase_3_status": "ready_for_owner_policy",
+    "reject_reasons": [],
+    "runtime_owner_intervention_required": false,
+    "status": "review_only_evidence_closure_wave_ready"
+  },
+  "strategygroup_capital_trial_envelope_projection_boundary": {
+    "eligibility_row_count": 7,
+    "live_permission_change_count": 0,
+    "next_checkpoint": "BRF2-001_tiny_live_intake_evidence",
+    "non_mpg_trial_candidate_count": 7,
+    "owner_policy_checkpoint_count": 1,
+    "policy_outcome": "promote",
+    "projection_role": "trial_envelope_projection",
+    "projection_schema": "brc.strategygroup_capital_trial_envelope_projection.v1",
+    "projection_status": "trial_envelope_projection_ready",
+    "promotion_scope": "intake_only",
+    "promotion_target": "paper_observation_or_experiment_evidence",
+    "reason": "promote_to_tiny_live_intake_candidate_not_live_ready",
+    "reject_reasons": [],
+    "runtime_owner_intervention_required": false,
+    "runtime_truth_source": false,
+    "selected_candidate_status": "short_experiment_evidence_pending_owner_policy",
+    "selected_non_mpg_strategy_group_id": "BRF2-001",
+    "status": "trial_envelope_projection_ready",
+    "strategygroup_lifecycle_owner": false,
+    "tradeability_decision_source": false,
+    "trial_envelope_generated": true
+  },
+  "strategygroup_portfolio_board_boundary": {
+    "engineering_continuation_count": 10,
+    "live_permission_change_count": 0,
+    "owner_policy_queue_count": 2,
+    "portfolio_row_count": 10,
+    "reject_reasons": [],
+    "runtime_owner_intervention_required": false,
+    "status": "portfolio_board_ready",
+    "trial_candidate_count": 3
+  },
+  "strategygroup_tier_boundary": {
+    "checks": {
+      "all_selected_strategygroups_reach_finalgate_dispatch_checked": true,
+      "allocated_subaccount_profile_boundary_checked": true,
+      "new_strategygroups_default_observe_only_checked": true,
+      "only_mpg_tiny_real_order_eligible_checked": true,
+      "runtime_tier_policy_checked": true,
+      "selected_strategygroup_dispatch_guard_checked": true,
+      "strategygroup_adapter_boundary_checked": true,
+      "tier_policy_source_readable": true
+    },
+    "current_strategy_group_tiers": {
+      "BTPC-001": "L2",
+      "FBS-001": "L3",
+      "MPG-001": "L4",
+      "PMR-001": "L1",
+      "SOR-001": "L3",
+      "TEQ-001": "L2"
+    },
+    "first_live_lane_strategy_group": "MPG-001",
+    "l4_strategy_groups": [
+      "MPG-001"
+    ],
+    "new_strategy_group_default_tiers": {
+      "BRF": "L1",
+      "LSR": "L1",
+      "RBR": "L1",
+      "VCB": "L1"
+    },
+    "new_strategy_groups_default_non_l4": true,
+    "non_l4_strategy_groups": [
+      "FBS-001",
+      "PMR-001",
+      "SOR-001",
+      "TEQ-001",
+      "BTPC-001"
+    ],
+    "status": "ready",
+    "strategygroups_define_custom_execution_pipeline": false,
+    "tier_policy_bypasses_finalgate": false,
+    "tier_policy_bypasses_operation_layer": false,
+    "tier_policy_is_execution_authority": false
+  },
+  "tracks": [
+    {
+      "blockers": [],
+      "evidence": [
+        "daily_check_status=waiting_for_market_monitor_refresh_needed",
+        "derived_waiting_for_market=True"
+      ],
+      "id": "p0_live_closure",
+      "label": "P0 第一笔边界内真实订单闭环",
+      "owner_state": "等待市场机会",
+      "progress_checkpoint": "等待 fresh signal 后推进官方链路",
+      "status": "waiting_for_market"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "interaction=L0_local_cache_read",
+        "remote_interaction_count=0",
+        "collected_interaction=L0_local_cache_read",
+        "collected_remote_interaction_count=0",
+        "baseline_low_noise_commands=present"
+      ],
+      "id": "runtime_interaction_projection",
+      "label": "Runtime Interaction Projection",
+      "owner_state": "已就绪",
+      "progress_checkpoint": "使用 L0 本地缓存进度，必要时才刷新一次 L1 快照",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "dry_run_audit=审计演练正常",
+        "scenario_count=14",
+        "chain_ready_segments=22",
+        "missing_chain_segments=0",
+        "goal_chain_ready_segments=7",
+        "missing_goal_chain_segments=0"
+      ],
+      "id": "engineering_rehearsal_projection",
+      "label": "Engineering Rehearsal Projection",
+      "owner_state": "已就绪",
+      "progress_checkpoint": "保持 dry-run / mock signal / source readiness 日检",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "category=monitor_refresh",
+        "notification=None",
+        "owner_intervention_required=False"
+      ],
+      "id": "owner_visibility_projection",
+      "label": "Owner Visibility Projection",
+      "owner_state": "已就绪",
+      "progress_checkpoint": "保持 Owner 进度层输出，不要求阅读原始证据包",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "status=review_only_evidence_closure_wave_ready",
+        "phase_1=ready",
+        "phase_2=ready",
+        "phase_3=ready_for_owner_policy",
+        "evidence_artifact_count=6",
+        "next_owner_policy_item_count=6",
+        "owner_policy_confirmation_required_now=True",
+        "runtime_owner_intervention_required=False"
+      ],
+      "id": "strategy_review_evidence_closure_projection",
+      "label": "Strategy Review Evidence Projection",
+      "owner_state": "策略政策待确认",
+      "progress_checkpoint": "等待 Owner 策略政策确认，不改变实盘权限",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "status=review_only_deep_dive_ready_for_owner_policy",
+        "phase_1=ready",
+        "phase_2=ready",
+        "phase_3=ready_for_owner_policy_review",
+        "deep_dive_artifact_count=6",
+        "next_owner_policy_item_count=6",
+        "owner_policy_confirmation_required_now=True",
+        "runtime_owner_intervention_required=False"
+      ],
+      "id": "strategy_review_deep_dive_projection",
+      "label": "Strategy Review Deep Dive Projection",
+      "owner_state": "六条线等待政策决策",
+      "progress_checkpoint": "等待 Owner 确认六条策略线下一步政策，不改变实盘权限",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "status=portfolio_board_ready",
+        "portfolio_row_count=10",
+        "trial_candidate_count=3",
+        "engineering_continuation_count=10",
+        "owner_policy_queue_count=2",
+        "live_permission_change_count=0",
+        "runtime_owner_intervention_required=False"
+      ],
+      "id": "strategygroup_portfolio_projection",
+      "label": "StrategyGroup Portfolio Projection",
+      "owner_state": "策略组合筛选中",
+      "progress_checkpoint": "继续工程补证队列和 受控实盘候选池治理，不改变实盘权限",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "status=trial_envelope_projection_ready",
+        "projection_status=trial_envelope_projection_ready",
+        "eligibility_row_count=7",
+        "non_mpg_trial_candidate_count=7",
+        "selected_non_mpg_strategy_group_id=BRF2-001",
+        "selected_candidate_status=short_experiment_evidence_pending_owner_policy",
+        "trial_envelope_generated=True",
+        "live_permission_change_count=0",
+        "runtime_owner_intervention_required=False"
+      ],
+      "id": "capital_trial_readiness_projection",
+      "label": "Capital Trial Envelope Projection",
+      "owner_state": "资金试验候选准备中",
+      "progress_checkpoint": "保留 BRF2-001 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点",
+      "status": "ready"
+    },
+    {
+      "blockers": [],
+      "evidence": [
+        "forbidden_effect_count=0"
+      ],
+      "id": "safety_invariants_projection",
+      "label": "Safety Invariants Projection",
+      "owner_state": "已就绪",
+      "progress_checkpoint": "保持不触发 FinalGate、Operation Layer、exchange write 或订单动作",
+      "status": "ready"
+    }
+  ]
+}

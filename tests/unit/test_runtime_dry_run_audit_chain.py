@@ -7,16 +7,16 @@ from scripts import runtime_dry_run_audit_chain as audit_chain
 
 
 def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
-    packet = audit_chain.build_audit_chain(tmp_path)
+    artifact = audit_chain.build_audit_artifact(tmp_path)
 
-    assert packet["schema"] == "brc.runtime_dry_run_audit_chain.v1"
-    assert packet["scope"] == "runtime_dry_run_audit_chain"
-    assert packet["status"] == "passed"
-    assert packet["scenario_count"] == 14
-    assert packet["checks"]["scenario_count"] == 14
-    assert packet["checks"]["all_scenarios_passed"] is True
-    assert packet["checks"]["dangerous_effects_absent"] is True
-    assert packet["summary"] == {
+    assert artifact["schema"] == "brc.runtime_dry_run_audit_chain.v1"
+    assert artifact["scope"] == "runtime_dry_run_audit_chain"
+    assert artifact["status"] == "passed"
+    assert artifact["scenario_count"] == 14
+    assert artifact["checks"]["scenario_count"] == 14
+    assert artifact["checks"]["all_scenarios_passed"] is True
+    assert artifact["checks"]["dangerous_effects_absent"] is True
+    assert artifact["summary"] == {
         "scenario_count": 14,
         "required_checks_present": True,
         "all_scenarios_passed": True,
@@ -26,7 +26,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
         "allocated_subaccount_profile_boundary_checked": True,
-        "strategy_handoff_no_execution_pipeline_fields_checked": True,
+        "strategy_intake_no_execution_pipeline_fields_checked": True,
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
         "mpg001_replay_corpus_checked": True,
@@ -52,17 +52,17 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "reduce_only_recovery_standing_authorization_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
-        "non_executing_prepare_auto_bridge_checked": True,
+        "execution_attempt_rehearsal_prepare_checked": True,
         "required_facts_readiness_checked": True,
-        "scoped_pipeline_operation_layer_handoff_checked": True,
+        "scoped_pipeline_operation_layer_submit_projection_checked": True,
     }
-    assert packet["required_checks"] == {
+    assert artifact["required_checks"] == {
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
         "disabled_smoke_not_real_execution_proof": True,
         "fresh_signal_fast_auto_chain_checked": True,
         "required_facts_readiness_checked": True,
-        "non_executing_prepare_auto_bridge_checked": True,
+        "execution_attempt_rehearsal_prepare_checked": True,
         "legacy_local_registration_probe_tolerance_checked": True,
         "mock_operation_layer_closed_loop_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
@@ -76,12 +76,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
-        "scoped_pipeline_operation_layer_handoff_checked": True,
+        "scoped_pipeline_operation_layer_submit_projection_checked": True,
         "required_scenarios_present": True,
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
         "allocated_subaccount_profile_boundary_checked": True,
-        "strategy_handoff_no_execution_pipeline_fields_checked": True,
+        "strategy_intake_no_execution_pipeline_fields_checked": True,
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
         "mpg001_replay_corpus_checked": True,
@@ -100,18 +100,18 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
     }
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert packet["safety_invariants"]["disabled_smoke_is_real_execution_proof"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["disabled_smoke_is_real_execution_proof"] is False
 
-    scenarios = {item["name"]: item for item in packet["scenarios"]}
+    scenarios = {item["name"]: item for item in artifact["scenarios"]}
     assert set(scenarios) == {
         "no_signal",
         "mock_fresh_signal_dry_run_pass",
-        "scoped_pipeline_operation_layer_handoff",
-        "non_executing_prepare_auto_bridge",
+        "scoped_pipeline_operation_layer_submit_projection",
+        "execution_attempt_rehearsal_prepare",
         "mock_operation_layer_submit_finalize_pass",
         "required_facts_missing",
         "active_position_or_open_order_conflict",
@@ -217,11 +217,11 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "review_recorded": True,
         "no_withdrawal_or_transfer": True,
     }
-    assert operation_closed_loop["dispatcher_packet"]["status"] == "settled"
-    assert operation_closed_loop["dispatcher_packet"]["dispatch_status"] == (
+    assert operation_closed_loop["dispatcher_artifact"]["status"] == "settled"
+    assert operation_closed_loop["dispatcher_artifact"]["dispatch_status"] == (
         "post_submit_finalize_completed_next_attempt_ready"
     )
-    assert scenarios["required_facts_missing"]["artifacts"]["readiness_bridge"][
+    assert scenarios["required_facts_missing"]["artifacts"]["readiness_evidence"][
         "status"
     ] == "ready_for_readiness_evidence"
     assert scenarios["active_position_or_open_order_conflict"]["artifacts"][
@@ -253,26 +253,35 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     }
     for case in matrix.values():
         assert all(case["checks"].values())
-        assert case["packet"]["status"] == "operation_layer_blocked"
-        assert case["packet"]["operation_layer_blocker_review"][
+        assert case["source_status"] == "operation_layer_blocked"
+        assert "packet_status" not in case
+        assert case["dispatcher_artifact"]["status"] == "operation_layer_blocked"
+        assert case["dispatcher_artifact"]["operation_layer_blocker_review"][
             "project_progress_allowed"
         ] is True
-        assert case["packet"]["operation_layer_blocker_review"][
+        assert case["dispatcher_artifact"]["operation_layer_blocker_review"][
             "continue_observation_allowed"
         ] is True
-        assert case["packet"]["operation_layer_blocker_review"][
+        assert case["dispatcher_artifact"]["operation_layer_blocker_review"][
+            "review_artifact_recommended"
+        ] is True
+        assert (
+            "review_packet_recommended"
+            not in case["dispatcher_artifact"]["operation_layer_blocker_review"]
+        )
+        assert case["dispatcher_artifact"]["operation_layer_blocker_review"][
             "real_submit_allowed"
         ] is False
-    assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
+    assert artifact["checks"]["operation_layer_evidence_relay_checked"] is True
     assert (
-        packet["checks"]["operation_layer_standing_authorization_relay_checked"]
+        artifact["checks"]["operation_layer_standing_authorization_relay_checked"]
         is True
     )
-    assert packet["checks"]["scoped_pipeline_operation_layer_handoff_checked"] is True
-    assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
-    assert packet["checks"]["required_facts_readiness_checked"] is True
-    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
-    replay_lab = packet["runtime_replay_lab_validation"]
+    assert artifact["checks"]["scoped_pipeline_operation_layer_submit_projection_checked"] is True
+    assert artifact["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert artifact["checks"]["required_facts_readiness_checked"] is True
+    assert artifact["checks"]["execution_attempt_rehearsal_prepare_checked"] is True
+    replay_lab = artifact["runtime_replay_lab_validation"]
     assert replay_lab["status"] == "passed"
     assert replay_lab["strategy_group_id"] == "MPG-001"
     assert replay_lab["checks"]["mpg001_replay_sample_present"] is True
@@ -310,42 +319,42 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert replay_lab["post_submit_simulator_matrix"]
     assert replay_lab["safety_invariants"]["exchange_write_called"] is False
     assert replay_lab["safety_invariants"]["real_order_created"] is False
-    assert packet["checks"][
+    assert artifact["checks"][
         "legacy_local_registration_probe_tolerance_checked"
     ] is True
-    assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
-    assert packet["checks"]["operation_layer_blocker_review_policy_checked"] is True
+    assert artifact["checks"]["mock_operation_layer_closed_loop_checked"] is True
+    assert artifact["checks"]["operation_layer_blocker_review_policy_checked"] is True
     assert (
-        packet["checks"]["operation_layer_hard_safety_blocker_matrix_checked"]
+        artifact["checks"]["operation_layer_hard_safety_blocker_matrix_checked"]
         is True
     )
-    assert packet["checks"]["expanded_watcher_scope_execution_guard_checked"] is True
-    assert packet["checks"]["operation_layer_authorization_chain_guard_checked"] is True
-    assert packet["checks"]["post_submit_closed_loop_evidence_guard_checked"] is True
-    assert packet["checks"]["post_submit_exit_outcome_matrix_checked"] is True
+    assert artifact["checks"]["expanded_watcher_scope_execution_guard_checked"] is True
+    assert artifact["checks"]["operation_layer_authorization_chain_guard_checked"] is True
+    assert artifact["checks"]["post_submit_closed_loop_evidence_guard_checked"] is True
+    assert artifact["checks"]["post_submit_exit_outcome_matrix_checked"] is True
     assert (
-        packet["checks"]["operation_layer_submit_result_identity_guard_checked"]
+        artifact["checks"]["operation_layer_submit_result_identity_guard_checked"]
         is True
     )
     assert (
-        packet["checks"]["post_submit_finalize_result_identity_guard_checked"]
+        artifact["checks"]["post_submit_finalize_result_identity_guard_checked"]
         is True
     )
-    assert packet["checks"]["shared_runtime_pipeline_checked"] is True
-    assert packet["checks"]["common_execution_chain_reuse_checked"] is True
-    assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
+    assert artifact["checks"]["shared_runtime_pipeline_checked"] is True
+    assert artifact["checks"]["common_execution_chain_reuse_checked"] is True
+    assert artifact["checks"]["strategygroup_adapter_boundary_checked"] is True
     assert (
-        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        artifact["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
         is True
     )
-    assert packet["checks"]["runtime_tier_policy_checked"] is True
-    assert packet["checks"]["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert artifact["checks"]["runtime_tier_policy_checked"] is True
+    assert artifact["checks"]["only_mpg_tiny_real_order_eligible_checked"] is True
     assert (
-        packet["checks"]["new_strategygroups_default_observe_only_checked"]
+        artifact["checks"]["new_strategygroups_default_observe_only_checked"]
         is True
     )
-    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
-    scoped_handoff = scenarios["scoped_pipeline_operation_layer_handoff"][
+    assert artifact["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
+    scoped_handoff = scenarios["scoped_pipeline_operation_layer_submit_projection"][
         "artifacts"
     ]
     assert scoped_handoff["checks"] == {
@@ -358,7 +367,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "scoped_pipeline_disabled_submit_smoke_passed": True,
     }
     assert scoped_handoff["scoped_disabled_submit_checks"] == {
-        "handoff_query_uses_pipeline_evidence_ids": True,
+        "submit_projection_query_uses_pipeline_evidence_ids": True,
         "disabled_smoke_called_official_endpoint": True,
         "disabled_smoke_keeps_owner_real_submit_false": True,
         "disabled_smoke_does_not_exchange_write": True,
@@ -418,8 +427,8 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "blocked_by_selected_strategygroup_scope"
     )
     assert selected_guard["out_of_scope_dispatch"]["command_plan"] is None
-    auto_bridge = scenarios["non_executing_prepare_auto_bridge"]["artifacts"]
-    assert auto_bridge["checks"] == {
+    rehearsal_prepare = scenarios["execution_attempt_rehearsal_prepare"]["artifacts"]
+    assert rehearsal_prepare["checks"] == {
         "prepare_runner_called_once": True,
         "prepare_uses_runtime_and_signal_input": True,
         "prepare_result_ready_for_finalgate": True,
@@ -428,14 +437,14 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_submit_not_called": True,
         "no_dangerous_effects": True,
     }
-    assert auto_bridge["resume_dispatch"]["status"] == "finalgate_ready"
-    assert auto_bridge["resume_dispatch"]["dispatch_action"] == (
+    assert rehearsal_prepare["resume_dispatch"]["status"] == "finalgate_ready"
+    assert rehearsal_prepare["resume_dispatch"]["dispatch_action"] == (
         "prepare_official_operation_layer_submit"
     )
-    assert auto_bridge["resume_dispatch"]["safety_invariants"][
+    assert rehearsal_prepare["resume_dispatch"]["safety_invariants"][
         "official_non_executing_prepare_called"
     ] is True
-    assert auto_bridge["resume_dispatch"]["safety_invariants"][
+    assert rehearsal_prepare["resume_dispatch"]["safety_invariants"][
         "official_operation_layer_submit_called"
     ] is False
     expanded_guard = scenarios["expanded_watcher_scope_execution_guard"][
@@ -509,9 +518,9 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "review_not_recorded",
     }
     for result in closed_loop_guard["cases"].values():
-        assert result["packet"]["status"] == "post_submit_finalize_blocked"
-        assert result["packet"]["dispatch_action"] is None
-        assert result["packet"]["owner_state"]["downgrade_mode"] == (
+        assert result["dispatcher_artifact"]["status"] == "post_submit_finalize_blocked"
+        assert result["dispatcher_artifact"]["dispatch_action"] is None
+        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
             "halt_new_entries_until_post_submit_settled"
         )
     assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
@@ -622,13 +631,16 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "reservation_mismatch",
     }
     for result in submit_identity_guard["cases"].values():
-        assert result["packet"]["status"] == "operation_layer_submit_failed"
-        assert result["packet"]["dispatch_status"] == (
+        assert (
+            result["dispatcher_artifact"]["status"]
+            == "operation_layer_submit_failed"
+        )
+        assert result["dispatcher_artifact"]["dispatch_status"] == (
             "official_operation_layer_submit_result_identity_mismatch"
         )
-        assert result["packet"]["dispatch_action"] is None
-        assert "post_submit_finalize_result" not in result["packet"]
-        assert result["packet"]["owner_state"]["downgrade_mode"] == (
+        assert result["dispatcher_artifact"]["dispatch_action"] is None
+        assert "post_submit_finalize_result" not in result["dispatcher_artifact"]
+        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
             "halt_new_entries_until_reconciled"
         )
         assert len(
@@ -664,12 +676,14 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "reservation_mismatch",
     }
     for result in finalize_identity_guard["cases"].values():
-        assert result["packet"]["status"] == "post_submit_finalize_blocked"
-        assert result["packet"]["dispatch_status"] == (
+        assert result["dispatcher_artifact"]["status"] == (
+            "post_submit_finalize_blocked"
+        )
+        assert result["dispatcher_artifact"]["dispatch_status"] == (
             "post_submit_finalize_result_identity_mismatch"
         )
-        assert result["packet"]["dispatch_action"] is None
-        assert result["packet"]["owner_state"]["downgrade_mode"] == (
+        assert result["dispatcher_artifact"]["dispatch_action"] is None
+        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
             "halt_new_entries_until_post_submit_settled"
         )
         assert len(
@@ -686,7 +700,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
                 if call["url_kind"] == "post_submit_finalize"
             ]
         ) == 1
-    shared = packet["shared_runtime_pipeline_validation"]
+    shared = artifact["shared_runtime_pipeline_validation"]
     assert shared["status"] == "passed"
     assert shared["judgment"] == {
         "common_runtime_pipe_share": "80%",
@@ -703,7 +717,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         shared["checks"]["all_strategy_groups_have_no_execution_pipeline_fields"]
         is True
     )
-    assert set(shared["strategy_handoff_forbidden_execution_fields"]) == {
+    assert set(shared["strategy_intake_source_forbidden_execution_fields"]) == {
         "candidate",
         "authorization",
         "runtime_grant",
@@ -741,7 +755,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         ]
         assert "final_gate_input" in row["execution_boundary"]
         assert row["execution_boundary"]["final_gate_input"] is False
-    tier_policy = packet["runtime_tier_policy_validation"]
+    tier_policy = artifact["runtime_tier_policy_validation"]
     assert tier_policy["status"] == "passed"
     assert tier_policy["l4_strategy_groups"] == ["MPG-001"]
     assert tier_policy["new_strategy_group_tiers"] == {
@@ -780,7 +794,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert tier_policy["safety_invariants"]["modifies_order_sizing_defaults"] is False
 
 
-def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):
+def test_runtime_dry_run_audit_chain_cli_writes_artifact(tmp_path, monkeypatch, capsys):
     output_json = tmp_path / "runtime-dry-run-audit-chain.json"
     monkeypatch.setattr(
         sys,
@@ -798,7 +812,7 @@ def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, ca
 
     captured = capsys.readouterr()
     assert captured.out.startswith("{")
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert packet["status"] == "passed"
-    assert packet["checks"]["required_scenarios_present"] is True
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "passed"
+    assert artifact["checks"]["required_scenarios_present"] is True
     assert list(tmp_path.glob(".runtime-dry-run-audit-chain.json.*.tmp")) == []

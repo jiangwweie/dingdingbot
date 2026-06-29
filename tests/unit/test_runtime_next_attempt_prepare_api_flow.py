@@ -21,6 +21,8 @@ def test_next_attempt_prepare_requires_candidate_or_signal_input(capsys):
 
     captured = capsys.readouterr()
     assert exit_code == 2
+    assert "runtime_next_attempt_prepare_artifact" in captured.out
+    assert "runtime_next_attempt_prepare_packet" not in captured.out
     assert "order_candidate_id_or_signal_input_json_required" in captured.out
     assert "order_lifecycle_called" in captured.out
 
@@ -51,9 +53,11 @@ def test_next_attempt_prepare_summary_is_final_gate_preflight_only():
 
     payload = runtime_next_attempt_prepare_api_flow._summarize_prepare_report(report)
 
+    assert payload["scope"] == "runtime_next_attempt_prepare_artifact"
     assert payload["status"] == "ready_for_final_gate_preflight"
-    assert payload["operator_command_plan"]["prepared_authorization_id"] == "auth-1"
-    assert payload["operator_command_plan"]["live_submit_allowed"] is False
+    assert "operator_command_plan" not in payload
+    assert payload["prepare_artifact_plan"]["prepared_authorization_id"] == "auth-1"
+    assert payload["prepare_artifact_plan"]["live_submit_allowed"] is False
     assert payload["created_records"]["execution_intent_created"] is True
     assert payload["created_records"]["submit_authorization_created"] is True
     assert payload["created_records"]["attempt_mutation_created"] is False
@@ -76,7 +80,8 @@ def test_next_attempt_prepare_summary_blocks_without_authorization():
     payload = runtime_next_attempt_prepare_api_flow._summarize_prepare_report(report)
 
     assert payload["status"] == "blocked"
-    assert payload["operator_command_plan"]["next_step"] == "resolve_prepare_blockers"
+    assert "operator_command_plan" not in payload
+    assert payload["prepare_artifact_plan"]["next_step"] == "resolve_prepare_blockers"
     assert payload["blockers"] == ["authorization_id_missing"]
 
 

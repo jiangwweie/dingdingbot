@@ -14,9 +14,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.brc_audit_ids import BrcSemanticIds
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreview,
-    RuntimeExecutionExchangeSubmitPacketPreviewStatus,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreview,
+    RuntimeExecutionExchangeSubmitPreviewStatus,
 )
 
 
@@ -68,7 +68,7 @@ class RuntimeExecutionExchangeSubmitActionAuthorization(
         default=None,
         max_length=220,
     )
-    packet_preview_id: str = Field(min_length=1, max_length=460)
+    submit_preview_id: str = Field(min_length=1, max_length=460)
     binding_id: str = Field(min_length=1, max_length=460)
     local_registration_adapter_result_id: str = Field(
         min_length=1,
@@ -154,7 +154,7 @@ class RuntimeExecutionExchangeSubmitActionAuthorization(
 
 def build_runtime_execution_exchange_submit_action_authorization(
     *,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     trusted_submit_fact_snapshot_id: str | None,
     submit_idempotency_policy_id: str | None,
     attempt_outcome_policy_id: str | None,
@@ -171,17 +171,17 @@ def build_runtime_execution_exchange_submit_action_authorization(
     owner_confirmation_reference: str | None = None,
     expires_at_ms: int | None = None,
 ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
-    blockers = list(packet_preview.blockers)
-    warnings = list(packet_preview.warnings)
+    blockers = list(submit_preview.blockers)
+    warnings = list(submit_preview.warnings)
     if (
-        packet_preview.status
-        != RuntimeExecutionExchangeSubmitPacketPreviewStatus
+        submit_preview.status
+        != RuntimeExecutionExchangeSubmitPreviewStatus
         .READY_FOR_EXCHANGE_SUBMIT_ADAPTER_DESIGN
     ):
-        blockers.append("exchange_submit_packet_preview_not_ready")
-    if not packet_preview.entry_submit_request_preview:
+        blockers.append("exchange_submit_preview_not_ready")
+    if not submit_preview.entry_submit_request_preview:
         blockers.append("entry_exchange_submit_request_preview_missing")
-    if not packet_preview.protection_submit_request_previews:
+    if not submit_preview.protection_submit_request_previews:
         blockers.append("protection_exchange_submit_request_previews_missing")
     if not _present(trusted_submit_fact_snapshot_id):
         blockers.append("trusted_submit_fact_snapshot_id_missing")
@@ -218,23 +218,23 @@ def build_runtime_execution_exchange_submit_action_authorization(
     )
     request_previews = [
         request.model_dump(mode="json")
-        for request in packet_preview.submit_request_previews
+        for request in submit_preview.submit_request_previews
     ]
-    entry_request = packet_preview.entry_submit_request_preview
+    entry_request = submit_preview.entry_submit_request_preview
     side = entry_request.direction.value if entry_request is not None else None
     return RuntimeExecutionExchangeSubmitActionAuthorization(
         action_authorization_id=(
             "runtime-exchange-submit-action-authorization-"
-            f"{packet_preview.authorization_id}"
+            f"{submit_preview.authorization_id}"
         ),
-        authorization_id=packet_preview.authorization_id,
-        execution_intent_id=packet_preview.execution_intent_id,
-        runtime_instance_id=packet_preview.runtime_instance_id,
-        source_type=packet_preview.source_type,
-        source_id=packet_preview.source_id,
-        semantic_ids=packet_preview.semantic_ids,
+        authorization_id=submit_preview.authorization_id,
+        execution_intent_id=submit_preview.execution_intent_id,
+        runtime_instance_id=submit_preview.runtime_instance_id,
+        source_type=submit_preview.source_type,
+        source_id=submit_preview.source_id,
+        semantic_ids=submit_preview.semantic_ids,
         status=status,
-        symbol=packet_preview.symbol,
+        symbol=submit_preview.symbol,
         side=side,
         local_registration_enablement_decision_id=_required_str(
             local_registration_enablement_decision_id,
@@ -271,16 +271,16 @@ def build_runtime_execution_exchange_submit_action_authorization(
         deployment_readiness_evidence_id=_optional_str(
             deployment_readiness_evidence_id
         ),
-        packet_preview_id=packet_preview.packet_preview_id,
-        binding_id=packet_preview.binding_id,
-        local_registration_adapter_result_id=packet_preview.adapter_result_id,
-        entry_order_id=packet_preview.entry_order_id,
-        local_order_ids=list(packet_preview.local_order_ids),
-        protection_order_ids=list(packet_preview.protection_order_ids),
+        submit_preview_id=submit_preview.submit_preview_id,
+        binding_id=submit_preview.binding_id,
+        local_registration_adapter_result_id=submit_preview.adapter_result_id,
+        entry_order_id=submit_preview.entry_order_id,
+        local_order_ids=list(submit_preview.local_order_ids),
+        protection_order_ids=list(submit_preview.protection_order_ids),
         submit_request_count=len(request_previews),
-        entry_submit_request_count=packet_preview.entry_submit_request_count,
+        entry_submit_request_count=submit_preview.entry_submit_request_count,
         protection_submit_request_count=(
-            packet_preview.protection_submit_request_count
+            submit_preview.protection_submit_request_count
         ),
         owner_confirmed_for_exchange_submit_action=(
             owner_confirmed_for_exchange_submit_action
@@ -296,9 +296,9 @@ def build_runtime_execution_exchange_submit_action_authorization(
             "scope": "runtime_execution_exchange_submit_action_authorization",
             "scope_bound_owner_exchange_submit_action_confirmation": True,
             "not_exchange_submit_authority": True,
-            "local_order_ids": list(packet_preview.local_order_ids),
-            "entry_order_id": packet_preview.entry_order_id,
-            "protection_order_ids": list(packet_preview.protection_order_ids),
+            "local_order_ids": list(submit_preview.local_order_ids),
+            "entry_order_id": submit_preview.entry_order_id,
+            "protection_order_ids": list(submit_preview.protection_order_ids),
             "submit_request_previews": request_previews,
             "does_not_call_order_lifecycle_submit": True,
             "does_not_change_execution_intent_status": True,

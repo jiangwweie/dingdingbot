@@ -12,9 +12,9 @@ def _readiness_payload(*, status="ready_for_executable_submit"):
     return {
         "status": status,
         "api_payload": {
-            "packet_id": "readiness-1",
+            "artifact_id": "readiness-1",
             "runtime_instance_id": "runtime-1",
-            "source_strategy_planning_packet_id": "strategy-plan-1",
+            "source_strategy_planning_artifact_id": "strategy-plan-1",
             "source_authorization_id": "consumed-auth-1",
             "signal_evaluation_id": "signal-eval-1",
             "order_candidate_id": (
@@ -100,7 +100,7 @@ def test_script_builds_ready_handoff_report(tmp_path):
 
     assert result.returncode == 0, result.stderr
     report = json.loads(output_path.read_text(encoding="utf-8"))
-    assert report["packet"]["status"] == "ready_for_official_submit_call"
+    assert report["handoff_artifact"]["status"] == "ready_for_official_submit_call"
     assert report["operator_action_preview"]["ready_for_call"] is True
     assert report["safety_invariants"]["calls_official_endpoint"] is False
     assert report["safety_invariants"]["exchange_called"] is False
@@ -129,12 +129,12 @@ def test_script_real_gateway_handoff_defaults_to_standing_authorization(tmp_path
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert report["packet"]["status"] == "ready_for_official_submit_call"
-    assert report["packet"]["official_query"][
+    assert report["handoff_artifact"]["status"] == "ready_for_official_submit_call"
+    assert report["handoff_artifact"]["official_query"][
         "owner_confirmed_for_first_real_submit_action"
     ] is True
     assert "owner_real_submit_action_confirmation_missing" not in (
-        report["packet"]["blockers"]
+        report["handoff_artifact"]["blockers"]
     )
 
 
@@ -159,9 +159,9 @@ def test_script_blocks_consumed_authorization_reuse(tmp_path):
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert report["packet"]["status"] == "blocked"
+    assert report["handoff_artifact"]["status"] == "blocked"
     assert "fresh_submit_authorization_reuses_consumed_authorization" in (
-        report["packet"]["blockers"]
+        report["handoff_artifact"]["blockers"]
     )
 
 
@@ -189,5 +189,7 @@ def test_script_blocks_unready_readiness(tmp_path):
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert report["packet"]["status"] == "blocked"
-    assert "readiness_not_ready_for_executable_submit" in report["packet"]["blockers"]
+    assert report["handoff_artifact"]["status"] == "blocked"
+    assert "readiness_not_ready_for_executable_submit" in report[
+        "handoff_artifact"
+    ]["blockers"]

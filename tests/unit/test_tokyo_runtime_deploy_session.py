@@ -40,7 +40,7 @@ def _deploy_report(**overrides):
         },
         "owner_summary": {
             "state": "部署完成",
-            "current_action": "运行 L1 快照核验",
+            "non_authority_checkpoint": "运行 L1 快照核验",
         },
         "checks": {
             "blockers": [],
@@ -51,34 +51,6 @@ def _deploy_report(**overrides):
             "remote_files_modified": True,
             "exchange_write_called": False,
             "order_created": False,
-        },
-    }
-    base.update(overrides)
-    return base
-
-
-def _frontend_report(**overrides):
-    base = {
-        "status": "applied",
-        "scope": "owner_console_frontend_homepage_publish",
-        "interaction": {
-            "level": "L3_frontend_static_publish",
-            "remote_interaction_count": 1,
-            "mutates_remote_files": True,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
-        "owner_summary": {
-            "state": "首页已发布",
-            "current_action": "运行 L1 快照核验",
-        },
-        "checks": {
-            "blockers": [],
-            "warnings": [],
-            "product_gaps": [],
         },
     }
     base.update(overrides)
@@ -101,7 +73,7 @@ def _daily_check_report(**overrides):
         },
         "owner_summary": {
             "state": "等待机会",
-            "current_action": "继续等待市场机会",
+            "non_authority_checkpoint": "继续等待市场机会",
         },
         "checks": {
             "blockers": [],
@@ -120,7 +92,6 @@ def test_deploy_session_summarizes_l3_deploy_plus_l1_check():
     report = module.build_deploy_session_report(
         reports=[
             ("runtime_deploy", _deploy_report()),
-            ("frontend_publish", _frontend_report()),
             ("postdeploy_daily_check", _daily_check_report()),
         ]
     )
@@ -130,7 +101,7 @@ def test_deploy_session_summarizes_l3_deploy_plus_l1_check():
     assert report["interaction"]["policy"]["owner_label"] == "有界服务器变更"
     assert report["interaction"]["policy"]["remote_mutation_allowed"] is True
     assert report["interaction"]["policy"]["exchange_write_allowed"] is False
-    assert report["interaction"]["remote_interaction_count"] == 9
+    assert report["interaction"]["remote_interaction_count"] == 8
     assert report["interaction"]["mutates_remote_files"] is True
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_exchange_write"] is False
@@ -147,11 +118,11 @@ def test_deploy_session_surfaces_product_gap_without_safety_blocking():
     report = module.build_deploy_session_report(
         reports=[
             (
-                "frontend_publish",
-                _frontend_report(
+                "runtime_deploy",
+                _deploy_report(
                     status="dry_run_ready",
                     interaction={
-                        "level": "L1_publish_plan_only",
+                        "level": "L1_deploy_plan_only",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -159,7 +130,7 @@ def test_deploy_session_surfaces_product_gap_without_safety_blocking():
                     checks={
                         "blockers": [],
                         "warnings": [],
-                        "product_gaps": ["frontend_release_missing"],
+                        "product_gaps": ["runtime_status_report_missing"],
                     },
                 ),
             ),
@@ -168,8 +139,12 @@ def test_deploy_session_surfaces_product_gap_without_safety_blocking():
 
     assert report["status"] == "degraded"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["owner_summary"]["current_action"] == "修复产品状态缺口"
-    assert report["checks"]["product_gaps"] == ["frontend_release_missing"]
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "修复产品状态缺口"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "deploy_session_status_projection"
+    )
+    assert report["checks"]["product_gaps"] == ["runtime_status_report_missing"]
     assert report["checks"]["blockers"] == []
 
 
@@ -185,7 +160,7 @@ def test_deploy_session_accepts_postdeploy_processing_state():
                     status="processing",
                     owner_summary={
                         "state": "处理中",
-                        "current_action": "等待系统完成收口",
+                        "non_authority_checkpoint": "等待系统完成收口",
                     },
                     checks={
                         "blockers": [],
@@ -200,7 +175,8 @@ def test_deploy_session_accepts_postdeploy_processing_state():
 
     assert report["status"] == "processing"
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["product_gaps"] == []
@@ -217,7 +193,7 @@ def test_deploy_session_cli_treats_processing_as_success(tmp_path):
                 status="processing",
                 owner_summary={
                     "state": "处理中",
-                    "current_action": "等待系统完成收口",
+                    "non_authority_checkpoint": "等待系统完成收口",
                 },
                 checks={
                     "blockers": [],
@@ -296,6 +272,22 @@ def test_deploy_session_uses_current_read_interaction_for_cache_only_status():
     )
 
 
+def test_deploy_session_step_ignores_legacy_current_action_checkpoint():
+    module = _load_module()
+
+    step = module._session_step(
+        name="postdeploy_daily_check",
+        report=_daily_check_report(
+            owner_summary={
+                "state": "等待机会",
+                "current_action": "legacy_action_must_not_drive_checkpoint",
+            }
+        ),
+    )
+
+    assert step["non_authority_checkpoint"] == ""
+
+
 def test_deploy_session_owner_progress_text_is_owner_readable():
     module = _load_module()
     cached_daily_check = _daily_check_report(
@@ -316,11 +308,12 @@ def test_deploy_session_owner_progress_text_is_owner_readable():
 
     assert "## Tokyo Runtime Deploy Session Progress" in text
     assert "- 当前阶段: 等待机会" in text
-    assert "- 当前动作: 继续等待市场机会" in text
+    assert "- 当前检查点: 继续等待市场机会" in text
     assert "- 交互等级: L0_local_cache_read" in text
     assert "- 远端交互次数: 0" in text
     assert "- 服务器修改: 否" in text
     assert "- 接近真实订单: 否" in text
+    assert "| Step | Status | Interaction | Remote | Server mutation | Real-order approach | Checkpoint |" in text
     assert "| postdeploy_daily_check | waiting_for_market | L0_local_cache_read | 0 | 否 | 否 | 继续等待市场机会 |" in text
 
 
@@ -341,7 +334,6 @@ def test_run_daily_check_defaults_to_fresh_snapshot(monkeypatch):
 
     report = module._run_daily_check(
         expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
         mode="fresh",
     )
 
@@ -349,7 +341,6 @@ def test_run_daily_check_defaults_to_fresh_snapshot(monkeypatch):
     assert "--auto-cache" not in calls[0]
     assert "--from-cache" not in calls[0]
     assert "--expected-runtime-head" in calls[0]
-    assert "--expected-frontend-head" in calls[0]
 
 
 def test_run_daily_check_can_use_auto_cache_for_routine_status(monkeypatch):
@@ -369,7 +360,6 @@ def test_run_daily_check_can_use_auto_cache_for_routine_status(monkeypatch):
 
     report = module._run_daily_check(
         expected_runtime_head=None,
-        expected_frontend_head=None,
         mode="auto-cache",
     )
 
@@ -395,7 +385,6 @@ def test_run_daily_check_can_use_strict_cache_without_server(monkeypatch):
 
     report = module._run_daily_check(
         expected_runtime_head=None,
-        expected_frontend_head=None,
         mode="cache",
     )
 

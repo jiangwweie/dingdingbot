@@ -19,9 +19,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.application.bnb_live_execution_bridge import (
-    BnbLiveExecutionBridgeDryRunResponse,
-    BnbLiveExecutionBridgeDryRunService,
+from src.application.bnb_live_execution_boundary import (
+    BnbLiveExecutionBoundaryDryRunResponse,
+    BnbLiveExecutionBoundaryDryRunService,
 )
 from src.application.owner_action_carrier_catalog import (
     get_owner_action_carrier,
@@ -102,9 +102,9 @@ class OwnerBoundedExecutionReadiness(BaseModel):
     ready: bool = False
     blockers: list[str] = Field(default_factory=list)
     endpoint: str | None = None
-    button_label: str = OWNER_BOUNDED_EXECUTE_LABEL
-    creates_execution_intent_on_click: bool = False
-    creates_order_on_click: bool = False
+    action_label: str = OWNER_BOUNDED_EXECUTE_LABEL
+    creates_execution_intent_when_invoked: bool = False
+    creates_order_when_invoked: bool = False
     order_permission_granted: bool = False
 
 
@@ -289,7 +289,7 @@ class OwnerBoundedCarrierExecutionAdapter(Protocol):
         self,
         authorization: BoundedLiveTrialAuthorization,
         *,
-        final_gate: BnbLiveExecutionBridgeDryRunResponse,
+        final_gate: BnbLiveExecutionBoundaryDryRunResponse,
         protection_plan: ProtectionPricePlanRecord,
         protection_planner_service: ProtectionPlannerService,
         executor: BoundedOrderExecutor,
@@ -334,8 +334,8 @@ class OwnerCatalogExecutionAdapter:
             endpoint=OWNER_BOUNDED_EXECUTE_ROUTE_TEMPLATE.format(
                 authorization_id=authorization.authorization_id,
             ),
-            creates_execution_intent_on_click=not blockers,
-            creates_order_on_click=not blockers,
+            creates_execution_intent_when_invoked=not blockers,
+            creates_order_when_invoked=not blockers,
             order_permission_granted=False,
         )
 
@@ -343,7 +343,7 @@ class OwnerCatalogExecutionAdapter:
         self,
         authorization: BoundedLiveTrialAuthorization,
         *,
-        final_gate: BnbLiveExecutionBridgeDryRunResponse,
+        final_gate: BnbLiveExecutionBoundaryDryRunResponse,
         protection_plan: ProtectionPricePlanRecord,
         protection_planner_service: ProtectionPlannerService,
         executor: BoundedOrderExecutor,
@@ -644,7 +644,7 @@ class OwnerBoundedExecutionService:
         self,
         *,
         owner_trial_repository: PgOwnerTrialFlowRepository | None = None,
-        final_gate_service: BnbLiveExecutionBridgeDryRunService,
+        final_gate_service: BnbLiveExecutionBoundaryDryRunService,
         registry: OwnerBoundedExecutionRegistry | None = None,
         session_maker: async_sessionmaker[AsyncSession] | None = None,
         protection_planner_service: ProtectionPlannerService | None = None,
@@ -686,8 +686,8 @@ class OwnerBoundedExecutionService:
             update={
                 "ready": not blockers,
                 "blockers": _dedupe(blockers),
-                "creates_execution_intent_on_click": not blockers,
-                "creates_order_on_click": not blockers,
+                "creates_execution_intent_when_invoked": not blockers,
+                "creates_order_when_invoked": not blockers,
                 "order_permission_granted": False,
             }
         )
@@ -855,7 +855,7 @@ class OwnerBoundedExecutionService:
         authorization: BoundedLiveTrialAuthorization,
         *,
         fact_snapshot: TrialPreflightFactsSnapshot | None = None,
-    ) -> BnbLiveExecutionBridgeDryRunResponse:
+    ) -> BnbLiveExecutionBoundaryDryRunResponse:
         return await self._final_gate_service.run_action_spec(
             _generic_action_spec_from_authorization(authorization),
             fact_snapshot=fact_snapshot,
@@ -1171,7 +1171,7 @@ class OwnerBoundedExecutionService:
         *,
         authorization: BoundedLiveTrialAuthorization,
         result: OwnerBoundedExecutionResponse,
-        final_gate: BnbLiveExecutionBridgeDryRunResponse,
+        final_gate: BnbLiveExecutionBoundaryDryRunResponse,
     ) -> None:
         async with self._session_maker() as session:
             bind = session.get_bind()
@@ -1267,7 +1267,7 @@ class OwnerBoundedExecutionService:
         *,
         authorization: BoundedLiveTrialAuthorization,
         exc: OwnerBoundedExecutionError,
-        final_gate: BnbLiveExecutionBridgeDryRunResponse,
+        final_gate: BnbLiveExecutionBoundaryDryRunResponse,
     ) -> None:
         operation_id = (
             f"review-{authorization.authorization_id}-{exc.execution_intent_id}"
@@ -1651,7 +1651,7 @@ def _build_owner_bounded_result_review_ledger(
     *,
     authorization: BoundedLiveTrialAuthorization,
     result: OwnerBoundedExecutionResponse,
-    final_gate: BnbLiveExecutionBridgeDryRunResponse,
+    final_gate: BnbLiveExecutionBoundaryDryRunResponse,
 ) -> dict[str, object]:
     return {
         "ledger_version": "owner_bounded_review_ledger_v0",
@@ -1677,7 +1677,7 @@ def _build_owner_bounded_result_review_ledger(
             "sl_order_id": result.sl_order_id,
         },
         "strategy_outcome": "pending_post_action_review",
-        "review_decision": {
+        "review_outcome": {
             "status": "pending",
             "allowed_values": ["promote", "revise", "park"],
             "requires_owner_review": True,
@@ -1696,7 +1696,7 @@ def _build_owner_bounded_failure_review_ledger(
     *,
     authorization: BoundedLiveTrialAuthorization,
     exc: OwnerBoundedExecutionError,
-    final_gate: BnbLiveExecutionBridgeDryRunResponse,
+    final_gate: BnbLiveExecutionBoundaryDryRunResponse,
 ) -> dict[str, object]:
     return {
         "ledger_version": "owner_bounded_review_ledger_v0",
@@ -1722,7 +1722,7 @@ def _build_owner_bounded_failure_review_ledger(
             "sl_order_id": exc.sl_order_id,
         },
         "strategy_outcome": "failed_requires_owner_review",
-        "review_decision": {
+        "review_outcome": {
             "status": "pending",
             "allowed_values": ["revise", "park"],
             "requires_owner_review": True,
@@ -1796,7 +1796,7 @@ def _build_owner_bounded_review_ledger(
         "strategy_outcome": "pending_post_action_review"
         if lifecycle_status != "closed_from_pg_exit_order"
         else "pending_closed_trade_review",
-        "review_decision": {
+        "review_outcome": {
             "status": "pending",
             "allowed_values": ["promote", "revise", "park"],
             "requires_owner_review": True,

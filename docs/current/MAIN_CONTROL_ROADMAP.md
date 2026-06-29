@@ -7,6 +7,14 @@ last_verified: 2026-06-23
 
 # Main Control Roadmap
 
+## Current State-Model Note
+
+`Signal Observation grade` in older roadmap checkpoints is a historical progress label and now maps
+to Signal Observation grade. It is not a lifecycle layer, not a packet family,
+and not a source of can-trade or live-submit authority. New roadmap work must
+flow through Strategy Asset State, Tradeability Decision, Runtime Safety State,
+Execution Attempt, and Review Outcome State.
+
 ## Purpose
 
 This is the short planning table for the main runtime window.
@@ -35,10 +43,10 @@ bounded-aggressive real-order loop when a fresh signal exists and all official
 runtime gates pass.
 ```
 
-Dry-run audit and source readiness are support tracks for that target. Frontend
-UI work has been externalized and is no longer part of the main runtime goal.
+Dry-run audit and source readiness are support tracks for that target. Static
+product-client work is externalized and is no longer part of the main runtime goal.
 
-This file is not a frontend design spec or historical packet index. It is also
+This file is not a product-client design spec or historical packet index. It is also
 not a generic research backlog: research, replay, paper/simulator, and cost-model
 work are included only when they help the system find opportunities, capture
 them through the official runtime path, preserve net edge after execution costs,
@@ -53,8 +61,8 @@ failure modes, bounded loss envelope, replay/paper evidence, and final
 main-control absorbability.
 
 Strategy tradeability is evaluated by
-`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`. The roadmap must not let
-candidate strategies sit indefinitely in reports, packets, or generic
+`docs/current/TRADEABILITY_DECISION_CONTRACT.md`. The roadmap must not let
+candidate strategies sit indefinitely in reports, artifacts, or generic
 `waiting_for_market`. Each active candidate should move toward one of two
 answers:
 
@@ -66,8 +74,8 @@ cannot trade because first blocker X remains
 
 The current planning phase is strategy learning on top of a live-ready P0
 chain. P0 remains ready for the first selected StrategyGroup allocated-subaccount
-live closure. P0.5 must now turn market observations into StrategyGroup learning
-decisions:
+live closure. Signal Observation grade work must now turn market observations
+into StrategyGroup learning decisions:
 
 ```text
 live path waits
@@ -84,20 +92,20 @@ The next phase is governed by eight execution constraints:
 
 | Constraint | Meaning |
 | --- | --- |
-| P0 preemption | A real fresh `MPG-001`/selected StrategyGroup signal immediately interrupts lower-priority P0.5 work |
+| P0 preemption | A real fresh `MPG-001`/selected StrategyGroup signal immediately interrupts lower-priority Signal Observation grade work |
 | Authority split | Owner controls policy and tier/risk scope; the system continues normal process execution inside selected boundaries |
 | Capability closure | Every goal-mode task must close one engineering problem class, unlock a concrete capability, and expose the next engineering bottleneck |
 | Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
-| Decision-ledger gate | New P0.5 artifacts must change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| Strategy Asset State evidence gate | New Signal Observation grade artifacts must change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
 | Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
-| Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / decision ledger surfaces |
+| Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / Strategy Asset State evidence surfaces and replace or reduce older entry points |
 
-The deploy-worthy checkpoint for the current P0.5 phase is:
+The deploy-worthy checkpoint for the current Signal Observation grade phase is:
 
 ```text
 high-priority no-action
--> StrategyGroup Decision Ledger
+-> Strategy Asset State pre-live evidence
 -> replay-to-review matching
 -> one current decision per StrategyGroup
 -> local monitor sequence
@@ -132,16 +140,16 @@ The learning loop now has two main records:
 
 | Ledger | Stage | Purpose |
 | --- | --- | --- |
-| StrategyGroup Decision Ledger | Before live submit | Decide keep, revise, promote, park, kill, go live, do not go live, or safety block from high-priority evidence |
+| Strategy Asset State pre-live evidence | Before live submit | Preserve keep, revise, promote, park, kill, go live, do not go live, or safety-block evidence from high-priority observations |
 | Review Ledger | After live action | Learn from entry, exit, protection, costs, PnL, reconciliation, and final review |
 
 Engineering work is mainline only when it improves one of those layers. Extra
-evidence fields, broad UI work, historical cleanup, or strategy expansion are
+evidence fields, broad product-client work, historical cleanup, or strategy expansion are
 not mainline unless they directly support this profitability-oriented loop.
 
 ## Tradeability-Oriented Operating Frame
 
-The main-control runtime should prefer tradeability language over packet
+The main-control runtime should prefer tradeability language over artifact
 completion language:
 
 ```text
@@ -259,8 +267,8 @@ Small-capital execution frictions are not reasons to stop the engineering lane:
 | PnL settlement | Estimate before action, reconcile after fills, record Review Ledger outcome |
 
 Every Goal Packet should state `Capability unlocked` and
-`Next engineering bottleneck`. If it only produces a packet or explains why
-progress is blocked, the architecture verdict should be `partial` unless the
+`Next engineering bottleneck`. If it only produces an artifact or explains why
+progress is blocked, the architecture outcome should be `partial` unless the
 Evidence Packet proves no engineering closure is currently possible.
 
 ### Rehearsal-Before-Live Policy
@@ -288,7 +296,7 @@ the decision changes policy, tier, capital/profile/scope, pause/resume,
 promote/downshift/park/kill, production transition, or abnormal intervention.
 
 Goal-mode work after research intake should therefore be framed as reducing the
-first tradeability blocker, not merely adding another bridge or report. A task
+first tradeability blocker, not merely adding another projection or report. A task
 that moves `not_tradable_asset_admission` to `not_tradable_policy`, or
 `not_tradable_policy` to `not_tradable_market_wait`, has advanced the system
 even if no live order exists yet.
@@ -324,7 +332,7 @@ deploys are intentionally less frequent now.
 | Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is missing, stale, schema-stale, or tied to an old runtime head |
 | Bounded Tokyo deploy apply | Only after a stage-worthy fix, deployable milestone, or explicit Owner request |
 | Real order path | Only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
-| Frontend work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
+| Static product-client work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
 
 Do not deploy for every small documentation change, planning adjustment, or
 local-only replay/simulation improvement.
@@ -349,26 +357,26 @@ market-dependent first real-order proof.
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
 | P0 First Bounded Live Order Closure | First selected StrategyGroup + allocated subaccount risk-budget real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, deployed at `e5f8c13b`; cutover ready; live closure evidence, same-tick goal-status, same-tick source-readiness refresh, and local cutover visibility contract are deployed; waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> protection/reconciliation/settlement/review |
-| P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher packets |
+| P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting artifacts | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher evidence |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
-| P0.5 Signal Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion/L2 readiness/tier-policy review ready | Use `latest-signal-coverage-diagnostic.json`, `latest-signal-coverage-expansion-review.json`, `latest-l2-readiness-review.json`, `latest-l2-intake-dry-run.json`, and `latest-l2-tier-policy-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs these packets after completion audit; current expansion review promotes `BTPC-001` to L2 non-executing shadow-candidate observation only, keeps `BRF-001`/`LSR-001`/`RBR-001`/`VCB-001` blocked from L2, reports each broader would-enter row with tier, suggested next tier, action, confidence, execution boundary, readiness gaps, and no-candidate reason, and does not treat broader preview signals as real-submit authority or L4 promotion authority |
-| P05-DECISION-LEDGER-001 StrategyGroup Decision Ledger | High-priority no-action and would-enter observations become minimal current decisions before they influence StrategyGroup tier decisions | Main runtime window | local ready; monitor-sequence integrated | `scripts/build_strategygroup_decision_ledger.py` now builds one minimal decision ledger from signal coverage and opportunity decision loop evidence, and `run_strategygroup_runtime_local_monitor_sequence.py` runs it as the final P0.5 learning step. Current local output is `decision_ledger_ready` with one current row per `BRF-001`, `BTPC-001`, `LSR-001`, `RBR-001`, and `VCB-001`: `BTPC-001` keep observing, `BRF-001`/`LSR-001`/`VCB-001` revise before tier change, and `RBR-001` park. Rows use only `strategy_group_id`, `tier`, `opportunity_type`, `decision`, `reason`, `required_next_evidence`, `authority_boundary`, and `next_checkpoint`; no raw replay samples, FinalGate, Operation Layer, exchange-write, real-order authority, L4 expansion, profile mutation, leverage mutation, or sizing-default mutation are introduced |
-| P0.5 Opportunity Decision Loop | Observed would-enter opportunities become repeatable local decisions by joining signal coverage, replay verification, blocking gaps, L2 tier state, and strategy-quality outcome | Main runtime window | local decision loop + LSR/VCB local revision execution + post-revision replay review + BTPC fact-quality/proxy/proxy-replay keep-revise/live-source mapping/classifier-rule review ready | Use `latest-opportunity-decision-loop.json` to turn broader observations into per-StrategyGroup actions and scheduled work items: continue L2 shadow quality review, repair RequiredFacts/classifier/economic gaps, build missing replay corpus, park low-quality vocabulary, or prepare future L2 intake without L4 scope change; current queue separates `local_replay_coverage_ready`, `fact_source_pending`, `strategy_decision_pending`, `strategy_review_pending`, and `parked`; covered LSR/VCB classifier/economic replay items can roll up into `strategy_quality_decisions` with `revise_before_l2`, concrete `revision_tasks`, `revision_completion.status=local_revision_completion_ready`, `revision_execution.status=local_revision_execution_complete`, and passed post-revision replay review when those rows are active; `latest-btpc-l2-shadow-fact-quality-review.json` classifies all five BTPC fact gaps, `latest-btpc-local-fact-proxy-review.json` attaches review-only derivatives/margin proxy coverage, and the local monitor sequence now reruns a final opportunity decision loop after `latest-btpc-proxy-replay-quality-review.json`; `latest-btpc-l2-keep-revise-fact-source-decision.json` freezes BTPC into keep L2 shadow + revise fact/classifier inputs, `latest-btpc-live-derivatives-fact-source-mapping.json` maps the future live derivatives/margin source routes, and `latest-btpc-classifier-rule-review.json` records the BTPC v1 strong-uptrend and stale-signal disable rules while keeping live RequiredFacts, L4 scope, FinalGate, Operation Layer, exchange-write, and real-order authority false; RBR remains parked |
-| P0.5 Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready; `BTPC-001` L2 shadow replay plus `BRF-001` / `VCB-001` / `LSR-001` L1 observe replay added | Keep MPG-001 eight-window corpus wired into local dry-run audit; use BTPC-001 L2 shadow replay and BRF/VCB/LSR L1 observe replay for no-action / would-enter diagnostics without expanding L4 real-order scope |
-| P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |
-| P0.5 Post-Submit Simulator | Entry acceptance, protection failure, partial fill, rejection, SL/TP closure, and still-open lifecycle branches can be rehearsed locally | Main runtime window | local matrix ready | Keep simulator matrix non-executing and link outcomes into review evidence |
-| P0.5 Cost Review Skeleton | Replay outputs carry fee, slippage, funding, min-qty/step-size, and net-edge note fields | Main runtime window + strategy research input | local skeleton ready | Improve estimates from real allocated-subaccount outcomes after first live loop |
+| Signal Observation Grade Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion/L2 readiness/tier-policy review ready | Use `latest-signal-coverage-diagnostic.json`, `latest-signal-coverage-expansion-review.json`, `latest-l2-readiness-review.json`, `latest-l2-intake-dry-run.json`, and `latest-l2-tier-policy-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs these artifacts after completion audit; current expansion review promotes `BTPC-001` to L2 non-executing shadow-candidate observation only, keeps `BRF-001`/`LSR-001`/`RBR-001`/`VCB-001` blocked from L2, reports each broader would-enter row with tier, suggested next tier, action, confidence, execution boundary, readiness gaps, and no-candidate reason, and does not treat broader preview signals as real-submit authority or L4 promotion authority |
+| SIGNAL-OBSERVATION-STATE-001 Strategy Asset State pre-live evidence | High-priority no-action and would-enter observations become Strategy Asset State evidence before they influence StrategyGroup tier decisions | Main runtime window | local ready; monitor-sequence integrated; direct Strategy Asset State path active | `scripts/build_strategygroup_strategy_asset_state.py` produces Strategy Asset State evidence from signal coverage and opportunity review work loop inputs, and `run_strategygroup_runtime_local_monitor_sequence.py` runs it as the final Signal Observation grade learning step. Current local output status is `strategy_asset_state_ready`. The output carries current Strategy Asset State rows for active groups and preserves no raw replay samples, FinalGate calls, Operation Layer calls, exchange-write, real-order authority, L4 expansion, profile mutation, leverage mutation, or sizing-default mutation |
+| Signal Observation Grade Opportunity Review Work Loop | Observed would-enter opportunities become repeatable local recommendations by joining signal coverage, replay verification, blocking gaps, L2 tier state, and strategy-asset recommendation | Main runtime window | local review work loop + LSR/VCB local revision execution + post-revision replay review + BTPC fact-quality/proxy/proxy-replay keep-revise/live-source mapping/classifier-rule review ready | Use `latest-opportunity-review-work-loop.json` to turn broader observations into per-StrategyGroup actions and scheduled work items: continue L2 shadow quality review, repair RequiredFacts/classifier/economic gaps, build missing replay corpus, park low-quality vocabulary, or prepare future L2 intake without L4 scope change; current queue separates `local_replay_coverage_ready`, `fact_source_pending`, `strategy_asset_recommendation_pending`, `strategy_review_pending`, and `parked`; covered LSR/VCB classifier/economic replay items can roll up into `strategy_asset_recommendations` with `revise_before_l2`, concrete `revision_tasks`, `revision_completion.status=local_revision_completion_ready`, `revision_execution.status=local_revision_execution_complete`, and passed post-revision replay review when those rows are active; `latest-btpc-l2-shadow-fact-quality-review.json` classifies all five BTPC fact gaps, `latest-btpc-local-fact-proxy-review.json` attaches review-only derivatives/margin proxy coverage, and the local monitor sequence now reruns a final opportunity review work loop after `latest-btpc-proxy-replay-quality-review.json`; `latest-btpc-l2-keep-revise-fact-source-review.json` freezes BTPC into keep L2 shadow + revise fact/classifier inputs, `latest-btpc-live-derivatives-fact-source-mapping.json` maps the future live derivatives/margin source routes, and `latest-btpc-classifier-rule-review.json` records the BTPC v1 strong-uptrend and stale-signal disable rules while keeping live RequiredFacts, L4 scope, FinalGate, Operation Layer, exchange-write, and real-order authority false; RBR remains parked |
+| Signal Observation Grade Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready; `BTPC-001` L2 shadow replay plus `BRF-001` / `VCB-001` / `LSR-001` L1 observe replay added | Keep MPG-001 eight-window corpus wired into local dry-run audit; use BTPC-001 L2 shadow replay and BRF/VCB/LSR L1 observe replay for no-action / would-enter diagnostics without expanding L4 real-order scope |
+| Signal Observation Grade Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |
+| Signal Observation Grade Post-Submit Simulator | Entry acceptance, protection failure, partial fill, rejection, SL/TP closure, and still-open lifecycle branches can be rehearsed locally | Main runtime window | local matrix ready | Keep simulator matrix non-executing and link outcomes into review evidence |
+| Signal Observation Grade Cost Review Skeleton | Replay outputs carry fee, slippage, funding, min-qty/step-size, and net-edge note fields | Main runtime window + strategy research input | local skeleton ready | Improve estimates from real allocated-subaccount outcomes after first live loop |
 | P1 Paper/Simulator Operation Layer | Official submit lifecycle branches can be exercised without real funds | Main runtime window | planned | Use paper/simulator for lifecycle branches; do not make testnet a mainline milestone |
 | P1 Allocated-Subaccount Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with allocated subaccount funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
 | P1 Execution Cost Model | StrategyGroup review can compare gross edge against fee, funding, slippage, and filter costs | Strategy research window first, main runtime consumes summaries | planned | Define cost-survival fields in StrategyGroup review output |
 | P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and allocated subaccount experiment results | Main runtime window | planned | Add promotion/demotion criteria after first allocated-subaccount real loop and replay evidence |
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
-| P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
-| P0.5 Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active, low-frequency retuned | Healthy waiting-for-market heartbeat is 2 hours / L0 cache-first; fresh-signal short window remains high-priority |
-| P1 Owner Console Mainline Stabilization | External frontend can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain static frontend or UI QA in this worktree |
+| P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only status artifact | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
+| Signal Observation Grade Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active, low-frequency retuned | Healthy waiting-for-market heartbeat is 2 hours / L0 cache-first; fresh-signal short window remains high-priority |
+| P1 Owner Runtime Readmodel Stabilization | External clients can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain external client release checks in this worktree |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
 | P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | local event-adapter ready | Start with read-only audit summaries and Feishu notification text only; `runtime_advisory_event_adapter` now converts daily-check, completion-audit, watcher, trade-closed, and review-due artifacts into push-only / ledger-only advisory events without creating execution authority |
@@ -380,7 +388,7 @@ market-dependent first real-order proof.
 
 Owner Console exploration is no longer treated as an isolated authority source.
 The main runtime branch now owns the source-readiness contract and exposes the
-machine-readable packet/API that the console consumes.
+machine-readable artifact/API that the console consumes.
 
 ### Scope
 
@@ -407,9 +415,9 @@ real-order readiness detail state
 | Artifact | Path |
 | --- | --- |
 | Human confirmation | `docs/current/OWNER_CONSOLE_SOURCE_READINESS_CONFIRMATION.md` |
-| Machine-readable packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/owner-console-source-readiness.json` |
+| Machine-readable artifact | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/owner-console-source-readiness.json` |
 | API surface | `GET /api/trading-console/owner-console-source-readiness` |
-| Watcher refresh hook | `scripts/refresh_strategygroup_runtime_product_state_packets.py` |
+| Watcher refresh hook | `scripts/refresh_strategygroup_runtime_product_state_artifacts.py` |
 
 ### Acceptance
 
@@ -423,7 +431,7 @@ real-order readiness detail state
 | Watcher waiting for signal | Owner state is `waiting_for_opportunity`, Owner language is `等待机会` |
 | Runtime dry-run audit passed | Source status is `ready`, Owner language is `审计演练正常` |
 | Runtime goal status reports liveness or safety degradation | Owner state is `needs_intervention` or `temporarily_unavailable`, not `waiting_for_opportunity` |
-| Real-order readiness matrix available | `real_order_readiness` summarizes pass/waiting/blocked counts and submit-blocking keys without requiring raw packet reading |
+| Real-order readiness matrix available | `real_order_readiness` summarizes pass/waiting/blocked counts and submit-blocking keys without requiring raw artifact reading |
 | Reconciliation/audit detail missing | Detail degrades without hiding StrategyGroups |
 | Safety | No order, exchange write, FinalGate bypass, Operation Layer bypass, secret mutation, profile expansion, sizing change, withdrawal, or transfer |
 
@@ -432,22 +440,22 @@ real-order readiness detail state
 | Item | Result |
 | --- | --- |
 | Source-readiness API | Returns `market_opportunity=等待机会`, `funds=资金正常`, `orders=暂无订单`, `positions=暂无持仓`, `protection=保护正常`, `runtime_dry_run_audit=审计演练正常` in the real-backend smoke fixture |
-| Owner Console UI | Homepage treats readable funds/orders/positions/protection as business-ready even when candidate-prep details are still progressive; StrategyGroup rows show `等待机会` during no-signal observation |
-| System page | Shows `审计演练` as a secondary system-health item, not a homepage gate |
-| Visual governance | Strategy rows show one primary health chip plus one Owner-readable summary sentence instead of a four-chip evidence wall |
-| Verification | Python source-readiness/dry-run tests, frontend build, real-backend smoke, normal smoke, state smoke, and visual QA passed |
+| Owner Runtime readmodel | Readable funds/orders/positions/protection are business-ready even when candidate-prep details are still progressive; StrategyGroup rows show `等待机会` during no-signal observation |
+| System health detail | Shows `审计演练` as a secondary system-health item, not a primary action gate |
+| Owner language governance | Strategy rows expose one primary health state plus one Owner-readable summary sentence instead of an evidence wall |
+| Verification | Python source-readiness/dry-run tests, real-backend smoke, normal smoke, and state smoke passed |
 | Runtime goal overlay | Source-readiness API now reads `strategygroup-runtime-goal-status.json`; `runtime_liveness_degraded` overrides the Owner state to `需要介入` so the console does not mislabel liveness repair as market waiting |
 | Real-order readiness detail | Source-readiness API now forwards `real_order_readiness` from goal-status so the console can distinguish waiting-for-market from submit-blocking safety conditions through one API |
-| Owner Console real-order card | Mainline UI now consumes `real_order_readiness` and shows `实盘边界`, pass/waiting/blocked counts, and one Owner-readable action state without exposing internal gate names on the homepage |
+| Owner real-order readmodel | Mainline readmodel now carries `real_order_readiness`, pass/waiting/blocked counts, and one Owner-readable action state without exposing internal gate names as the primary Owner state |
 
 ### 2026-06-17 Selected Scope Refresh Checkpoint
 
 | Item | Result |
 | --- | --- |
 | Selected StrategyGroup scope | Watcher service now carries default `BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001`, `BRC_STRATEGYGROUP_MAX_SYMBOLS=3`, and `BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180`; `/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env` may override them |
-| Product-state refresh | `80-product-state-refresh.conf` now performs signed GET-only live-facts precollection and writes `product-state-refresh-packet.json` before refreshing Owner Console source-readiness |
-| Stale drop-in hygiene | Tokyo deploy planner removes legacy `50-product-state-refresh.conf` so old refresh semantics do not race or overwrite current selected-scope packets |
-| Resume dispatcher guard | `40-resume-dispatcher.conf` passes the selected StrategyGroup scope to `runtime_signal_watcher_resume_dispatcher.py`; actionable fresh-authorization, FinalGate, or Operation Layer dispatch is blocked unless the packet proves the action belongs to the selected StrategyGroup |
+| Product-state refresh | `80-product-state-refresh.conf` now performs signed GET-only live-facts precollection and writes the compatibility artifact file `product-state-refresh-packet.json` before refreshing Owner Console source-readiness |
+| Stale drop-in hygiene | Tokyo deploy planner removes legacy `50-product-state-refresh.conf` so old refresh semantics do not race or overwrite current selected-scope artifacts |
+| Resume dispatcher guard | `40-resume-dispatcher.conf` passes the selected StrategyGroup scope to `runtime_signal_watcher_resume_dispatcher.py`; actionable fresh-authorization, FinalGate, or Operation Layer dispatch is blocked unless the artifact proves the action belongs to the selected StrategyGroup |
 | Safety | This remains readmodel/live-facts GET-only work; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Runtime Objective Chain Visibility Checkpoint
@@ -456,8 +464,8 @@ real-order readiness detail state
 | --- | --- |
 | Objective chain segments | `runtime_execution_chain_closure_status.py` projects six target-aligned segments: fresh/mock signal, RequiredFacts, candidate/auth evidence, action-time FinalGate, official Operation Layer evidence handoff, and disabled/dry-run proof |
 | Daily monitor | `run_strategygroup_runtime_daily_check.py` now carries goal-chain ready/missing counts separately from lower-level implementation checks |
-| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py` now degrades P0.5 engineering rehearsal when any objective chain segment is missing |
-| Old deployed packets | Missing `ready_goal_chain_segments` is reported as `unknown`, not as `0 ready / 0 missing` |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py` now degrades Signal Observation grade engineering rehearsal when any objective chain segment is missing |
+| Old deployed artifacts | Missing `ready_goal_chain_segments` is reported as `unknown`, not as `0 ready / 0 missing` |
 | Safety | This is non-executing visibility work only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Runtime Objective Chain Deploy Checkpoint
@@ -475,7 +483,7 @@ runtime dry-run audit summary.
 | Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
 | Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
 | Daily progress | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `目标链路段: 6 ready / 0 missing` |
-| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]` |
+| Goal progress | `P0=waiting_for_market`, `Signal Observation grade=ready`, `blockers=[]`, `product_gaps=[]` |
 | Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Runtime Monitor Atomic Artifact Checkpoint
@@ -508,34 +516,34 @@ written JSON to parallel readers.
 | Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
 | Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
 | Daily progress | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `目标链路段: 6 ready / 0 missing` |
-| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]` |
+| Goal progress | `P0=waiting_for_market`, `Signal Observation grade=ready`, `blockers=[]`, `product_gaps=[]` |
 | Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Deploy Channel Diagnostic Checkpoint
 
 Tokyo deploy readiness now distinguishes deployment channel failures from
 runtime gate failures. When the local-to-Tokyo path cannot reach SSH/TCP, the
-git owner deploy packet remains blocked and surfaces explicit channel blockers
+git owner deploy policy artifact remains blocked and surfaces explicit channel blockers
 instead of collapsing into a generic readonly-probe failure.
 
 | Item | Result |
 | --- | --- |
 | Connectivity probe | `scripts/probe_tokyo_runtime_governance_readonly.py` can build a non-mutating `tokyo_runtime_governance_connectivity_probe` |
 | TCP blocker | Unreachable SSH/TCP produces `tokyo_tcp_22_unreachable` |
-| Deploy packet | `scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py` catches readonly probe errors and emits a blocked JSON packet |
+| Deploy policy artifact | `scripts/build_tokyo_runtime_governance_git_owner_deploy_policy_artifact.py` catches readonly probe errors and emits a blocked JSON artifact |
 | Safety | The diagnostic does not modify remote files, run migrations, restart services, read secrets, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
 
-Historical observed state for the diagnostic `a9e3e0f2` deploy packet was:
+Historical observed state for the diagnostic `a9e3e0f2` deploy artifact was:
 
 ```text
-packet_status=blocked
+deploy_diagnostic_status=blocked
 tokyo_connectivity_blockers=tokyo_tcp_22_unreachable
 ```
 
 That was a deploy-channel diagnostic blocker only. It did not imply that the
 StrategyGroup runtime chain, Owner Console source readiness, or dry-run audit
 chain failed. Later bounded git deploys reached `postdeploy_accepted`; use the
-latest deploy-channel packet or the newest checkpoint below for current state.
+latest deploy-channel artifact or the newest checkpoint below for current state.
 
 ### 2026-06-17 Owner Console Deploy Channel Source Checkpoint
 
@@ -546,12 +554,12 @@ from market opportunity, runtime liveness, live facts, and real-order safety.
 | Item | Result |
 | --- | --- |
 | Backend source | `owner-console-source-readiness` reads `BRC_TOKYO_DEPLOY_CHANNEL_STATUS_PATH` or `tokyo-deploy-channel-status.json` under the watcher report directory |
-| Default state | Missing deploy-channel packet maps to `ready_empty` / `部署通道未检查` |
-| Degraded state | Blocked deploy packet with `tokyo_tcp_22_unreachable` maps to `degraded` / `部署通道暂不可用` |
-| Owner UI | The status appears only on the system/source-health page, not as a homepage primary gate |
+| Default state | Missing deploy-channel artifact maps to `ready_empty` / `部署通道未检查` |
+| Degraded state | Blocked deploy artifact with `tokyo_tcp_22_unreachable` maps to `degraded` / `部署通道暂不可用` |
+| Owner readmodel boundary | The status appears only as system/source-health detail, not as a primary Owner action gate |
 | Safety | Deploy-channel degradation does not hide StrategyGroups, create orders, call exchange write APIs, bypass FinalGate, or bypass Operation Layer |
 
-## P0.5 Subgoal: Runtime Interaction Optimization
+## Signal Observation Grade Subgoal: Runtime Interaction Optimization
 
 ### Purpose
 
@@ -584,23 +592,23 @@ L1 read-only snapshot
 | Interaction taxonomy | `scripts/runtime_interaction_levels.py` defines L0-L5 as a machine-readable policy for local read, read-only remote checks, dry-run rehearsal, bounded server mutation, action-time pre-execution checks, and official allocated-subaccount real-order actions |
 | Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, source-readiness, goal-status, latest-summary, dry-run audit, and execution-chain closure facts through one read-only SSH interaction |
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply` |
-| Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
+| Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits runtime `owner_summary`, changed/not-changed fields, and safety flags |
 | Batched deploy apply | `scripts/plan_tokyo_runtime_governance_git_deploy.py` batches contiguous Tokyo operations so the git deploy path uses 4 direct SSH commands instead of many small server command fragments |
 | Deploy interaction count | `scripts/execute_tokyo_runtime_governance_git_deploy.py` writes `interaction.remote_interaction_count`; current git deploy apply budget is 7 counted remote interactions including readonly/postdeploy verifier probes |
-| Frontend scope | Static frontend publishing has been removed from the main runtime worktree; future UI work should live in a separate frontend project and consume the stable readmodel/API |
+| Static release scope | Static product-client publishing has been removed from the main runtime worktree; external product clients consume the stable readmodel/API |
 | Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
-| Tokyo verification | L1 snapshot reports the runtime head, watcher/backend active state, source-readiness, dry-run audit, execution-chain closure status, and safety invariants; it no longer reads nginx or static frontend release files |
+| Tokyo verification | L1 snapshot reports the runtime head, watcher/backend active state, source-readiness, dry-run audit, execution-chain closure status, and safety invariants; it no longer reads nginx or external client release files |
 | Daily check | `scripts/run_strategygroup_runtime_daily_check.py` consumes one L1 snapshot and returns `waiting_for_market`, `degraded`, or `blocked` with Owner-readable current action and safety invariants |
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime head, low-interaction check modes, and the server-side signal-detection source, so heartbeat automation can run without hardcoded deployment SHAs or accidental extra probes |
 | Interaction budget | Daily check defaults to `--max-remote-interactions 1`; if the source snapshot exceeds the budget, the report becomes a `NOTIFY` engineering blocker instead of silently becoming chatty |
-| Notification decision | Daily check now emits `notification.decision` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
-| Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat` renders the same decision as Codex heartbeat XML; fresh cache stays `L0` / 0 remote interactions, while stale cache may refresh one `L1` snapshot |
+| Notification result | Daily check now emits `notification.notification_result` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
+| Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat` renders the same notification result as Codex heartbeat XML; fresh cache stays `L0` / 0 remote interactions, while stale cache may refresh one `L1` snapshot |
 | Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` renders the same one-shot check as a concise Owner-readable progress summary, so manual status reviews do not require extra SSH probes or raw JSON/XML inspection |
 | Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 14` instead of a vague green label |
-| Execution-chain closure visibility | L1 snapshot and daily-check read `runtime-execution-chain-closure-status.json`, so healthy non-market closure appears as `非市场链路已收口` without rereading raw audit packets |
+| Execution-chain closure visibility | L1 snapshot and daily-check read `runtime-execution-chain-closure-status.json`, so healthy non-market closure appears as `非市场链路已收口` without rereading raw audit artifacts |
 | Closure segment projection | `runtime-execution-chain-closure-status.json` now projects key dry-run segments such as fresh-signal fast auto-chain, scoped Operation Layer handoff, submit-blocker matrix, shared runtime pipe, and post-submit guards into `projected_checks`, `ready_segments`, and `missing_or_failed_segments` |
-| Goal-chain segment projection | Closure status now also maps lower-level checks into six objective-aligned segments: `fresh_or_mock_signal`, `required_facts_readiness`, `candidate_authorization_evidence`, `action_time_finalgate`, `official_operation_layer_evidence_handoff`, and `disabled_dry_run_proof` |
-| Closure segment Owner progress | L1 snapshot and daily-check can carry closure segment counts into Owner progress; older deployed packets without segment fields render `链路段: unknown` instead of falsely reporting `0 ready / 0 missing` |
+| Goal-chain segment projection | Closure status now also maps lower-level checks into six objective-aligned segments: `fresh_or_mock_signal`, `required_facts_readiness`, `candidate_authorization_evidence`, `action_time_finalgate`, `official_operation_layer_evidence_relay_projection`, and `disabled_dry_run_proof` |
+| Closure segment Owner progress | L1 snapshot and daily-check can carry closure segment counts into Owner progress; older deployed artifacts without segment fields render `链路段: unknown` instead of falsely reporting `0 ready / 0 missing` |
 | Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
 | Auto cache mode | `--auto-cache --owner-progress` first uses a fresh local cache with `L0` / 0 remote interactions; only missing, stale, or schema-stale cache triggers one `L1` snapshot and refreshes the local cache/progress files |
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
@@ -611,30 +619,27 @@ L1 read-only snapshot
 | Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including the local sequence command and its quiet/noise boundary, using `L0` / 0 remote interactions |
 | Quiet-monitor drift cache | The same audit writes `output/runtime-monitor/latest-quiet-monitor-audit.json` and `output/runtime-monitor/latest-quiet-monitor-audit.md`, keeping automation drift review local and reusable |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
-| Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0/P0.5 track status with `L0` / 0 remote interactions |
+| Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0 plus Signal Observation grade status with `L0` / 0 remote interactions |
 | Goal progress cache | The same audit writes `output/runtime-monitor/latest-goal-progress.json` and `output/runtime-monitor/latest-goal-progress.md`, so status reviews can reuse the latest local progress artifact |
 | Goal progress evidence table | Goal progress output now includes a compact Evidence table, including dry-run scenario count, closure segment readiness count, missing closure segment count, interaction source, notification state, and forbidden-effect count |
 | Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check` accepts `--daily-check-mode fresh`, `auto-cache`, or `cache`; postdeploy acceptance stays fresh, while routine reviews can reuse cache |
 | Deploy-session cache clarity | Cache-only deploy-session reviews report `interaction.level=L0_local_cache_read` and keep the original `collected_interaction_level` inside the step for audit context |
 | Deploy-session Owner progress | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress` renders a Markdown progress table with current stage, action, risk, interaction count, server mutation, and real-order proximity |
-| Homepage-only visual QA | `owner-runtime-console` exposes `npm run visual:qa:home`, so current P1 frontend work verifies the homepage without pulling unfinished tabs into scope |
-| Engineering rehearsal check | L1 snapshot now requires the dry-run audit packet to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
-| UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
-| Owner visibility classification | The daily check emits `owner_summary.visibility.category`, and the homepage shows `当前阶段` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names |
-| Homepage Owner language guard | The homepage now maps internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the homepage |
+| Engineering rehearsal check | L1 snapshot now requires the dry-run audit artifact to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
+| Owner visibility classification | The daily check emits `owner_summary.visibility.category` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names as the primary Owner state |
+| Owner language guard | Owner readmodels map internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the primary Owner state |
 | Monitor Owner language guard | Healthy waiting notifications say `当前没有可用市场机会`; internal signal terms remain audit/detail concepts instead of the default Owner heartbeat text |
 | Signal detection source | Fresh opportunity detection remains Tokyo watcher / Feishu notification driven; local `--auto-cache` status checks are not the only market-opportunity detector |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ### Deploy Interaction Rule
 
-After bounded Tokyo deploys or homepage publishes, the main runtime window should
+After bounded Tokyo deploys, the main runtime window should
 prefer one deploy-session report instead of narrating each server command. The
 normal shape is:
 
 ```text
 runtime deploy report
-+ optional frontend publish report
 + one L1 daily check
 -> tokyo_runtime_deploy_session
 ```
@@ -645,9 +650,9 @@ The report must state:
 | --- | --- |
 | `interaction.level` | Highest interaction level in the session, for example `L3_bounded_deploy_apply` |
 | `interaction.remote_interaction_count` | Total counted remote interactions from the session steps |
-| `interaction.mutates_remote_files` | Whether the session changed remote runtime or static frontend files |
-| `interaction.approaches_real_order` | Must remain `false` for deploy and frontend publish sessions |
-| `owner_summary.current_action` | One Owner-readable next action, usually `继续等待市场机会` when healthy |
+| `interaction.mutates_remote_files` | Whether the session changed remote runtime files |
+| `interaction.approaches_real_order` | Must remain `false` for deploy sessions |
+| `owner_summary.non_authority_checkpoint` | One Owner-readable status checkpoint, usually `继续等待市场机会` when healthy |
 
 This is a communication and tooling optimization only. It does not authorize
 FinalGate bypass, Operation Layer bypass, exchange write, live-profile changes,
@@ -665,14 +670,11 @@ safety state:
 | Explicit signal/regression investigation | `--json` or one direct L1 snapshot | `L1`, 1 remote interaction |
 | Fresh runtime status | One `probe_tokyo_runtime_snapshot.py` collection | `L1`, 1 remote interaction |
 | Runtime deploy apply | Batched git deploy phases with explicit remote count | `L3`, 4 direct SSH commands, 7 counted remote interactions |
-| Frontend homepage publish | One tar-over-SSH static publish | `L3`, 1 remote interaction |
 | Postdeploy acceptance | One daily-check snapshot plus one deploy-session summary | `L1` snapshot, summary local |
 | Routine deploy-session review | `--run-daily-check --daily-check-mode auto-cache` | `L0` if cache is fresh; otherwise one `L1` refresh |
 | Owner-readable deploy-session review | `--run-daily-check --daily-check-mode cache --owner-progress` | `L0`, 0 remote interactions when cache is fresh |
 | Goal progress review | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` | Local cache/baseline only, 0 Tokyo interactions |
 | Quiet-monitor drift review | `audit_tokyo_runtime_quiet_monitor.py --owner-progress` | Local automation/config files only, 0 Tokyo interactions |
-| Homepage-only visual QA | `npm run visual:qa:home` | Local browser/dev-server only, 0 Tokyo interactions |
-
 When a tool can reuse a fresh cache or a single snapshot, it must not run extra
 Tokyo probes only to restate the same state. When a deploy is necessary, the
 report should summarize the whole session instead of narrating each command.
@@ -681,7 +683,7 @@ report should summarize the whole session instead of narrating each command.
 
 The runtime deploy tool optimization was pushed and deployed to Tokyo. The
 server now carries the batched git deploy planner/executor plus the Owner
-Console homepage interaction projection.
+Runtime interaction projection.
 
 | Item | Result |
 | --- | --- |
@@ -693,23 +695,22 @@ Console homepage interaction projection.
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head only |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
-### 2026-06-17 Homepage Visibility Deploy Checkpoint
+### 2026-06-17 Owner Runtime Visibility Checkpoint
 
-The low-interaction monitor defaults and Owner Console homepage visibility
-changes were pushed and deployed to Tokyo.
+The low-interaction monitor defaults and Owner runtime visibility changes were
+pushed and deployed to Tokyo.
 
 | Item | Result |
 | --- | --- |
 | Deployed runtime head | `7df799e1ee3dbabd69060f92758a6b84ba2a0ae6` |
-| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-7df799e1-homepage-visibility` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-7df799e1-owner-runtime-visibility` |
 | Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
-| Frontend homepage publish | `status=applied`, `interaction.level=L3_frontend_static_publish`, `remote_interaction_count=1`, `blockers=[]` |
 | Postdeploy daily check | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `blockers=[]`, `product_gaps=[]` |
-| Deploy session summary | `status=waiting_for_market`, `remote_interaction_count=9`, `all_steps_safe_for_deploy_session_summary=true` |
-| Owner Console homepage | Homepage no longer shows deploy-channel status as a primary operating card; deploy-channel detail remains on the system/source-health surface |
-| Visibility coverage | Homepage state smoke now covers waiting for market, processing, engineering blocker, safety blocker, and needs-intervention states |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime and frontend head `7df799e1ee3dbabd69060f92758a6b84ba2a0ae6` |
-| Safety | Deploy, publish, and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+| Deploy session summary | `status=waiting_for_market`, `all_steps_safe_for_deploy_session_summary=true` |
+| Owner Runtime visibility | Runtime status no longer shows deploy-channel status as a primary operating state; deploy-channel detail remains system/source-health evidence |
+| Visibility coverage | Runtime state smoke covers waiting for market, processing, engineering blocker, safety blocker, and needs-intervention states |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime head `7df799e1ee3dbabd69060f92758a6b84ba2a0ae6` |
+| Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ## P0 Subgoal: Runtime Liveness Repair
 
@@ -802,7 +803,7 @@ RequiredFacts, risk defaults, hard stops, and conflict policy.
 | Live runtime handoff | A runtime that has left shadow mode and is execution-enabled is no longer eligible for B0 shadow-candidate scheduler planning; it must be handled by Operation Layer evidence/readiness or closed-loop recovery |
 | Observation blocker hygiene | Plain `waiting_for_signal` and non-mutating historical attempt/candidate blockers do not create Owner attention; they remain runtime-level audit warnings unless prepare/order/exchange/budget/attempt side effects occurred |
 
-### 2026-06-17 Non-Executing Prepare Auto Bridge Checkpoint
+### 2026-06-17 Non-Executing Prepare Evidence Checkpoint
 
 The resume dispatcher now treats `ready_for_non_executing_prepare` as an
 actionable common-pipeline checkpoint when `--execute-preflight` is enabled:
@@ -821,7 +822,7 @@ fresh selected StrategyGroup signal
 | Safety invariants | Prepare may create bounded pre-submit evidence, but it must not arm local registration, arm exchange submit, call OrderLifecycle, create orders, call exchange write APIs, mutate attempt counters, mutate runtime budget, or create withdrawal/transfer actions |
 | Missing input handling | Missing runtime instance or signal/order-candidate input blocks as `missing_fact` before FinalGate |
 | Forbidden effect handling | Any forbidden prepare effect blocks as `hard_safety_stop` before FinalGate |
-| Cross-StrategyGroup proof | Unit coverage proves the same prepare -> FinalGate bridge works for MPG, TEQ, and SOR with only StrategyGroup/runtime IDs changed |
+| Cross-StrategyGroup proof | Unit coverage proves the same prepare -> FinalGate proof works for MPG, TEQ, and SOR with only StrategyGroup/runtime IDs changed |
 | Remaining scope | Operation Layer evidence readiness, live boundary enablement, submit, finalize, reconciliation, settlement, and review remain shared runtime stages rather than StrategyGroup adapters |
 
 ## P0 Subgoal: Runtime Dry-Run Audit Chain
@@ -843,16 +844,16 @@ mock fresh signal
 -> Operation Layer evidence prep
 -> disabled submit smoke
 -> fake or non-executing post-submit finalize / reconciliation / budget settlement / review shape check
--> unified audit packet
+-> unified audit artifact
 ```
 
 ### Required Artifact
 
 | Artifact | Path |
 | --- | --- |
-| Local audit packet | `output/strategygroup-runtime-pilot/dry-run-audit-chain/runtime-dry-run-audit-chain.json` |
-| Local closure status packet | `output/strategygroup-runtime-pilot/chain-closure-status/runtime-execution-chain-closure-status.json` |
-| Tokyo audit packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
+| Local audit artifact | `output/strategygroup-runtime-pilot/dry-run-audit-chain/runtime-dry-run-audit-chain.json` |
+| Local closure status artifact | `output/strategygroup-runtime-pilot/chain-closure-status/runtime-execution-chain-closure-status.json` |
+| Tokyo audit artifact | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
 
 ### Current Implementation
 
@@ -878,14 +879,14 @@ one go/no-go status for main-control progress reviews.
 | Mock Operation Layer submit/finalize pass | Dispatcher reaches settled and next-attempt-ready with mock responses only |
 | RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
-| Operation Layer blocker review matrix | Active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets |
+| Operation Layer blocker review matrix | Active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked evidence |
 | Selected StrategyGroup dispatch guard | Selected MPG-001 mock fresh signal can reach FinalGate dispatch; out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer |
 
 ### 2026-06-17 Chain Closure Status Checkpoint
 
 `scripts/runtime_execution_chain_closure_status.py` now converts the full
-dry-run audit packet into a compact status packet. This keeps routine progress
-reviews from rereading many raw evidence packets while still refusing to treat
+dry-run audit artifact into compact status evidence. This keeps routine progress
+reviews from rereading many raw evidence artifacts while still refusing to treat
 mock or disabled-smoke proof as a real-order proof.
 
 | Item | Result |
@@ -935,7 +936,7 @@ non-secret overlay at `/home/ubuntu/brc-deploy/env/runtime-order-capable.env`.
 
 ### 2026-06-17 Goal Status Local Dry-Run Checkpoint
 
-The goal-status packet now accepts the local dry-run audit packet from either
+The goal-status artifact now accepts the local dry-run audit artifact from either
 the Tokyo-style report root or the local audit subdirectory:
 
 ```text
@@ -944,7 +945,7 @@ dry-run-audit-chain/runtime-dry-run-audit-chain.json
 ```
 
 This keeps local P0 audit runs usable without waiting for a market signal or
-manually copying packet files.
+manually copying artifact files.
 
 | Item | Result |
 | --- | --- |
@@ -952,47 +953,47 @@ manually copying packet files.
 | Fast auto-chain audit | Goal status treats `fresh_signal_fast_auto_chain_checked=true` as a required dry-run check |
 | Submit-blocker review | Active position/open-order conflicts remain submit blockers, but `active_position:missing` and `open_orders:missing` are classified through missing facts instead of fake conflict resolution |
 | Budget/protection missing facts | `budget:missing` and `protection:missing` surface as missing-fact submit blockers |
-| Safety | This remains read-only packet aggregation; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+| Safety | This remains read-only artifact aggregation; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Local Product-State Refresh Checkpoint
 
-`scripts/refresh_strategygroup_runtime_product_state_packets.py` can now be
+`scripts/refresh_strategygroup_runtime_product_state_artifacts.py` can now be
 used as a local main-control refresh wrapper. When explicitly requested, it
 refreshes the non-executing dry-run audit chain and then rebuilds
 `strategygroup-runtime-goal-status.json` from the same report directory.
 
 If local operator auth is missing, API readmodel refresh is recorded as a
-reviewable blocker, but local dry-run audit and goal-status packets are still
+reviewable blocker, but local dry-run audit and goal-status artifacts are still
 written. This prevents no-signal development turns from stopping only because
 the local console server/auth environment is not running.
 
 | Item | Result |
 | --- | --- |
 | Optional dry-run refresh | `--refresh-dry-run-audit-chain` writes `runtime-dry-run-audit-chain.json` |
-| Optional closure-status refresh | `--refresh-chain-closure-status` writes `runtime-execution-chain-closure-status.json` from the current dry-run audit packet |
+| Optional closure-status refresh | `--refresh-chain-closure-status` writes `runtime-execution-chain-closure-status.json` from the current dry-run audit artifact |
 | Optional goal-status refresh | `--refresh-goal-status` writes `strategygroup-runtime-goal-status.json` |
 | Tokyo watcher hook | `80-product-state-refresh.conf` now writes `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-execution-chain-closure-status.json` after the dry-run audit post-step |
-| Local auth missing | Records `operator_cookie_unavailable` and skips API packets instead of aborting the local audit refresh |
-| Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, goal-status refreshed, fallback source-readiness was written, and no forbidden safety effect is present |
+| Local auth missing | Records `operator_cookie_unavailable` and skips API readmodel refresh instead of aborting the local audit refresh |
+| Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, goal-status refreshed, source-readiness unavailable evidence was written, and no forbidden safety effect is present |
 | Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=14`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
-| Safety | The wrapper remains readmodel/local-packet only; the degraded-success flag is not installed in Tokyo systemd and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+| Safety | The wrapper remains readmodel/local-artifact only; the degraded-success flag is not installed in Tokyo systemd and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
-### 2026-06-17 Source-Readiness Fallback Checkpoint
+### 2026-06-17 Source-Readiness Unavailable Evidence Checkpoint
 
 When local operator auth is missing, product-state refresh now writes a
-degraded `owner-console-source-readiness.json` fallback packet instead of
-leaving the source-readiness file absent. The fallback keeps the Owner Console
+degraded `owner-console-source-readiness.json` unavailable evidence artifact instead of
+leaving the source-readiness file absent. The evidence keeps the Owner Console
 contract shape but marks account, orders, positions, protection, runtime source,
 and watcher as unavailable.
 
 | Item | Result |
 | --- | --- |
-| Fallback trigger | `operator_cookie_unavailable` while refreshing readmodel APIs |
-| Fallback packet | `owner-console-source-readiness.json.status=source_unavailable` |
+| Evidence trigger | `operator_cookie_unavailable` while refreshing readmodel APIs |
+| Unavailable evidence | `owner-console-source-readiness.json.status=source_unavailable` |
 | Preserved health | `runtime_dry_run_audit=审计演练正常` when the local dry-run audit passed |
-| Goal-status effect | `strategygroup-runtime-goal-status` no longer reports `missing_packet:source_readiness`; it still reports `source_readiness_not_ready` and `live_facts_not_ready` until real readmodels/facts are available |
-| No fake readiness | Funds, orders, positions, protection, runtime source, and watcher remain unavailable in the fallback |
-| Safety | Fallback packet generation is local/read-only and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+| Goal-status effect | `strategygroup-runtime-goal-status` no longer reports packet-shaped missing source blockers; it reports `missing_artifact:source_readiness`, `source_readiness_not_ready`, and `live_facts_not_ready` until real readmodels/facts are available |
+| No fake readiness | Funds, orders, positions, protection, runtime source, and watcher remain unavailable in the evidence artifact |
+| Safety | Unavailable evidence generation is local/read-only and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### Evidence Relay Checks
 
@@ -1051,10 +1052,10 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | Requirement | Expected result |
 | --- | --- |
 | Shared chain | MPG / TEQ / FBS / PMR / SOR enter the same runtime admission, candidate/auth, FinalGate, Operation Layer, finalize, reconcile, and settle code path |
-| Strategy-specific inputs | Each StrategyGroup only changes handoff contract inputs: signal packet, RequiredFacts, symbol, side, risk defaults, hard stops, and conflict rules |
+| Strategy-specific inputs | Each StrategyGroup only changes handoff contract inputs: signal observation shape, RequiredFacts, symbol, side, risk defaults, hard stops, and conflict rules |
 | Dry-run coverage | The dry-run audit chain includes at least one pass-like fixture and one blocked fixture that are not SOR-only |
 | No execution fork | No StrategyGroup adds a custom FinalGate, Operation Layer, order lifecycle, exchange gateway, or settlement implementation |
-| Owner Console | The UI/readmodel shows StrategyGroup differences as product state, not separate packet-reading workflows |
+| Owner readmodel | StrategyGroup differences appear as product state, not separate artifact-reading workflows |
 
 ### 2026-06-17 Checkpoint
 
@@ -1063,7 +1064,7 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | Dry-run audit artifact | `runtime-dry-run-audit-chain.json` now includes `shared_runtime_pipeline_validation` and `selected_strategygroup_dispatch_guard_checked` |
 | StrategyGroups covered | MPG / TEQ / FBS / PMR / SOR |
 | Common-chain proof | All five StrategyGroups share the same runtime stages: admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, account/protection/budget/idempotency checks, submit, finalize/reconcile/settle/review, and Owner readmodel |
-| Strategy-specific proof | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, risk defaults, hard stops, and sample packets |
+| Strategy-specific proof | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, risk defaults, hard stops, and sample artifacts |
 | Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
 | Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true`, `common_execution_chain_reuse_checked=true`, `strategygroup_adapter_boundary_checked=true`, and `selected_strategygroup_dispatch_guard_checked=true` before treating dry-run audit as healthy |
 
@@ -1074,7 +1075,7 @@ The current architecture judgment is verified as a runtime audit invariant:
 | Share | Scope | Verification result |
 | --- | --- | --- |
 | 80% | Common runtime pipe | `runtime-dry-run-audit-chain.json` proves MPG / TEQ / FBS / PMR / SOR share the same admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, submit, finalize, reconciliation, settlement, review, and Owner readmodel stages |
-| 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, hard stops, and sample packets |
+| 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, hard stops, and sample artifacts |
 
 Current local validation:
 
@@ -1109,14 +1110,14 @@ forks and do not stop watcher observation or common-chain project progress.
 `strategygroup-runtime-goal-status.json` now projects the required dry-run audit
 checks into its top-level `checks` object. Automation and Owner Console
 readmodels can distinguish a live-source gap from a shared-chain gap without
-digging into the raw dry-run packet.
+digging into the raw dry-run artifact.
 
 | Item | Result |
 | --- | --- |
 | Fast chain projection | `checks.fresh_signal_fast_auto_chain_checked=true` when the local audit proves fresh signal -> authorization -> FinalGate dispatch -> Operation Layer evidence prep |
 | Shared pipeline projection | `checks.common_execution_chain_reuse_checked=true` and `checks.strategygroup_adapter_boundary_checked=true` when MPG / TEQ / FBS / PMR / SOR reuse the common runtime pipe |
 | Selected-scope projection | `checks.selected_strategygroup_dispatch_guard_checked=true` and `checks.all_selected_strategygroups_reach_finalgate_dispatch_checked=true` when selected StrategyGroup dispatch can reach the action-time FinalGate plan and out-of-scope signals are blocked |
-| Current local effect | Local `goal-status` can report `runtime_dry_run_audit_passed=true` while still blocking real submit on `missing_packet:*`, `source_readiness_not_ready`, or `live_facts_not_ready` |
+| Current local effect | Local `goal-status` can report `runtime_dry_run_audit_passed=true` while still blocking real submit on `missing_artifact:*`, `source_readiness_not_ready`, or `live_facts_not_ready` |
 | Safety | This is read-only projection only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Tokyo Deploy Checkpoint
@@ -1161,7 +1162,7 @@ Tokyo through the git-based standing-authorization deploy path.
 ### 2026-06-17 Deploy Channel Status Publish Checkpoint
 
 The git-based deploy plan now writes the watcher-facing deploy-channel status
-packet after postdeploy verification succeeds. This prevents Owner Console from
+artifact after postdeploy verification succeeds. This prevents Owner Console from
 showing `部署通道未检查` immediately after a successful bounded deploy.
 
 | Item | Result |
@@ -1170,16 +1171,16 @@ showing `部署通道未检查` immediately after a successful bounded deploy.
 | Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cd61c69d-deploy-channel-status` |
 | Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
 | Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `cd61c69d3421abe23d43c6ab4953403ac72e6258` |
-| Deploy-channel packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/tokyo-deploy-channel-status.json` exists with `status=postdeploy_accepted`, `blockers=[]` |
+| Deploy-channel artifact | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/tokyo-deploy-channel-status.json` exists with `status=postdeploy_accepted`, `blockers=[]` |
 | Owner Console source readiness | `deploy_channel=部署通道正常`, source status `ready`, `connectivity_ready=true` |
 | Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `deploy_channel_blockers=[]`, `fresh_signal_present=false` |
 | Dry-run audit | `runtime-dry-run-audit-chain.status=passed` |
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
-| Safety | Deploy-channel status publication is a report-packet write only; deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+| Safety | Deploy-channel status publication is a report-artifact write only; deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Readonly Probe Structured Failure Checkpoint
 
-The Tokyo readonly probe now emits a structured JSON packet even when SSH
+The Tokyo readonly probe now emits a structured JSON artifact even when SSH
 read-only collection fails. This keeps automation and Owner Console source
 readiness from treating deployment-channel failures as opaque runtime failures.
 
@@ -1193,17 +1194,17 @@ readiness from treating deployment-channel failures as opaque runtime failures.
 
 ### 2026-06-17 Source Readiness Deploy-Channel Fallback Checkpoint
 
-Owner Console source readiness now uses the readonly probe packet as a
+Owner Console source readiness now uses the readonly probe artifact as a
 deploy-channel fallback when `tokyo-deploy-channel-status.json` is absent. This
 keeps the product surface specific even before the next successful deploy writes
-the postdeploy channel packet.
+the postdeploy channel artifact.
 
 | Item | Result |
 | --- | --- |
-| Readmodel fallback | `owner-console-source-readiness` reads `BRC_TOKYO_READONLY_PROBE_STATUS_PATH` or `tokyo-readonly-probe-current.json` under the watcher report directory when the deploy-channel packet is missing |
+| Readmodel fallback | `owner-console-source-readiness` reads `BRC_TOKYO_READONLY_PROBE_STATUS_PATH` or `tokyo-readonly-probe-current.json` under the watcher report directory when the deploy-channel artifact is missing |
 | Product status | `tokyo_ssh_publickey_denied` maps to `deploy_channel=部署通道暂不可用` |
-| Local fallback packet | `refresh_strategygroup_runtime_product_state_packets.py` mirrors the same deploy-channel language in source-readiness fallback output |
-| Owner UI boundary | The deploy-channel item remains a source-health/system detail and does not become a homepage execution gate |
+| Local fallback artifact | `refresh_strategygroup_runtime_product_state_artifacts.py` mirrors the same deploy-channel language in source-readiness fallback output |
+| Owner readmodel boundary | The deploy-channel item remains a source-health/system detail and does not become a primary execution gate |
 | Safety | This is read-only state projection; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Source Readiness Fallback Deploy Checkpoint
@@ -1229,21 +1230,21 @@ StrategyGroup signal.
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy, probe, postdeploy, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
-### 2026-06-17 Frontend Externalization Checkpoint
+### 2026-06-17 External Product-Client Boundary Checkpoint
 
-The static Owner Console frontend was removed from the main runtime goal. The
-main worktree keeps the source-readiness/readmodel contract for future external
-frontends, but frontend build, visual QA, static publishing, and homepage
-release checks no longer affect runtime monitoring or first real-order closure.
+The Owner Console product client was removed from the main runtime goal.
+The main worktree keeps the source-readiness/readmodel contract for future
+external clients, but external client build/release checks no longer affect
+runtime monitoring or first real-order closure.
 
 | Item | Result |
 | --- | --- |
-| Static frontend publish | Removed from mainline runtime monitoring |
-| UI governance docs/assets | Removed from `docs/current` |
+| External client release | Removed from mainline runtime monitoring |
+| Product-client governance docs/assets | Removed from `docs/current` |
 | Runtime snapshot | No longer checks nginx or `/var/www/brc-owner-console` release files |
-| Daily check | Healthy waiting-for-market can stay quiet without frontend release proof |
-| Goal progress audit | No longer contains a homepage publish track |
-| Runtime/API contract | Source-readiness and readmodel/API surfaces remain available for a future external frontend |
+| Daily check | Healthy waiting-for-market can stay quiet without external client release proof |
+| Goal progress audit | No longer contains an external client release track |
+| Runtime/API contract | Source-readiness and readmodel/API surfaces remain available for a future external client |
 | Readonly probe | `status=ready_for_controlled_deploy_preflight`, `blockers=[]`, health is `ok`, `live_ready=false` |
 | Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal` |
 | Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `fresh_signal_present=false`, `source_readiness_ready=true`, `live_facts_ready=true` |
@@ -1254,7 +1255,7 @@ release checks no longer affect runtime monitoring or first real-order closure.
 ### 2026-06-17 Submit-Blocker Review State Deploy Checkpoint
 
 The submit-blocker review state was pushed and deployed to Tokyo so the
-watcher-facing goal-status packet can distinguish normal waiting from
+watcher-facing goal-status artifact can distinguish normal waiting from
 reviewable submit blockers.
 
 | Item | Result |
@@ -1263,7 +1264,7 @@ reviewable submit blockers.
 | Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-315af1b7-submit-blocker-review` |
 | Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
 | Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `315af1b784ae8526f505e6b8e0d577a9728bde7e` |
-| Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal`; `resume-dispatch-packet.status=waiting_for_market` |
+| Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal`; `resume-dispatch-artifact.status=waiting_for_market` |
 | Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `next_safe_checkpoint=continue_watcher_observation`, `ready_for_real_order_action=false` |
 | Submit-blocker review | `submit_blocker_review.required=false`, `blocker_keys=[]`; natural no-signal waiting is not a review task |
 | Real order boundary | `submit_blocker_keys=["fresh_signal","candidate_authorization","action_time_finalgate","official_operation_layer"]`, but `submit_blocker_review_required=false` because these are waiting states, not blocked rows |
@@ -1271,7 +1272,7 @@ reviewable submit blockers.
 
 ### 2026-06-17 Owner Console Submit-Blocker Review Projection Checkpoint
 
-The Owner Console source-readiness readmodel and frontend now consume the
+The Owner Console source-readiness readmodel now consumes the
 submit-blocker review state instead of forcing the Owner to interpret raw
 matrix keys.
 
@@ -1283,9 +1284,9 @@ matrix keys.
 | Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `6b615aaca2b6f593d7feaa98ee3f7884ad22b56f` |
 | Source-readiness projection | `real_order_readiness.submit_blocker_review.required=false`, `blocker_keys=[]`, `ready_for_real_order_action=false` |
 | Current Owner state | `owner_summary.real_order_readiness=等待机会`; no-signal waiting remains a normal waiting state, not a review task |
-| Frontend copy | Real submit blockers show `系统审查已记录` and `真实订单保持关闭`; normal waiting does not show that warning |
-| Validation | `pytest` readmodel checks passed; `npm run build`, `npm run smoke`, `npm run smoke:states`, `npm run smoke:real`, and `npm run visual:qa` passed |
-| Safety | UI/readmodel validation and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+| Owner copy | Real submit blockers show `系统审查已记录` and `真实订单保持关闭`; normal waiting does not show that warning |
+| Validation | `pytest` readmodel checks passed |
+| Safety | Readmodel validation and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### P0 Common Runtime Pipe Reuse Verification
 
@@ -1347,7 +1348,7 @@ Operation Layer submit
 
 This scenario may contain simulated exchange-effect fields inside its own
 artifact. Those fields are explicitly marked as mock-only and are not accepted
-as real execution proof. The global audit packet must still show no actual
+as real execution proof. The global audit artifact must still show no actual
 exchange write, no actual order creation, no actual order-lifecycle call, and
 no withdrawal or transfer.
 
@@ -1363,16 +1364,16 @@ evidence as ready.
 ### Purpose
 
 The active goal loop should not require manually reading several watcher
-packets before deciding whether to keep observing or advance toward the first
-bounded real order. A read-only summary packet now classifies the current
+artifacts before deciding whether to keep observing or advance toward the first
+bounded real order. A read-only summary artifact now classifies the current
 runtime state from already-written evidence.
 
 ### Required Artifact
 
 | Artifact | Path |
 | --- | --- |
-| Local/generated packet | `output/strategygroup-runtime-pilot/goal-status/strategygroup-runtime-goal-status.json` |
-| Tokyo watcher packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` |
+| Local/generated artifact | `output/strategygroup-runtime-pilot/goal-status/strategygroup-runtime-goal-status.json` |
+| Tokyo watcher artifact | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` |
 | Builder | `scripts/build_strategygroup_runtime_goal_status.py` |
 | Watcher drop-in | `deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf` |
 
@@ -1389,16 +1390,16 @@ runtime state from already-written evidence.
 
 ### Safety
 
-The builder only reads local JSON packets. It does not call Tokyo APIs,
+The builder only reads local JSON artifacts. It does not call Tokyo APIs,
 FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawals,
 transfers, secrets, live profile, or order sizing. It must never mark a real
 order action ready unless selected StrategyGroup, allocated subaccount risk
 budget, fresh signal,
 RequiredFacts, candidate/grant/authorization evidence, action-time FinalGate,
-and official Operation Layer evidence are all represented by current packets.
+and official Operation Layer evidence are all represented by current artifacts.
 
 The `runtime_dry_run_audit_passed` check is intentionally stricter than
-`runtime-dry-run-audit-chain.json.status=passed`. The goal status packet must
+`runtime-dry-run-audit-chain.json.status=passed`. The goal status artifact must
 also see these dry-run sub-checks as true before treating the runtime chain as
 healthy:
 
@@ -1406,13 +1407,13 @@ healthy:
 | --- | --- |
 | `required_scenarios_present` | Confirms the no-signal, mock signal, missing fact, conflict, blocker-review, and closed-loop scenarios are all represented. |
 | `all_scenarios_passed` | Confirms every dry-run scenario passed. |
-| `dangerous_effects_absent` | Confirms no forbidden effect flag escaped the dry-run packet. |
+| `dangerous_effects_absent` | Confirms no forbidden effect flag escaped the dry-run artifact. |
 | `disabled_smoke_not_real_execution_proof` | Prevents disabled smoke from being mistaken for real execution evidence. |
 | `operation_layer_evidence_relay_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
 | `fresh_signal_fast_auto_chain_checked` | Confirms mock fresh signal reaches candidate/authorization readiness, FinalGate dispatch, and Operation Layer evidence readiness without calling real submit. |
 | `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
 | `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
-| `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets rather than project-stopping chat confirmations, while real submit remains forbidden. |
+| `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked evidence rather than project-stopping chat confirmations, while real submit remains forbidden. |
 | `common_execution_chain_reuse_checked` | Confirms MPG / TEQ / FBS / PMR / SOR reuse the shared execution chain and remain input-only StrategyGroup adapters. |
 | `strategygroup_adapter_boundary_checked` | Confirms each StrategyGroup handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, and hard stops, while candidate/auth, FinalGate, Operation Layer, finalize, reconciliation, settlement, and Owner readmodel remain in the shared runtime pipe. |
 | `selected_strategygroup_dispatch_guard_checked` | Confirms selected MPG-001 mock fresh signal can reach FinalGate dispatch while an out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer. |
@@ -1420,7 +1421,7 @@ healthy:
 Operation Layer blockers such as active position, open order, missing protection,
 missing budget, duplicate-submit risk, and symbol/side/notional/leverage scope
 mismatch must not stop project progress or watcher observation. They must
-produce an auditable review packet and Owner-readable unavailable/intervention
+produce auditable review evidence and Owner-readable unavailable/intervention
 state, but `real_submit_allowed` must remain false until the blocker is
 resolved through the official path.
 
@@ -1431,19 +1432,19 @@ resolved through the official path.
 and Owner Console detail surfaces distinguish normal market waiting from
 submit-blocking safety conditions.
 
-The packet also projects the common readiness decision at stable top-level
-fields so automation and UI consumers do not need to know internal packet
+The artifact also projects the common readiness decision at stable top-level
+fields so automation and external clients do not need to know internal artifact
 nesting:
 
 | Field | Meaning |
 | --- | --- |
 | `ready_for_real_order_action` | Direct boolean mirror of the common real-order boundary decision. It remains `false` while waiting for market, missing facts, blocked by safety matrix items, or before official Operation Layer readiness. |
 | `checks.ready_for_real_order_action` | Machine-check mirror for smoke tests, heartbeat monitors, and readmodel consumers. |
-| `next_safe_checkpoint` | Direct Owner/runtime continuation point, such as `continue_watcher_observation` while no fresh signal exists. |
+| `non_authority_checkpoint` | Owner/runtime continuation checkpoint, such as `continue_watcher_observation` while no fresh signal exists; not submit authority. |
 
 `owner-console-source-readiness` and the product-state refresh script now
 prefer these top-level fields first, then fall back to `checks` and the older
-`real_order_boundary` shape only for compatibility with historical packets.
+`real_order_boundary` shape only for compatibility with historical artifacts.
 
 | Matrix item | Purpose |
 | --- | --- |
@@ -1480,7 +1481,7 @@ submit.
 `Operation Layer evidence ready` is not sufficient by itself to open the real
 order boundary. If any `real_order_readiness_matrix` item has
 `blocks_real_submit=true`, `ready_for_real_order_action` must remain false and
-the packet must record `matrix_submit_blocker:<key>`.
+the status artifact must record `matrix_submit_blocker:<key>`.
 
 This keeps the project moving while preserving the live-funds boundary:
 
@@ -1488,7 +1489,7 @@ This keeps the project moving while preserving the live-funds boundary:
 | --- | --- | --- |
 | No fresh signal | Continue watcher observation | Closed |
 | Fresh signal with candidate/auth/FinalGate progress | Continue automatic evidence chain | Closed until Operation Layer and matrix pass |
-| Operation Layer evidence ready but matrix blocker exists | Record submit-blocker review packet | Closed |
+| Operation Layer evidence ready but matrix blocker exists | Record submit-blocker review evidence | Closed |
 | Operation Layer evidence ready and matrix has no submit blockers | Call official Operation Layer only | Open inside selected Owner-allocated subaccount/profile boundary |
 
 Submit blockers such as active position, open order, missing protection,
@@ -1497,18 +1498,18 @@ mismatch therefore become reviewable evidence and Owner-readable status, not
 per-strategy execution forks or opaque project-wide chat confirmations.
 
 Regression coverage now exercises the full submit-blocker family while the
-packet is otherwise `official_operation_layer_evidence_ready`: active position,
+status artifact is otherwise `official_operation_layer_evidence_ready`: active position,
 open order, missing protection, missing budget, duplicate submit, and
 symbol/side/notional/leverage mismatch all keep
 `ready_for_real_order_action=false` and emit `matrix_submit_blocker:<key>`.
 
 `strategygroup-runtime-goal-status.json` also emits an explicit
 `submit_blocker_review` object under `evidence` and mirrored fields under
-`real_order_boundary`. When these blockers appear, the packet states:
+`real_order_boundary`. When these blockers appear, the status artifact states:
 
 | Field | Meaning |
 | --- | --- |
-| `submit_blocker_review.required=true` | A submit-blocker review packet should be recorded. |
+| `submit_blocker_review.required=true` | Submit-blocker review evidence should be recorded. |
 | `submit_blocker_review.project_progress_allowed=true` | The project can continue with review/repair work instead of waiting for chat confirmation. |
 | `submit_blocker_review.continue_observation_allowed=true` | Watcher observation can continue while real submit stays closed. |
 | `submit_blocker_review.real_submit_allowed=false` | No real exchange action is allowed until the blocker is resolved through the official path. |
@@ -1563,12 +1564,12 @@ specific code.
 ### 2026-06-17 Scoped Dry-Run Proof Tightening
 
 The dry-run audit chain keeps `scenario_count=14` but now strengthens the
-`scoped_pipeline_operation_layer_handoff` scenario:
+`scoped_pipeline_operation_layer_submit_projection` scenario:
 
 ```text
 scoped pipeline evidence
 -> dispatcher accepts Operation Layer evidence
--> handoff packet is built from the same evidence IDs
+-> handoff artifact is built from the same evidence IDs
 -> official first-real-submit endpoint is called in disabled-smoke mode
 -> dispatcher can also call the same endpoint in disabled-smoke mode
 -> owner_confirmed_for_first_real_submit_action=false
@@ -1582,26 +1583,26 @@ the existing real gateway action mode as the default. It is still not real
 execution proof and does not authorize bypassing action-time FinalGate or the
 official Operation Layer.
 
-### 2026-06-17 Watcher Packet Atomic Deploy Checkpoint
+### 2026-06-17 Watcher Artifact Atomic Deploy Checkpoint
 
 Tokyo is now deployed at
 `0414db6fd1a3575d27019663fb39bfd91d5175db` through the bounded git deploy path.
-This deploy is a runtime/watcher packet durability repair, not a frontend
+This deploy is a runtime/watcher artifact durability repair, not a static client
 publish and not a trading action.
 
 | Item | Result |
 | --- | --- |
 | Release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0414db6f-watcher-packet-atomic-writes` |
 | Deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
-| Atomic packet writes | `runtime-dry-run-audit-chain.json`, `runtime-execution-chain-closure-status.json`, `strategygroup-runtime-goal-status.json`, and `product-state-refresh-packet.json` now use temp-file replacement |
+| Atomic artifact writes | `runtime-dry-run-audit-chain.json`, `runtime-execution-chain-closure-status.json`, `strategygroup-runtime-goal-status.json`, and compatibility artifact file `product-state-refresh-packet.json` now use temp-file replacement |
 | Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
 | Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
-| Runtime progress | `P0=waiting_for_market`, `P0.5=ready`, `product_gaps=[]`, `blockers=[]` |
+| Runtime progress | `P0=waiting_for_market`, `Signal Observation grade=ready`, `product_gaps=[]`, `blockers=[]` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, or order-sizing mutation |
 
-The static Owner Console frontend has already been removed from this main
-runtime worktree. Frontend experiments and future UI implementation remain
-external and do not affect watcher, dry-run audit, FinalGate readiness,
+The static Owner Console product client has already been removed from this main
+runtime worktree. Static client experiments and future product-client implementation
+remain external and do not affect watcher, dry-run audit, FinalGate readiness,
 Operation Layer evidence preparation, or runtime monitoring.
 
 ### 2026-06-17 Local Dry-Run Deploy-Channel Context Checkpoint
@@ -1627,7 +1628,7 @@ the server path.
 The low-interaction Tokyo snapshot now reads `strategygroup-runtime-goal-status`
 checks from the nested `checks` object as well as top-level compatibility
 fields. This keeps the Owner progress layer from losing important goal-loop
-facts when the packet is produced by the current builder.
+facts when the artifact is produced by the current builder.
 
 | Field | Snapshot behavior |
 | --- | --- |
@@ -1649,12 +1650,12 @@ the segment.
 | --- | --- |
 | `fresh_or_mock_signal` | `fresh_signal_fast_auto_chain_checked`, `mock_fresh_signal_dry_run_pass` |
 | `required_facts_readiness` | `required_facts_readiness_checked`, `required_facts_missing` |
-| `candidate_authorization_evidence` | `non_executing_prepare_auto_bridge_checked`, `non_executing_prepare_auto_bridge` |
-| `action_time_finalgate` | `all_selected_strategygroups_reach_finalgate_dispatch_checked`, `non_executing_prepare_auto_bridge` |
-| `official_operation_layer_evidence_handoff` | `operation_layer_evidence_relay_checked`, `scoped_pipeline_operation_layer_handoff` |
+| `candidate_authorization_evidence` | `execution_attempt_rehearsal_prepare_checked`, `execution_attempt_rehearsal_prepare` |
+| `action_time_finalgate` | `all_selected_strategygroups_reach_finalgate_dispatch_checked`, `execution_attempt_rehearsal_prepare` |
+| `official_operation_layer_evidence_relay_projection` | `operation_layer_evidence_relay_checked`, `scoped_pipeline_operation_layer_submit_projection` |
 | `disabled_dry_run_proof` | `disabled_smoke_not_real_execution_proof`, `mock_operation_layer_submit_finalize_pass` |
 
-This makes the non-market closure proof auditable from one packet without
+This makes the non-market closure proof auditable from one artifact without
 re-reading all raw dry-run artifacts. It remains non-executing and does not
 promote disabled smoke into real execution proof.
 
@@ -1663,7 +1664,7 @@ promote disabled smoke into real execution proof.
 Tokyo is now deployed at
 `6a49b8ba9904a10d21f52e946e84bd33d494af84` through the bounded git deploy
 path. This deploy publishes the non-market closure evidence map and the latest
-monitoring/readability repairs. It does not publish or depend on a frontend.
+monitoring/readability repairs. It does not publish or depend on a static client.
 
 | Item | Result |
 | --- | --- |
@@ -1675,7 +1676,7 @@ monitoring/readability repairs. It does not publish or depend on a frontend.
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, or order-sizing mutation |
 
 The local low-interaction snapshot reader now also projects
-`goal_chain_segment_evidence` from the closure packet, so one snapshot can show
+`goal_chain_segment_evidence` from the closure artifact, so one snapshot can show
 which dry-run scenarios proved each objective segment.
 
 ### 2026-06-17 Pilot Confidence Floor Checkpoint
@@ -1735,7 +1736,7 @@ loop.
 ### 2026-06-17 Runtime Monitor Exit Matrix Schema Checkpoint
 
 The low-noise runtime monitor now treats the post-submit exit outcome matrix as
-part of the objective-chain progress surface. Fresh local closure packets
+part of the objective-chain progress surface. Fresh local closure artifacts
 already prove seven objective segments; the daily-check cache schema is bumped
 so old six-segment cache artifacts cannot remain quietly accepted after this
 P0 exit-hardening change.
@@ -1778,7 +1779,7 @@ new runtime head and reported healthy waiting-for-market state.
 | Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
 | Postdeploy daily check | `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
 | Required dry-run checks | `runtime_dry_run_missing_required_checks=[]` |
-| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `owner_intervention_required=false` |
+| Goal progress | `P0=waiting_for_market`, `Signal Observation grade=ready`, `owner_intervention_required=false` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Exchange-Native Hard Stop Shape Checkpoint
@@ -1825,9 +1826,9 @@ budget settlement, and review actually completed.
 | Domain contract | `RuntimePostSubmitFinalizePacket` now emits `post_submit_reconciliation_evidence_id`, `post_submit_finalize_complete`, `post_submit_reconciliation_matched`, `post_submit_budget_settled`, and `submit_outcome_review_recorded` |
 | Dispatcher guard | `runtime_signal_watcher_resume_dispatcher.py` blocks `finalized_ready_for_next_attempt` when any close-loop truth field is absent or false |
 | Dry-run audit | `post_submit_closed_loop_evidence_guard` now covers missing reconciliation evidence plus false finalize/reconciliation/budget/review truth cases |
-| Official proof | `runtime_official_post_submit_finalize_proof.py` carries the same close-loop truth fields into its proof packet and top-level report |
+| Official proof | `runtime_official_post_submit_finalize_proof.py` carries the same close-loop truth fields into its proof artifact and top-level report |
 | Local validation | `python3 -m py_compile ...`; targeted tests `54 passed`; expanded post-submit/closure/readmodel tests `314 passed, 1 skipped`; dry-run audit `status=passed` |
-| Current owner progress | `status=not_complete_runtime_processing`, `non_market_gaps=0`, `P0.5=ready`, `owner_intervention_required=false`, `remote_interaction_count=0` for goal-progress; one L1 read-only daily-check refresh reported `remote_interaction_count=1` |
+| Current owner progress | `status=not_complete_runtime_processing`, `non_market_gaps=0`, `Signal Observation grade=ready`, `owner_intervention_required=false`, `remote_interaction_count=0` for goal-progress; one L1 read-only daily-check refresh reported `remote_interaction_count=1` |
 | Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch or explicit Owner request |
 | Safety proof | Local tests and one read-only cache refresh only; no server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
@@ -1835,19 +1836,19 @@ budget settlement, and review actually completed.
 
 Postdeploy acceptance for `90ab93c1` exposed a product-state false alarm:
 `runtime-live-closure-evidence.json` was rebuilt as an official live closure
-packet from passive runtime reports such as handoff/intake, goal-status, and
-waiting-for-market resume packets. Those reports can carry sample or stale
+artifact from passive runtime reports such as handoff/intake, goal-status, and
+waiting-for-market resume artifacts. Those reports can carry sample or stale
 signal/candidate IDs, but they are not official closure sources.
 
 | Item | Result |
 | --- | --- |
-| Root cause | `refresh_runtime_live_closure_evidence_packets.py` included every non-dry-run JSON in the watcher report directory and then marked the aggregate as `official_live_closure_evidence` |
+| Root cause | `refresh_runtime_live_closure_evidence_artifacts.py` included every non-dry-run JSON in the watcher report directory and then marked the aggregate as `official_live_closure_evidence`; the old packet-named command has been removed |
 | Symptom | Fresh postdeploy daily check returned `degraded` with `live_closure_evidence:*_mismatch` and `*_missing` product gaps despite no exchange write and no real submit |
-| Fix | Passive report scopes such as `handoff`, `intake`, `goal_status`, `product_state_refresh`, `source_readiness`, `deployment_readiness`, `bootstrap`, and observation reports are skipped before live closure packet assembly |
+| Fix | Passive report scopes such as `handoff`, `intake`, `goal_status`, `product_state_refresh`, `source_readiness`, `deployment_readiness`, `bootstrap`, and observation reports are skipped before live closure artifact assembly |
 | Read-error behavior | Malformed historical JSON artifacts in the long-running watcher report directory are recorded in `read_errors` but do not fail the default refresh; `--strict-read-errors` keeps the blocker behavior available for strict offline audits |
 | Preserved path | Real closure sources still include live signal, RequiredFacts/live facts, candidate authorization, action-time FinalGate, Operation Layer, exchange submit, hard stop/protection, reconciliation, settlement, and review markers |
-| Validation | `py_compile` passed; `119 passed` across `test_refresh_runtime_live_closure_evidence_packets.py`, `test_strategygroup_runtime_product_state_refresh.py`, `test_tokyo_runtime_snapshot.py`, `test_strategygroup_runtime_daily_check.py`, `test_strategygroup_runtime_goal_progress_audit.py`, `test_runtime_first_bounded_live_order_completion_audit.py`, and `test_tokyo_runtime_deploy_session.py` |
-| Deployment | Stage-worthy because Tokyo currently regenerates a false official closure packet; deploy in the next bounded git apply only |
+| Validation | `py_compile` passed; `119 passed` across `test_refresh_runtime_live_closure_evidence_artifacts.py`, `test_strategygroup_runtime_product_state_refresh.py`, `test_tokyo_runtime_snapshot.py`, `test_strategygroup_runtime_daily_check.py`, `test_strategygroup_runtime_goal_progress_audit.py`, `test_runtime_first_bounded_live_order_completion_audit.py`, and `test_tokyo_runtime_deploy_session.py` |
+| Deployment | Stage-worthy because Tokyo currently regenerates a false official closure artifact; deploy in the next bounded git apply only |
 | Safety proof | Local script/tests only in this checkpoint; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Closure Truth And Source Filter Deploy Checkpoint
@@ -1870,14 +1871,14 @@ product gaps and blockers are cleared.
 ### 2026-06-18 Stale Wakeup Waiting Resume Local Checkpoint
 
 The low-noise monitor exposed a status-classification edge case: a stale
-`wakeup-packet.json` could still push the Owner progress layer into
+`wakeup-evidence.json` could still push the Owner progress layer into
 `fresh_signal_processing` even when the authoritative `latest-summary`,
-`post-signal-resume-pack`, `resume-dispatch-packet`, and pilot status had
+`post-signal-resume-pack`, `resume-dispatch-artifact`, and pilot status had
 already returned to waiting-for-market semantics.
 
 | Item | Result |
 | --- | --- |
-| Root cause | `_current_status` still considered `wakeup-packet.json` fresh-chain statuses even after `_has_fresh_signal` had correctly returned `false` |
+| Root cause | `_current_status` still considered `wakeup-evidence.json` fresh-chain statuses even after `_has_fresh_signal` had correctly returned `false` |
 | Fix | `build_strategygroup_runtime_goal_status.py` now returns `waiting_for_signal` when fresh signal is absent and authoritative latest/post-resume evidence is waiting; `wakeup` participates in chain progression only when `fresh_signal_present=true` |
 | Regression test | Added `test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market` |
 | Validation | `test_strategygroup_runtime_goal_status.py`: `32 passed`; monitor/readmodel suite: `122 passed`; expanded runtime monitor/deploy-session suite: `151 passed`; py_compile passed |
@@ -1887,7 +1888,7 @@ already returned to waiting-for-market semantics.
 ### 2026-06-18 Stale Wakeup Waiting Resume Deploy Checkpoint
 
 The stale-wakeup status fix was deployed because the live monitor kept reading
-the old server-side goal-status packet as `processing`. After deploy and one
+the old server-side goal-status artifact as `processing`. After deploy and one
 fresh L1 postdeploy check, the server-side Owner progress layer returned to
 healthy waiting-for-market semantics.
 
@@ -1898,7 +1899,7 @@ healthy waiting-for-market semantics.
 | Runtime deploy apply | `output/tokyo-git-deploy-apply-6239199b.json`: `status=applied`, interaction `L3_bounded_deploy_apply`, remote interactions `7` |
 | Deploy session | `output/tokyo-runtime-deploy-session-6239199b.json`: `status=waiting_for_market`, remote interactions `8`, blockers/product gaps/warnings all empty |
 | Daily check cache | `output/runtime-monitor/latest-daily-check.json`: `status=waiting_for_market`, notification `DONT_NOTIFY`, waiting keys `fresh_signal`, `candidate_authorization`, `action_time_finalgate`, `official_operation_layer` |
-| Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `P0.5=ready`, blockers/product gaps empty |
+| Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `Signal Observation grade=ready`, blockers/product gaps empty |
 | Completion audit | `output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json`: `not_complete_waiting_for_market`, non-market gaps empty, market-dependent remaining `5` |
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head `6239199be96111585e9d1b2bf51816b2d71746b0` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
@@ -1923,9 +1924,9 @@ parallel local commands.
 
 ### 2026-06-18 Local Sequence Live-Cutover Refresh Checkpoint
 
-The local monitor sequence now refreshes the live-cutover readiness packet
+The local monitor sequence now refreshes the live-cutover readiness artifact
 before goal-progress and P0 completion audit. This prevents stale
-`latest-live-cutover-readiness.json` packets from hiding or inventing
+`latest-live-cutover-readiness.json` artifacts from hiding or inventing
 first-live-order closure gaps after the live-closure contract gains stricter
 proof requirements.
 
@@ -1933,7 +1934,7 @@ proof requirements.
 | --- | --- |
 | Local sequence order | `daily_check -> live_cutover_readiness -> goal_progress -> completion_audit` |
 | Completion audit strictness | `runtime_first_bounded_live_order_completion_audit.py` now requires all 13 first-live closure evidence keys and all first-order live proof guards from the cutover contract |
-| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover packets to `tmp_path`, not the runtime-monitor cache |
+| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover artifacts to `tmp_path`, not the runtime-monitor cache |
 | Automation prompt | `tokyo-runtime-quiet-monitor` describes live-cutover readiness refresh inside the local zero-remote sequence |
 | Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
 | Deployment | Not deployed; this is local monitor/audit hardening only |
@@ -1955,7 +1956,7 @@ confirmation.
 | Removed non-market blocker | `--standing-authorized-first-real-submit` satisfies the first-real-submit execution guard without the legacy env string |
 | Preserved hard gates | `--execute-real-submit`, prearmed evidence ids, action-time FinalGate, official Operation Layer, protection, idempotency, deployment readiness, and post-submit accounting remain required |
 | Followup next step | Disabled-smoke completion now points to waiting for a fresh signal and then running the standing-authorized official Operation Layer chain |
-| Local validation | `py_compile` passed; first-real-submit API flow, action authorization packet, and active-observation followup tests: `57 passed` |
+| Local validation | `py_compile` passed; first-real-submit API flow, action authorization evidence, and active-observation followup tests: `57 passed` |
 | Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
 | Safety proof | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
@@ -1963,7 +1964,7 @@ confirmation.
 
 The automatic resume dispatcher now makes the first bounded live-order cutover
 authorization model explicit all the way to the official Operation Layer submit
-packet. The official endpoint still receives
+payload. The official endpoint still receives
 `owner_confirmed_for_first_real_submit_action=true` for real submit, but the
 dispatcher now records that this is satisfied by standing authorization inside
 the selected StrategyGroup and allocated subaccount boundary, not by a new
@@ -1971,8 +1972,8 @@ per-order chat confirmation.
 
 | Item | Result |
 | --- | --- |
-| Automatic path | `runtime_signal_watcher_resume_dispatcher.py` carries `standing_authorized_first_real_submit=true`, `owner_chat_confirmation_required_for_real_submit=false`, and `legacy_owner_confirmation_env_required=false` in Operation Layer command and submit packets |
-| Regression guard | Official Operation Layer submit is blocked before POST if a packet regresses to missing standing authorization, chat confirmation required, or legacy env required |
+| Automatic path | `runtime_signal_watcher_resume_dispatcher.py` carries `standing_authorized_first_real_submit=true`, `owner_chat_confirmation_required_for_real_submit=false`, and `legacy_owner_confirmation_env_required=false` in Operation Layer command and submit payloads |
+| Regression guard | Official Operation Layer submit is blocked before POST if the payload regresses to missing standing authorization, chat confirmation required, or legacy env required |
 | Disabled smoke boundary | Disabled smoke keeps `standing_authorization_consumed_for_real_submit=false`, so it remains rehearsal proof only |
 | Local validation | `py_compile` passed; dispatcher tests: `40 passed` |
 | Local monitor sequence | `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
@@ -1992,21 +1993,21 @@ or the legacy `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env gate again.
 | Relay details | `operation_layer_relay_checks` proves standing authorization is bound, chat confirmation is not required, and the legacy env gate is not required |
 | Monitor integration | Daily check and goal-progress entry fast-chain readiness include the new required check |
 | Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
-| Local packet refresh | `output/runtime-monitor/latest-runtime-dry-run-audit-chain.json` now reports `operation_layer_standing_authorization_relay_checked=true` |
+| Local artifact refresh | `output/runtime-monitor/latest-runtime-dry-run-audit-chain.json` now reports `operation_layer_standing_authorization_relay_checked=true` |
 | Local monitor sequence | `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-19 Observation Decision Loop Gap Closure Checkpoint
 
-The P0.5 local loop now stops treating broader observe-only would-enter rows as
-unreviewed once the opportunity decision loop has converted them into repeatable
-decision output. This keeps the roadmap focused on useful next work instead of
-re-reporting an already reviewed observation-scope item.
+The Signal Observation grade local loop now stops treating broader observe-only
+would-enter rows as unreviewed once the opportunity review work loop has converted
+them into repeatable decision output. This keeps the roadmap focused on useful
+next work instead of re-reporting an already reviewed observation-scope item.
 
 | Item | Result |
 | --- | --- |
-| Closed loop | `opportunity_decision_loop=decision_loop_ready` clears `observation_scope_expansion_review_needed` when no conditional L2 dry-run or tier-policy update is pending |
+| Closed loop | `opportunity_review_work_loop=review_work_loop_ready` clears `observation_scope_expansion_review_needed` when no conditional L2 dry-run or tier-policy update is pending |
 | Preserved escalation | Actual conditional L2 intake/tier updates, failed dry-runs, and forbidden effects still remain non-market gaps |
 | Current local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: blockers empty, non-market gaps empty, remote interactions `0`, server mutation `false`, approaches real order `false` |
 | Remaining state | `needs_refresh` comes from monitor cache freshness, not from opportunity review or live-order readiness |
@@ -2015,16 +2016,17 @@ re-reporting an already reviewed observation-scope item.
 
 ### 2026-06-19 Priority-Aware Observation Expansion Checkpoint
 
-The opportunity discovery path now distinguishes actionable P0.5/P1
-would-enter observations from low-priority parked observations before they
-become roadmap pressure. This keeps the main loop focused on opportunity
-quality and replay closure, not on reviving parked vocabulary.
+The opportunity discovery path now distinguishes high-priority Signal
+Observation grade / P1 would-enter observations from low-priority parked
+observations before they become roadmap pressure. This keeps the main loop
+focused on opportunity quality and replay closure, not on reviving parked
+vocabulary.
 
 | Item | Result |
 | --- | --- |
 | Priority join | Signal coverage expansion rows include policy priority, L2 readiness, and recommended action from `main-control-signal-coverage-expansion-policy.json` |
-| Current RBR handling | RBR would-enter is recorded as `low_priority_observe_only_would_enter_parked`, not as a P0.5 expansion push |
-| High-priority preservation | P0.5/P1 rows still trigger `review_needed_broader_observe_only_would_enter` |
+| Current RBR handling | RBR would-enter is recorded as `low_priority_observe_only_would_enter_parked`, not as a Signal Observation expansion push |
+| High-priority preservation | Signal Observation grade / P1 rows still trigger `review_needed_broader_observe_only_would_enter` |
 | Current local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: expansion review low-priority parked, blockers empty, non-market gaps empty, remote interactions `0`, server mutation `false`, approaches real order `false` |
 | Deployment | Not deployed; local diagnostic classification only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
@@ -2049,7 +2051,8 @@ sequence.
 
 No-signal periods now produce useful high-priority no-action review input. The
 diagnostic does not only report whether would-enter exists; it also shows which
-P0.5/P1 StrategyGroups are visible, not triggering, and why.
+Signal Observation grade / P1 StrategyGroups are visible, not triggering, and
+why.
 
 | Item | Result |
 | --- | --- |
@@ -2062,10 +2065,10 @@ P0.5/P1 StrategyGroups are visible, not triggering, and why.
 
 ## Boundaries
 
-- Keep UI experiments outside mainline; the Owner Console source-readiness
+- Keep static product-client experiments outside mainline; the Owner Console source-readiness
   contract remains mainline-owned in `/Users/jiangwei/Documents/final`.
 - Keep strategy research in `/Users/jiangwei/Documents/final-strategy-research`.
 - Keep main runtime work in `/Users/jiangwei/Documents/final`.
-- Do not expose internal gate names as Owner homepage labels.
+- Do not expose internal gate names as primary Owner labels.
 - Do not treat weak strategy evidence as a live-safety blocker.
 - Do not treat missing audit detail as a reason to hide StrategyGroups.

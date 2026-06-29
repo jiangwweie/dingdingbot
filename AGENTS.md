@@ -20,7 +20,7 @@ docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
-docs/current/TRADEABILITY_VERDICT_CONTRACT.md
+docs/current/TRADEABILITY_DECISION_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
@@ -93,7 +93,7 @@ Advance strategies by experiment value, known risk envelope, replay/paper
 evidence, and main-control absorbability, not by perfect-profit proof.
 
 Strategy tradeability follows
-`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`: every active or newly absorbed
+`docs/current/TRADEABILITY_DECISION_CONTRACT.md`: every active or newly absorbed
 StrategyGroup candidate must answer whether it can trade now. If it cannot, the
 system must identify the first blocker, blocker owner, next action, and
 post-action state. Do not compress asset-admission, Owner-policy, fact-mapping,
@@ -143,7 +143,7 @@ surfaces:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
@@ -168,10 +168,10 @@ observation
 ```
 
 Owner scoped risk acceptance may advance `trial_eligible`, observation, shadow,
-armed-observation, or L4 eligibility. It must not set `actionable_now=true`,
-bypass action-time RequiredFacts, bypass FinalGate, bypass Operation Layer,
-ignore missing protection, ignore stale facts, or override account/exchange
-safety facts.
+armed-observation, or L4 eligibility. It must not grant runtime trade/order
+authority, bypass action-time RequiredFacts, bypass FinalGate, bypass Operation
+Layer, ignore missing protection, ignore stale facts, or override
+account/exchange safety facts.
 
 Do not convert StrategyGroup governance into Owner manual operation. Do not ask
 the Owner to manually judge raw no-action rows, replay samples, signal
@@ -242,7 +242,7 @@ Gate checks must be scoped by execution surface:
 | --- | --- | --- |
 | `rehearsal` | Unsafe or inconsistent local proof, missing test fixtures, broken lifecycle model | Non-executing dry-run, simulation, or packet generation merely because there is no live signal |
 | `shadow` | Candidate/readiness evidence that would mislead tier or Owner state | Read-only observation, replay, classifier repair, RequiredFacts mapping, or monitor integration |
-| `live_submit` | Real exchange write, stale facts, missing protection, duplicate submit, wrong scope, FinalGate/Operation Layer bypass | Engineering closure that remains non-executing and keeps `actionable_now=false` |
+| `live_submit` | Real exchange write, stale facts, missing protection, duplicate submit, wrong scope, FinalGate/Operation Layer bypass | Engineering closure that remains non-executing and does not grant Runtime Safety State submit authority |
 | `review` | Review claims unsupported by evidence | Recording negative evidence, rough cost estimates, or simulator outcomes as non-authority review input |
 
 No live-only condition may block pre-live engineering closure. A missing fresh
@@ -252,8 +252,8 @@ dry-run, paper Operation Layer, post-submit lifecycle rehearsal, rough cost/PnL
 calculation, or Review Ledger shape work.
 
 Rehearsal and simulation may unlock the next engineering capability, but they
-must never set `actionable_now=true`, pretend to be live RequiredFacts, or become
-Operation Layer submit authority.
+must never grant runtime trade/order authority, pretend to be live
+RequiredFacts, or become Operation Layer submit authority.
 
 Monitor cache freshness is a reporting constraint, not a trading safety gate.
 `runtime_progress_cache_stale`, `runtime_progress_cache_missing`,

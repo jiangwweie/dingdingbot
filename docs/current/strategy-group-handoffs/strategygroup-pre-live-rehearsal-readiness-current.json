@@ -1,15 +1,6 @@
 {
   "capability_unlocked": "Standard local sequence can regenerate pre_live_rehearsal_ready without claiming live submit authority.",
   "closed_engineering_problem": "Quality Wave governance is now connected to monitor sequence, explicit handoff boundaries, BTPC revise guards, lifecycle rehearsal, and one pre-live readiness checkpoint.",
-  "decision": {
-    "actionable_now": false,
-    "default_next_step": "stage_worthy_local_checkpoint_ready_for_owner_deploy_decision",
-    "deploy_worthy_local_checkpoint": true,
-    "live_outcome_calibrated": false,
-    "live_submit_ready": false,
-    "pre_live_rehearsal_ready": true,
-    "real_order_authority": false
-  },
   "input_rows": [
     {
       "expected_status": "quality_wave_ready",
@@ -63,8 +54,20 @@
     "official_operation_layer_submit_path",
     "protection_account_and_exchange_facts"
   ],
+  "runtime_readiness_state": {
+    "default_next_step": "stage_worthy_local_checkpoint_ready_for_owner_deploy_decision",
+    "deploy_worthy_local_checkpoint": true,
+    "execution_attempt_source": false,
+    "live_outcome_calibrated": false,
+    "live_submit_ready": false,
+    "pre_live_rehearsal_ready": true,
+    "primary_judgment_source": false,
+    "readiness_scope": "pre_live_rehearsal",
+    "source_role": "pre_live_rehearsal_readiness_evidence",
+    "state_family": "Runtime Readiness State",
+    "tradeability_decision_source": false
+  },
   "safety_invariants": {
-    "actionable_now": false,
     "exchange_write_called": false,
     "final_gate_called": false,
     "live_outcome_calibrated": false,
@@ -74,7 +77,6 @@
     "operation_layer_called": false,
     "order_created": false,
     "order_sizing_defaults_changed": false,
-    "real_order_authority": false,
     "withdrawal_or_transfer_created": false
   },
   "schema": "brc.strategygroup_pre_live_rehearsal_readiness.v1",
@@ -82,43 +84,43 @@
   "status": "pre_live_rehearsal_ready",
   "strategygroup_decision_impact": [
     {
-      "actionable_now": false,
       "current_decision": "revise",
       "current_tier": "L2",
       "decision_impact": "revise lane guarded; L2 shadow may continue; no L4/live authority",
-      "real_order_authority": false,
+      "primary_judgment_source": false,
+      "source_role": "quality_evidence_provenance",
       "strategy_group_id": "BTPC-001"
     },
     {
-      "actionable_now": false,
       "current_decision": "keep_observing",
       "current_tier": "L1",
       "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
-      "real_order_authority": false,
+      "primary_judgment_source": false,
+      "source_role": "quality_evidence_provenance",
       "strategy_group_id": "VCB-001"
     },
     {
-      "actionable_now": false,
       "current_decision": "revise",
       "current_tier": "L1",
       "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
-      "real_order_authority": false,
+      "primary_judgment_source": false,
+      "source_role": "quality_evidence_provenance",
       "strategy_group_id": "LSR-001"
     },
     {
-      "actionable_now": false,
       "current_decision": "promote_review_only",
       "current_tier": "L1",
       "decision_impact": "observe-only decision retained with explicit missing handoff boundary",
-      "real_order_authority": false,
+      "primary_judgment_source": false,
+      "source_role": "quality_evidence_provenance",
       "strategy_group_id": "BRF-001"
     },
     {
-      "actionable_now": false,
       "current_decision": "park",
       "current_tier": "L1",
       "decision_impact": "park decision retained until material new edge evidence",
-      "real_order_authority": false,
+      "primary_judgment_source": false,
+      "source_role": "quality_evidence_provenance",
       "strategy_group_id": "RBR-001"
     }
   ],

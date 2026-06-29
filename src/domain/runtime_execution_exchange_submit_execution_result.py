@@ -17,8 +17,8 @@ from src.domain.runtime_execution_exchange_submit_enablement import (
     RuntimeExecutionExchangeSubmitEnablementDecision,
     RuntimeExecutionExchangeSubmitGateStatus,
 )
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreview,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreview,
 )
 
 
@@ -62,7 +62,7 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
 ):
     execution_result_id: str = Field(min_length=1, max_length=540)
     enablement_decision_id: str = Field(min_length=1, max_length=500)
-    packet_preview_id: str = Field(min_length=1, max_length=460)
+    submit_preview_id: str = Field(min_length=1, max_length=460)
     binding_id: str = Field(min_length=1, max_length=460)
     authorization_id: str = Field(min_length=1, max_length=220)
     execution_intent_id: str = Field(min_length=1, max_length=64)
@@ -226,7 +226,7 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
 def build_runtime_exchange_submit_execution_disabled_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     now_ms: int,
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
@@ -236,7 +236,7 @@ def build_runtime_exchange_submit_execution_disabled_result(
     warnings.append("exchange_submit_execution_disabled")
     return _execution_result(
         enablement_decision=enablement_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         status=(
             RuntimeExecutionExchangeSubmitExecutionStatus
             .EXCHANGE_SUBMIT_EXECUTION_DISABLED
@@ -258,7 +258,7 @@ def build_runtime_exchange_submit_execution_disabled_result(
 def build_runtime_exchange_submit_execution_blocked_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     blockers: list[str],
     warnings: list[str],
     now_ms: int,
@@ -269,7 +269,7 @@ def build_runtime_exchange_submit_execution_blocked_result(
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     return _execution_result(
         enablement_decision=enablement_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         status=RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED,
         submitted_orders=[],
         failed_local_order_id=None,
@@ -288,7 +288,7 @@ def build_runtime_exchange_submit_execution_blocked_result(
 def build_runtime_exchange_submit_execution_lock_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     now_ms: int,
     execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str,
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
@@ -296,7 +296,7 @@ def build_runtime_exchange_submit_execution_lock_result(
     warnings.append("exchange_submit_execution_lock_acquired")
     return _execution_result(
         enablement_decision=enablement_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         status=(
             RuntimeExecutionExchangeSubmitExecutionStatus
             .EXCHANGE_SUBMIT_EXECUTION_LOCK_ACQUIRED
@@ -318,7 +318,7 @@ def build_runtime_exchange_submit_execution_lock_result(
 def build_runtime_exchange_submit_execution_submitted_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     submitted_orders: list[RuntimeExecutionSubmittedExchangeOrder],
     exchange_call_count: int,
     now_ms: int,
@@ -327,7 +327,7 @@ def build_runtime_exchange_submit_execution_submitted_result(
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     return _execution_result(
         enablement_decision=enablement_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         status=(
             RuntimeExecutionExchangeSubmitExecutionStatus
             .EXCHANGE_SUBMIT_ORDERS_SUBMITTED
@@ -349,7 +349,7 @@ def build_runtime_exchange_submit_execution_submitted_result(
 def build_runtime_exchange_submit_execution_failed_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     submitted_orders: list[RuntimeExecutionSubmittedExchangeOrder],
     failed_local_order_id: str,
     failed_order_role: str,
@@ -371,7 +371,7 @@ def build_runtime_exchange_submit_execution_failed_result(
     ]
     return _execution_result(
         enablement_decision=enablement_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         status=status,
         submitted_orders=submitted_orders,
         failed_local_order_id=failed_local_order_id,
@@ -390,7 +390,7 @@ def build_runtime_exchange_submit_execution_failed_result(
 def _execution_result(
     *,
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     status: RuntimeExecutionExchangeSubmitExecutionStatus,
     submitted_orders: list[RuntimeExecutionSubmittedExchangeOrder],
     failed_local_order_id: str | None,
@@ -439,8 +439,8 @@ def _execution_result(
             f"{enablement_decision.authorization_id}"
         ),
         enablement_decision_id=enablement_decision.decision_id,
-        packet_preview_id=packet_preview.packet_preview_id,
-        binding_id=packet_preview.binding_id,
+        submit_preview_id=submit_preview.submit_preview_id,
+        binding_id=submit_preview.binding_id,
         authorization_id=enablement_decision.authorization_id,
         execution_intent_id=enablement_decision.execution_intent_id,
         runtime_instance_id=enablement_decision.runtime_instance_id,
@@ -448,13 +448,13 @@ def _execution_result(
         source_id=enablement_decision.source_id,
         semantic_ids=enablement_decision.semantic_ids,
         status=status,
-        symbol=packet_preview.symbol,
+        symbol=submit_preview.symbol,
         exchange_submit_action_authorization_id=(
             enablement_decision.exchange_submit_action_authorization_id
         ),
-        local_order_ids=list(packet_preview.local_order_ids),
-        entry_order_id=packet_preview.entry_order_id,
-        protection_order_ids=list(packet_preview.protection_order_ids),
+        local_order_ids=list(submit_preview.local_order_ids),
+        entry_order_id=submit_preview.entry_order_id,
+        protection_order_ids=list(submit_preview.protection_order_ids),
         submitted_orders=submitted_orders,
         submitted_local_order_ids=[order.local_order_id for order in submitted_orders],
         submitted_exchange_order_ids=submitted_exchange_ids,
@@ -480,7 +480,7 @@ def _execution_result(
         metadata={
             "scope": "runtime_execution_exchange_submit_execution_result",
             "enablement_decision_id": enablement_decision.decision_id,
-            "packet_preview_id": packet_preview.packet_preview_id,
+            "submit_preview_id": submit_preview.submit_preview_id,
             "exchange_submit_action_authorization_id": (
                 enablement_decision.exchange_submit_action_authorization_id
             ),

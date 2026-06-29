@@ -8,8 +8,8 @@
         "real_fresh_signal_absent_for_p0_live_lane"
       ],
       "evidence_stage": "trial_waiting",
-      "next_system_action": "MPG-001_no_action_visibility_and_routing_audit",
-      "strategy_group_id": "MPG-001"
+      "strategy_group_id": "MPG-001",
+      "strategy_review_checkpoint": "build_mpg_member_role_controls_v2_without_live_scope_expansion"
     },
     {
       "blocked_until": "engineering_evidence_closure",
@@ -17,12 +17,11 @@
       "evidence_gaps": [
         "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "would_enter_forward_outcome_pending:4h",
-        "promote_review_forward_positive_not_completed"
+        "would_enter_forward_outcome_pending:4h"
       ],
       "evidence_stage": "promote_review",
-      "next_system_action": "BRF-001_forward_outcome_and_requiredfacts_review",
-      "strategy_group_id": "BRF-001"
+      "strategy_group_id": "BRF-001",
+      "strategy_review_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
@@ -31,31 +30,18 @@
         "no_action_or_classifier_attribution_needs_closure"
       ],
       "evidence_stage": "revise",
-      "next_system_action": "BTPC-001_classifier_fact_source_revision_review",
-      "strategy_group_id": "BTPC-001"
+      "strategy_group_id": "BTPC-001",
+      "strategy_review_checkpoint": "BTPC-001_classifier_fact_source_revision_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
       "does_not_authorize_live_execution": true,
       "evidence_gaps": [
-        "would_enter_forward_outcome_pending:24h",
         "no_action_or_classifier_attribution_needs_closure"
       ],
       "evidence_stage": "revise",
-      "next_system_action": "LSR-001_classifier_fact_source_revision_review",
-      "strategy_group_id": "LSR-001"
-    },
-    {
-      "blocked_until": "engineering_evidence_closure",
-      "does_not_authorize_live_execution": true,
-      "evidence_gaps": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved"
-      ],
-      "evidence_stage": "identity_review",
-      "next_system_action": "MI-001_registry_identity_review",
-      "strategy_group_id": "MI-001"
+      "strategy_group_id": "LSR-001",
+      "strategy_review_checkpoint": "LSR-001_classifier_fact_source_revision_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
@@ -65,11 +51,23 @@
         "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved"
+        "would_enter_forward_outcome_pending:4h"
       ],
-      "evidence_stage": "identity_review",
-      "next_system_action": "CPM-RO-001_registry_identity_review",
-      "strategy_group_id": "CPM-RO-001"
+      "evidence_stage": "revise",
+      "strategy_group_id": "MI-001",
+      "strategy_review_checkpoint": "open_mi_identity_overlap_symbol_concentration_review"
+    },
+    {
+      "blocked_until": "engineering_evidence_closure",
+      "does_not_authorize_live_execution": true,
+      "evidence_gaps": [
+        "registry_identity_or_registry_row_missing",
+        "execution_tier_not_in_policy_or_registry",
+        "would_enter_forward_outcome_pending:24h"
+      ],
+      "evidence_stage": "revise",
+      "strategy_group_id": "CPM-RO-001",
+      "strategy_review_checkpoint": "open_cpm_ro_semantic_source_merge_quality_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
@@ -79,8 +77,8 @@
         "coverage_visibility_or_routing_needs_closure"
       ],
       "evidence_stage": "coverage_visibility_review",
-      "next_system_action": "FBS-001_no_action_visibility_and_routing_audit",
-      "strategy_group_id": "FBS-001"
+      "strategy_group_id": "FBS-001",
+      "strategy_review_checkpoint": "run_fbs_derivatives_fact_coverage_visibility_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
@@ -90,19 +88,34 @@
         "coverage_visibility_or_routing_needs_closure"
       ],
       "evidence_stage": "coverage_visibility_review",
-      "next_system_action": "SOR-001_no_action_visibility_and_routing_audit",
-      "strategy_group_id": "SOR-001"
+      "strategy_group_id": "SOR-001",
+      "strategy_review_checkpoint": "run_sor_session_no_action_visibility_review"
     },
     {
       "blocked_until": "engineering_evidence_closure",
       "does_not_authorize_live_execution": true,
-      "evidence_gaps": [],
+      "evidence_gaps": [
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h"
+      ],
       "evidence_stage": "observe",
-      "next_system_action": "VCB-001_continue_observe_only",
-      "strategy_group_id": "VCB-001"
+      "strategy_group_id": "VCB-001",
+      "strategy_review_checkpoint": "run_vcb_false_breakout_classifier_review"
+    },
+    {
+      "blocked_until": "engineering_evidence_closure",
+      "does_not_authorize_live_execution": true,
+      "evidence_gaps": [
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h"
+      ],
+      "evidence_stage": "park",
+      "strategy_group_id": "RBR-001",
+      "strategy_review_checkpoint": "keep_parked_until_material_new_edge_evidence"
     }
   ],
-  "generated_at_utc": "2026-06-23T02:06:27.398915+00:00",
+  "generated_at_utc": "2026-06-28T19:14:03.317228+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -113,61 +126,39 @@
     "remote_interaction_count": 0,
     "server_files_mutated": false
   },
-  "owner_policy_decision_queue": [
+  "owner_policy_queue": [
     {
-      "decision_kind": "member_role_exit_decay_without_live_scope_expansion",
-      "decision_source": "review_only_deep_dive_owner_decision",
       "does_not_authorize_live_execution": true,
       "evidence_stage": "trial_waiting",
       "live_permission_change": false,
-      "next_system_action_before_decision": "MPG-001_no_action_visibility_and_routing_audit",
+      "policy_kind": "member_role_exit_decay_without_live_scope_expansion",
+      "policy_source": "review_only_deep_dive_owner_policy",
       "runtime_owner_intervention_required": false,
-      "strategy_group_id": "MPG-001"
+      "strategy_group_id": "MPG-001",
+      "strategy_review_checkpoint_before_policy": "build_mpg_member_role_controls_v2_without_live_scope_expansion"
     },
     {
-      "decision_kind": "continue_promote_review_without_tier_or_live_change",
-      "decision_source": "review_only_deep_dive_owner_decision",
       "does_not_authorize_live_execution": true,
       "evidence_stage": "promote_review",
       "live_permission_change": false,
-      "next_system_action_before_decision": "BRF-001_forward_outcome_and_requiredfacts_review",
+      "policy_kind": "continue_promote_review_without_tier_or_live_change",
+      "policy_source": "review_only_deep_dive_owner_policy",
       "runtime_owner_intervention_required": false,
-      "strategy_group_id": "BRF-001"
-    },
-    {
-      "decision_kind": "formal_candidate_vs_sub_capability_vs_observe_or_park",
-      "decision_source": "review_only_deep_dive_owner_decision",
-      "does_not_authorize_live_execution": true,
-      "evidence_stage": "identity_review",
-      "live_permission_change": false,
-      "next_system_action_before_decision": "MI-001_registry_identity_review",
-      "runtime_owner_intervention_required": false,
-      "strategy_group_id": "MI-001"
-    },
-    {
-      "decision_kind": "formal_candidate_vs_sub_capability_vs_observe_or_park",
-      "decision_source": "review_only_deep_dive_owner_decision",
-      "does_not_authorize_live_execution": true,
-      "evidence_stage": "identity_review",
-      "live_permission_change": false,
-      "next_system_action_before_decision": "CPM-RO-001_registry_identity_review",
-      "runtime_owner_intervention_required": false,
-      "strategy_group_id": "CPM-RO-001"
+      "strategy_group_id": "BRF-001",
+      "strategy_review_checkpoint_before_policy": "BRF-001_forward_outcome_and_requiredfacts_review"
     }
   ],
   "owner_progress_projection": {
     "no_live_permission": true,
     "owner_intervention_required": false,
-    "owner_policy_decision_required_later": true,
-    "owner_summary": "P0 waits for a real executable signal; P0.5 has an active StrategyGroup portfolio board, engineering evidence queue, and review-only trial-candidate pool; no live permission changed.",
-    "p0_5_state": "portfolio_screening_active",
-    "p0_state": "waiting_for_market"
+    "owner_policy_confirmation_required_later": true,
+    "owner_summary": "P0 waits for a real executable signal; Signal Observation has an active StrategyGroup portfolio board, engineering evidence queue, and review-only trial-candidate pool; no live permission changed.",
+    "p0_state": "waiting_for_market",
+    "p0_state_source": "strategy_capture_gap_audit.owner_visibility_state.p0_state",
+    "signal_observation_state": "portfolio_screening_active"
   },
   "portfolio_rows": [
     {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "coverage_visibility_review",
       "blocked_policy_effects": [
         "registry_admission",
         "tier_policy_change",
@@ -176,6 +167,11 @@
         "mpg_member_live_scope_expansion",
         "real_order_scope_expansion"
       ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "MPG-001_no_action_visibility_and_routing_audit",
+        "recommendation": "coverage_visibility_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
       "cost_after_result_summary": {
         "12h": {
           "completed": 0,
@@ -224,23 +220,20 @@
       "live_permission_change": false,
       "live_permission_change_recommended_now": false,
       "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "MPG-001_no_action_visibility_and_routing_audit",
       "no_action_count": 0,
       "owner_label": "动量延续",
-      "owner_policy_decision_source": "review_only_deep_dive_owner_decision",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
+      "owner_policy_source": "review_only_deep_dive_owner_policy",
       "recent_opportunity_count": 0,
       "registry_decision_ref": "",
       "strategy_group_id": "MPG-001",
+      "strategy_review_checkpoint": "build_mpg_member_role_controls_v2_without_live_scope_expansion",
       "trial_eligible": true,
       "trial_eligible_source": "registry_baseline",
       "would_enter_forward_positive_count": 0
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "promote_review",
       "blocked_policy_effects": [
         "registry_admission",
         "tier_policy_change",
@@ -249,45 +242,46 @@
         "mpg_member_live_scope_expansion",
         "real_order_scope_expansion"
       ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+        "recommendation": "promote_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
       "cost_after_result_summary": {
         "12h": {
-          "completed": 0,
-          "pending": 1,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
+          "completed": 5,
+          "pending": 2,
+          "tradable_completed_ratio": 0.6,
+          "tradable_mfe_after_cost_count": 3,
           "unavailable_or_unknown": 0
         },
         "24h": {
-          "completed": 0,
-          "pending": 1,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
+          "completed": 4,
+          "pending": 3,
+          "tradable_completed_ratio": 0.75,
+          "tradable_mfe_after_cost_count": 3,
           "unavailable_or_unknown": 0
         },
         "4h": {
-          "completed": 0,
+          "completed": 6,
           "pending": 1,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
+          "tradable_completed_ratio": 0.5,
+          "tradable_mfe_after_cost_count": 3,
           "unavailable_or_unknown": 0
         }
       },
       "does_not_authorize_live_execution": true,
       "dominant_blocker_classes": [
         {
-          "count": 85,
+          "count": 107,
           "key": "market_structure_not_confirmed"
         },
         {
-          "count": 63,
-          "key": "no_action_other"
-        },
-        {
-          "count": 20,
+          "count": 55,
           "key": "classifier_threshold_not_met"
         },
         {
-          "count": 1,
+          "count": 7,
           "key": "observe_only_would_enter"
         }
       ],
@@ -295,67 +289,63 @@
       "evidence_gaps": [
         "would_enter_forward_outcome_pending:12h",
         "would_enter_forward_outcome_pending:24h",
-        "would_enter_forward_outcome_pending:4h",
-        "promote_review_forward_positive_not_completed"
+        "would_enter_forward_outcome_pending:4h"
       ],
       "evidence_stage": "promote_review",
       "evidence_stage_reasons": [
-        "audit_decision=promote_review"
+        "strategy_asset_current_decision=promote_review_only"
       ],
-      "evidence_strength": "material_no_action_gap",
+      "evidence_strength": "material_observe_only_evidence",
       "execution_tier": "L1",
       "execution_tier_source": "registry_baseline.default_tier",
       "forward_outcome_summary": {
         "by_window": {
           "12h": {
-            "completed": 0,
+            "completed": 5,
             "not_applicable": 0,
-            "pending": 1,
-            "tradable_mfe_after_cost_count": 0,
+            "pending": 2,
+            "tradable_mfe_after_cost_count": 3,
             "unavailable": 0,
             "unknown": 0
           },
           "24h": {
-            "completed": 0,
+            "completed": 4,
             "not_applicable": 0,
-            "pending": 1,
-            "tradable_mfe_after_cost_count": 0,
+            "pending": 3,
+            "tradable_mfe_after_cost_count": 3,
             "unavailable": 0,
             "unknown": 0
           },
           "4h": {
-            "completed": 0,
+            "completed": 6,
             "not_applicable": 0,
             "pending": 1,
-            "tradable_mfe_after_cost_count": 0,
+            "tradable_mfe_after_cost_count": 3,
             "unavailable": 0,
             "unknown": 0
           }
         },
-        "event_count": 1
+        "event_count": 7
       },
-      "high_priority_no_action_count": 168,
+      "high_priority_no_action_count": 162,
       "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
       "live_permission_change": false,
       "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 136,
-      "next_system_action": "BRF-001_forward_outcome_and_requiredfacts_review",
-      "no_action_count": 168,
+      "missed_no_action_forward_positive_count": 134,
+      "no_action_count": 162,
       "owner_label": "熊市反弹失败",
-      "owner_policy_decision_source": "review_only_deep_dive_owner_decision",
       "owner_policy_required": true,
       "owner_policy_required_now": false,
-      "recent_opportunity_count": 1,
+      "owner_policy_source": "review_only_deep_dive_owner_policy",
+      "recent_opportunity_count": 7,
       "registry_decision_ref": "keep_observing",
       "strategy_group_id": "BRF-001",
+      "strategy_review_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
       "trial_eligible": false,
       "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 0
+      "would_enter_forward_positive_count": 5
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "revise",
       "blocked_policy_effects": [
         "registry_admission",
         "tier_policy_change",
@@ -364,6 +354,11 @@
         "mpg_member_live_scope_expansion",
         "real_order_scope_expansion"
       ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
+        "recommendation": "revise",
+        "source_role": "capture_gap_observation_provenance"
+      },
       "cost_after_result_summary": {
         "12h": {
           "completed": 0,
@@ -400,7 +395,7 @@
       ],
       "evidence_stage": "revise",
       "evidence_stage_reasons": [
-        "audit_decision=revise"
+        "strategy_asset_current_decision=revise"
       ],
       "evidence_strength": "material_no_action_gap",
       "execution_tier": "L2",
@@ -413,24 +408,21 @@
       "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
       "live_permission_change": false,
       "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 152,
-      "next_system_action": "BTPC-001_classifier_fact_source_revision_review",
+      "missed_no_action_forward_positive_count": 155,
       "no_action_count": 169,
       "owner_label": "熊市回抽延续",
-      "owner_policy_decision_source": "none",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
+      "owner_policy_source": "none",
       "recent_opportunity_count": 0,
       "registry_decision_ref": "",
       "strategy_group_id": "BTPC-001",
+      "strategy_review_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
       "trial_eligible": false,
       "trial_eligible_source": "not_registry_trial_eligible",
       "would_enter_forward_positive_count": 0
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "revise",
       "blocked_policy_effects": [
         "registry_admission",
         "tier_policy_change",
@@ -439,6 +431,11 @@
         "mpg_member_live_scope_expansion",
         "real_order_scope_expansion"
       ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+        "recommendation": "revise",
+        "source_role": "capture_gap_observation_provenance"
+      },
       "cost_after_result_summary": {
         "12h": {
           "completed": 2,
@@ -448,10 +445,10 @@
           "unavailable_or_unknown": 0
         },
         "24h": {
-          "completed": 1,
-          "pending": 1,
+          "completed": 2,
+          "pending": 0,
           "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 1,
+          "tradable_mfe_after_cost_count": 2,
           "unavailable_or_unknown": 0
         },
         "4h": {
@@ -475,12 +472,11 @@
       ],
       "engineering_continue": true,
       "evidence_gaps": [
-        "would_enter_forward_outcome_pending:24h",
         "no_action_or_classifier_attribution_needs_closure"
       ],
       "evidence_stage": "revise",
       "evidence_stage_reasons": [
-        "audit_decision=revise"
+        "strategy_asset_current_decision=revise"
       ],
       "evidence_strength": "material_observe_only_evidence",
       "execution_tier": "L1",
@@ -492,6 +488,485 @@
             "not_applicable": 0,
             "pending": 0,
             "tradable_mfe_after_cost_count": 2,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "24h": {
+            "completed": 2,
+            "not_applicable": 0,
+            "pending": 0,
+            "tradable_mfe_after_cost_count": 2,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "4h": {
+            "completed": 2,
+            "not_applicable": 0,
+            "pending": 0,
+            "tradable_mfe_after_cost_count": 2,
+            "unavailable": 0,
+            "unknown": 0
+          }
+        },
+        "event_count": 2
+      },
+      "high_priority_no_action_count": 167,
+      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "live_permission_change": false,
+      "live_permission_change_recommended_now": false,
+      "missed_no_action_forward_positive_count": 0,
+      "no_action_count": 167,
+      "owner_label": "流动性扫盘/短线复活",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 2,
+      "registry_decision_ref": "keep_observing",
+      "strategy_group_id": "LSR-001",
+      "strategy_review_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+      "trial_eligible": false,
+      "trial_eligible_source": "not_registry_trial_eligible",
+      "would_enter_forward_positive_count": 2
+    },
+    {
+      "blocked_policy_effects": [
+        "registry_admission",
+        "tier_policy_change",
+        "live_profile_change",
+        "order_sizing_change",
+        "mpg_member_live_scope_expansion",
+        "real_order_scope_expansion"
+      ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "MI-001_registry_identity_review",
+        "recommendation": "identity_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
+      "cost_after_result_summary": {
+        "12h": {
+          "completed": 13,
+          "pending": 4,
+          "tradable_completed_ratio": 0.6923,
+          "tradable_mfe_after_cost_count": 9,
+          "unavailable_or_unknown": 0
+        },
+        "24h": {
+          "completed": 12,
+          "pending": 5,
+          "tradable_completed_ratio": 0.8333,
+          "tradable_mfe_after_cost_count": 10,
+          "unavailable_or_unknown": 0
+        },
+        "4h": {
+          "completed": 15,
+          "pending": 2,
+          "tradable_completed_ratio": 0.6667,
+          "tradable_mfe_after_cost_count": 10,
+          "unavailable_or_unknown": 0
+        }
+      },
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker_classes": [
+        {
+          "count": 321,
+          "key": "no_action_other"
+        },
+        {
+          "count": 17,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "registry_identity_or_registry_row_missing",
+        "execution_tier_not_in_policy_or_registry",
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h"
+      ],
+      "evidence_stage": "revise",
+      "evidence_stage_reasons": [
+        "strategy_asset_current_decision=revise"
+      ],
+      "evidence_strength": "strong_observe_only_evidence",
+      "execution_tier": "unknown",
+      "execution_tier_source": "no_tier_policy_or_registry_evidence",
+      "forward_outcome_summary": {
+        "by_window": {
+          "12h": {
+            "completed": 13,
+            "not_applicable": 0,
+            "pending": 4,
+            "tradable_mfe_after_cost_count": 9,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "24h": {
+            "completed": 12,
+            "not_applicable": 0,
+            "pending": 5,
+            "tradable_mfe_after_cost_count": 10,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "4h": {
+            "completed": 15,
+            "not_applicable": 0,
+            "pending": 2,
+            "tradable_mfe_after_cost_count": 10,
+            "unavailable": 0,
+            "unknown": 0
+          }
+        },
+        "event_count": 17
+      },
+      "high_priority_no_action_count": 0,
+      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "live_permission_change": false,
+      "live_permission_change_recommended_now": false,
+      "missed_no_action_forward_positive_count": 0,
+      "no_action_count": 321,
+      "owner_label": "动量冲击",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 17,
+      "registry_decision_ref": "",
+      "strategy_group_id": "MI-001",
+      "strategy_review_checkpoint": "open_mi_identity_overlap_symbol_concentration_review",
+      "trial_eligible": false,
+      "trial_eligible_source": "not_registry_trial_eligible",
+      "would_enter_forward_positive_count": 12
+    },
+    {
+      "blocked_policy_effects": [
+        "registry_admission",
+        "tier_policy_change",
+        "live_profile_change",
+        "order_sizing_change",
+        "mpg_member_live_scope_expansion",
+        "real_order_scope_expansion"
+      ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "CPM-RO-001_registry_identity_review",
+        "recommendation": "identity_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
+      "cost_after_result_summary": {
+        "12h": {
+          "completed": 18,
+          "pending": 0,
+          "tradable_completed_ratio": 0.6111,
+          "tradable_mfe_after_cost_count": 11,
+          "unavailable_or_unknown": 0
+        },
+        "24h": {
+          "completed": 17,
+          "pending": 1,
+          "tradable_completed_ratio": 0.7647,
+          "tradable_mfe_after_cost_count": 13,
+          "unavailable_or_unknown": 0
+        },
+        "4h": {
+          "completed": 18,
+          "pending": 0,
+          "tradable_completed_ratio": 0.5,
+          "tradable_mfe_after_cost_count": 9,
+          "unavailable_or_unknown": 0
+        }
+      },
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker_classes": [
+        {
+          "count": 91,
+          "key": "no_action_other"
+        },
+        {
+          "count": 60,
+          "key": "classifier_threshold_not_met"
+        },
+        {
+          "count": 18,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "registry_identity_or_registry_row_missing",
+        "execution_tier_not_in_policy_or_registry",
+        "would_enter_forward_outcome_pending:24h"
+      ],
+      "evidence_stage": "revise",
+      "evidence_stage_reasons": [
+        "strategy_asset_current_decision=revise"
+      ],
+      "evidence_strength": "strong_observe_only_evidence",
+      "execution_tier": "unknown",
+      "execution_tier_source": "no_tier_policy_or_registry_evidence",
+      "forward_outcome_summary": {
+        "by_window": {
+          "12h": {
+            "completed": 18,
+            "not_applicable": 0,
+            "pending": 0,
+            "tradable_mfe_after_cost_count": 11,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "24h": {
+            "completed": 17,
+            "not_applicable": 0,
+            "pending": 1,
+            "tradable_mfe_after_cost_count": 13,
+            "unavailable": 0,
+            "unknown": 0
+          },
+          "4h": {
+            "completed": 18,
+            "not_applicable": 0,
+            "pending": 0,
+            "tradable_mfe_after_cost_count": 9,
+            "unavailable": 0,
+            "unknown": 0
+          }
+        },
+        "event_count": 18
+      },
+      "high_priority_no_action_count": 0,
+      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "live_permission_change": false,
+      "live_permission_change_recommended_now": false,
+      "missed_no_action_forward_positive_count": 0,
+      "no_action_count": 151,
+      "owner_label": "CPM 回补观察",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 18,
+      "registry_decision_ref": "",
+      "strategy_group_id": "CPM-RO-001",
+      "strategy_review_checkpoint": "open_cpm_ro_semantic_source_merge_quality_review",
+      "trial_eligible": false,
+      "trial_eligible_source": "not_registry_trial_eligible",
+      "would_enter_forward_positive_count": 13
+    },
+    {
+      "blocked_policy_effects": [
+        "registry_admission",
+        "tier_policy_change",
+        "live_profile_change",
+        "order_sizing_change",
+        "mpg_member_live_scope_expansion",
+        "real_order_scope_expansion"
+      ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "FBS-001_no_action_visibility_and_routing_audit",
+        "recommendation": "coverage_visibility_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
+      "cost_after_result_summary": {
+        "12h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        },
+        "24h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        },
+        "4h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        }
+      },
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker_classes": [],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "no_recent_forward_outcome_events_in_capture_audit",
+        "coverage_visibility_or_routing_needs_closure"
+      ],
+      "evidence_stage": "coverage_visibility_review",
+      "evidence_stage_reasons": [
+        "no_recent_capture_events_for_observation_lane"
+      ],
+      "evidence_strength": "insufficient_recent_evidence",
+      "execution_tier": "L3",
+      "execution_tier_source": "tier_policy.current_strategy_groups",
+      "forward_outcome_summary": {
+        "by_window": {},
+        "event_count": 0
+      },
+      "high_priority_no_action_count": 0,
+      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "live_permission_change": false,
+      "live_permission_change_recommended_now": false,
+      "missed_no_action_forward_positive_count": 0,
+      "no_action_count": 0,
+      "owner_label": "资金费率/基差压力",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 0,
+      "registry_decision_ref": "",
+      "strategy_group_id": "FBS-001",
+      "strategy_review_checkpoint": "run_fbs_derivatives_fact_coverage_visibility_review",
+      "trial_eligible": false,
+      "trial_eligible_source": "not_registry_trial_eligible",
+      "would_enter_forward_positive_count": 0
+    },
+    {
+      "blocked_policy_effects": [
+        "registry_admission",
+        "tier_policy_change",
+        "live_profile_change",
+        "order_sizing_change",
+        "mpg_member_live_scope_expansion",
+        "real_order_scope_expansion"
+      ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "SOR-001_no_action_visibility_and_routing_audit",
+        "recommendation": "coverage_visibility_review",
+        "source_role": "capture_gap_observation_provenance"
+      },
+      "cost_after_result_summary": {
+        "12h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        },
+        "24h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        },
+        "4h": {
+          "completed": 0,
+          "pending": 0,
+          "tradable_completed_ratio": null,
+          "tradable_mfe_after_cost_count": 0,
+          "unavailable_or_unknown": 0
+        }
+      },
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker_classes": [],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "no_recent_forward_outcome_events_in_capture_audit",
+        "coverage_visibility_or_routing_needs_closure"
+      ],
+      "evidence_stage": "coverage_visibility_review",
+      "evidence_stage_reasons": [
+        "no_recent_capture_events_for_observation_lane"
+      ],
+      "evidence_strength": "insufficient_recent_evidence",
+      "execution_tier": "L3",
+      "execution_tier_source": "tier_policy.current_strategy_groups",
+      "forward_outcome_summary": {
+        "by_window": {},
+        "event_count": 0
+      },
+      "high_priority_no_action_count": 0,
+      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+      "live_permission_change": false,
+      "live_permission_change_recommended_now": false,
+      "missed_no_action_forward_positive_count": 0,
+      "no_action_count": 0,
+      "owner_label": "开盘区间结构",
+      "owner_policy_required": false,
+      "owner_policy_required_now": false,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 0,
+      "registry_decision_ref": "",
+      "strategy_group_id": "SOR-001",
+      "strategy_review_checkpoint": "run_sor_session_no_action_visibility_review",
+      "trial_eligible": false,
+      "trial_eligible_source": "not_registry_trial_eligible",
+      "would_enter_forward_positive_count": 0
+    },
+    {
+      "blocked_policy_effects": [
+        "registry_admission",
+        "tier_policy_change",
+        "live_profile_change",
+        "order_sizing_change",
+        "mpg_member_live_scope_expansion",
+        "real_order_scope_expansion"
+      ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "VCB-001_continue_observe_only",
+        "recommendation": "keep_observing",
+        "source_role": "capture_gap_observation_provenance"
+      },
+      "cost_after_result_summary": {
+        "12h": {
+          "completed": 1,
+          "pending": 1,
+          "tradable_completed_ratio": 1.0,
+          "tradable_mfe_after_cost_count": 1,
+          "unavailable_or_unknown": 0
+        },
+        "24h": {
+          "completed": 1,
+          "pending": 1,
+          "tradable_completed_ratio": 1.0,
+          "tradable_mfe_after_cost_count": 1,
+          "unavailable_or_unknown": 0
+        },
+        "4h": {
+          "completed": 2,
+          "pending": 0,
+          "tradable_completed_ratio": 1.0,
+          "tradable_mfe_after_cost_count": 2,
+          "unavailable_or_unknown": 0
+        }
+      },
+      "does_not_authorize_live_execution": true,
+      "dominant_blocker_classes": [
+        {
+          "count": 160,
+          "key": "classifier_threshold_not_met"
+        },
+        {
+          "count": 7,
+          "key": "no_action_other"
+        },
+        {
+          "count": 2,
+          "key": "observe_only_would_enter"
+        }
+      ],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h"
+      ],
+      "evidence_stage": "observe",
+      "evidence_stage_reasons": [
+        "would_enter_forward_positive_but_no_promotion_decision"
+      ],
+      "evidence_strength": "material_observe_only_evidence",
+      "execution_tier": "L1",
+      "execution_tier_source": "registry_baseline.default_tier",
+      "forward_outcome_summary": {
+        "by_window": {
+          "12h": {
+            "completed": 1,
+            "not_applicable": 0,
+            "pending": 1,
+            "tradable_mfe_after_cost_count": 1,
             "unavailable": 0,
             "unknown": 0
           },
@@ -518,490 +993,21 @@
       "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
       "live_permission_change": false,
       "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "LSR-001_classifier_fact_source_revision_review",
-      "no_action_count": 167,
-      "owner_label": "流动性扫盘/短线复活",
-      "owner_policy_decision_source": "none",
-      "owner_policy_required": false,
-      "owner_policy_required_now": false,
-      "recent_opportunity_count": 2,
-      "registry_decision_ref": "keep_observing",
-      "strategy_group_id": "LSR-001",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 2
-    },
-    {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "identity_review",
-      "blocked_policy_effects": [
-        "registry_admission",
-        "tier_policy_change",
-        "live_profile_change",
-        "order_sizing_change",
-        "mpg_member_live_scope_expansion",
-        "real_order_scope_expansion"
-      ],
-      "cost_after_result_summary": {
-        "12h": {
-          "completed": 23,
-          "pending": 0,
-          "tradable_completed_ratio": 0.913,
-          "tradable_mfe_after_cost_count": 21,
-          "unavailable_or_unknown": 0
-        },
-        "24h": {
-          "completed": 23,
-          "pending": 0,
-          "tradable_completed_ratio": 0.9565,
-          "tradable_mfe_after_cost_count": 22,
-          "unavailable_or_unknown": 0
-        },
-        "4h": {
-          "completed": 23,
-          "pending": 0,
-          "tradable_completed_ratio": 0.7391,
-          "tradable_mfe_after_cost_count": 17,
-          "unavailable_or_unknown": 0
-        }
-      },
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker_classes": [
-        {
-          "count": 315,
-          "key": "no_action_other"
-        },
-        {
-          "count": 23,
-          "key": "observe_only_would_enter"
-        }
-      ],
-      "engineering_continue": true,
-      "evidence_gaps": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved"
-      ],
-      "evidence_stage": "identity_review",
-      "evidence_stage_reasons": [
-        "audit_decision=identity_review"
-      ],
-      "evidence_strength": "strong_observe_only_evidence",
-      "execution_tier": "unknown",
-      "execution_tier_source": "no_tier_policy_or_registry_evidence",
-      "forward_outcome_summary": {
-        "by_window": {
-          "12h": {
-            "completed": 23,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 21,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "24h": {
-            "completed": 23,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 22,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "4h": {
-            "completed": 23,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 17,
-            "unavailable": 0,
-            "unknown": 0
-          }
-        },
-        "event_count": 23
-      },
-      "high_priority_no_action_count": 0,
-      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "live_permission_change": false,
-      "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "MI-001_registry_identity_review",
-      "no_action_count": 315,
-      "owner_label": "动量冲击",
-      "owner_policy_decision_source": "review_only_deep_dive_owner_decision",
-      "owner_policy_required": true,
-      "owner_policy_required_now": false,
-      "recent_opportunity_count": 23,
-      "registry_decision_ref": "",
-      "strategy_group_id": "MI-001",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 22
-    },
-    {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "identity_review",
-      "blocked_policy_effects": [
-        "registry_admission",
-        "tier_policy_change",
-        "live_profile_change",
-        "order_sizing_change",
-        "mpg_member_live_scope_expansion",
-        "real_order_scope_expansion"
-      ],
-      "cost_after_result_summary": {
-        "12h": {
-          "completed": 16,
-          "pending": 2,
-          "tradable_completed_ratio": 0.8125,
-          "tradable_mfe_after_cost_count": 13,
-          "unavailable_or_unknown": 0
-        },
-        "24h": {
-          "completed": 16,
-          "pending": 2,
-          "tradable_completed_ratio": 0.8125,
-          "tradable_mfe_after_cost_count": 13,
-          "unavailable_or_unknown": 0
-        },
-        "4h": {
-          "completed": 18,
-          "pending": 0,
-          "tradable_completed_ratio": 0.7222,
-          "tradable_mfe_after_cost_count": 13,
-          "unavailable_or_unknown": 0
-        }
-      },
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker_classes": [
-        {
-          "count": 87,
-          "key": "no_action_other"
-        },
-        {
-          "count": 64,
-          "key": "classifier_threshold_not_met"
-        },
-        {
-          "count": 18,
-          "key": "observe_only_would_enter"
-        }
-      ],
-      "engineering_continue": true,
-      "evidence_gaps": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
-        "would_enter_forward_outcome_pending:12h",
-        "would_enter_forward_outcome_pending:24h",
-        "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved"
-      ],
-      "evidence_stage": "identity_review",
-      "evidence_stage_reasons": [
-        "audit_decision=identity_review"
-      ],
-      "evidence_strength": "strong_observe_only_evidence",
-      "execution_tier": "unknown",
-      "execution_tier_source": "no_tier_policy_or_registry_evidence",
-      "forward_outcome_summary": {
-        "by_window": {
-          "12h": {
-            "completed": 16,
-            "not_applicable": 0,
-            "pending": 2,
-            "tradable_mfe_after_cost_count": 13,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "24h": {
-            "completed": 16,
-            "not_applicable": 0,
-            "pending": 2,
-            "tradable_mfe_after_cost_count": 13,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "4h": {
-            "completed": 18,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 13,
-            "unavailable": 0,
-            "unknown": 0
-          }
-        },
-        "event_count": 18
-      },
-      "high_priority_no_action_count": 0,
-      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "live_permission_change": false,
-      "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "CPM-RO-001_registry_identity_review",
-      "no_action_count": 151,
-      "owner_label": "CPM 回补观察",
-      "owner_policy_decision_source": "review_only_deep_dive_owner_decision",
-      "owner_policy_required": true,
-      "owner_policy_required_now": false,
-      "recent_opportunity_count": 18,
-      "registry_decision_ref": "",
-      "strategy_group_id": "CPM-RO-001",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 13
-    },
-    {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "coverage_visibility_review",
-      "blocked_policy_effects": [
-        "registry_admission",
-        "tier_policy_change",
-        "live_profile_change",
-        "order_sizing_change",
-        "mpg_member_live_scope_expansion",
-        "real_order_scope_expansion"
-      ],
-      "cost_after_result_summary": {
-        "12h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        },
-        "24h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        },
-        "4h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        }
-      },
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker_classes": [],
-      "engineering_continue": true,
-      "evidence_gaps": [
-        "no_recent_forward_outcome_events_in_capture_audit",
-        "coverage_visibility_or_routing_needs_closure"
-      ],
-      "evidence_stage": "coverage_visibility_review",
-      "evidence_stage_reasons": [
-        "audit_decision=coverage_visibility_review"
-      ],
-      "evidence_strength": "insufficient_recent_evidence",
-      "execution_tier": "L3",
-      "execution_tier_source": "tier_policy.current_strategy_groups",
-      "forward_outcome_summary": {
-        "by_window": {},
-        "event_count": 0
-      },
-      "high_priority_no_action_count": 0,
-      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "live_permission_change": false,
-      "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "FBS-001_no_action_visibility_and_routing_audit",
-      "no_action_count": 0,
-      "owner_label": "资金费率/基差压力",
-      "owner_policy_decision_source": "none",
-      "owner_policy_required": false,
-      "owner_policy_required_now": false,
-      "recent_opportunity_count": 0,
-      "registry_decision_ref": "",
-      "strategy_group_id": "FBS-001",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 0
-    },
-    {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "coverage_visibility_review",
-      "blocked_policy_effects": [
-        "registry_admission",
-        "tier_policy_change",
-        "live_profile_change",
-        "order_sizing_change",
-        "mpg_member_live_scope_expansion",
-        "real_order_scope_expansion"
-      ],
-      "cost_after_result_summary": {
-        "12h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        },
-        "24h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        },
-        "4h": {
-          "completed": 0,
-          "pending": 0,
-          "tradable_completed_ratio": null,
-          "tradable_mfe_after_cost_count": 0,
-          "unavailable_or_unknown": 0
-        }
-      },
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker_classes": [],
-      "engineering_continue": true,
-      "evidence_gaps": [
-        "no_recent_forward_outcome_events_in_capture_audit",
-        "coverage_visibility_or_routing_needs_closure"
-      ],
-      "evidence_stage": "coverage_visibility_review",
-      "evidence_stage_reasons": [
-        "audit_decision=coverage_visibility_review"
-      ],
-      "evidence_strength": "insufficient_recent_evidence",
-      "execution_tier": "L3",
-      "execution_tier_source": "tier_policy.current_strategy_groups",
-      "forward_outcome_summary": {
-        "by_window": {},
-        "event_count": 0
-      },
-      "high_priority_no_action_count": 0,
-      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "live_permission_change": false,
-      "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "SOR-001_no_action_visibility_and_routing_audit",
-      "no_action_count": 0,
-      "owner_label": "开盘区间结构",
-      "owner_policy_decision_source": "none",
-      "owner_policy_required": false,
-      "owner_policy_required_now": false,
-      "recent_opportunity_count": 0,
-      "registry_decision_ref": "",
-      "strategy_group_id": "SOR-001",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 0
-    },
-    {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "keep_observing",
-      "blocked_policy_effects": [
-        "registry_admission",
-        "tier_policy_change",
-        "live_profile_change",
-        "order_sizing_change",
-        "mpg_member_live_scope_expansion",
-        "real_order_scope_expansion"
-      ],
-      "cost_after_result_summary": {
-        "12h": {
-          "completed": 2,
-          "pending": 0,
-          "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 2,
-          "unavailable_or_unknown": 0
-        },
-        "24h": {
-          "completed": 2,
-          "pending": 0,
-          "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 2,
-          "unavailable_or_unknown": 0
-        },
-        "4h": {
-          "completed": 2,
-          "pending": 0,
-          "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 2,
-          "unavailable_or_unknown": 0
-        }
-      },
-      "does_not_authorize_live_execution": true,
-      "dominant_blocker_classes": [
-        {
-          "count": 162,
-          "key": "classifier_threshold_not_met"
-        },
-        {
-          "count": 5,
-          "key": "no_action_other"
-        },
-        {
-          "count": 2,
-          "key": "observe_only_would_enter"
-        }
-      ],
-      "engineering_continue": true,
-      "evidence_gaps": [],
-      "evidence_stage": "observe",
-      "evidence_stage_reasons": [
-        "audit_decision=keep_observing"
-      ],
-      "evidence_strength": "material_observe_only_evidence",
-      "execution_tier": "L1",
-      "execution_tier_source": "registry_baseline.default_tier",
-      "forward_outcome_summary": {
-        "by_window": {
-          "12h": {
-            "completed": 2,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 2,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "24h": {
-            "completed": 2,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 2,
-            "unavailable": 0,
-            "unknown": 0
-          },
-          "4h": {
-            "completed": 2,
-            "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 2,
-            "unavailable": 0,
-            "unknown": 0
-          }
-        },
-        "event_count": 2
-      },
-      "high_priority_no_action_count": 167,
-      "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-      "live_permission_change": false,
-      "live_permission_change_recommended_now": false,
-      "missed_no_action_forward_positive_count": 135,
-      "next_system_action": "VCB-001_continue_observe_only",
+      "missed_no_action_forward_positive_count": 133,
       "no_action_count": 167,
       "owner_label": "波动压缩突破",
-      "owner_policy_decision_source": "none",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
+      "owner_policy_source": "none",
       "recent_opportunity_count": 2,
       "registry_decision_ref": "keep_observing",
       "strategy_group_id": "VCB-001",
+      "strategy_review_checkpoint": "run_vcb_false_breakout_classifier_review",
       "trial_eligible": false,
       "trial_eligible_source": "not_registry_trial_eligible",
       "would_enter_forward_positive_count": 2
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "review_only_portfolio_board; requires real fresh signal, live facts, candidate authorization, action-time FinalGate, official Operation Layer, protection, reconciliation, and Owner-approved policy scope",
-      "audit_decision": "park",
       "blocked_policy_effects": [
         "registry_admission",
         "tier_policy_change",
@@ -1010,25 +1016,30 @@
         "mpg_member_live_scope_expansion",
         "real_order_scope_expansion"
       ],
+      "capture_gap_recommendation_provenance": {
+        "next_checkpoint": "park_until_material_new_edge_evidence",
+        "recommendation": "park",
+        "source_role": "capture_gap_observation_provenance"
+      },
       "cost_after_result_summary": {
         "12h": {
-          "completed": 6,
-          "pending": 0,
-          "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 6,
+          "completed": 8,
+          "pending": 1,
+          "tradable_completed_ratio": 0.625,
+          "tradable_mfe_after_cost_count": 5,
           "unavailable_or_unknown": 0
         },
         "24h": {
-          "completed": 6,
-          "pending": 0,
-          "tradable_completed_ratio": 1.0,
-          "tradable_mfe_after_cost_count": 6,
+          "completed": 7,
+          "pending": 2,
+          "tradable_completed_ratio": 0.7143,
+          "tradable_mfe_after_cost_count": 5,
           "unavailable_or_unknown": 0
         },
         "4h": {
-          "completed": 6,
-          "pending": 0,
-          "tradable_completed_ratio": 0.8333,
+          "completed": 8,
+          "pending": 1,
+          "tradable_completed_ratio": 0.625,
           "tradable_mfe_after_cost_count": 5,
           "unavailable_or_unknown": 0
         }
@@ -1036,19 +1047,23 @@
       "does_not_authorize_live_execution": true,
       "dominant_blocker_classes": [
         {
-          "count": 163,
+          "count": 160,
           "key": "no_action_other"
         },
         {
-          "count": 6,
+          "count": 9,
           "key": "observe_only_would_enter"
         }
       ],
-      "engineering_continue": false,
-      "evidence_gaps": [],
+      "engineering_continue": true,
+      "evidence_gaps": [
+        "would_enter_forward_outcome_pending:12h",
+        "would_enter_forward_outcome_pending:24h",
+        "would_enter_forward_outcome_pending:4h"
+      ],
       "evidence_stage": "park",
       "evidence_stage_reasons": [
-        "audit_decision=park"
+        "registry_current_decision_ref=park"
       ],
       "evidence_strength": "parked_despite_observation_evidence",
       "execution_tier": "L1",
@@ -1056,49 +1071,49 @@
       "forward_outcome_summary": {
         "by_window": {
           "12h": {
-            "completed": 6,
+            "completed": 8,
             "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 6,
+            "pending": 1,
+            "tradable_mfe_after_cost_count": 5,
             "unavailable": 0,
             "unknown": 0
           },
           "24h": {
-            "completed": 6,
+            "completed": 7,
             "not_applicable": 0,
-            "pending": 0,
-            "tradable_mfe_after_cost_count": 6,
+            "pending": 2,
+            "tradable_mfe_after_cost_count": 5,
             "unavailable": 0,
             "unknown": 0
           },
           "4h": {
-            "completed": 6,
+            "completed": 8,
             "not_applicable": 0,
-            "pending": 0,
+            "pending": 1,
             "tradable_mfe_after_cost_count": 5,
             "unavailable": 0,
             "unknown": 0
           }
         },
-        "event_count": 6
+        "event_count": 9
       },
       "high_priority_no_action_count": 0,
       "last_evidence_ref": "output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
       "live_permission_change": false,
       "live_permission_change_recommended_now": false,
       "missed_no_action_forward_positive_count": 0,
-      "next_system_action": "park_until_material_new_edge_evidence",
-      "no_action_count": 163,
+      "no_action_count": 160,
       "owner_label": "区间边界回归",
-      "owner_policy_decision_source": "none",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
-      "recent_opportunity_count": 6,
+      "owner_policy_source": "none",
+      "recent_opportunity_count": 9,
       "registry_decision_ref": "park",
       "strategy_group_id": "RBR-001",
+      "strategy_review_checkpoint": "keep_parked_until_material_new_edge_evidence",
       "trial_eligible": false,
       "trial_eligible_source": "not_registry_trial_eligible",
-      "would_enter_forward_positive_count": 6
+      "would_enter_forward_positive_count": 5
     }
   ],
   "portfolio_summary": {
@@ -1114,14 +1129,13 @@
       "VCB-001",
       "RBR-001"
     ],
-    "engineering_continuation_count": 9,
+    "engineering_continuation_count": 10,
     "evidence_stage_counts": {
       "coverage_visibility_review": 2,
-      "identity_review": 2,
       "observe": 1,
       "park": 1,
       "promote_review": 1,
-      "revise": 2,
+      "revise": 4,
       "trial_waiting": 1
     },
     "execution_tier_counts": {
@@ -1131,13 +1145,13 @@
       "L4": 1,
       "unknown": 2
     },
-    "owner_policy_decision_count": 4,
+    "owner_policy_queue_count": 2,
     "portfolio_row_count": 10,
     "registry_only_strategy_groups": [
       "PMR-001",
       "TEQ-001"
     ],
-    "trial_candidate_count": 5
+    "trial_candidate_count": 3
   },
   "registry_context": {
     "registry_only_note": "These registry assets were not in the latest active capture audit rows and are not forced into the current review board.",
@@ -1162,15 +1176,15 @@
   "runtime_posture": {
     "no_live_permission": true,
     "observation_active": true,
-    "p0_5_state": "review_needed",
     "p0_safe_standby": true,
     "p0_state": "waiting_for_market",
+    "p0_state_source": "strategy_capture_gap_audit.owner_visibility_state.p0_state",
     "runtime_owner_intervention_required": false,
-    "runtime_status_source": "strategy_capture_gap_audit.owner_visibility_state"
+    "runtime_status_source": "strategy_capture_gap_audit.owner_visibility_state",
+    "signal_observation_state": "review_needed"
   },
   "safety_invariants": {
     "exchange_write_called": false,
-    "execution_intent_created": false,
     "final_gate_called": false,
     "l4_real_order_scope_expanded": false,
     "live_profile_changed": false,
@@ -1180,7 +1194,6 @@
     "order_created": false,
     "order_sizing_changed": false,
     "preview_or_replay_treated_as_live_signal": false,
-    "real_order_authority": false,
     "registry_authority_changed": false,
     "server_files_mutated": false,
     "server_interaction": false,
@@ -1192,56 +1205,64 @@
   "scope": "strategygroup_portfolio_board_review_only",
   "source_status": {
     "capture_gap_audit": "strategy_capture_gap_audit_ready",
-    "owner_decision_package": "owner_decision_package_ready",
+    "owner_policy_package": "owner_policy_package_incomplete",
     "quality_closure_wave": "quality_closure_wave_ready",
     "registry_baseline": "current_pilot_baseline",
-    "review_deep_dive": "review_only_deep_dive_ready_for_owner_decision",
+    "review_deep_dive": "review_only_deep_dive_ready_for_owner_policy",
     "source_gaps": [],
     "tier_policy": "current_pilot_supplement"
   },
   "status": "portfolio_board_ready",
   "trial_candidate_pool": {
-    "actionable_now_count": 0,
     "boundary": "Trial candidate pool is review-only. It does not authorize live execution, registry admission, tier change, live profile change, or order submission.",
-    "candidate_count": 5,
+    "candidate_count": 3,
     "eligible_now_count": 1,
     "excluded_rows": [
       {
-        "next_system_action": "BTPC-001_classifier_fact_source_revision_review",
         "reason": "not_trial_pool_stage:revise",
-        "strategy_group_id": "BTPC-001"
+        "strategy_group_id": "BTPC-001",
+        "strategy_review_checkpoint": "BTPC-001_classifier_fact_source_revision_review"
       },
       {
-        "next_system_action": "FBS-001_no_action_visibility_and_routing_audit",
+        "reason": "not_trial_pool_stage:revise",
+        "strategy_group_id": "MI-001",
+        "strategy_review_checkpoint": "open_mi_identity_overlap_symbol_concentration_review"
+      },
+      {
+        "reason": "not_trial_pool_stage:revise",
+        "strategy_group_id": "CPM-RO-001",
+        "strategy_review_checkpoint": "open_cpm_ro_semantic_source_merge_quality_review"
+      },
+      {
         "reason": "not_trial_pool_stage:coverage_visibility_review",
-        "strategy_group_id": "FBS-001"
+        "strategy_group_id": "FBS-001",
+        "strategy_review_checkpoint": "run_fbs_derivatives_fact_coverage_visibility_review"
       },
       {
-        "next_system_action": "SOR-001_no_action_visibility_and_routing_audit",
         "reason": "not_trial_pool_stage:coverage_visibility_review",
-        "strategy_group_id": "SOR-001"
+        "strategy_group_id": "SOR-001",
+        "strategy_review_checkpoint": "run_sor_session_no_action_visibility_review"
       },
       {
-        "next_system_action": "VCB-001_continue_observe_only",
         "reason": "not_trial_pool_stage:observe",
-        "strategy_group_id": "VCB-001"
+        "strategy_group_id": "VCB-001",
+        "strategy_review_checkpoint": "run_vcb_false_breakout_classifier_review"
       },
       {
-        "next_system_action": "park_until_material_new_edge_evidence",
         "reason": "not_trial_pool_stage:park",
-        "strategy_group_id": "RBR-001"
+        "strategy_group_id": "RBR-001",
+        "strategy_review_checkpoint": "keep_parked_until_material_new_edge_evidence"
       }
     ],
     "live_permission_change_count": 0,
     "rows": [
       {
-        "actionable_now": false,
         "evidence_stage": "trial_waiting",
         "execution_tier": "L4",
         "live_permission_change": false,
-        "next_system_action": "MPG-001_no_action_visibility_and_routing_audit",
         "pool_stage": "selected_live_lane_waiting_for_market",
         "strategy_group_id": "MPG-001",
+        "strategy_review_checkpoint": "build_mpg_member_role_controls_v2_without_live_scope_expansion",
         "trial_blockers": [
           "no_recent_forward_outcome_events_in_capture_audit",
           "real_fresh_signal_absent_for_p0_live_lane",
@@ -1251,67 +1272,29 @@
         "trial_eligible": true
       },
       {
-        "actionable_now": false,
         "evidence_stage": "promote_review",
         "execution_tier": "L1",
         "live_permission_change": false,
-        "next_system_action": "BRF-001_forward_outcome_and_requiredfacts_review",
         "pool_stage": "promote_review_candidate",
         "strategy_group_id": "BRF-001",
+        "strategy_review_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
         "trial_blockers": [
           "would_enter_forward_outcome_pending:12h",
           "would_enter_forward_outcome_pending:24h",
           "would_enter_forward_outcome_pending:4h",
-          "promote_review_forward_positive_not_completed",
           "owner_policy_scope_not_confirmed"
         ],
         "trial_eligible": false
       },
       {
-        "actionable_now": false,
         "evidence_stage": "revise",
         "execution_tier": "L1",
         "live_permission_change": false,
-        "next_system_action": "LSR-001_classifier_fact_source_revision_review",
         "pool_stage": "rewrite_candidate_after_revision",
         "strategy_group_id": "LSR-001",
+        "strategy_review_checkpoint": "LSR-001_classifier_fact_source_revision_review",
         "trial_blockers": [
-          "would_enter_forward_outcome_pending:24h",
           "no_action_or_classifier_attribution_needs_closure"
-        ],
-        "trial_eligible": false
-      },
-      {
-        "actionable_now": false,
-        "evidence_stage": "identity_review",
-        "execution_tier": "unknown",
-        "live_permission_change": false,
-        "next_system_action": "MI-001_registry_identity_review",
-        "pool_stage": "identity_candidate_review",
-        "strategy_group_id": "MI-001",
-        "trial_blockers": [
-          "registry_identity_or_registry_row_missing",
-          "execution_tier_not_in_policy_or_registry",
-          "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-          "owner_policy_scope_not_confirmed"
-        ],
-        "trial_eligible": false
-      },
-      {
-        "actionable_now": false,
-        "evidence_stage": "identity_review",
-        "execution_tier": "unknown",
-        "live_permission_change": false,
-        "next_system_action": "CPM-RO-001_registry_identity_review",
-        "pool_stage": "identity_candidate_review",
-        "strategy_group_id": "CPM-RO-001",
-        "trial_blockers": [
-          "registry_identity_or_registry_row_missing",
-          "execution_tier_not_in_policy_or_registry",
-          "would_enter_forward_outcome_pending:12h",
-          "would_enter_forward_outcome_pending:24h",
-          "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
-          "owner_policy_scope_not_confirmed"
         ],
         "trial_eligible": false
       }

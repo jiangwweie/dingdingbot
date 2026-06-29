@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from scripts.runtime_post_submit_finalize_probe import (
-    build_runtime_post_submit_finalize_probe_packet,
+    build_runtime_post_submit_finalize_probe_artifact,
 )
 from src.application.runtime_post_submit_finalize_service import (
     RuntimePostSubmitFinalizeService,
@@ -57,7 +57,7 @@ async def test_finalize_probe_uses_pg_position_projection_for_next_gate():
         runtime_service=_RuntimeService(_runtime(boundary={"budget_reserved": Decimal("0")})),
     )
 
-    packet = await build_runtime_post_submit_finalize_probe_packet(
+    artifact = await build_runtime_post_submit_finalize_probe_artifact(
         authorization_id="auth-1",
         reservation_id="runtime-attempt-reservation-auth-1",
         position_repository=_PositionRepo([]),
@@ -65,13 +65,15 @@ async def test_finalize_probe_uses_pg_position_projection_for_next_gate():
         execution_result_repository=_ExecutionResultRepo(result),
     )
 
-    assert packet["status"] == (
+    assert artifact["status"] == (
         RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT.value
     )
-    assert packet["active_position_facts"]["source"] == "pg_position_projection"
-    assert packet["active_position_facts"]["active_positions_count"] == 0
-    assert packet["post_submit_finalize_packet"]["pre_submit_rehearsal_retry_allowed"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["active_position_facts"]["source"] == "pg_position_projection"
+    assert artifact["active_position_facts"]["active_positions_count"] == 0
+    assert artifact["post_submit_finalize_payload"][
+        "pre_submit_rehearsal_retry_allowed"
+    ] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 async def test_finalize_probe_blocks_when_symbol_has_active_position_projection():
@@ -86,7 +88,7 @@ async def test_finalize_probe_blocks_when_symbol_has_active_position_projection(
         runtime_service=_RuntimeService(_runtime()),
     )
 
-    packet = await build_runtime_post_submit_finalize_probe_packet(
+    artifact = await build_runtime_post_submit_finalize_probe_artifact(
         authorization_id="auth-1",
         reservation_id="runtime-attempt-reservation-auth-1",
         position_repository=_PositionRepo([_position(runtime_instance_id="runtime-1")]),
@@ -94,9 +96,9 @@ async def test_finalize_probe_blocks_when_symbol_has_active_position_projection(
         execution_result_repository=_ExecutionResultRepo(result),
     )
 
-    assert packet["next_attempt_gate_status"] == "blocked"
-    assert "runtime_active_position_slot_in_use" in packet["next_attempt_blockers"]
-    assert packet["active_position_facts"]["runtime_owned_count"] == 1
+    assert artifact["next_attempt_gate_status"] == "blocked"
+    assert "runtime_active_position_slot_in_use" in artifact["next_attempt_blockers"]
+    assert artifact["active_position_facts"]["runtime_owned_count"] == 1
 
 
 async def test_finalize_probe_missing_submit_result_blocks_without_user_fact_override():
@@ -110,7 +112,7 @@ async def test_finalize_probe_missing_submit_result_blocks_without_user_fact_ove
         runtime_service=_RuntimeService(_runtime()),
     )
 
-    packet = await build_runtime_post_submit_finalize_probe_packet(
+    artifact = await build_runtime_post_submit_finalize_probe_artifact(
         authorization_id="missing-auth",
         reservation_id="runtime-attempt-reservation-auth-1",
         position_repository=_PositionRepo([]),
@@ -118,10 +120,10 @@ async def test_finalize_probe_missing_submit_result_blocks_without_user_fact_ove
         execution_result_repository=_ExecutionResultRepo(_submitted_result()),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["active_position_facts"]["active_positions_count"] is None
-    assert "exchange_submit_execution_result_not_found" in packet["blockers"]
-    assert "trusted_active_positions_count_missing" in packet["next_attempt_blockers"]
+    assert artifact["status"] == "blocked"
+    assert artifact["active_position_facts"]["active_positions_count"] is None
+    assert "exchange_submit_execution_result_not_found" in artifact["blockers"]
+    assert "trusted_active_positions_count_missing" in artifact["next_attempt_blockers"]
 
 
 def _position(*, runtime_instance_id: str | None) -> Position:

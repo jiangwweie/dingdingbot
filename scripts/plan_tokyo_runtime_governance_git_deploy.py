@@ -46,7 +46,7 @@ from src.domain.standing_authorization import (
 
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+    "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
 )
 
 
@@ -473,7 +473,7 @@ def _plan_phases(
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/verify_runtime_submit_rehearsal_pre_live_packet.py --json "
+                "scripts/verify_runtime_submit_rehearsal_pre_live_evidence.py --json "
                 "--skip-current-head-deployed-check",
             ],
             "stop_if": [
@@ -481,7 +481,7 @@ def _plan_phases(
                 "target commit is not the pushed remote branch head",
                 "migration gap audit does not pass",
                 "shadow-planning rehearsal does not pass",
-                "runtime submit pre-live packet contains forbidden execution flags",
+                "runtime submit pre-live evidence contains forbidden execution flags",
             ],
         },
         {

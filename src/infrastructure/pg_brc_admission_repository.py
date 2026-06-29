@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.domain.brc_admission import (
     AdmissionAuditLog,
     AdmissionDecision,
-    AdmissionEvidencePacket,
+    AdmissionEvidence,
     AdmissionRequest,
     AdmissionRuleConfig,
     AdmissionTrialBinding,
@@ -25,7 +25,7 @@ from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.pg_models import (
     PGBrcAdmissionAuditLogORM,
     PGBrcAdmissionDecisionORM,
-    PGBrcAdmissionEvidencePacketORM,
+    PGBrcAdmissionEvidenceORM,
     PGBrcAdmissionRequestORM,
     PGBrcAdmissionRuleConfigORM,
     PGBrcAdmissionTrialBindingORM,
@@ -148,21 +148,26 @@ class PgBrcAdmissionRepository:
             row = result.scalar_one_or_none()
             return self._to_rule_config(row) if row is not None else None
 
-    async def create_evidence_packet(
+    async def create_admission_evidence(
         self,
-        packet: AdmissionEvidencePacket,
-    ) -> AdmissionEvidencePacket:
+        admission_evidence: AdmissionEvidence,
+    ) -> AdmissionEvidence:
         async with self._session_maker() as session:
             async with session.begin():
-                row = PGBrcAdmissionEvidencePacketORM(**packet.model_dump(mode="json"))
+                row = PGBrcAdmissionEvidenceORM(
+                    **_admission_storage_payload(admission_evidence)
+                )
                 session.add(row)
                 await session.flush()
-                return self._to_evidence_packet(row)
+                return self._to_admission_evidence(row)
 
-    async def get_evidence_packet(self, evidence_packet_id: str) -> Optional[AdmissionEvidencePacket]:
+    async def get_admission_evidence(
+        self,
+        admission_evidence_id: str,
+    ) -> Optional[AdmissionEvidence]:
         async with self._session_maker() as session:
-            row = await session.get(PGBrcAdmissionEvidencePacketORM, evidence_packet_id)
-            return self._to_evidence_packet(row) if row is not None else None
+            row = await session.get(PGBrcAdmissionEvidenceORM, admission_evidence_id)
+            return self._to_admission_evidence(row) if row is not None else None
 
     async def create_owner_regime_input(
         self,
@@ -189,7 +194,9 @@ class PgBrcAdmissionRepository:
     async def create_admission_request(self, request: AdmissionRequest) -> AdmissionRequest:
         async with self._session_maker() as session:
             async with session.begin():
-                row = PGBrcAdmissionRequestORM(**request.model_dump(mode="json"))
+                row = PGBrcAdmissionRequestORM(
+                    **_admission_storage_payload(request)
+                )
                 session.add(row)
                 await session.flush()
                 return self._to_admission_request(row)
@@ -224,7 +231,9 @@ class PgBrcAdmissionRepository:
     async def create_admission_decision(self, decision: AdmissionDecision) -> AdmissionDecision:
         async with self._session_maker() as session:
             async with session.begin():
-                row = PGBrcAdmissionDecisionORM(**decision.model_dump(mode="json"))
+                row = PGBrcAdmissionDecisionORM(
+                    **_admission_storage_payload(decision)
+                )
                 session.add(row)
                 await session.flush()
                 return self._to_admission_decision(row)
@@ -409,8 +418,8 @@ class PgBrcAdmissionRepository:
         return AdmissionRuleConfig.model_validate(_row_dict(row))
 
     @staticmethod
-    def _to_evidence_packet(row: PGBrcAdmissionEvidencePacketORM) -> AdmissionEvidencePacket:
-        return AdmissionEvidencePacket.model_validate(_row_dict(row))
+    def _to_admission_evidence(row: PGBrcAdmissionEvidenceORM) -> AdmissionEvidence:
+        return AdmissionEvidence.model_validate(_row_dict(row))
 
     @staticmethod
     def _to_owner_regime_input(row: PGBrcOwnerMarketRegimeInputORM) -> OwnerMarketRegimeInput:
@@ -450,4 +459,11 @@ class PgBrcAdmissionRepository:
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
-    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    return {
+        attr.key: getattr(row, attr.key)
+        for attr in row.__mapper__.column_attrs
+    }
+
+
+def _admission_storage_payload(model: Any) -> dict[str, Any]:
+    return model.model_dump(mode="json")

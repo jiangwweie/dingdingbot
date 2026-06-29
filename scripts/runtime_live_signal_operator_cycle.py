@@ -28,7 +28,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_live_signal_routing_packet as routing_script  # noqa: E402
+from scripts import runtime_live_signal_routing_artifact as routing_script  # noqa: E402
 from scripts import runtime_next_attempt_prepare_api_flow as prepare_script  # noqa: E402
 
 
@@ -41,47 +41,62 @@ READY_FOR_PREPARE_STATUS = "ready_for_prepare"
 READY_FOR_FINAL_GATE_PREFLIGHT = "ready_for_final_gate_preflight"
 
 
-async def _build_packet(
+async def _build_cycle_artifact(
     args: argparse.Namespace,
     *,
     routing_builder: RoutingBuilder | None = None,
     prepare_runner: PrepareRunner | None = None,
 ) -> dict[str, Any]:
-    routing = await _build_routing_packet(args, routing_builder=routing_builder)
-    routing_status = str(routing.get("status") or "")
+    routing_evidence = await _build_routing_evidence(
+        args, routing_builder=routing_builder
+    )
+    routing_status = str(routing_evidence.get("status") or "")
     if routing_status == routing_script.READY_CURRENT_RUNTIME_STATUS:
         return _handle_ready_current_runtime(
             args,
-            routing_packet=routing,
+            routing_evidence=routing_evidence,
             prepare_runner=prepare_runner,
         )
     if routing_status == READY_PROFILE_STATUS:
-        return _base_packet(
+        return _base_artifact(
             args=args,
             status=READY_PROFILE_STATUS,
-            routing_packet=routing,
-            prepare_packet=None,
+            routing_evidence=routing_evidence,
+            prepare_evidence=None,
             next_step="owner_codex_review_runtime_profile_proposal_before_runtime_creation",
         )
     if routing_status == WAITING_STATUS:
-        return _base_packet(
+        return _base_artifact(
             args=args,
             status=WAITING_STATUS,
-            routing_packet=routing,
-            prepare_packet=None,
+            routing_evidence=routing_evidence,
+            prepare_evidence=None,
             next_step="continue_live_signal_observation_without_forcing_entry",
         )
-    return _base_packet(
+    return _base_artifact(
         args=args,
         status="blocked",
-        routing_packet=routing,
-        prepare_packet=None,
+        routing_evidence=routing_evidence,
+        prepare_evidence=None,
         next_step="resolve_live_signal_routing_blocker",
-        extra_blockers=list(routing.get("blockers") or []),
+        extra_blockers=list(routing_evidence.get("blockers") or []),
     )
 
 
-async def _build_routing_packet(
+async def _build_artifact(
+    args: argparse.Namespace,
+    *,
+    routing_builder: RoutingBuilder | None = None,
+    prepare_runner: PrepareRunner | None = None,
+) -> dict[str, Any]:
+    return await _build_cycle_artifact(
+        args,
+        routing_builder=routing_builder,
+        prepare_runner=prepare_runner,
+    )
+
+
+async def _build_routing_evidence(
     args: argparse.Namespace,
     *,
     routing_builder: RoutingBuilder | None,
@@ -95,49 +110,49 @@ async def _build_routing_packet(
         signal_index=args.signal_index,
         output_json=None,
     )
-    builder = routing_builder or routing_script._build_packet
+    builder = routing_builder or routing_script._build_artifact
     return await builder(routing_args)
 
 
 def _handle_ready_current_runtime(
     args: argparse.Namespace,
     *,
-    routing_packet: dict[str, Any],
+    routing_evidence: dict[str, Any],
     prepare_runner: PrepareRunner | None,
 ) -> dict[str, Any]:
-    signal_input_json = routing_packet.get("signal_input_json")
+    signal_input_json = routing_evidence.get("signal_input_json")
     if not isinstance(signal_input_json, str) or not signal_input_json.strip():
-        return _base_packet(
+        return _base_artifact(
             args=args,
             status="blocked",
-            routing_packet=routing_packet,
-            prepare_packet=None,
+            routing_evidence=routing_evidence,
+            prepare_evidence=None,
             next_step="rerun_routing_until_signal_input_json_is_available",
             extra_blockers=["ready_current_runtime_signal_input_json_missing"],
         )
 
     if not args.allow_prepare_records:
-        return _base_packet(
+        return _base_artifact(
             args=args,
             status=READY_FOR_PREPARE_STATUS,
-            routing_packet=routing_packet,
-            prepare_packet=None,
+            routing_evidence=routing_evidence,
+            prepare_evidence=None,
             next_step="rerun_with_allow_prepare_records_after_operator_review",
         )
 
     setattr(
         args,
         "routing_runtime_profile",
-        routing_packet.get("runtime_profile") or {},
+        routing_evidence.get("runtime_profile") or {},
     )
     runner = prepare_runner or _run_prepare_flow
-    prepare_packet = runner(args, signal_input_json)
-    status = str(prepare_packet.get("status") or "blocked")
-    return _base_packet(
+    prepare_evidence = runner(args, signal_input_json)
+    status = str(prepare_evidence.get("status") or "blocked")
+    return _base_artifact(
         args=args,
         status=status,
-        routing_packet=routing_packet,
-        prepare_packet=prepare_packet,
+        routing_evidence=routing_evidence,
+        prepare_evidence=prepare_evidence,
         next_step=(
             "run_official_final_gate_preflight"
             if status == READY_FOR_FINAL_GATE_PREFLIGHT
@@ -185,40 +200,42 @@ def _prepare_args(args: argparse.Namespace, *, signal_input_json: str) -> argpar
     )
 
 
-def _base_packet(
+def _base_artifact(
     *,
     args: argparse.Namespace,
     status: str,
-    routing_packet: dict[str, Any],
-    prepare_packet: dict[str, Any] | None,
+    routing_evidence: dict[str, Any],
+    prepare_evidence: dict[str, Any] | None,
     next_step: str,
     extra_blockers: list[str] | None = None,
 ) -> dict[str, Any]:
     blockers = [
         *list(extra_blockers or []),
-        *list(routing_packet.get("blockers") or []),
+        *list(routing_evidence.get("blockers") or []),
     ]
-    if isinstance(prepare_packet, dict):
-        blockers.extend(f"prepare:{item}" for item in prepare_packet.get("blockers") or [])
-    warnings = list(routing_packet.get("warnings") or [])
-    if isinstance(prepare_packet, dict):
-        warnings.extend(f"prepare:{item}" for item in prepare_packet.get("warnings") or [])
+    if isinstance(prepare_evidence, dict):
+        blockers.extend(
+            f"prepare:{item}" for item in prepare_evidence.get("blockers") or []
+        )
+    warnings = list(routing_evidence.get("warnings") or [])
+    if isinstance(prepare_evidence, dict):
+        warnings.extend(f"prepare:{item}" for item in prepare_evidence.get("warnings") or [])
     safety = _safety(
         allow_prepare_records=args.allow_prepare_records,
-        routing_packet=routing_packet,
-        prepare_packet=prepare_packet,
+        routing_evidence=routing_evidence,
+        prepare_evidence=prepare_evidence,
     )
     return {
         "scope": "runtime_live_signal_operator_cycle",
         "status": status,
         "runtime_instance_id": args.runtime_instance_id,
-        "routing_packet": routing_packet,
-        "prepare_packet": prepare_packet,
-        "signal_input_json": routing_packet.get("signal_input_json"),
-        "profile_proposal_packet": routing_packet.get("profile_proposal_packet"),
+        "routing_evidence": routing_evidence,
+        "prepare_evidence": prepare_evidence,
+        "signal_input_json": routing_evidence.get("signal_input_json"),
+        "runtime_profile_proposal": routing_evidence.get("profile_proposal_artifact"),
         "blockers": _dedupe(blockers),
         "warnings": _dedupe(warnings),
-        "operator_command_plan": {
+        "live_operator_plan": {
             "next_step": next_step,
             "allow_prepare_records": args.allow_prepare_records,
             "current_runtime_prepare_allowed": (
@@ -226,10 +243,8 @@ def _base_packet(
             ),
             "requires_owner_runtime_profile_confirmation": status == READY_PROFILE_STATUS,
             "prepared_authorization_id": (
-                (prepare_packet.get("operator_command_plan") or {}).get(
-                    "prepared_authorization_id"
-                )
-                if isinstance(prepare_packet, dict)
+                (prepare_evidence.get("ids") or {}).get("authorization_id")
+                if isinstance(prepare_evidence, dict)
                 else None
             ),
             "creates_runtime": False,
@@ -245,18 +260,18 @@ def _base_packet(
 def _safety(
     *,
     allow_prepare_records: bool,
-    routing_packet: dict[str, Any],
-    prepare_packet: dict[str, Any] | None,
+    routing_evidence: dict[str, Any],
+    prepare_evidence: dict[str, Any] | None,
 ) -> dict[str, bool]:
-    routing_safety = _as_dict(routing_packet.get("safety_invariants"))
+    routing_safety = _as_dict(routing_evidence.get("safety_invariants"))
     prepare_safety = (
-        _as_dict(prepare_packet.get("safety_invariants"))
-        if isinstance(prepare_packet, dict)
+        _as_dict(prepare_evidence.get("safety_invariants"))
+        if isinstance(prepare_evidence, dict)
         else {}
     )
     created = (
-        _as_dict(prepare_packet.get("created_records"))
-        if isinstance(prepare_packet, dict)
+        _as_dict(prepare_evidence.get("created_records"))
+        if isinstance(prepare_evidence, dict)
         else {}
     )
 
@@ -266,11 +281,11 @@ def _safety(
     return {
         "live_signal_operator_cycle": True,
         "allow_prepare_records": allow_prepare_records,
-        "routing_packet_created": True,
-        "prepare_flow_called": prepare_packet is not None,
+        "routing_evidence_created": True,
+        "prepare_flow_called": prepare_evidence is not None,
         "prepare_records_created": bool(
-            prepare_packet
-            and prepare_packet.get("status") == READY_FOR_FINAL_GATE_PREFLIGHT
+            prepare_evidence
+            and prepare_evidence.get("status") == READY_FOR_FINAL_GATE_PREFLIGHT
         ),
         "shadow_candidate_created": bool(created.get("shadow_candidate_created")),
         "runtime_execution_intent_draft_created": bool(
@@ -319,7 +334,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-base")
     parser.add_argument(
         "--source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
+        choices=["sample", "local_sqlite_read_only", "live_market"],
         default="live_market",
     )
     parser.add_argument("--output-signal-input-json")
@@ -354,20 +369,20 @@ def _main(
 ) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = asyncio.run(
-            _build_packet(
+        artifact = asyncio.run(
+            _build_artifact(
                 args,
                 routing_builder=routing_builder,
                 prepare_runner=prepare_runner,
             )
         )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] in {
+    return 0 if artifact["status"] in {
         WAITING_STATUS,
         READY_PROFILE_STATUS,
         READY_FOR_PREPARE_STATUS,

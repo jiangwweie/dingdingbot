@@ -10,7 +10,7 @@ from src.application.runtime_closed_trade_review_facts_service import (
 from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, Position
 from src.domain.runtime_closed_trade_review_facts import (
     RuntimeClosedTradeReviewFactsStatus,
-    build_runtime_closed_trade_review_facts_packet,
+    build_runtime_closed_trade_review_facts_artifact,
 )
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
@@ -58,7 +58,7 @@ class _PositionRepo:
 
 
 def test_review_facts_waits_for_close_when_position_active() -> None:
-    packet = build_runtime_closed_trade_review_facts_packet(
+    artifact = build_runtime_closed_trade_review_facts_artifact(
         runtime=_runtime(),
         orders=[_order("entry-1", OrderRole.ENTRY)],
         active_positions=[_position(active=True)],
@@ -66,15 +66,15 @@ def test_review_facts_waits_for_close_when_position_active() -> None:
         now_ms=3,
     )
 
-    assert packet.status == RuntimeClosedTradeReviewFactsStatus.WAITING_FOR_CLOSE
-    assert packet.active_position_count == 1
-    assert packet.review_command_args == []
-    assert packet.review_record_created is False
-    assert packet.exchange_called is False
+    assert artifact.status == RuntimeClosedTradeReviewFactsStatus.WAITING_FOR_CLOSE
+    assert artifact.active_position_count == 1
+    assert artifact.review_command_args == []
+    assert artifact.review_record_created is False
+    assert artifact.exchange_called is False
 
 
 def test_review_facts_resolves_closed_entry_exit_order_ids() -> None:
-    packet = build_runtime_closed_trade_review_facts_packet(
+    artifact = build_runtime_closed_trade_review_facts_artifact(
         runtime=_runtime(),
         orders=[
             _order("entry-1", OrderRole.ENTRY, filled_at=1),
@@ -85,11 +85,11 @@ def test_review_facts_resolves_closed_entry_exit_order_ids() -> None:
         now_ms=3,
     )
 
-    assert packet.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
-    assert packet.entry_order_id == "entry-1"
-    assert packet.exit_order_id == "exit-1"
-    assert packet.authorization_id == "auth-avx-1"
-    assert packet.review_command_args == [
+    assert artifact.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+    assert artifact.entry_order_id == "entry-1"
+    assert artifact.exit_order_id == "exit-1"
+    assert artifact.authorization_id == "auth-avx-1"
+    assert artifact.review_command_args == [
         "scripts/create_runtime_closed_trade_review.py",
         "--runtime-instance-id",
         "strategy-runtime-95655873b76c",
@@ -100,8 +100,8 @@ def test_review_facts_resolves_closed_entry_exit_order_ids() -> None:
         "--authorization-id",
         "auth-avx-1",
     ]
-    assert packet.review_record_created is False
-    assert packet.runtime_state_mutated is False
+    assert artifact.review_record_created is False
+    assert artifact.runtime_state_mutated is False
 
 
 def test_review_facts_resolves_legacy_exit_without_runtime_id_by_signal() -> None:
@@ -114,7 +114,7 @@ def test_review_facts_resolves_legacy_exit_without_runtime_id_by_signal() -> Non
         parent_order_id="entry-1",
     )
 
-    packet = build_runtime_closed_trade_review_facts_packet(
+    artifact = build_runtime_closed_trade_review_facts_artifact(
         runtime=_runtime(),
         orders=[entry, exit_order],
         active_positions=[],
@@ -122,12 +122,12 @@ def test_review_facts_resolves_legacy_exit_without_runtime_id_by_signal() -> Non
         now_ms=3,
     )
 
-    assert packet.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
-    assert packet.exit_order_id == "exit-legacy"
+    assert artifact.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+    assert artifact.exit_order_id == "exit-legacy"
 
 
 def test_review_facts_blocks_when_flat_but_terminal_exit_missing() -> None:
-    packet = build_runtime_closed_trade_review_facts_packet(
+    artifact = build_runtime_closed_trade_review_facts_artifact(
         runtime=_runtime(),
         orders=[_order("entry-1", OrderRole.ENTRY)],
         active_positions=[],
@@ -135,8 +135,8 @@ def test_review_facts_blocks_when_flat_but_terminal_exit_missing() -> None:
         now_ms=3,
     )
 
-    assert packet.status == RuntimeClosedTradeReviewFactsStatus.BLOCKED
-    assert "terminal_exit_order_not_found" in packet.blockers
+    assert artifact.status == RuntimeClosedTradeReviewFactsStatus.BLOCKED
+    assert "terminal_exit_order_not_found" in artifact.blockers
 
 
 @pytest.mark.asyncio
@@ -153,14 +153,14 @@ async def test_review_facts_service_reads_repositories() -> None:
         position_repository=_PositionRepo(),
     )
 
-    packet = await service.build_packet(
+    artifact = await service.build_artifact(
         runtime_instance_id=runtime.runtime_instance_id,
         now_ms=3,
     )
 
-    assert packet.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
-    assert packet.entry_order_id == "entry-1"
-    assert packet.exit_order_id == "exit-1"
+    assert artifact.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+    assert artifact.entry_order_id == "entry-1"
+    assert artifact.exit_order_id == "exit-1"
 
 
 def _runtime() -> StrategyRuntimeInstance:

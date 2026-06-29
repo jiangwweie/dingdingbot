@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _load_env_file(args.env_file)
     client = UrlLibApiClient(api_base=args.api_base)
-    packet = build_runtime_live_enablement_api_packet(
+    artifact = build_runtime_live_enablement_api_flow_artifact(
         client=client,
         runtime_instance_id=args.runtime_instance_id,
         query=_query_from_args(args),
@@ -60,13 +60,13 @@ def main(argv: list[str] | None = None) -> int:
         actor=args.actor,
     )
     if args.json:
-        print(json.dumps(packet, indent=2, sort_keys=True))
+        print(json.dumps(artifact, indent=2, sort_keys=True))
     else:
-        _print_human(packet)
-    return 0 if not packet["checks"]["blockers"] else 2
+        _print_human(artifact)
+    return 0 if not artifact["checks"]["blockers"] else 2
 
 
-def build_runtime_live_enablement_api_packet(
+def build_runtime_live_enablement_api_flow_artifact(
     *,
     client: ApiClient,
     runtime_instance_id: str,
@@ -164,7 +164,7 @@ def build_runtime_live_enablement_api_packet(
     elif apply_mutation:
         status = "blocked_before_live_runtime_enablement_mutation"
 
-    packet = {
+    artifact = {
         "status": status,
         "scope": "runtime_live_enablement_api_flow",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -192,7 +192,7 @@ def build_runtime_live_enablement_api_packet(
             "runtime_state_mutated": mutation_applied,
         },
     }
-    return packet
+    return artifact
 
 
 def _step(
@@ -388,7 +388,7 @@ def _add_confirmation_flags(parser: argparse.ArgumentParser) -> None:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build or apply a guarded live runtime enablement API packet.",
+        description="Build or apply a guarded live runtime enablement API artifact.",
     )
     parser.add_argument("--api-base", default=os.environ.get("RUNTIME_LIVE_ENABLEMENT_API_BASE", DEFAULT_API_BASE))
     parser.add_argument("--env-file")
@@ -414,10 +414,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _print_human(packet: dict[str, Any]) -> None:
-    checks = packet["checks"]
-    print(f"status={packet['status']}")
-    print(f"runtime_instance_id={packet['runtime_instance_id']}")
+def _print_human(artifact: dict[str, Any]) -> None:
+    checks = artifact["checks"]
+    print(f"status={artifact['status']}")
+    print(f"runtime_instance_id={artifact['runtime_instance_id']}")
     print(f"preview_ready={str(checks['preview_ready']).lower()}")
     print(f"apply_requested={str(checks['apply_requested']).lower()}")
     print(f"mutation_applied={str(checks['mutation_applied']).lower()}")

@@ -36,7 +36,7 @@ experiment-worthy strategy asset
 ```
 
 After main-control absorption, strategy progress should be evaluated through
-`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`. The strategy question becomes:
+`docs/current/TRADEABILITY_DECISION_CONTRACT.md`. The strategy question becomes:
 
 ```text
 Is the asset tradeable now?
@@ -178,7 +178,7 @@ facts.
 | --- | --- | --- | --- |
 | `research_candidate` | A plausible strategy idea or vocabulary item | Strategy thesis and rough regime fit | Research only |
 | `replay_candidate` | Worth replay or event extraction | Event definition, sample source, rough outcome question | No runtime authority |
-| `paper_observation_candidate` | Worth live read-only observation | RequiredFacts draft, disable/review facts, paper packet shape | No submit authority |
+| `paper_observation_candidate` | Worth live read-only observation | RequiredFacts draft, disable/review facts, paper observation evidence shape | No submit authority |
 | `tiny_live_intake_candidate` | Worth main-control review as a small-capital experimental asset | Thesis, risk envelope, path-risk evidence, replay/paper evidence, boundary-clean handoff | Not tiny-live ready |
 | `trial_asset_admission_candidate` | Worth formal final-owned admission preparation | Registry proposal, policy-scope draft, RequiredFacts draft, risk envelope, hard-stop summary | No runtime authority |
 | `admitted_trial_asset` | Accepted into final-owned strategy asset layer | Registry/tier/policy representation and explicit non-authority boundary | No action-time authority |
@@ -293,8 +293,8 @@ Absorption must preserve:
 ```text
 research artifacts remain research_only=true
 main-control reviewed artifacts remain non-executing unless runtime scope changes
-actionable_now=false unless runtime action-time gates pass
-real_order_authority=false unless the official runtime path grants it
+Tradeability Decision remains the only can-trade read model
+Runtime Safety State remains the only live-submit safety read model
 ```
 
 ## Hard Boundaries

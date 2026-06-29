@@ -1,0 +1,149 @@
+{
+  "after_next_state": "armed_observation",
+  "checks": {
+    "disable_facts_clear": false,
+    "required_facts_satisfied": false
+  },
+  "first_blocker": {
+    "class": "short_squeeze_risk_state_disable_active",
+    "owner": "market",
+    "repair_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
+  },
+  "generated_at_utc": "2026-06-28T19:14:04.566103+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_brf2_shadow_candidate_evidence",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "next_runtime_step": "continue_brf2_armed_observation_until_disable_clears",
+  "safety_invariants": {
+    "authorization_evidence_created": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "execution_attempt_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.brf2_shadow_candidate_evidence.v1",
+  "scope": "brf2_shadow_candidate_evidence_read_model",
+  "shadow_candidate_evidence": {
+    "disable_fact_bindings": [
+      {
+        "fact_key": "short_squeeze_risk_state",
+        "fresh": true,
+        "raw_state": "red",
+        "state": "disable_active"
+      },
+      {
+        "fact_key": "strong_reclaim_disable_state",
+        "fresh": true,
+        "raw_state": "false",
+        "state": "clear"
+      },
+      {
+        "fact_key": "rally_extension_invalidates_failure_state",
+        "fresh": true,
+        "raw_state": "active",
+        "state": "disable_active"
+      },
+      {
+        "fact_key": "liquidity_downshift_state",
+        "fresh": true,
+        "raw_state": "false",
+        "state": "clear"
+      },
+      {
+        "fact_key": "spread_liquidity_state",
+        "fresh": true,
+        "raw_state": "acceptable",
+        "state": "clear"
+      }
+    ],
+    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "fact_authority_boundary": {
+      "action_time_required_facts_satisfied": false,
+      "fact_authority": "readonly_proxy_not_action_time_required_fact",
+      "notes": "BRF reference rows are read-only observation proxies; action-time RequiredFacts must be rebuilt from live runtime/exchange facts.",
+      "source_is_brf_reference_row": true,
+      "usable_for_armed_observation": true,
+      "usable_for_exchange_write": false,
+      "usable_for_finalgate": false,
+      "usable_for_market_wait_classification": true,
+      "usable_for_operation_layer": false
+    },
+    "fresh_signal_present": false,
+    "required_fact_bindings": [
+      {
+        "fact_key": "closed_1h_ohlcv",
+        "fresh": true,
+        "raw_state": "ready",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "closed_5m_ohlcv",
+        "fresh": true,
+        "raw_state": "ready",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "rally_context",
+        "fresh": true,
+        "raw_state": "bear_or_weak_reclaim",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "rally_failure_trigger_state",
+        "fresh": true,
+        "raw_state": "confirmed",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "short_squeeze_risk_state",
+        "fresh": true,
+        "raw_state": "red",
+        "state": "not_satisfied"
+      },
+      {
+        "fact_key": "strong_reclaim_disable_state",
+        "fresh": true,
+        "raw_state": "false",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "liquidity_downshift_state",
+        "fresh": true,
+        "raw_state": "false",
+        "state": "satisfied"
+      },
+      {
+        "fact_key": "spread_liquidity_state",
+        "fresh": true,
+        "raw_state": "acceptable",
+        "state": "satisfied"
+      }
+    ],
+    "shadow_candidate_evidence_id": "",
+    "shadow_candidate_evidence_type": "brf2_non_executing_short_signal_candidate_evidence",
+    "side": "short",
+    "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
+    "signal_state": "blocked_by_disable_fact",
+    "source_candidate_id": "BRF-001-BTC-SHORT",
+    "source_signal_observation_id": "BRF-001-BTC-SHORT:brf-9d221c462ba943dcc6370db0:1770039600000",
+    "source_signal_type": "would_enter",
+    "source_strategy_group_id": "BRF-001",
+    "strategy_group_id": "BRF2-001",
+    "symbol": "BTC/USDT:USDT",
+    "symbol_binding_status": "actual_symbol_bound"
+  },
+  "shadow_candidate_evidence_ready": false,
+  "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
+  "strategy_group_id": "BRF2-001"
+}

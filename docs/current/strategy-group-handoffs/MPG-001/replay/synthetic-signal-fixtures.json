@@ -1,7 +1,7 @@
 {
   "schema_version": "brc.strategygroup.synthetic_fixture_set.v1",
   "strategy_group_id": "MPG-001",
-  "purpose": "P0.5 local replay rehearsal fixtures. These are never live market signals and never authorize a real order.",
+  "purpose": "Signal Observation grade local replay rehearsal fixtures. These are never live market signals and never authorize a real order.",
   "fixtures": [
     {
       "fixture_case": "no_signal",

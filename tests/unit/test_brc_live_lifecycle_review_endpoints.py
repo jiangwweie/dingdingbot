@@ -153,7 +153,7 @@ def test_live_lifecycle_closed_reviewed_endpoint_records_terminal_review(monkeyp
                 "sl_order_id": "sl-canceled",
                 "sl_exchange_order_id": "exchange-sl-canceled",
                 "owner_risk_acceptance": "owner_accepted_l3_bounded_live",
-                "review_decision": "park",
+                "review_outcome": "park",
                 "strategy_outcome": "closed_reviewed",
                 "close_reason": "take_profit_filled",
                 "cleanup_evidence_ref": "/tmp/cleanup.json",
@@ -170,7 +170,8 @@ def test_live_lifecycle_closed_reviewed_endpoint_records_terminal_review(monkeyp
     assert payload["review"]["trial_binding_id"] == "trial-binding-closed"
     assert payload["review"]["signal_evaluation_id"] == "signal-evaluation-closed"
     assert payload["review"]["order_candidate_id"] == "order-candidate-closed"
-    assert payload["review"]["metadata"]["review_decision"] == "park"
+    assert payload["review"]["metadata"]["review_outcome"] == "park"
+    assert "review_decision" not in payload["review"]["metadata"]
     assert payload["review"]["metadata"]["cleanup_evidence_ref"] == "/tmp/cleanup.json"
     assert payload["review"]["places_order"] is False
     assert payload["review"]["mutates_exchange"] is False

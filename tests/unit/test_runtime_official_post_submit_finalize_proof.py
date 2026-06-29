@@ -27,6 +27,18 @@ def test_official_post_submit_finalize_passes(tmp_path):
     assert report["post_submit_reconciliation_matched"] is True
     assert report["post_submit_budget_settled"] is True
     assert report["submit_outcome_review_recorded"] is True
+    assert "operator_command_plan" not in report
+    assert report["post_submit_finalize_plan"] == {
+        "next_step": "build_strategy_driven_next_attempt_after_flat_or_close_review",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "live_submit_allowed": False,
+        "post_submit_finalize_completed": True,
+        "old_authorization_replay_only": True,
+        "next_attempt_requires_fresh_signal": True,
+        "next_attempt_requires_fresh_authorization": True,
+        "pre_submit_rehearsal_retry_allowed": False,
+    }
 
     checks = report["checks"]
     assert checks["controlled_gateway_action_passed"] is True
@@ -57,16 +69,16 @@ def test_official_post_submit_finalize_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_post_submit_finalize_outputs_packet(tmp_path):
+def test_official_post_submit_finalize_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf088"
 
     report = script.build_proof_report(output_dir)
 
     expected_files = [
         "contract-report.json",
-        "controlled-gateway-action-packet.json",
+        "controlled-gateway-action-artifact.json",
         "post-submit-finalize.json",
-        "post-submit-finalize-proof-packet.json",
+        "post-submit-finalize-proof-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -74,46 +86,69 @@ def test_official_post_submit_finalize_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "post-submit-finalize-proof-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "post-submit-finalize-proof-artifact.json").read_text()
     )
-    assert packet["status"] == "post_submit_finalize_completed_next_attempt_blocked"
-    assert packet["statuses"]["exchange_submit_execution_result"] == (
+    assert artifact["status"] == "post_submit_finalize_completed_next_attempt_blocked"
+    assert artifact["statuses"]["exchange_submit_execution_result"] == (
         "exchange_submit_orders_submitted"
     )
-    assert packet["statuses"]["post_submit_finalize"] == (
+    assert artifact["statuses"]["post_submit_finalize"] == (
         "finalized_next_attempt_blocked"
     )
-    assert packet["statuses"]["next_attempt_gate"] == "blocked"
-    assert packet["statuses"]["submit_outcome_review"] == (
+    assert artifact["statuses"]["next_attempt_gate"] == "blocked"
+    assert artifact["statuses"]["submit_outcome_review"] == (
         "classified_ready_for_attempt_outcome_policy"
     )
-    assert packet["statuses"]["post_submit_budget_settlement"] == (
+    assert artifact["statuses"]["post_submit_budget_settlement"] == (
         "recorded_reserved_budget_consumed"
     )
-    finalize = packet["post_submit_finalize"]
+    finalize = artifact["post_submit_finalize"]
+    assert "packet_id" not in finalize
+    assert "payload_id" in finalize
     assert finalize["old_authorization_submit_retry_allowed"] is False
     assert finalize["pre_submit_rehearsal_retry_allowed"] is False
     assert finalize["local_created_order_requirement_retired"] is True
     assert finalize["submit_result_status"] == "exchange_submit_orders_submitted"
-    gate = packet["next_attempt_gate"]
+    gate = artifact["next_attempt_gate"]
     assert gate["status"] == "blocked"
     assert gate["active_positions_count"] == 1
     assert "runtime_active_position_slot_in_use" in gate["blockers"]
     assert gate["requires_fresh_strategy_signal"] is True
     assert gate["requires_fresh_authorization"] is True
-    assert packet["review"]["observed_outcome"] == "submitted_full_fill"
-    assert packet["review"]["recommended_attempt_outcome_kind"] == (
+    assert artifact["review"]["observed_outcome"] == "submitted_full_fill"
+    assert artifact["review"]["recommended_attempt_outcome_kind"] == (
         "submitted_full_fill"
     )
-    assert packet["settlement"]["status"] == "recorded_reserved_budget_consumed"
-    assert packet["settlement"]["budget_action"] == (
+    assert artifact["settlement"]["status"] == "recorded_reserved_budget_consumed"
+    assert artifact["settlement"]["budget_action"] == (
         "confirm_reserved_budget_consumed"
     )
-    assert packet["safety_invariants"]["live_exchange_called"] is False
-    assert packet["safety_invariants"]["post_submit_created_order"] is False
-    assert packet["safety_invariants"]["post_submit_order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["live_exchange_called"] is False
+    assert artifact["safety_invariants"]["post_submit_created_order"] is False
+    assert artifact["safety_invariants"]["post_submit_order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert "post_submit_finalize_payload" in report
+    assert "post_submit_finalize_packet" not in report
+    assert "post_submit_finalize_payload_id" in artifact["ids"]
+    assert "post_submit_finalize_packet_id" not in artifact["ids"]
+
+
+def test_post_submit_finalize_payload_id_ignores_legacy_packet_id() -> None:
+    assert (
+        script._post_submit_finalize_payload_id(
+            {
+                "packet_id": "legacy-post-submit-finalize-packet",
+            }
+        )
+        is None
+    )
+    assert script._post_submit_finalize_payload_id(
+        {
+            "packet_id": "legacy-post-submit-finalize-packet",
+            "payload_id": "current-payload",
+        }
+    ) == "current-payload"
 
 
 def test_official_post_submit_finalize_cli_stdout_is_json_only(

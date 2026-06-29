@@ -40,7 +40,7 @@ class RuntimeExecutionTrustedSubmitFactSource(
 
     `trusted=True` means the fact is sourced from a local projection,
     reconciliation readmodel, market-rule readmodel, or exchange read-only
-    fact source. It must not mean an Owner/UI-supplied allow signal.
+    fact source. It must not mean an Owner-surface supplied allow signal.
     """
 
     key: str = Field(min_length=1, max_length=96)

@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+from scripts import verify_runtime_next_attempt_gate_strategy_planning as verifier
 from scripts.verify_runtime_next_attempt_gate_strategy_planning import (
     build_next_attempt_gate_strategy_planning_report,
 )
@@ -62,6 +63,8 @@ async def test_next_attempt_gate_strategy_planning_report_covers_ready_block_wai
         assert item["status"] == "passed"
         assert item["checks"]["no_execution_side_effects"] is True
         assert item["checks"]["pre_submit_rehearsal_retry_disallowed"] is True
+        assert "strategy_planning_packet" not in item
+        assert "strategy_planning_artifact" in item
 
 
 def test_next_attempt_gate_strategy_planning_script_writes_json(tmp_path):
@@ -84,3 +87,10 @@ def test_next_attempt_gate_strategy_planning_script_writes_json(tmp_path):
     assert stdout_payload["status"] == "rtf049_next_attempt_gate_strategy_planning_passed"
     assert file_payload["status"] == stdout_payload["status"]
     assert file_payload["scenario_count"] == 3
+
+
+def test_next_attempt_gate_strategy_planning_uses_payload_helper_boundary():
+    assert hasattr(verifier, "_finalize_payload")
+    assert not hasattr(verifier, "_finalize_packet")
+    assert "runtime packet" not in (verifier.__doc__ or "")
+    assert "runtime payload" in (verifier.__doc__ or "")

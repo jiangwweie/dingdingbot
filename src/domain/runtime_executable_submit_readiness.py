@@ -1,6 +1,6 @@
-"""Runtime-level executable submit readiness packet.
+"""Runtime-level executable submit readiness artifact.
 
-This packet is the non-executing boundary between a fresh, strategy-driven
+This artifact is the non-executing boundary between a fresh, strategy-driven
 runtime attempt and the official auditable submit path. It consolidates current
 runtime evidence without pushing consumed or historical pre-submit rehearsal
 artifacts back into the main loop.
@@ -71,11 +71,11 @@ class RuntimeExecutableSubmitReadinessEvidence(
     )
 
 
-class RuntimeExecutableSubmitReadinessPacket(RuntimeExecutableSubmitReadinessModel):
-    packet_id: str = Field(min_length=1, max_length=720)
+class RuntimeExecutableSubmitReadinessArtifact(RuntimeExecutableSubmitReadinessModel):
+    artifact_id: str = Field(min_length=1, max_length=720)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
-    source_release_packet_id: str | None = Field(default=None, max_length=420)
-    source_strategy_planning_packet_id: str = Field(min_length=1, max_length=640)
+    source_release_evidence_id: str | None = Field(default=None, max_length=420)
+    source_strategy_planning_artifact_id: str = Field(min_length=1, max_length=640)
     source_authorization_id: str = Field(min_length=1, max_length=220)
     signal_evaluation_id: str | None = Field(default=None, max_length=128)
     order_candidate_id: str | None = Field(default=None, max_length=128)
@@ -104,7 +104,7 @@ class RuntimeExecutableSubmitReadinessPacket(RuntimeExecutableSubmitReadinessMod
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_packet(self) -> "RuntimeExecutableSubmitReadinessPacket":
+    def _validate_artifact(self) -> "RuntimeExecutableSubmitReadinessArtifact":
         _reject_forbidden_execution_fields(
             "runtime executable submit readiness",
             {"metadata": self.metadata},
@@ -134,22 +134,22 @@ class RuntimeExecutableSubmitReadinessPacket(RuntimeExecutableSubmitReadinessMod
         return self
 
 
-def build_runtime_executable_submit_readiness_packet(
+def build_runtime_executable_submit_readiness_artifact(
     *,
     runtime_instance_id: str,
-    source_strategy_planning_packet_id: str,
+    source_strategy_planning_artifact_id: str,
     source_authorization_id: str,
     strategy_planning_status: str,
     evidence: RuntimeExecutableSubmitReadinessEvidence,
     order_candidate_id: str | None = None,
     signal_evaluation_id: str | None = None,
-    source_release_packet_id: str | None = None,
-    first_real_submit_packet_status: str | None = None,
-    first_real_submit_packet_blockers: list[str] | None = None,
+    source_release_evidence_id: str | None = None,
+    first_real_submit_source_status: str | None = None,
+    first_real_submit_source_blockers: list[str] | None = None,
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
-) -> RuntimeExecutableSubmitReadinessPacket:
+) -> RuntimeExecutableSubmitReadinessArtifact:
     blockers: list[str] = []
     warnings: list[str] = []
 
@@ -212,23 +212,23 @@ def build_runtime_executable_submit_readiness_packet(
     if _present(evidence.durable_exchange_submit_execution_result_id):
         warnings.append("durable_execution_result_is_post_submit_evidence_only")
 
-    first_real_submit_blockers = list(first_real_submit_packet_blockers or [])
-    if first_real_submit_packet_status and first_real_submit_packet_status not in {
+    first_real_submit_blockers = list(first_real_submit_source_blockers or [])
+    if first_real_submit_source_status and first_real_submit_source_status not in {
         "ready_for_owner_final_review",
         "ready_for_executable_submit",
     }:
         if _runtime_grant_path_has_required_evidence(evidence=evidence):
             warnings.append(
-                "first_real_submit_packet_not_ready_but_runtime_grant_path_used"
+                "first_real_submit_source_not_ready_but_runtime_grant_path_used"
             )
             warnings.extend(
-                f"first_real_submit_packet:{item}"
+                f"first_real_submit_source:{item}"
                 for item in first_real_submit_blockers
             )
         else:
-            blockers.append("first_real_submit_packet_not_ready")
+            blockers.append("first_real_submit_source_not_ready")
             blockers.extend(
-                f"first_real_submit_packet:{item}"
+                f"first_real_submit_source:{item}"
                 for item in first_real_submit_blockers
             )
 
@@ -241,15 +241,15 @@ def build_runtime_executable_submit_readiness_packet(
         if blockers
         else RuntimeExecutableSubmitReadinessStatus.READY_FOR_EXECUTABLE_SUBMIT
     )
-    packet_id = (
+    artifact_id = (
         "runtime-executable-submit-readiness-"
-        f"{runtime_instance_id}-{source_strategy_planning_packet_id}"
+        f"{runtime_instance_id}-{source_strategy_planning_artifact_id}"
     )
-    return RuntimeExecutableSubmitReadinessPacket(
-        packet_id=packet_id,
+    return RuntimeExecutableSubmitReadinessArtifact(
+        artifact_id=artifact_id,
         runtime_instance_id=runtime_instance_id,
-        source_release_packet_id=_optional_str(source_release_packet_id),
-        source_strategy_planning_packet_id=source_strategy_planning_packet_id,
+        source_release_evidence_id=_optional_str(source_release_evidence_id),
+        source_strategy_planning_artifact_id=source_strategy_planning_artifact_id,
         source_authorization_id=source_authorization_id,
         signal_evaluation_id=_optional_str(signal_evaluation_id),
         order_candidate_id=_optional_str(order_candidate_id),

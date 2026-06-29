@@ -27,7 +27,7 @@
         "main-control L2 intake dry-run passed",
         "runtime tier policy promotes BTPC-001 to L2 shadow_candidate only",
         "largest current right-tail lead among reviewed expansion candidates",
-        "candidate packet reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
+        "candidate evidence reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
         "supports bearish-only activation and strong-uptrend disable review"
       ],
       "blocking_gaps_before_l2": [

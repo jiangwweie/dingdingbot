@@ -248,7 +248,7 @@ def test_promotion_confirmation_record_replays_gate_facts_without_execution_auth
         strategy_family_version_id="CPM-RO-001-v0",
         semantic_confirmations=_semantic_confirmed(),
         runtime_confirmations=_runtime_confirmed(),
-        reason="Owner accepts bounded 30U experimental capital semantics.",
+        reason="Owner accepts controlled-subaccount experimental capital semantics.",
         created_at_ms=1781000000000,
         metadata={"risk_capital_objective": "bounded_loss_right_tail_capture"},
     )

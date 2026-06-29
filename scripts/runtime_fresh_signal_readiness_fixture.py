@@ -4,8 +4,8 @@
 The fixture proves the ready path that the live runtime will use when a fresh
 runtime-compatible signal appears:
 
-fresh-signal loop ready packet
--> RTF-057 readiness bridge
+fresh-signal loop ready artifact
+-> RTF-057 readiness evidence
 -> strategy planning ready
 -> executable readiness / handoff preview ready
 
@@ -28,7 +28,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_fresh_signal_readiness_bridge as bridge  # noqa: E402
+from scripts import runtime_fresh_signal_readiness_evidence as readiness_evidence  # noqa: E402
 
 
 READY_FOR_FRESH_SUBMIT_AUTHORIZATION = "ready_for_fresh_submit_authorization"
@@ -57,7 +57,7 @@ def _fixture_paths(root: Path) -> dict[str, Path]:
         "fresh_loop": root / "00-fresh-signal-loop-ready.json",
         "signal_input": root / "00-signal-input-ready.json",
         "evidence": root / "00-readiness-evidence.json",
-        "bridge_output": root / "01-fresh-signal-readiness-bridge.json",
+        "readiness_evidence_output": root / "01-fresh-signal-readiness-evidence.json",
     }
 
 
@@ -89,9 +89,9 @@ def _signal_input(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _post_submit_packet(args: argparse.Namespace) -> dict[str, Any]:
+def _post_submit_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
-        "packet_id": "runtime-post-submit-finalize-rtf058",
+        "artifact_id": "runtime-post-submit-finalize-rtf058",
         "authorization_id": "consumed-submit-auth-rtf058",
         "runtime_instance_id": args.runtime_instance_id,
         "status": "finalized_ready_for_next_attempt",
@@ -116,7 +116,7 @@ def _post_submit_packet(args: argparse.Namespace) -> dict[str, Any]:
         "blockers": [],
         "warnings": [],
         "not_execution_authority": True,
-        "runtime_state_mutated_by_packet": False,
+        "runtime_state_mutated_by_payload": False,
         "execution_intent_created": False,
         "order_created": False,
         "exchange_called": False,
@@ -126,12 +126,12 @@ def _post_submit_packet(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _fresh_loop_packet(
+def _fresh_loop_artifact(
     args: argparse.Namespace,
     *,
     signal_input_json: Path,
 ) -> dict[str, Any]:
-    post_submit = _post_submit_packet(args)
+    post_submit = _post_submit_payload(args)
     return {
         "scope": "runtime_fresh_signal_prepare_loop",
         "status": READY_FOR_FINAL_GATE_PREFLIGHT,
@@ -139,7 +139,7 @@ def _fresh_loop_packet(
         "post_submit_finalize_flow": {
             "scope": "runtime_post_submit_finalize_api_flow",
             "status": "finalized_ready_for_next_attempt",
-            "post_submit_finalize_packet": post_submit,
+            "post_submit_finalize_payload": post_submit,
             "api_payload": post_submit,
             "blockers": [],
             "warnings": [],
@@ -153,7 +153,7 @@ def _fresh_loop_packet(
             "scope": "runtime_next_attempt_observation_api_prepare_flow",
             "status": READY_FOR_FINAL_GATE_PREFLIGHT,
             "signal_input_json": str(signal_input_json),
-            "prepare_packet": {
+            "prepare_artifact": {
                 "status": READY_FOR_FINAL_GATE_PREFLIGHT,
                 "ids": {
                     "authorization_id": "prepared-submit-auth-rtf058",
@@ -161,7 +161,7 @@ def _fresh_loop_packet(
                     "runtime_execution_intent_draft_id": "draft-rtf058",
                     "protection_plan_id": "protection-rtf058",
                 },
-                "operator_command_plan": {
+                "prepare_artifact_plan": {
                     "prepared_authorization_id": "prepared-submit-auth-rtf058",
                     "not_executed": True,
                     "places_order": False,
@@ -177,7 +177,7 @@ def _fresh_loop_packet(
             },
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {
+            "api_prepare_plan": {
                 "prepared_authorization_id": "prepared-submit-auth-rtf058",
                 "creates_shadow_candidate": True,
                 "places_order": False,
@@ -201,7 +201,7 @@ def _fresh_loop_packet(
         "prepared_authorization_id": "prepared-submit-auth-rtf058",
         "blockers": [],
         "warnings": ["rtf058_ready_signal_fixture"],
-        "operator_command_plan": {
+        "fresh_signal_prepare_plan": {
             "next_step": "run_official_final_gate_preflight",
             "creates_shadow_candidate": True,
             "creates_execution_intent": False,
@@ -245,14 +245,14 @@ def _readiness_evidence(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _planning_packet(args: argparse.Namespace, planning_args: argparse.Namespace) -> dict[str, Any]:
+def _planning_artifact(args: argparse.Namespace, planning_args: argparse.Namespace) -> dict[str, Any]:
     signal = _read_json(planning_args.signal_input_json)
-    post_submit = _read_json(planning_args.post_submit_finalize_packet_json)
+    post_submit = _read_json(planning_args.post_submit_finalize_payload_json)
     strategy = {
-        "packet_id": "strategy-plan-rtf058",
+        "artifact_id": "strategy-plan-rtf058",
         "runtime_instance_id": args.runtime_instance_id,
         "source_authorization_id": post_submit.get("authorization_id"),
-        "post_submit_finalize_packet_id": post_submit.get("packet_id"),
+        "post_submit_finalize_payload_id": post_submit.get("artifact_id"),
         "status": READY_FOR_FINAL_GATE_PREFLIGHT,
         "next_attempt_gate_status": "ready_for_fresh_signal",
         "signal_evaluation_id": signal.get("evaluation_id"),
@@ -262,7 +262,7 @@ def _planning_packet(args: argparse.Namespace, planning_args: argparse.Namespace
         "order_candidate_id": "order-candidate-rtf058",
         "blockers": [],
         "warnings": ["rtf058_fixture_strategy_planning"],
-        "operator_command_plan": {
+        "strategy_planning_plan": {
             "next_step": "run_executable_submit_readiness",
             "creates_shadow_candidate": True,
             "creates_executable_execution_intent": False,
@@ -307,12 +307,13 @@ def _planning_packet(args: argparse.Namespace, planning_args: argparse.Namespace
     }
 
 
-def _handoff_packet(
+def _handoff_artifact(
     args: argparse.Namespace,
     handoff_args: argparse.Namespace,
 ) -> dict[str, Any]:
-    cycle = _read_json(handoff_args.cycle_packet_json)
-    strategy_flow = cycle.get("next_attempt_strategy_plan_flow")
+    cycle_artifact_path = getattr(handoff_args, "cycle_artifact_json", None)
+    cycle_artifact = _read_json(cycle_artifact_path)
+    strategy_flow = cycle_artifact.get("next_attempt_strategy_plan_flow")
     if not isinstance(strategy_flow, dict):
         strategy_flow = {}
     status = (
@@ -325,14 +326,14 @@ def _handoff_packet(
         "status": status,
         "blocked_stage": None,
         "runtime_instance_id": args.runtime_instance_id,
-        "cycle_packet": cycle,
+        "cycle_artifact": cycle_artifact,
         "executable_readiness_flow": {
             "status": "ready_for_executable_submit",
             "api_payload": {
-                "packet_id": "readiness-rtf058",
+                "artifact_id": "readiness-rtf058",
                 "runtime_instance_id": args.runtime_instance_id,
-                "source_strategy_planning_packet_id": (
-                    (strategy_flow.get("api_payload") or {}).get("packet_id")
+                "source_strategy_planning_artifact_id": (
+                    (strategy_flow.get("api_payload") or {}).get("artifact_id")
                 ),
                 "source_authorization_id": "consumed-submit-auth-rtf058",
                 "status": "ready_for_executable_submit",
@@ -351,14 +352,14 @@ def _handoff_packet(
         if args.include_fresh_submit_authorization
         else None,
         "blockers": [],
-        "warnings": ["rtf058_fixture_handoff_bridge"],
+        "warnings": ["rtf058_fixture_handoff_evidence"],
         "operator_action_preview": {
             "ready_for_call": args.include_fresh_submit_authorization,
             "mode": "disabled_smoke",
         }
         if args.include_fresh_submit_authorization
         else None,
-        "operator_command_plan": {
+        "fresh_submit_handoff_plan": {
             "next_step": (
                 "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
                 if args.include_fresh_submit_authorization
@@ -388,17 +389,17 @@ def _handoff_packet(
     }
 
 
-def _bridge_args(
+def _readiness_evidence_args(
     args: argparse.Namespace,
     *,
     paths: dict[str, Path],
-    bridge_output_dir: Path,
+    readiness_evidence_output_dir: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
         fresh_signal_loop_json=str(paths["fresh_loop"]),
         evidence_json=str(paths["evidence"]),
-        first_real_submit_packet_json=None,
+        first_real_submit_evidence_json=None,
         fresh_submit_authorization_id=(
             "fresh-submit-auth-rtf058"
             if args.include_fresh_submit_authorization
@@ -421,7 +422,7 @@ def _bridge_args(
             },
             ensure_ascii=False,
         ),
-        output_dir=str(bridge_output_dir),
+        output_dir=str(readiness_evidence_output_dir),
         flow_id="rtf058-ready-signal",
     )
 
@@ -429,12 +430,12 @@ def _bridge_args(
 def _build_report(args: argparse.Namespace) -> dict[str, Any]:
     artifact_dir = Path(args.artifact_dir).expanduser()
     fixture_dir = artifact_dir / "fixture-inputs"
-    bridge_dir = artifact_dir / "bridge"
+    readiness_evidence_dir = artifact_dir / "readiness-evidence"
     paths = _fixture_paths(fixture_dir)
     _write_json(paths["signal_input"], _signal_input(args))
     _write_json(
         paths["fresh_loop"],
-        _fresh_loop_packet(args, signal_input_json=paths["signal_input"]),
+        _fresh_loop_artifact(args, signal_input_json=paths["signal_input"]),
     )
     _write_json(paths["evidence"], _readiness_evidence(args))
 
@@ -445,51 +446,55 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
         planning_calls.append(
             {
                 "signal_input_json": planning_args.signal_input_json,
-                "post_submit_finalize_packet_json": (
-                    planning_args.post_submit_finalize_packet_json
+                "post_submit_finalize_payload_json": (
+                    planning_args.post_submit_finalize_payload_json
                 ),
             }
         )
-        return _planning_packet(args, planning_args)
+        return _planning_artifact(args, planning_args)
 
     def handoff_builder(handoff_args: argparse.Namespace) -> dict[str, Any]:
         handoff_calls.append(
             {
-                "cycle_packet_json": handoff_args.cycle_packet_json,
+                "cycle_artifact_json": handoff_args.cycle_artifact_json,
                 "evidence_json": handoff_args.evidence_json,
                 "fresh_submit_authorization_id": (
                     handoff_args.fresh_submit_authorization_id
                 ),
             }
         )
-        return _handoff_packet(args, handoff_args)
+        return _handoff_artifact(args, handoff_args)
 
-    bridge_packet = bridge._build_packet(
-        _bridge_args(args, paths=paths, bridge_output_dir=bridge_dir),
+    projection_artifact = readiness_evidence._build_evidence(
+        _readiness_evidence_args(
+            args,
+            paths=paths,
+            readiness_evidence_output_dir=readiness_evidence_dir,
+        ),
         planning_builder=planning_builder,
         handoff_builder=handoff_builder,
     )
-    _write_json(paths["bridge_output"], bridge_packet)
-    bridge_status = str(bridge_packet.get("status") or "")
+    _write_json(paths["readiness_evidence_output"], projection_artifact)
+    projection_status = str(projection_artifact.get("status") or "")
     report = {
         "scope": "runtime_fresh_signal_readiness_fixture",
         "status": (
             "ready_fresh_signal_readiness_fixture"
-            if bridge_status
+            if projection_status
             in {READY_FOR_FRESH_SUBMIT_AUTHORIZATION, READY_FOR_OFFICIAL_SUBMIT_CALL}
             else "blocked_fresh_signal_readiness_fixture"
         ),
         "runtime_instance_id": args.runtime_instance_id,
-        "bridge_status": bridge_status,
+        "projection_status": projection_status,
         "artifact_dir": str(artifact_dir),
         "fixture_files": {key: str(value) for key, value in paths.items()},
-        "bridge_packet": bridge_packet,
+        "projection_artifact": projection_artifact,
         "planning_call_count": len(planning_calls),
         "handoff_call_count": len(handoff_calls),
         "planning_calls": planning_calls,
         "handoff_calls": handoff_calls,
-        "blockers": list(bridge_packet.get("blockers") or []),
-        "warnings": list(bridge_packet.get("warnings") or []),
+        "blockers": list(projection_artifact.get("blockers") or []),
+        "warnings": list(projection_artifact.get("warnings") or []),
         "safety_invariants": {
             "uses_fake_api_builders": True,
             "does_not_call_server": True,
@@ -502,14 +507,14 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
             "does_not_mutate_runtime_budget": True,
             "does_not_open_or_close_position": True,
             "does_not_create_withdrawal_or_transfer": True,
-            "bridge_exchange_write_called": bool(
-                bridge_packet.get("safety_invariants", {}).get("exchange_write_called")
+            "readiness_evidence_exchange_write_called": bool(
+                projection_artifact.get("safety_invariants", {}).get("exchange_write_called")
             ),
-            "bridge_order_created": bool(
-                bridge_packet.get("safety_invariants", {}).get("order_created")
+            "readiness_evidence_order_created": bool(
+                projection_artifact.get("safety_invariants", {}).get("order_created")
             ),
-            "bridge_order_lifecycle_called": bool(
-                bridge_packet.get("safety_invariants", {}).get("order_lifecycle_called")
+            "readiness_evidence_order_lifecycle_called": bool(
+                projection_artifact.get("safety_invariants", {}).get("order_lifecycle_called")
             ),
         },
         "created_at_ms": int(time.time() * 1000),

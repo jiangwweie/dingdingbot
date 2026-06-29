@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Build a runtime active-position resolution packet from report JSON files.
+"""Build a runtime active-position resolution projection from report JSON files.
 
 Inputs are the existing read-only reports:
 
 - runtime_live_position_monitor.py output
 - runtime_position_exit_plan.py output
-- build_runtime_post_close_followup_packet.py output
+- build_runtime_post_close_followup_artifact.py output
 
-The script is packet-only and never talks to PG, exchange, OrderLifecycle, or
-runtime mutation services.
+The script is projection-only and never talks to PG, exchange, OrderLifecycle,
+or runtime mutation services.
 """
 
 from __future__ import annotations
@@ -25,11 +25,11 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.domain.runtime_active_position_resolution import (  # noqa: E402
-    build_runtime_active_position_resolution_packet,
+    build_runtime_active_position_resolution_artifact,
 )
-from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket  # noqa: E402
+from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorArtifact  # noqa: E402
 from src.domain.runtime_position_exit_plan import RuntimePositionExitPlan  # noqa: E402
-from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupPacket  # noqa: E402
+from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupArtifact  # noqa: E402
 
 
 def _load_report(path: str) -> dict[str, Any]:
@@ -52,24 +52,26 @@ def _payload(report: dict[str, Any], key: str) -> dict[str, Any] | None:
     return value
 
 
-def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
+def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     monitor_report = _load_report(args.live_position_monitor_json)
     exit_report = _load_report(args.position_exit_plan_json) if args.position_exit_plan_json else None
     followup_report = _load_report(args.post_close_followup_json) if args.post_close_followup_json else None
 
-    monitor_payload = _payload(monitor_report, "packet") or monitor_report
+    monitor_payload = _payload(monitor_report, "artifact") or monitor_report
     exit_payload = _payload(exit_report, "plan") if exit_report is not None else None
-    followup_payload = _payload(followup_report, "packet") if followup_report is not None else None
+    followup_payload = (
+        _payload(followup_report, "artifact") if followup_report is not None else None
+    )
 
-    packet = build_runtime_active_position_resolution_packet(
-        monitor=RuntimeLivePositionMonitorPacket.model_validate(monitor_payload),
+    artifact = build_runtime_active_position_resolution_artifact(
+        monitor=RuntimeLivePositionMonitorArtifact.model_validate(monitor_payload),
         exit_plan=(
             RuntimePositionExitPlan.model_validate(exit_payload)
             if exit_payload is not None
             else None
         ),
         post_close_followup=(
-            RuntimePostCloseFollowupPacket.model_validate(followup_payload)
+            RuntimePostCloseFollowupArtifact.model_validate(followup_payload)
             if followup_payload is not None
             else None
         ),
@@ -77,15 +79,15 @@ def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     )
     return {
         "scope": "runtime_active_position_resolution_from_reports",
-        "status": packet.status.value,
-        "packet": packet.model_dump(mode="json"),
+        "status": artifact.status.value,
+        "artifact": artifact.model_dump(mode="json"),
         "source_reports": {
             "live_position_monitor_json": args.live_position_monitor_json,
             "position_exit_plan_json": args.position_exit_plan_json,
             "post_close_followup_json": args.post_close_followup_json,
         },
         "safety_invariants": {
-            "packet_only": True,
+            "active_position_resolution_projection_only": True,
             "pg_read_called": False,
             "exchange_called": False,
             "exchange_write_called": False,
@@ -101,7 +103,7 @@ def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a packet-only active-position resolution from reports.",
+        description="Build a projection-only active-position resolution from reports.",
     )
     parser.add_argument("--live-position-monitor-json", required=True)
     parser.add_argument("--position-exit-plan-json")
@@ -112,9 +114,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if packet["status"] != "blocked" else 2
+    artifact = _build_artifact(args)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if artifact["status"] != "blocked" else 2
 
 
 if __name__ == "__main__":

@@ -97,9 +97,9 @@ def _preview(rows: list[dict]) -> dict:
 
 def test_selector_writes_runtime_compatible_would_enter_signal(tmp_path: Path) -> None:
     output_path = tmp_path / "selected-signal-input.json"
-    packet = selector._build_packet_from_preview(
+    artifact = selector._build_artifact_from_preview(
         runtime=_runtime(),
-        preview_packet=_preview(
+        preview_artifact=_preview(
             [
                 _row(
                     family="BTPC-001",
@@ -113,20 +113,21 @@ def test_selector_writes_runtime_compatible_would_enter_signal(tmp_path: Path) -
         output_signal_input_json=str(output_path),
     )
 
-    assert packet["status"] == "runtime_compatible_would_enter_selected"
-    assert packet["blockers"] == []
-    assert packet["selected_signal"]["strategy_family_id"] == "BTPC-001"
-    assert packet["selected_signal"]["symbol"] == "AVAX/USDT:USDT"
-    assert packet["operator_command_plan"]["signal_input_json"] == str(output_path)
+    assert artifact["status"] == "runtime_compatible_would_enter_selected"
+    assert artifact["blockers"] == []
+    assert artifact["selected_signal"]["strategy_family_id"] == "BTPC-001"
+    assert artifact["selected_signal"]["symbol"] == "AVAX/USDT:USDT"
+    assert "operator_command_plan" not in artifact
+    assert artifact["live_signal_selector_plan"]["signal_input_json"] == str(output_path)
     assert json.loads(output_path.read_text())["strategy_family_id"] == "BTPC-001"
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_candidate_created"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_candidate_created"] is False
 
 
 def test_selector_reports_non_runtime_would_enter_without_profile_change() -> None:
-    packet = selector._build_packet_from_preview(
+    artifact = selector._build_artifact_from_preview(
         runtime=_runtime(),
-        preview_packet=_preview(
+        preview_artifact=_preview(
             [
                 _row(
                     family="RBR-001",
@@ -139,10 +140,10 @@ def test_selector_reports_non_runtime_would_enter_without_profile_change() -> No
         ),
     )
 
-    assert packet["status"] == "would_enter_available_but_not_runtime_compatible"
-    assert packet["blockers"] == ["would_enter_signals_not_runtime_compatible"]
-    assert packet["selected_signal"] is None
-    assert packet["non_runtime_would_enter_signals"][0][
+    assert artifact["status"] == "would_enter_available_but_not_runtime_compatible"
+    assert artifact["blockers"] == ["would_enter_signals_not_runtime_compatible"]
+    assert artifact["selected_signal"] is None
+    assert artifact["non_runtime_would_enter_signals"][0][
         "runtime_compatibility_blockers"
     ] == [
         "runtime_strategy_family_mismatch",
@@ -150,16 +151,16 @@ def test_selector_reports_non_runtime_would_enter_without_profile_change() -> No
         "runtime_symbol_mismatch",
     ]
     assert (
-        packet["operator_command_plan"]["requires_owner_runtime_profile_confirmation"]
+        artifact["live_signal_selector_plan"]["requires_owner_runtime_profile_confirmation"]
         is True
     )
-    assert packet["safety_invariants"]["runtime_profile_mutated"] is False
+    assert artifact["safety_invariants"]["runtime_profile_mutated"] is False
 
 
 def test_selector_reports_runtime_observe_only_signal() -> None:
-    packet = selector._build_packet_from_preview(
+    artifact = selector._build_artifact_from_preview(
         runtime=_runtime(),
-        preview_packet=_preview(
+        preview_artifact=_preview(
             [
                 _row(
                     family="BTPC-001",
@@ -172,7 +173,7 @@ def test_selector_reports_runtime_observe_only_signal() -> None:
         ),
     )
 
-    assert packet["status"] == "runtime_signal_observe_only"
-    assert packet["blockers"] == ["runtime_strategy_signal_not_would_enter"]
-    assert packet["runtime_current_signal"]["signal_type"] == "no_action"
-    assert packet["selected_signal"] is None
+    assert artifact["status"] == "runtime_signal_observe_only"
+    assert artifact["blockers"] == ["runtime_strategy_signal_not_would_enter"]
+    assert artifact["runtime_current_signal"]["signal_type"] == "no_action"
+    assert artifact["selected_signal"] is None

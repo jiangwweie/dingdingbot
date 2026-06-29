@@ -43,18 +43,23 @@ def test_ready_signal_prepare_handoff_contract_outputs_audit_artifacts(tmp_path)
 
     contract_path = output_dir / "contract-report.json"
     shadow_path = output_dir / "shadow-contract-report.json"
-    prepare_path = output_dir / "prepare-packet.json"
+    prepare_path = output_dir / "prepare-artifact.json"
     nested_shadow_path = output_dir / "shadow-planning" / "contract-report.json"
     assert contract_path.exists()
     assert shadow_path.exists()
     assert prepare_path.exists()
     assert nested_shadow_path.exists()
     assert json.loads(contract_path.read_text())["status"] == report["status"]
-    prepare_packet = json.loads(prepare_path.read_text())
-    assert prepare_packet["status"] == "ready_for_final_gate_preflight"
-    assert prepare_packet["operator_command_plan"]["places_order"] is False
-    assert prepare_packet["safety_invariants"]["exchange_write_called"] is False
-    assert prepare_packet["safety_invariants"]["order_lifecycle_called"] is False
+    prepare_artifact = json.loads(prepare_path.read_text())
+    assert prepare_artifact["status"] == "ready_for_final_gate_preflight"
+    assert "operator_command_plan" not in prepare_artifact
+    assert prepare_artifact["prepare_artifact_plan"]["places_order"] is False
+    assert prepare_artifact["safety_invariants"]["exchange_write_called"] is False
+    assert prepare_artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert "prepare_packet" not in report
+    assert "operator_command_plan" not in report
+    assert report["prepare_handoff_plan"]["places_order"] is False
+    assert report["prepare_artifact"]["status"] == "ready_for_final_gate_preflight"
 
 
 def test_ready_signal_prepare_handoff_contract_cli_stdout_is_json_only(
@@ -77,7 +82,8 @@ def test_ready_signal_prepare_handoff_contract_cli_stdout_is_json_only(
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert payload["status"] == "ready_signal_prepare_handoff_contract_passed"
-    assert "runtime_next_attempt_prepare_packet" in captured.out
+    assert "prepare_artifact" in payload
+    assert "prepare_packet" not in payload
     assert captured.err == ""
 
 

@@ -3,7 +3,7 @@
 
 RTF-092 proves the ready/flat side of the runtime loop:
 
-ready post-submit finalize packet
+ready post-submit finalize payload
 -> official next-attempt strategy planning route
 -> fresh shadow SignalEvaluation / OrderCandidate
 -> official prepare / FinalGate / controlled-submit preflight
@@ -56,7 +56,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
 
     runtime = ready_fixture._runtime()
     signal_input = ready_fixture._signal_input()
-    ready_post_submit = ready_fixture._post_submit_finalize_packet(runtime)
+    ready_post_submit = ready_fixture._post_submit_finalize_payload(runtime)
     store = ready_fixture._ShadowStore()
     planning_service = ready_fixture._planning_service(
         runtime=runtime,
@@ -80,7 +80,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             strategy_plan = _post_next_attempt_strategy_plan(
                 api_client=api_client,
                 runtime_instance_id=runtime.runtime_instance_id,
-                post_submit_finalize_packet=ready_post_submit.model_dump(mode="json"),
+                post_submit_finalize_payload=ready_post_submit.model_dump(mode="json"),
                 signal_input=signal_input.model_dump(mode="json"),
                 context_id="rtf092-flat-next-attempt",
             )
@@ -170,7 +170,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
 
-    packet = _proof_packet(
+    proof_artifact = _proof_artifact(
         ready_post_submit=ready_post_submit.model_dump(mode="json"),
         strategy_plan=strategy_plan,
         planning_proposal=(
@@ -184,9 +184,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         controlled_submit_preflight=controlled_submit_preflight,
         state=state,
     )
-    _write_json(output_dir / "flat-next-attempt-end-to-end-packet.json", packet)
+    _write_json(
+        output_dir / "flat-next-attempt-end-to-end-artifact.json",
+        proof_artifact,
+    )
 
-    checks = dict(packet["checks"])
+    checks = dict(proof_artifact["checks"])
     report = {
         "scope": "runtime_official_flat_next_attempt_end_to_end_proof",
         "status": (
@@ -195,7 +198,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             else "blocked"
         ),
         "runtime_instance_id": runtime.runtime_instance_id,
-        "signal_evaluation_id": packet["strategy_plan"].get(
+        "signal_evaluation_id": proof_artifact["strategy_plan"].get(
             "signal_evaluation_id"
         ),
         "order_candidate_id": store.candidate.order_candidate_id,
@@ -208,13 +211,16 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "execution_intent_id": (prepare_report.get("ids") or {}).get(
             "execution_intent_id"
         ),
-        "controlled_submit_preflight_id": packet["ids"].get(
+        "controlled_submit_preflight_id": proof_artifact["ids"].get(
             "controlled_submit_preflight_id"
         ),
-        "flat_next_attempt_end_to_end_packet": packet,
+        "flat_next_attempt_end_to_end_artifact": proof_artifact,
+        "official_runtime_artifact_boundary_classification": (
+            _official_runtime_artifact_boundary_classification()
+        ),
         "checks": checks,
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "safety_invariants": proof_artifact["safety_invariants"],
+        "flat_next_attempt_plan": {
             "next_step": (
                 "tokyo_integration_probe_or_full_runtime_cycle_proof"
                 if _contract_passed(checks)
@@ -241,7 +247,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def _proof_packet(
+def _proof_artifact(
     *,
     ready_post_submit: dict[str, Any],
     strategy_plan: dict[str, Any],
@@ -276,7 +282,7 @@ def _proof_packet(
         safety=safety,
     )
     return {
-        "scope": "runtime_official_flat_next_attempt_end_to_end_packet",
+        "scope": "runtime_official_flat_next_attempt_end_to_end_artifact",
         "status": (
             "flat_next_attempt_ready_for_controlled_submit_adapter"
             if _contract_passed(checks)
@@ -301,6 +307,7 @@ def _proof_packet(
         "strategy_plan": {
             "http_status": strategy_plan.get("http_status"),
             "status": strategy_body.get("status"),
+            "strategy_planning_plan": _strategy_planning_plan(strategy_body),
             "next_attempt_gate_status": strategy_body.get(
                 "next_attempt_gate_status"
             ),
@@ -337,6 +344,28 @@ def _proof_packet(
     }
 
 
+def _official_runtime_artifact_boundary_classification() -> dict[str, list[str]]:
+    return {
+        "evidence_only_outputs": [
+            "runtime_official_flat_next_attempt_end_to_end_artifact",
+        ],
+        "protected_lifecycle_payload_contracts": [
+            "post_submit_finalize_payload",
+        ],
+        "typed_submit_handoff_contracts": [
+            "RuntimeExecutableSubmitReadinessArtifact",
+            "RuntimeOfficialSubmitHandoffArtifact",
+        ],
+        "judgment_authorities": [
+            "Strategy Asset State",
+            "Tradeability Decision",
+            "Runtime Safety State",
+            "Review Outcome State",
+            "Execution Attempt",
+        ],
+    }
+
+
 def _checks(
     *,
     ready_post_submit: dict[str, Any],
@@ -353,7 +382,7 @@ def _checks(
 ) -> dict[str, bool]:
     prepare_ids = prepare_report.get("ids") or {}
     next_gate = ready_post_submit.get("next_attempt_gate") or {}
-    strategy_operator = strategy_body.get("operator_command_plan") or {}
+    strategy_operator = _strategy_planning_plan(strategy_body)
     candidate_proposal = strategy_body.get("proposal") or planning_proposal or {}
     tp_refs = candidate_proposal.get("take_profit_references") or []
     return {
@@ -440,6 +469,11 @@ def _checks(
             "withdrawal_or_transfer_created"
         ],
     }
+
+
+def _strategy_planning_plan(body: dict[str, Any]) -> dict[str, Any]:
+    plan = body.get("strategy_planning_plan") or {}
+    return plan if isinstance(plan, dict) else {}
 
 
 def _contract_passed(checks: dict[str, bool]) -> bool:

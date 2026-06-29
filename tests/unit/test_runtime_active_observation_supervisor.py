@@ -28,7 +28,7 @@ def _args(tmp_path, **overrides):
         "allow_arm_preview": True,
         "allow_attempt_policy_prepare": False,
         "allow_disabled_smoke": True,
-        "include_packets": False,
+        "include_artifacts": False,
         "skip_disabled_smoke_prerequisite_probe": False,
     }
     values.update(overrides)
@@ -46,7 +46,7 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     def runner(command, stdout_path):
         calls.append(command)
         if "runtime_active_observation_loop.py" in command[1]:
-            loop_path = tmp_path / "supervisor" / "loop-packet.json"
+            loop_path = tmp_path / "supervisor" / "loop-artifact.json"
             _write_json(
                 loop_path,
                 {
@@ -62,7 +62,7 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
                 },
             )
         if "runtime_active_observation_followup.py" in command[1]:
-            followup_path = tmp_path / "supervisor" / "followup-packet.json"
+            followup_path = tmp_path / "supervisor" / "followup-artifact.json"
             _write_json(
                 followup_path,
                 {
@@ -84,15 +84,15 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
     flat_commands = " ".join(" ".join(command) for command in calls)
-    assert packet["status"] == "supervisor_completed"
-    assert packet["loop_status"] == "waiting_for_signal"
-    assert packet["followup_status"] == "waiting_for_ready_final_gate_preflight"
+    assert artifact["status"] == "supervisor_completed"
+    assert artifact["loop_status"] == "waiting_for_signal"
+    assert artifact["followup_status"] == "waiting_for_ready_final_gate_preflight"
     assert "--allow-prepare-records" in calls[0]
     assert "--status-output-json" in calls[0]
     assert "--allow-arm-preview" in calls[1]
@@ -101,17 +101,20 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     assert "--execute-real-submit" not in flat_commands
     assert "--mode execute" not in flat_commands
     assert "--mode arm" not in flat_commands
-    assert packet["safety_invariants"]["real_submit_requested"] is False
-    assert packet["safety_invariants"]["exchange_order_requested"] is False
-    status_packet = json.loads(
-        (tmp_path / "supervisor" / "status-packet.json").read_text()
+    assert "operator_command_plan" not in artifact
+    assert artifact["supervisor_plan"]["real_submit_requested"] is False
+    assert artifact["safety_invariants"]["real_submit_requested"] is False
+    assert artifact["safety_invariants"]["exchange_order_requested"] is False
+    status_artifact = json.loads(
+        (tmp_path / "supervisor" / "status-artifact.json").read_text()
     )
-    assert status_packet["scope"] == "runtime_active_observation_status"
-    assert status_packet["loop_status"] == "waiting_for_signal"
-    assert status_packet["followup_status"] == "waiting_for_ready_final_gate_preflight"
-    assert status_packet["safety_invariants"]["read_packets_only"] is True
-    assert status_packet["safety_invariants"]["connects_to_api"] is False
-    assert status_packet["safety_invariants"]["places_order"] is False
+    assert status_artifact["scope"] == "runtime_active_observation_status"
+    assert status_artifact["loop_status"] == "waiting_for_signal"
+    assert status_artifact["followup_status"] == "waiting_for_ready_final_gate_preflight"
+    assert status_artifact["safety_invariants"]["read_artifacts_only"] is True
+    assert status_artifact["safety_invariants"]["connects_to_api"] is False
+    assert status_artifact["safety_invariants"]["places_order"] is False
+    assert not (tmp_path / "supervisor" / "supervisor-packet.json").exists()
 
 
 def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
@@ -121,7 +124,7 @@ def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
         calls.append(command)
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "waiting_for_signal",
                     "safety_invariants": {},
@@ -129,7 +132,7 @@ def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "waiting_for_ready_final_gate_preflight",
                     "safety_invariants": {},
@@ -142,7 +145,7 @@ def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
             stderr_tail="",
         )
 
-    runtime_active_observation_supervisor.build_supervisor_packet(
+    runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path, strategy_family_id=["MPG-001", "TEQ-001"]),
         runner=runner,
     )
@@ -157,14 +160,14 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
 
     def runner(command, stdout_path):
         if "runtime_active_observation_loop.py" in command[1]:
-            running_path = tmp_path / "supervisor" / "supervisor-packet.json"
+            running_path = tmp_path / "supervisor" / "supervisor-artifact.json"
             running_snapshots.append(json.loads(running_path.read_text()))
-            running_status_path = tmp_path / "supervisor" / "status-packet.json"
+            running_status_path = tmp_path / "supervisor" / "status-artifact.json"
             running_status = json.loads(running_status_path.read_text())
             assert running_status["supervisor_status"] == "supervisor_running"
-            assert running_status["safety_invariants"]["read_packets_only"] is True
+            assert running_status["safety_invariants"]["read_artifacts_only"] is True
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "waiting_for_signal",
                     "safety_invariants": {
@@ -179,7 +182,7 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "waiting_for_ready_final_gate_preflight",
                     "safety_invariants": {},
@@ -192,7 +195,7 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path, cycle_timeout_seconds=123.0),
         runner=runner,
     )
@@ -200,7 +203,8 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
     assert running_snapshots
     running = running_snapshots[0]
     assert running["status"] == "supervisor_running"
-    assert running["operator_command_plan"]["real_submit_requested"] is False
+    assert "operator_command_plan" not in running
+    assert running["supervisor_plan"]["real_submit_requested"] is False
     assert running["safety_invariants"]["allow_arm_preview"] is True
     assert running["safety_invariants"]["exchange_order_requested"] is False
     loop_command = running["command_results"]["loop"]["command"]
@@ -208,14 +212,14 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
     assert "123.0" in loop_command
     assert "--status-output-json" in loop_command
 
-    final_packet = json.loads(
-        (tmp_path / "supervisor" / "supervisor-packet.json").read_text()
+    final_artifact = json.loads(
+        (tmp_path / "supervisor" / "supervisor-artifact.json").read_text()
     )
-    assert final_packet == packet
-    assert final_packet["status"] == "supervisor_completed"
+    assert final_artifact == artifact
+    assert final_artifact["status"] == "supervisor_completed"
 
 
-def test_supervisor_does_not_run_followup_when_loop_packet_missing(tmp_path):
+def test_supervisor_does_not_run_followup_when_loop_artifact_missing(tmp_path):
     calls = []
 
     def runner(command, stdout_path):
@@ -227,14 +231,14 @@ def test_supervisor_does_not_run_followup_when_loop_packet_missing(tmp_path):
             stderr_tail="loop failed",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_blocked"
-    assert "loop_command_failed:1" in packet["blockers"]
-    assert "loop_packet_missing" in packet["blockers"]
+    assert artifact["status"] == "supervisor_blocked"
+    assert "loop_command_failed:1" in artifact["blockers"]
+    assert "loop_artifact_missing" in artifact["blockers"]
     assert len(calls) == 1
 
 
@@ -242,7 +246,7 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
     def runner(command, stdout_path):
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "safety_invariants": {
@@ -257,7 +261,7 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_blocked",
                     "safety_invariants": {
@@ -272,14 +276,14 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_blocked"
-    assert "supervisor_detected_forbidden_effects" in packet["blockers"]
-    assert packet["safety_invariants"]["forbidden_effects"] == [
+    assert artifact["status"] == "supervisor_blocked"
+    assert "supervisor_detected_forbidden_effects" in artifact["blockers"]
+    assert artifact["safety_invariants"]["forbidden_effects"] == [
         "followup.exchange_order_submitted"
     ]
 
@@ -291,7 +295,7 @@ def test_supervisor_allows_attempt_policy_preflight_when_flagged(tmp_path):
         calls.append(command)
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "safety_invariants": {
@@ -306,7 +310,7 @@ def test_supervisor_allows_attempt_policy_preflight_when_flagged(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_completed",
                     "safety_invariants": {
@@ -328,22 +332,22 @@ def test_supervisor_allows_attempt_policy_preflight_when_flagged(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path, allow_attempt_policy_prepare=True),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_completed"
+    assert artifact["status"] == "supervisor_completed"
     assert "--allow-attempt-policy-prepare" in calls[1]
-    assert packet["safety_invariants"]["forbidden_effects"] == []
-    assert packet["safety_invariants"]["allowed_official_attempt_policy_prepare"] is True
+    assert artifact["safety_invariants"]["forbidden_effects"] == []
+    assert artifact["safety_invariants"]["allowed_official_attempt_policy_prepare"] is True
 
 
 def test_supervisor_blocks_attempt_policy_mutation_even_when_flagged(tmp_path):
     def runner(command, stdout_path):
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "safety_invariants": {
@@ -358,7 +362,7 @@ def test_supervisor_blocks_attempt_policy_mutation_even_when_flagged(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_completed",
                     "safety_invariants": {
@@ -380,17 +384,17 @@ def test_supervisor_blocks_attempt_policy_mutation_even_when_flagged(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path, allow_attempt_policy_prepare=True),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_blocked"
-    assert "supervisor_detected_forbidden_effects" in packet["blockers"]
-    assert "followup.attempt_counter_mutated" in packet["safety_invariants"][
+    assert artifact["status"] == "supervisor_blocked"
+    assert "supervisor_detected_forbidden_effects" in artifact["blockers"]
+    assert "followup.attempt_counter_mutated" in artifact["safety_invariants"][
         "forbidden_effects"
     ]
-    assert "followup.runtime_budget_mutated" in packet["safety_invariants"][
+    assert "followup.runtime_budget_mutated" in artifact["safety_invariants"][
         "forbidden_effects"
     ]
 
@@ -399,7 +403,7 @@ def test_supervisor_blocks_when_followup_reports_arm_preview_forbidden_effect(tm
     def runner(command, stdout_path):
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "safety_invariants": {
@@ -414,7 +418,7 @@ def test_supervisor_blocks_when_followup_reports_arm_preview_forbidden_effect(tm
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_blocked",
                     "safety_invariants": {
@@ -435,14 +439,14 @@ def test_supervisor_blocks_when_followup_reports_arm_preview_forbidden_effect(tm
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_blocked"
-    assert "supervisor_detected_forbidden_effects" in packet["blockers"]
-    assert packet["safety_invariants"]["forbidden_effects"] == [
+    assert artifact["status"] == "supervisor_blocked"
+    assert "supervisor_detected_forbidden_effects" in artifact["blockers"]
+    assert artifact["safety_invariants"]["forbidden_effects"] == [
         "followup.arm_preview_forbidden_effect:handoff:order_lifecycle_adapter_result"
     ]
 
@@ -451,7 +455,7 @@ def test_supervisor_blocks_when_child_packet_requests_real_submit(tmp_path):
     def runner(command, stdout_path):
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "safety_invariants": {
@@ -466,7 +470,7 @@ def test_supervisor_blocks_when_child_packet_requests_real_submit(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_blocked",
                     "safety_invariants": {
@@ -482,13 +486,13 @@ def test_supervisor_blocks_when_child_packet_requests_real_submit(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
-    assert packet["status"] == "supervisor_blocked"
-    assert packet["safety_invariants"]["forbidden_effects"] == [
+    assert artifact["status"] == "supervisor_blocked"
+    assert artifact["safety_invariants"]["forbidden_effects"] == [
         "followup.creates_execution_intent",
         "followup.real_submit_requested",
     ]
@@ -501,7 +505,7 @@ def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path)
         calls.append(command)
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "ready_for_final_gate_preflight",
                     "latest_summary": {
@@ -526,7 +530,7 @@ def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path)
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "disabled_smoke_completed",
                     "source_loop_status": "ready_for_final_gate_preflight",
@@ -557,29 +561,29 @@ def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path)
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(tmp_path),
         runner=runner,
     )
 
     flat_commands = " ".join(" ".join(command) for command in calls)
-    assert packet["status"] == "supervisor_completed"
-    assert packet["loop_status"] == "ready_for_final_gate_preflight"
-    assert packet["followup_status"] == "disabled_smoke_completed"
-    assert packet["safety_invariants"]["forbidden_effects"] == []
+    assert artifact["status"] == "supervisor_completed"
+    assert artifact["loop_status"] == "ready_for_final_gate_preflight"
+    assert artifact["followup_status"] == "disabled_smoke_completed"
+    assert artifact["safety_invariants"]["forbidden_effects"] == []
     assert "--allow-arm-preview" in calls[1]
     assert "--allow-disabled-smoke" in calls[1]
     assert "--execute-real-submit" not in flat_commands
     assert "--mode execute" not in flat_commands
 
-    status_packet = json.loads(
-        (tmp_path / "supervisor" / "status-packet.json").read_text()
+    status_artifact = json.loads(
+        (tmp_path / "supervisor" / "status-artifact.json").read_text()
     )
-    assert status_packet["loop_status"] == "ready_for_final_gate_preflight"
-    assert status_packet["followup_status"] == "disabled_smoke_completed"
-    assert status_packet["prepared_authorization_id"] == "auth-ready-1"
-    assert status_packet["safety_invariants"]["places_order"] is False
-    assert status_packet["safety_invariants"]["calls_order_lifecycle"] is False
+    assert status_artifact["loop_status"] == "ready_for_final_gate_preflight"
+    assert status_artifact["followup_status"] == "disabled_smoke_completed"
+    assert status_artifact["prepared_authorization_id"] == "auth-ready-1"
+    assert status_artifact["safety_invariants"]["places_order"] is False
+    assert status_artifact["safety_invariants"]["calls_order_lifecycle"] is False
 
 
 def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
@@ -589,7 +593,7 @@ def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
         calls.append(command)
         if "runtime_active_observation_loop.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "loop-packet.json",
+                tmp_path / "supervisor" / "loop-artifact.json",
                 {
                     "status": "waiting_for_signal",
                     "safety_invariants": {
@@ -604,7 +608,7 @@ def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
             )
         if "runtime_active_observation_followup.py" in command[1]:
             _write_json(
-                tmp_path / "supervisor" / "followup-packet.json",
+                tmp_path / "supervisor" / "followup-artifact.json",
                 {
                     "status": "waiting_for_ready_final_gate_preflight",
                     "safety_invariants": {
@@ -624,7 +628,7 @@ def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
             stderr_tail="",
         )
 
-    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+    artifact = runtime_active_observation_supervisor.build_supervisor_artifact(
         _args(
             tmp_path,
             runtime_instance_id=["runtime-ada", "runtime-avax"],
@@ -633,7 +637,7 @@ def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
     )
 
     loop_command = calls[0]
-    assert packet["status"] == "supervisor_completed"
+    assert artifact["status"] == "supervisor_completed"
     assert loop_command.count("--runtime-instance-id") == 2
     assert _argument_values(loop_command, "--runtime-instance-id") == [
         "runtime-ada",

@@ -1,6 +1,6 @@
-"""Runtime-level post-submit finalize packet.
+"""Runtime-level post-submit finalize payload.
 
-This packet closes the semantic gap after a real submit result exists. It
+This payload closes the semantic gap after a real submit result exists. It
 acknowledges that the consumed authorization is replay-only evidence, gathers
 post-submit review / accounting / settlement facts, and produces the next
 attempt gate without returning to pre-submit rehearsal.
@@ -72,8 +72,8 @@ class RuntimeNextAttemptGate(RuntimePostSubmitFinalizeModel):
         return self
 
 
-class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
-    packet_id: str = Field(min_length=1, max_length=640)
+class RuntimePostSubmitFinalizePayload(RuntimePostSubmitFinalizeModel):
+    post_submit_finalize_payload_id: str = Field(min_length=1, max_length=640)
     authorization_id: str = Field(min_length=1, max_length=220)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     execution_intent_id: Optional[str] = Field(default=None, max_length=64)
@@ -109,7 +109,7 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     not_execution_authority: Literal[True] = True
-    runtime_state_mutated_by_packet: Literal[False] = False
+    runtime_state_mutated_by_payload: Literal[False] = False
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     order_cancelled: Literal[False] = False
@@ -123,26 +123,26 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_packet(self) -> "RuntimePostSubmitFinalizePacket":
+    def _validate_payload(self) -> "RuntimePostSubmitFinalizePayload":
         _reject_forbidden_metadata_fields({"metadata": self.metadata})
         if self.status == RuntimePostSubmitFinalizeStatus.BLOCKED:
             if not self.blockers:
-                raise ValueError("blocked post-submit finalize packet requires blockers")
+                raise ValueError("blocked post-submit finalize payload requires blockers")
         elif self.blockers:
-            raise ValueError("finalized post-submit packet cannot have blockers")
+            raise ValueError("finalized post-submit payload cannot have blockers")
         if (
             self.status
             == RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
             and self.next_attempt_gate.status
             != RuntimeNextAttemptGateStatus.READY_FOR_FRESH_SIGNAL
         ):
-            raise ValueError("ready finalize packet requires ready next-attempt gate")
+            raise ValueError("ready finalize payload requires ready next-attempt gate")
         if (
             self.status
             == RuntimePostSubmitFinalizeStatus.FINALIZED_NEXT_ATTEMPT_BLOCKED
             and self.next_attempt_gate.status != RuntimeNextAttemptGateStatus.BLOCKED
         ):
-            raise ValueError("blocked next-attempt finalize packet requires gate block")
+            raise ValueError("blocked next-attempt finalize payload requires gate block")
         if self.status != RuntimePostSubmitFinalizeStatus.BLOCKED:
             required_truth = {
                 "post_submit_finalize_complete": self.post_submit_finalize_complete,
@@ -157,13 +157,13 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
             ]
             if missing_truth:
                 raise ValueError(
-                    "finalized post-submit packet requires closed-loop truth: "
+                    "finalized post-submit payload requires closed-loop truth: "
                     + ", ".join(missing_truth)
                 )
         return self
 
 
-def build_runtime_post_submit_finalize_packet(
+def build_runtime_post_submit_finalize_payload(
     *,
     authorization_id: str,
     runtime: StrategyRuntimeInstance | None,
@@ -178,7 +178,7 @@ def build_runtime_post_submit_finalize_packet(
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
-) -> RuntimePostSubmitFinalizePacket:
+) -> RuntimePostSubmitFinalizePayload:
     blockers = list(additional_blockers or [])
     warnings = list(additional_warnings or [])
     warnings.extend(protection_blockers or [])
@@ -255,8 +255,10 @@ def build_runtime_post_submit_finalize_packet(
     else:
         status = RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
 
-    return RuntimePostSubmitFinalizePacket(
-        packet_id=f"runtime-post-submit-finalize-{authorization_id}",
+    return RuntimePostSubmitFinalizePayload(
+        post_submit_finalize_payload_id=(
+            f"runtime-post-submit-finalize-{authorization_id}"
+        ),
         authorization_id=authorization_id,
         runtime_instance_id=runtime_instance_id,
         execution_intent_id=execution_intent_id,

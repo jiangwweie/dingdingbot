@@ -1,0 +1,305 @@
+{
+  "action_time_required_facts_behavior_evidence": {
+    "duplicate_submit_guard_check": true,
+    "missing_or_stale_facts": [],
+    "owner_scoped_risk_acceptance_can_bypass_runtime_safety_gates": false,
+    "owner_scoped_risk_acceptance_can_promote_trial_eligibility": true,
+    "owner_scoped_risk_acceptance_cannot_grant_runtime_authority": true,
+    "protection_failure_policy_check": true,
+    "stale_or_missing_fact_behavior": "localized_blocker_when_action_time_active",
+    "status": "facts_behavior_waiting_for_fresh_signal",
+    "strategy_uncertainty_blocks_engineering_progress": false,
+    "submit_idempotency_policy_check": true,
+    "trusted_submit_fact_snapshot_check": true
+  },
+  "action_time_required_facts_matrix": [
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "trusted_submit_fact_snapshot",
+      "owner_wording": "等待机会",
+      "question": "trusted submit fact snapshot",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "account_facts",
+      "owner_wording": "等待机会",
+      "question": "account facts freshness",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "position_open_order_conflict",
+      "owner_wording": "等待机会",
+      "question": "position and open-order conflict",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "budget_coverage",
+      "owner_wording": "等待机会",
+      "question": "budget coverage",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "protection_template",
+      "owner_wording": "等待机会",
+      "question": "protection template",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "submit_idempotency_policy",
+      "owner_wording": "等待机会",
+      "question": "submit idempotency policy",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "duplicate_submit_guard",
+      "owner_wording": "等待机会",
+      "question": "duplicate-submit guard",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "protection_failure_policy",
+      "owner_wording": "等待机会",
+      "question": "protection failure policy",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "exchange_rules",
+      "owner_wording": "等待机会",
+      "question": "exchange rule check",
+      "source_status": "pending_action_time",
+      "status": "pending_action_time"
+    },
+    {
+      "action_time_check_active": false,
+      "blocker": null,
+      "blocks_live_submit_now": false,
+      "check_surface": "live_submit",
+      "key": "signal_freshness",
+      "owner_wording": "等待机会",
+      "question": "signal freshness",
+      "source_status": "missing",
+      "status": "waiting"
+    }
+  ],
+  "execution_attempt_rehearsal_preparation": {
+    "current_market_dependency": "fresh_selected_strategygroup_signal",
+    "execution_attempt_required_for_lifecycle_entry": true,
+    "finalgate_checkpoint_input_shape_ready": true,
+    "fresh_signal_required_for_final_acceptance": true,
+    "hard_fact_blockers": [],
+    "idempotency_ready": true,
+    "operation_layer_input_shape_evidence": {
+      "budget_context_shape_ready": true,
+      "calls_operation_layer": false,
+      "exchange_write_authority_gated": true,
+      "finalgate_pass_required_before_submit": true,
+      "idempotency_key_shape_ready": true,
+      "input_shape_ready": true,
+      "operation_layer_submit_authority_required": true,
+      "places_order": false,
+      "protection_params_shape_ready": true,
+      "recovery_path_shape_ready": true,
+      "required_fields": [
+        "strategy_group_id",
+        "runtime_profile_id",
+        "subaccount_boundary",
+        "symbol",
+        "side",
+        "notional_or_quantity",
+        "leverage",
+        "protection_params",
+        "budget_context",
+        "submit_idempotency_key",
+        "recovery_path",
+        "authorization_evidence_ids"
+      ]
+    },
+    "protection_branch_ready": true,
+    "reconciliation_baseline_ready": true,
+    "review_ledger_shape_ready": true,
+    "status": "execution_attempt_rehearsal_waiting_for_fresh_signal",
+    "submit_payload_shape_ready": true
+  },
+  "fresh_signal_transition": {
+    "current_checkpoint": "waiting_for_market",
+    "current_state": "waiting_for_market",
+    "developer_audit_next_internal_gate_chain": [
+      "RequiredFacts",
+      "candidate/auth",
+      "FinalGate",
+      "Operation Layer"
+    ],
+    "owner_manual_internal_evidence_review_required": false,
+    "signal_observation_grade_preempted_on_fresh_signal": false
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_runtime_safety_state",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "live_outcome_calibration_preparation": {
+    "capture_fields": [
+      "exchange_accept_or_reject",
+      "fill_status",
+      "partial_fill_quantity",
+      "average_fill_price",
+      "slippage",
+      "fee",
+      "funding",
+      "protection_order_acceptance",
+      "settlement_status",
+      "realized_pnl",
+      "reconciliation_result",
+      "review_ledger_outcome"
+    ],
+    "capture_schema_ready": true,
+    "final_acceptance_dependencies": [
+      "real_exchange_response",
+      "real_fill_or_reject",
+      "real_protection_acceptance",
+      "real_reconciliation_settlement",
+      "realized_pnl_review"
+    ],
+    "live_outcome_calibrated": false,
+    "requires_real_live_outcome": true,
+    "status": "capture_surface_ready_live_outcome_pending"
+  },
+  "owner_state": {
+    "automation_summary": "系统待命中",
+    "intervention": "无需操作",
+    "owner_intervention_required": false,
+    "owner_label": "等待机会",
+    "owner_manual_internal_evidence_review_required": false,
+    "owner_status": "waiting_for_opportunity",
+    "reason": "没有新的可用市场信号"
+  },
+  "runtime_safety_state": {
+    "execution_attempt_required_for_lifecycle_entry": true,
+    "fresh_signal_state": "none",
+    "hard_fact_blockers": [],
+    "live_submit_ready": false,
+    "live_submit_ready_false_reason": "no_fresh_signal",
+    "pre_live_rehearsal_ready": true,
+    "primary_judgment_source": true,
+    "readiness_separation": {
+      "can_create_execution_attempt": false,
+      "execution_attempt_required_for_lifecycle_entry": true,
+      "fresh_signal_state": "none",
+      "live_submit_ready": false,
+      "live_submit_ready_false_reason": "no_fresh_signal",
+      "live_submit_ready_source": "Runtime Safety action-time chain",
+      "pre_live_rehearsal_ready": true,
+      "pre_live_rehearsal_ready_source": "Runtime Safety rehearsal",
+      "ready_for_finalgate_checkpoint": false,
+      "scoped_strategy_group_ids": [],
+      "source": "runtime_safety_state",
+      "tiny_live_ready": false,
+      "tiny_live_ready_source": "Tradeability Decision / Runtime Safety State",
+      "trial_eligible": false,
+      "trial_eligible_source": "Strategy Asset State / Owner policy"
+    },
+    "ready_for_finalgate_checkpoint": false,
+    "source_sections": [
+      "pre_live_rehearsal_readiness",
+      "daily_check",
+      "live_cutover",
+      "goal_progress",
+      "completion_audit",
+      "action_time_required_facts_matrix"
+    ],
+    "state_family": "Runtime Safety State",
+    "status": "live_submit_standby_waiting_for_market"
+  },
+  "safety_invariants": {
+    "exchange_write_called": false,
+    "final_gate_called": false,
+    "live_profile_changed": false,
+    "local_runtime_safety_projection_only": true,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_defaults_changed": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.strategygroup_runtime_safety_state.v1",
+  "scope": "p0_runtime_safety_state",
+  "source_status": {
+    "completion_audit": "not_complete_waiting_for_market",
+    "daily_check": "waiting_for_market_monitor_refresh_needed",
+    "goal_progress": "waiting_for_market_monitor_refresh_needed",
+    "live_cutover": "live_cutover_waiting_for_fresh_signal",
+    "pre_live_rehearsal_readiness": "pre_live_rehearsal_ready"
+  },
+  "status": "live_submit_standby_waiting_for_market",
+  "strategygroup_advancement_preparation": {
+    "advancement_engine_ready_for_evidence": true,
+    "allowed_decisions": [
+      "keep",
+      "revise",
+      "promote",
+      "downshift",
+      "park",
+      "kill",
+      "go_live",
+      "do_not_go_live",
+      "block_for_safety"
+    ],
+    "promotion_quality_final": false,
+    "required_inputs": [
+      "Strategy Asset State evidence",
+      "replay evidence",
+      "no-action attribution",
+      "live outcome when available"
+    ],
+    "status": "advancement_skeleton_ready_evidence_pending",
+    "strategy_uncertainty_policy": "may drive revise, downshift, park, or owner scoped trial eligibility; must not block engineering progress or grant runtime authority"
+  },
+  "validation_errors": []
+}

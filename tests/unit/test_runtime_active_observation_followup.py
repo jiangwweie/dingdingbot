@@ -16,7 +16,7 @@ def _args(
     operation_layer_arm_evidence_json=None,
 ):
     return Namespace(
-        loop_packet_json="unused.json",
+        loop_artifact_json="unused.json",
         output_json=None,
         api_base="http://unit",
         env_file=None,
@@ -32,7 +32,7 @@ def _args(
     )
 
 
-def _loop_packet(
+def _loop_artifact(
     status="waiting_for_signal",
     *,
     authorization_id="auth-1",
@@ -227,24 +227,30 @@ def _attempt_policy_preflight_report(status="pass", blockers=None):
 def test_followup_waits_when_loop_is_not_ready():
     calls = []
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_disabled_smoke=True),
-        loop_packet=_loop_packet(),
+        loop_artifact=_loop_artifact(),
         disabled_smoke_runner=lambda auth_id, args: calls.append(auth_id) or {},
     )
 
     assert packet["status"] == "waiting_for_ready_final_gate_preflight"
     assert packet["prepared_authorization_id"] == "auth-1"
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["prepared_authorization_source"] == {
+        "authorization_id": "auth-1",
+        "source_path": "latest_summary.prepared_authorization_id",
+        "legacy_source": False,
+    }
+    assert "operator_command_plan" not in packet
+    assert packet["followup_plan"]["disabled_smoke_called"] is False
     assert calls == []
 
 
 def test_followup_marks_completed_no_signal_window_without_running_smoke():
     calls = []
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet(
+        loop_artifact=_loop_artifact(
             "waiting_for_signal",
             authorization_id=None,
             stop_reason="max_iterations_exhausted",
@@ -257,11 +263,11 @@ def test_followup_marks_completed_no_signal_window_without_running_smoke():
     assert packet["status"] == "observation_window_complete_no_signal"
     assert packet["source_loop_status"] == "waiting_for_signal"
     assert packet["source_loop_stop_reason"] == "max_iterations_exhausted"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert packet["followup_plan"]["next_step"] == (
         "review_no_signal_window_or_start_new_observation"
     )
-    assert packet["operator_command_plan"]["arm_preview_called"] is False
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["followup_plan"]["arm_preview_called"] is False
+    assert packet["followup_plan"]["disabled_smoke_called"] is False
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
     assert calls == []
@@ -270,35 +276,35 @@ def test_followup_marks_completed_no_signal_window_without_running_smoke():
 def test_followup_surfaces_ready_for_prepare_without_running_smoke():
     calls = []
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_prepare"),
+        loop_artifact=_loop_artifact("ready_for_prepare"),
         arm_preview_runner=lambda auth_id, args: calls.append(("arm", auth_id)) or {},
         disabled_smoke_runner=lambda auth_id, args: calls.append(("disabled", auth_id))
         or {},
     )
 
     assert packet["status"] == "ready_for_prepare_records"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert packet["followup_plan"]["next_step"] == (
         "review_ready_signal_then_continue_prepare_record_path"
     )
-    assert packet["operator_command_plan"]["arm_preview_called"] is False
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["followup_plan"]["arm_preview_called"] is False
+    assert packet["followup_plan"]["disabled_smoke_called"] is False
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert calls == []
 
 
 def test_followup_cli_exits_zero_for_ready_prepare_review(tmp_path, capsys):
-    loop_path = tmp_path / "loop-packet.json"
-    output_path = tmp_path / "followup-packet.json"
+    loop_path = tmp_path / "loop-artifact.json"
+    output_path = tmp_path / "followup-artifact.json"
     loop_path.write_text(
-        json.dumps(_loop_packet("ready_for_prepare")),
+        json.dumps(_loop_artifact("ready_for_prepare")),
         encoding="utf-8",
     )
 
     exit_code = runtime_active_observation_followup.main(
         [
-            "--loop-packet-json",
+            "--loop-artifact-json",
             str(loop_path),
             "--output-json",
             str(output_path),
@@ -314,12 +320,12 @@ def test_followup_cli_exits_zero_for_ready_prepare_review(tmp_path, capsys):
 
 
 def test_followup_cli_refreshes_arm_evidence_when_no_current_arm(tmp_path):
-    loop_path = tmp_path / "loop-packet.json"
-    output_path = tmp_path / "followup-packet.json"
+    loop_path = tmp_path / "loop-artifact.json"
+    output_path = tmp_path / "followup-artifact.json"
     arm_evidence_path = tmp_path / "operation-layer-arm-evidence.json"
     loop_path.write_text(
         json.dumps(
-            _loop_packet(
+            _loop_artifact(
                 "waiting_for_signal",
                 authorization_id=None,
                 stop_reason="max_iterations_exhausted",
@@ -340,7 +346,7 @@ def test_followup_cli_refreshes_arm_evidence_when_no_current_arm(tmp_path):
 
     exit_code = runtime_active_observation_followup.main(
         [
-            "--loop-packet-json",
+            "--loop-artifact-json",
             str(loop_path),
             "--output-json",
             str(output_path),
@@ -360,15 +366,15 @@ def test_followup_cli_refreshes_arm_evidence_when_no_current_arm(tmp_path):
 
 
 def test_followup_requires_explicit_disabled_smoke_flag_when_ready():
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
     )
 
     assert packet["status"] == "ready_for_disabled_smoke"
     assert "allow_disabled_smoke_flag_required" in packet["blockers"]
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["followup_plan"]["disabled_smoke_called"] is False
 
 
 def test_followup_runs_disabled_smoke_only_after_ready_and_allow_flag():
@@ -378,9 +384,9 @@ def test_followup_runs_disabled_smoke_only_after_ready_and_allow_flag():
         calls.append((auth_id, args.api_base))
         return _disabled_smoke_report()
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         disabled_smoke_runner=runner,
     )
 
@@ -391,7 +397,7 @@ def test_followup_runs_disabled_smoke_only_after_ready_and_allow_flag():
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert packet["followup_plan"]["next_step"] == (
         "wait_for_fresh_signal_then_run_standing_authorized_official_"
         "operation_layer_chain"
     )
@@ -408,9 +414,9 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
         calls.append(("disabled", auth_id, args.api_base))
         return _disabled_smoke_report()
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=arm_runner,
         disabled_smoke_runner=disabled_runner,
     )
@@ -420,15 +426,15 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
         ("arm", "auth-1", "http://unit"),
         ("disabled", "auth-1", "http://unit"),
     ]
-    assert packet["operator_command_plan"]["arm_preview_called"] is True
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is True
+    assert packet["followup_plan"]["arm_preview_called"] is True
+    assert packet["followup_plan"]["disabled_smoke_called"] is True
     assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
     assert (
         "arm_preview:attempt_consumption_required_before_order_lifecycle_handoff"
         in packet["warnings"]
     )
     assert packet["local_registration_readiness"]["classification"] == (
-        "not_ready_for_local_registration_authorization_packet"
+        "not_ready_for_local_registration_evidence_prep"
     )
     assert packet["safety_invariants"]["real_submit_requested"] is False
 
@@ -448,13 +454,13 @@ def test_followup_preflights_attempt_policy_without_mutation_when_allowed():
         calls.append(("disabled", auth_id, args.api_base))
         return _disabled_smoke_report()
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(
             allow_arm_preview=True,
             allow_attempt_policy_prepare=True,
             allow_disabled_smoke=True,
         ),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         attempt_policy_preflight_runner=lambda auth_id, args: (
             calls.append(("preflight", auth_id, args.api_base))
             or _attempt_policy_preflight_report()
@@ -470,11 +476,11 @@ def test_followup_preflights_attempt_policy_without_mutation_when_allowed():
         ("arm", "auth-1", "http://unit"),
         ("disabled", "auth-1", "http://unit"),
     ]
-    assert packet["operator_command_plan"]["attempt_policy_preflight_called"] is True
-    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is False
+    assert packet["followup_plan"]["attempt_policy_preflight_called"] is True
+    assert packet["followup_plan"]["attempt_policy_prepare_called"] is False
     assert (
-        packet["operator_command_plan"][
-            "mutating_attempt_consumption_allowed_by_this_packet"
+        packet["followup_plan"][
+            "mutating_attempt_consumption_allowed_by_this_artifact"
         ]
         is False
     )
@@ -498,13 +504,13 @@ def test_followup_blocks_attempt_policy_prepare_when_preflight_blocks():
         calls.append(("arm", auth_id))
         return _arm_preview_report(blockers=[], warnings=[])
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(
             allow_arm_preview=True,
             allow_attempt_policy_prepare=True,
             allow_disabled_smoke=True,
         ),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         attempt_policy_preflight_runner=lambda auth_id, args: (
             calls.append(("preflight", auth_id))
             or _attempt_policy_preflight_report(
@@ -522,8 +528,8 @@ def test_followup_blocks_attempt_policy_prepare_when_preflight_blocks():
     assert calls == [("preflight", "auth-1")]
     assert "attempt_policy_preflight_not_passed" in packet["blockers"]
     assert "attempt_policy_preflight:attempts_exhausted" in packet["blockers"]
-    assert packet["operator_command_plan"]["attempt_policy_preflight_called"] is True
-    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is False
+    assert packet["followup_plan"]["attempt_policy_preflight_called"] is True
+    assert packet["followup_plan"]["attempt_policy_prepare_called"] is False
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
     assert packet["safety_invariants"]["runtime_budget_mutated"] is False
 
@@ -541,9 +547,9 @@ def test_followup_classifies_expected_local_registration_boundary():
         }
     )
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=lambda auth_id, args: _arm_preview_report(),
         disabled_smoke_runner=lambda auth_id, args: disabled_report,
     )
@@ -556,7 +562,7 @@ def test_followup_classifies_expected_local_registration_boundary():
         "expected_non_mutating_preview_stop"
     ] is True
     assert packet["local_registration_readiness"][
-        "ready_for_local_registration_authorization_packet"
+        "ready_for_local_registration_evidence_prep"
     ] is True
     assert packet["local_registration_readiness"][
         "requires_fresh_real_signal_revalidation"
@@ -565,19 +571,19 @@ def test_followup_classifies_expected_local_registration_boundary():
         "must_not_consume_attempt_for_sample_or_stale_signal"
     ] is True
     assert packet["local_registration_readiness"]["missing_evidence_ids"] == []
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert packet["followup_plan"]["next_step"] == (
         "for_fresh_real_signal_run_standing_authorized_operation_layer_"
         "evidence_prep_then_rerun_action_time_finalgate"
     )
-    assert packet["operator_command_plan"][
-        "local_registration_authorization_packet_script"
+    assert packet["followup_plan"][
+        "local_registration_evidence_prep_script"
     ] == (
         "scripts/runtime_first_real_submit_api_flow.py"
     )
-    assert packet["operator_command_plan"][
-        "mutating_attempt_consumption_allowed_by_this_packet"
+    assert packet["followup_plan"][
+        "mutating_attempt_consumption_allowed_by_this_artifact"
     ] is False
-    assert packet["operator_command_plan"][
+    assert packet["followup_plan"][
         "requires_fresh_real_signal_revalidation_before_mutation"
     ] is True
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
@@ -586,13 +592,13 @@ def test_followup_classifies_expected_local_registration_boundary():
 
 
 def test_followup_keeps_standing_operation_layer_evidence_prep_non_mutating():
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(
             allow_arm_preview=True,
             allow_disabled_smoke=True,
             allow_standing_operation_layer_evidence_prep=True,
         ),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=lambda auth_id, args: _standing_non_mutating_arm_preview_report(),
         disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
     )
@@ -601,11 +607,11 @@ def test_followup_keeps_standing_operation_layer_evidence_prep_non_mutating():
     assert packet["blockers"] == [
         "arm_preview:attempt_consumption_required_before_order_lifecycle_handoff",
     ]
-    assert packet["operator_command_plan"][
+    assert packet["followup_plan"][
         "standing_authorized_operation_layer_evidence_prep_allowed"
     ] is True
-    assert packet["operator_command_plan"][
-        "mutating_attempt_consumption_allowed_by_this_packet"
+    assert packet["followup_plan"][
+        "mutating_attempt_consumption_allowed_by_this_artifact"
     ] is False
     assert packet["safety_invariants"][
         "standing_authorized_operation_layer_evidence_prep_called"
@@ -625,9 +631,9 @@ def test_followup_marks_expected_local_registration_boundary_missing_evidence():
         warnings=["RuntimeExecutionOrderLifecycleAdapterResult not found"],
     )
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=lambda auth_id, args: _arm_preview_report(),
         disabled_smoke_runner=lambda auth_id, args: disabled_report,
     )
@@ -637,21 +643,21 @@ def test_followup_marks_expected_local_registration_boundary_missing_evidence():
         "expected_non_mutating_preview_stop_missing_evidence"
     )
     assert packet["local_registration_readiness"][
-        "ready_for_local_registration_authorization_packet"
+        "ready_for_local_registration_evidence_prep"
     ] is False
     assert packet["local_registration_readiness"]["missing_evidence_ids"] == [
         "trusted_submit_fact_snapshot_id",
         "submit_idempotency_policy_id",
         "protection_creation_failure_policy_id",
     ]
-    assert packet["operator_command_plan"]["next_step"] == (
-        "resolve_missing_evidence_before_local_registration_authorization_packet"
+    assert packet["followup_plan"]["next_step"] == (
+        "resolve_missing_evidence_before_local_registration_evidence_prep"
     )
 
 
-def test_followup_extracts_ready_authorization_from_multi_runtime_monitor_packet():
+def test_followup_extracts_ready_authorization_from_multi_runtime_monitor_artifact():
     calls = []
-    loop_packet = {
+    loop_artifact = {
         "status": "ready_for_final_gate_preflight",
         "runtime_summaries": [
             {
@@ -690,20 +696,130 @@ def test_followup_extracts_ready_authorization_from_multi_runtime_monitor_packet
         calls.append(("disabled", auth_id, args.api_base))
         return _disabled_smoke_report()
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=loop_packet,
+        loop_artifact=loop_artifact,
         arm_preview_runner=arm_runner,
         disabled_smoke_runner=disabled_runner,
     )
 
     assert packet["source_loop_status"] == "ready_for_final_gate_preflight"
     assert packet["prepared_authorization_id"] == "auth-ready"
+    assert packet["prepared_authorization_source"] == {
+        "authorization_id": "auth-ready",
+        "source_path": "latest_summary.prepared_authorization_id",
+        "legacy_source": False,
+    }
     assert packet["status"] == "disabled_smoke_completed"
     assert calls == [
         ("arm", "auth-ready", "http://unit"),
         ("disabled", "auth-ready", "http://unit"),
     ]
+
+
+def test_followup_ignores_legacy_prepare_packet_authorization_source():
+    calls = []
+    loop_artifact = {
+        "status": "ready_for_final_gate_preflight",
+        "runtime_packets": [
+            {
+                "status": "ready_for_final_gate_preflight",
+                "latest_packet": {
+                    "prepare_packet": {
+                        "ids": {"authorization_id": "auth-legacy-packet"}
+                    }
+                },
+            }
+        ],
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "executable_execution_intent_created": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+    }
+
+    packet = runtime_active_observation_followup.build_followup_artifact(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_artifact=loop_artifact,
+        arm_preview_runner=lambda auth_id, args: calls.append(("arm", auth_id)) or (
+            _arm_preview_report(blockers=[], warnings=[])
+        ),
+        disabled_smoke_runner=lambda auth_id, args: calls.append(
+            ("disabled", auth_id)
+        )
+        or _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["prepared_authorization_id"] is None
+    assert packet["prepared_authorization_source"] is None
+    assert "prepared_authorization_id_missing" in packet["blockers"]
+    assert calls == []
+
+
+def test_followup_ignores_legacy_runtime_packet_authorization_sources():
+    calls = []
+    loop_artifact = {
+        "status": "ready_for_final_gate_preflight",
+        "cycle_packets": [
+            {
+                "operator_command_plan": {
+                    "prepared_authorization_id": "auth-cycle-packet"
+                }
+            }
+        ],
+        "runtime_packets": [
+            {
+                "status": "ready_for_final_gate_preflight",
+                "operator_command_plan": {
+                    "prepared_authorization_id": "auth-runtime-packet"
+                },
+                "latest_packet": {
+                    "operator_command_plan": {
+                        "prepared_authorization_id": "auth-latest-packet"
+                    },
+                    "prepare_evidence": {
+                        "ids": {"authorization_id": "auth-prepare-evidence-packet"}
+                    },
+                },
+            }
+        ],
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "executable_execution_intent_created": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+    }
+
+    packet = runtime_active_observation_followup.build_followup_artifact(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_artifact=loop_artifact,
+        arm_preview_runner=lambda auth_id, args: calls.append(("arm", auth_id)) or (
+            _arm_preview_report(blockers=[], warnings=[])
+        ),
+        disabled_smoke_runner=lambda auth_id, args: calls.append(
+            ("disabled", auth_id)
+        )
+        or _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["prepared_authorization_id"] is None
+    assert packet["prepared_authorization_source"] is None
+    assert "prepared_authorization_id_missing" in packet["blockers"]
+    assert calls == []
 
 
 def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
@@ -729,13 +845,13 @@ def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
         calls.append(("disabled", auth_id))
         return _disabled_smoke_report()
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(
             allow_arm_preview=True,
             allow_disabled_smoke=True,
             arm_report_json=str(arm_path),
         ),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=arm_runner,
         disabled_smoke_runner=disabled_runner,
     )
@@ -745,9 +861,9 @@ def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
     assert packet["arm_preview_report"]["ids"]["trusted_submit_fact_snapshot_id"] == (
         "facts-1"
     )
-    assert packet["operator_command_plan"]["arm_preview_called"] is False
-    assert packet["operator_command_plan"]["arm_report_attached"] is True
-    assert packet["operator_command_plan"]["arm_report_json_used"] is True
+    assert packet["followup_plan"]["arm_preview_called"] is False
+    assert packet["followup_plan"]["arm_report_attached"] is True
+    assert packet["followup_plan"]["arm_report_json_used"] is True
     assert packet["safety_invariants"]["arm_preview_called"] is False
     assert packet["safety_invariants"]["arm_report_json_used"] is True
     assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
@@ -760,12 +876,12 @@ def test_followup_blocks_attached_arm_report_with_real_order_safety_flag(tmp_pat
     arm_path = tmp_path / "arm-report.json"
     arm_path.write_text(json.dumps(arm_report), encoding="utf-8")
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(
             allow_disabled_smoke=True,
             arm_report_json=str(arm_path),
         ),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
     )
 
@@ -777,9 +893,9 @@ def test_followup_blocks_attached_arm_report_with_real_order_safety_flag(tmp_pat
 
 
 def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_arm_preview=True, allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         arm_preview_runner=lambda auth_id, args: _arm_preview_report(forbidden=True),
         disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
     )
@@ -794,16 +910,16 @@ def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():
 def test_followup_blocks_on_loop_forbidden_effects_before_smoke():
     calls = []
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight", forbidden=True),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight", forbidden=True),
         disabled_smoke_runner=lambda auth_id, args: calls.append(auth_id) or {},
     )
 
     assert packet["status"] == "blocked"
-    assert "loop_packet_contains_forbidden_effects" in packet["blockers"]
+    assert "loop_artifact_contains_forbidden_effects" in packet["blockers"]
     assert packet["safety_invariants"]["loop_forbidden_effects"]
-    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["followup_plan"]["disabled_smoke_called"] is False
     assert calls == []
 
 
@@ -819,9 +935,9 @@ def test_followup_blocks_when_disabled_smoke_touches_forbidden_surfaces():
         }
     )
 
-    packet = runtime_active_observation_followup.build_followup_packet(
+    packet = runtime_active_observation_followup.build_followup_artifact(
         _args(allow_disabled_smoke=True),
-        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        loop_artifact=_loop_artifact("ready_for_final_gate_preflight"),
         disabled_smoke_runner=lambda auth_id, args: report,
     )
 

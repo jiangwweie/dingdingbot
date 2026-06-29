@@ -158,7 +158,7 @@ class StrategyRuntimePromotionGateResult(StrategyRuntimePromotionGateModel):
     scope: StrategyRuntimePromotionScope
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    missing_owner_decisions: list[str] = Field(default_factory=list)
+    missing_owner_policy_requirements: list[str] = Field(default_factory=list)
     binding_candidate_mode: StrategyCandidateMode
     implementation_kind: StrategyImplementationKind
     runtime_confirmation_mode: str = Field(min_length=1, max_length=128)
@@ -263,25 +263,25 @@ def evaluate_strategy_runtime_promotion_gate(
     binding = gate_input.binding
     blockers: list[str] = []
     warnings: list[str] = []
-    missing_owner_decisions: list[str] = []
+    missing_owner_policy_requirements: list[str] = []
 
     _check_binding_admission(binding, blockers, warnings)
     _check_semantic_confirmations(
         gate_input.semantic_confirmations,
         blockers,
-        missing_owner_decisions,
+        missing_owner_policy_requirements,
     )
     _check_runtime_confirmations(
         binding,
         gate_input.runtime_confirmations,
         blockers,
-        missing_owner_decisions,
+        missing_owner_policy_requirements,
     )
     if gate_input.scope == StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW:
         _check_first_real_submit_confirmations(
             gate_input.first_real_submit_confirmations,
             blockers,
-            missing_owner_decisions,
+            missing_owner_policy_requirements,
         )
 
     if blockers:
@@ -303,7 +303,7 @@ def evaluate_strategy_runtime_promotion_gate(
         scope=gate_input.scope,
         blockers=sorted(set(blockers)),
         warnings=sorted(set(warnings)),
-        missing_owner_decisions=sorted(set(missing_owner_decisions)),
+        missing_owner_policy_requirements=sorted(set(missing_owner_policy_requirements)),
         binding_candidate_mode=binding.candidate_mode,
         implementation_kind=binding.implementation_kind,
         runtime_confirmation_mode=binding.runtime_confirmation_mode.value,
@@ -329,7 +329,7 @@ def _check_binding_admission(
 def _check_semantic_confirmations(
     facts: StrategySemanticsConfirmationFacts,
     blockers: list[str],
-    missing_owner_decisions: list[str],
+    missing_owner_policy_requirements: list[str],
 ) -> None:
     required = {
         "strategy_family_confirmed": facts.strategy_family_confirmed,
@@ -345,14 +345,14 @@ def _check_semantic_confirmations(
             facts.right_tail_review_metrics_confirmed
         ),
     }
-    _append_missing(required, "semantic", blockers, missing_owner_decisions)
+    _append_missing(required, "semantic", blockers, missing_owner_policy_requirements)
 
 
 def _check_runtime_confirmations(
     binding: StrategyImplementationBinding,
     facts: RuntimeExecutionConfirmationFacts,
     blockers: list[str],
-    missing_owner_decisions: list[str],
+    missing_owner_policy_requirements: list[str],
 ) -> None:
     required = {
         "runtime_profile_confirmed": facts.runtime_profile_confirmed,
@@ -385,13 +385,13 @@ def _check_runtime_confirmations(
         required["short_side_conservative_profile_confirmed"] = (
             facts.short_side_conservative_profile_confirmed
         )
-    _append_missing(required, "runtime", blockers, missing_owner_decisions)
+    _append_missing(required, "runtime", blockers, missing_owner_policy_requirements)
 
 
 def _check_first_real_submit_confirmations(
     facts: FirstRealSubmitConfirmationFacts,
     blockers: list[str],
-    missing_owner_decisions: list[str],
+    missing_owner_policy_requirements: list[str],
 ) -> None:
     required = {
         "budget_release_or_consume_rule_confirmed": (
@@ -409,39 +409,39 @@ def _check_first_real_submit_confirmations(
             facts.explicit_owner_real_submit_authorization
         ),
     }
-    _append_missing(required, "first_real_submit", blockers, missing_owner_decisions)
+    _append_missing(required, "first_real_submit", blockers, missing_owner_policy_requirements)
     if not facts.post_submit_budget_settlement_persistence_evidence_id:
         blockers.append(
             "first_real_submit_post_submit_budget_settlement_persistence_"
             "evidence_id_missing"
         )
-        missing_owner_decisions.append(
+        missing_owner_policy_requirements.append(
             "post_submit_budget_settlement_persistence_evidence_id"
         )
     if not facts.attempt_outcome_policy_id:
         blockers.append("first_real_submit_attempt_outcome_policy_id_missing")
-        missing_owner_decisions.append("attempt_outcome_policy_id")
+        missing_owner_policy_requirements.append("attempt_outcome_policy_id")
     if not facts.trusted_submit_fact_snapshot_id:
         blockers.append("first_real_submit_trusted_submit_fact_snapshot_id_missing")
-        missing_owner_decisions.append("trusted_submit_fact_snapshot_id")
+        missing_owner_policy_requirements.append("trusted_submit_fact_snapshot_id")
     if not facts.submit_idempotency_policy_id:
         blockers.append("first_real_submit_submit_idempotency_policy_id_missing")
-        missing_owner_decisions.append("submit_idempotency_policy_id")
+        missing_owner_policy_requirements.append("submit_idempotency_policy_id")
     if not facts.protection_creation_failure_policy_id:
         blockers.append(
             "first_real_submit_protection_creation_failure_policy_id_missing"
         )
-        missing_owner_decisions.append("protection_creation_failure_policy_id")
+        missing_owner_policy_requirements.append("protection_creation_failure_policy_id")
     if not facts.local_registration_enablement_decision_id:
         blockers.append(
             "first_real_submit_local_registration_enablement_decision_id_missing"
         )
-        missing_owner_decisions.append("local_registration_enablement_decision_id")
+        missing_owner_policy_requirements.append("local_registration_enablement_decision_id")
     if not facts.exchange_submit_enablement_decision_id:
         blockers.append(
             "first_real_submit_exchange_submit_enablement_decision_id_missing"
         )
-        missing_owner_decisions.append("exchange_submit_enablement_decision_id")
+        missing_owner_policy_requirements.append("exchange_submit_enablement_decision_id")
     if (
         not facts.runtime_submit_rehearsal_id
         and not facts.exchange_submit_execution_result_id
@@ -450,30 +450,30 @@ def _check_first_real_submit_confirmations(
             "first_real_submit_runtime_submit_rehearsal_or_execution_result_"
             "id_missing"
         )
-        missing_owner_decisions.append(
+        missing_owner_policy_requirements.append(
             "runtime_submit_rehearsal_or_execution_result_id"
         )
     if not facts.deployment_readiness_evidence_id:
         blockers.append("first_real_submit_deployment_readiness_evidence_id_missing")
-        missing_owner_decisions.append("deployment_readiness_evidence_id")
+        missing_owner_policy_requirements.append("deployment_readiness_evidence_id")
     if not facts.owner_real_submit_authorization_id:
         blockers.append(
             "first_real_submit_owner_real_submit_authorization_id_missing"
         )
-        missing_owner_decisions.append("owner_real_submit_authorization_id")
+        missing_owner_policy_requirements.append("owner_real_submit_authorization_id")
 
 
 def _append_missing(
     required: dict[str, bool],
     prefix: str,
     blockers: list[str],
-    missing_owner_decisions: list[str],
+    missing_owner_policy_requirements: list[str],
 ) -> None:
     for key, confirmed in required.items():
         if confirmed:
             continue
         blockers.append(f"{prefix}_{key}_missing")
-        missing_owner_decisions.append(key)
+        missing_owner_policy_requirements.append(key)
 
 
 def _binding_requires_short_side_conservative_profile(

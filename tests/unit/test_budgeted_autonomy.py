@@ -94,7 +94,7 @@ def test_protected_open_position_is_budgeted_loop_outcome_and_blocks_new_candida
     )
     assert evaluation.action_allowed is False
     assert evaluation.backend_actionable is False
-    assert evaluation.frontend_action_enabled is False
+    assert evaluation.owner_action_enabled is False
     assert evaluation.auto_execution_enabled is False
     assert evaluation.places_order is False
     assert evaluation.mutates_pg is False
@@ -130,6 +130,9 @@ def test_pg_exchange_mismatch_blocks_with_cleanup_retry_condition():
     assert evaluation.selected_candidate is None
     assert evaluation.blocked_candidates[0].blockers[0].id == (
         "BUDGETED-AUTONOMY-PG-EXCHANGE-MISMATCH"
+    )
+    assert evaluation.blocked_candidates[0].blockers[0].recovery_action == (
+        "Keep all new actions disabled while reconciliation/review cleanup is pending."
     )
     assert evaluation.retry_condition == (
         "Run official reconciliation/review cleanup so PG position, orders, "
@@ -194,7 +197,7 @@ def test_scope_mismatch_and_non_catalog_candidate_block():
     assert "BUDGETED-AUTONOMY-SCOPE-ATTEMPTS" in blocker_ids
     assert "BUDGETED-AUTONOMY-SCOPE-PROTECTION" in blocker_ids
     assert "BUDGETED-AUTONOMY-SCOPE-REVIEW" in blocker_ids
-    assert blocked.frontend_action_enabled is False
+    assert blocked.owner_action_enabled is False
     assert blocked.places_order is False
 
 
@@ -205,7 +208,7 @@ def test_closed_reviewed_ledger_closes_loop_without_selecting_candidate():
         candidates=[_candidate()],
         review_ledger={
             "lifecycle_status": "closed_from_pg_exit_order",
-            "review_decision": {"status": "revise"},
+            "review_outcome": {"status": "revise"},
         },
         now_ms=1780496665000,
     )
@@ -225,7 +228,7 @@ def test_external_flat_reviewed_ledger_closes_loop_without_selecting_candidate()
         candidates=[_candidate()],
         review_ledger={
             "lifecycle_status": "closed_external_exchange_flat_unresolved",
-            "review_decision": {"status": "revise"},
+            "review_outcome": {"status": "revise"},
         },
         now_ms=1780496665000,
     )
@@ -285,6 +288,13 @@ def test_v01_daily_attempts_exhausted_blocks_candidate_selection():
     assert evaluation.blocked_candidates[0].blockers[0].id == (
         "BUDGETED-AUTONOMY-V01-DAILY-ATTEMPTS-EXHAUSTED"
     )
+    blocker_payload = evaluation.blocked_candidates[0].blockers[0].model_dump(
+        mode="json"
+    )
+    assert blocker_payload["recovery_action"] == (
+        "Keep new budgeted actions disabled for the rest of the budget day."
+    )
+    assert "bridge" not in blocker_payload
     assert evaluation.policy["daily_attempts"]["remaining"] == 0
     assert evaluation.action_allowed is False
     assert evaluation.places_order is False

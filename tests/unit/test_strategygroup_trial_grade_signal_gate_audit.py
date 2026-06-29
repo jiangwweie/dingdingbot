@@ -111,11 +111,16 @@ def _brf2_policy() -> dict:
     return {
         "policy": {
             "capital_scope": {
-                "amount": "30",
-                "currency": "USDT",
                 "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
+                "currency": "USDT",
             },
-            "loss_unit": {"amount": "10", "currency": "USDT"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+            },
             "attempt_cap": 3,
             "max_consecutive_losses": 2,
             "pause_conditions": ["two_consecutive_losses"],
@@ -160,7 +165,7 @@ def _sor_replay_corpus() -> dict:
 def test_trial_grade_signal_catalog_and_brf2_proxy_boundary() -> None:
     module = _load_module()
 
-    packet = module.build_trial_grade_signal_gate_audit(
+    audit_artifact = module.build_trial_grade_signal_gate_audit(
         mpg_replay_corpus=_mpg_replay_corpus(),
         brf_replay_corpus=_brf_replay_corpus(),
         sor_handoff={"risk_defaults": {"requires_sl": True}},
@@ -172,21 +177,24 @@ def test_trial_grade_signal_catalog_and_brf2_proxy_boundary() -> None:
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    assert packet["schema"] == "brc.strategygroup_trial_grade_signal_gate_audit.v1"
-    assert set(packet["signal_grade_catalog"]) == {
+    assert audit_artifact["schema"] == "brc.strategygroup_trial_grade_signal_gate_audit.v1"
+    assert set(audit_artifact["signal_grade_catalog"]) == {
         "observe_only_signal",
         "trial_grade_signal",
         "production_grade_signal",
         "invalid_signal",
     }
-    assert packet["summary"]["trial_grade_observation_count_30d"] == 1
-    assert packet["summary"]["action_time_trial_submit_count_30d"] == 0
-    assert packet["summary"]["hard_safety_gates_relaxed"] is False
-    assert packet["checks"]["hard_safety_gates_not_relaxed"] is True
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
+    assert audit_artifact["summary"]["trial_grade_observation_count_30d"] == 1
+    assert audit_artifact["summary"]["action_time_trial_submit_count_30d"] == 0
+    assert audit_artifact["summary"]["hard_safety_gates_relaxed"] is False
+    assert audit_artifact["checks"]["hard_safety_gates_not_relaxed"] is True
+    assert "actionable_now" not in audit_artifact["checks"]
+    assert "real_order_authority" not in audit_artifact["checks"]
+    assert "actionable_now" not in audit_artifact["safety_invariants"]
+    assert "real_order_authority" not in audit_artifact["safety_invariants"]
+    assert "execution_intent_created" not in audit_artifact["safety_invariants"]
 
-    brf2 = packet["strategy_group_rows"]["BRF2-001"]
+    brf2 = audit_artifact["strategy_group_rows"]["BRF2-001"]
     counts_30d = brf2["verified_recent_window_counts"]["windows_days"]["30"]
     assert counts_30d["trial_grade_observation_count"] == 1
     assert counts_30d["action_time_trial_submit_count"] == 0
@@ -200,16 +208,20 @@ def test_trial_grade_signal_catalog_and_brf2_proxy_boundary() -> None:
     assert brf2["risk_envelope"]["path_risk_treatment"] == (
         "known_path_risk_enters_envelope_not_trade_denial"
     )
+    assert "actionable_now" not in brf2["authority_boundary"]
+    assert "real_order_authority" not in brf2["authority_boundary"]
     assert brf2["risk_envelope"]["attempt_cap"] == 3
-    assert brf2["risk_envelope"]["loss_unit"]["amount"] == "10"
-    assert brf2["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert brf2["risk_envelope"]["loss_unit"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert brf2["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
     assert brf2["authority_boundary"]["trial_grade_signal_can_bypass_hard_safety_gates"] is False
 
 
 def test_sor_trial_grade_audit_exposes_missing_replay_source() -> None:
     module = _load_module()
 
-    packet = module.build_trial_grade_signal_gate_audit(
+    audit_artifact = module.build_trial_grade_signal_gate_audit(
         mpg_replay_corpus=_mpg_replay_corpus(),
         brf_replay_corpus=_brf_replay_corpus(),
         sor_handoff={"risk_defaults": {"requires_sl": True}},
@@ -221,11 +233,11 @@ def test_sor_trial_grade_audit_exposes_missing_replay_source() -> None:
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    sor = packet["strategy_group_rows"]["SOR-001"]
+    sor = audit_artifact["strategy_group_rows"]["SOR-001"]
     assert sor["fixture_replay_projection"]["source"] == (
         "missing_strategy_specific_replay_source"
     )
-    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is False
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is False
     assert sor["false_positive_review_pack"][0]["case"] == "sor_replay_source_missing"
     assert any(
         row["recommendation"] == "needs_replay_source"
@@ -236,7 +248,7 @@ def test_sor_trial_grade_audit_exposes_missing_replay_source() -> None:
 def test_sor_replay_source_calibrates_trial_grade_without_live_authority() -> None:
     module = _load_module()
 
-    packet = module.build_trial_grade_signal_gate_audit(
+    audit_artifact = module.build_trial_grade_signal_gate_audit(
         mpg_replay_corpus=_mpg_replay_corpus(),
         brf_replay_corpus=_brf_replay_corpus(),
         sor_handoff={"risk_defaults": {"requires_sl": True}},
@@ -249,12 +261,12 @@ def test_sor_replay_source_calibrates_trial_grade_without_live_authority() -> No
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    sor = packet["strategy_group_rows"]["SOR-001"]
+    sor = audit_artifact["strategy_group_rows"]["SOR-001"]
     assert sor["fixture_replay_projection"]["trial_grade_trigger_case_count"] == 1
     assert sor["fixture_replay_projection"]["would_trigger_cases"] == [
         "session_range_breakdown_trial_would_enter"
     ]
-    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
     assert sor["verified_recent_window_counts"]["windows_days"]["30"][
         "trial_grade_observation_count"
     ] == 0
@@ -262,9 +274,12 @@ def test_sor_replay_source_calibrates_trial_grade_without_live_authority() -> No
         item["case"] == "session_false_breakout_decay_review_needed"
         for item in sor["false_positive_review_pack"]
     )
-    assert packet["checks"]["calls_finalgate"] is False
-    assert packet["checks"]["calls_operation_layer"] is False
-    assert packet["checks"]["calls_exchange_write"] is False
+    assert "calls_finalgate" not in audit_artifact["checks"]
+    assert "calls_operation_layer" not in audit_artifact["checks"]
+    assert "calls_exchange_write" not in audit_artifact["checks"]
+    assert audit_artifact["interaction"]["calls_finalgate"] is False
+    assert audit_artifact["interaction"]["calls_operation_layer"] is False
+    assert audit_artifact["interaction"]["calls_exchange_write"] is False
 
 
 def test_trial_grade_signal_gate_audit_cli_writes_json_and_markdown(tmp_path: Path) -> None:
@@ -287,11 +302,15 @@ def test_trial_grade_signal_gate_audit_cli_writes_json_and_markdown(tmp_path: Pa
     )
 
     assert result.returncode == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    audit_artifact = json.loads(output_json.read_text(encoding="utf-8"))
     markdown = output_md.read_text(encoding="utf-8")
-    assert packet["status"] == "trial_grade_signal_gate_audit_ready"
-    assert packet["checks"]["calls_finalgate"] is False
-    assert packet["checks"]["calls_operation_layer"] is False
-    assert packet["checks"]["calls_exchange_write"] is False
-    assert packet["checks"]["places_order"] is False
+    assert audit_artifact["status"] == "trial_grade_signal_gate_audit_ready"
+    assert "calls_finalgate" not in audit_artifact["checks"]
+    assert "calls_operation_layer" not in audit_artifact["checks"]
+    assert "calls_exchange_write" not in audit_artifact["checks"]
+    assert "places_order" not in audit_artifact["checks"]
+    assert audit_artifact["interaction"]["calls_finalgate"] is False
+    assert audit_artifact["interaction"]["calls_operation_layer"] is False
+    assert audit_artifact["interaction"]["calls_exchange_write"] is False
+    assert audit_artifact["interaction"]["places_order"] is False
     assert "Trial-Grade Signal Gate Audit" in markdown

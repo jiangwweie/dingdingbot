@@ -19,6 +19,32 @@ if str(REPO_ROOT) not in sys.path:
 from scripts import runtime_live_closure_evidence_verifier  # noqa: E402
 from scripts import runtime_first_bounded_live_order_completion_audit  # noqa: E402
 from scripts import runtime_live_cutover_readiness  # noqa: E402
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    LEGACY_AUTHORITY_MIRROR_KEYS,
+    legacy_authority_mirror_present_errors,
+)
+try:
+    from scripts.runtime_monitor_refresh import (
+        DEPLOYMENT_ISSUE_STATUS,
+        MONITOR_REFRESH_STATUS,
+        monitor_owner_action_label_for,
+        monitor_owner_state_label_for,
+        monitor_notification_projection,
+        owner_runtime_issues_projection,
+        monitor_status_projection,
+        monitor_runtime_status_for,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from runtime_monitor_refresh import (
+        DEPLOYMENT_ISSUE_STATUS,
+        MONITOR_REFRESH_STATUS,
+        monitor_owner_action_label_for,
+        monitor_owner_state_label_for,
+        monitor_notification_projection,
+        owner_runtime_issues_projection,
+        monitor_status_projection,
+        monitor_runtime_status_for,
+    )
 
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_JSON = REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
@@ -47,6 +73,48 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
     / "output/strategygroup-runtime-pilot/live-closure-evidence/"
     "runtime-live-closure-evidence.json"
 )
+OWNER_PROGRESS_STATE_LABELS = {
+    "blocked": "暂不可用",
+    "complete": "已完成",
+    "degraded": "非市场收口待处理",
+    "processing": "处理中",
+}
+OWNER_PROGRESS_ACTION_LABELS = {
+    "blocked": "处理目标进度阻断",
+    "complete": "归档当前目标进度",
+    "degraded": "处理非市场收口缺口",
+    "processing": "等待系统完成收口",
+}
+REVIEW_PROJECTION_FORBIDDEN_EFFECT_KEYS = (
+    "exchange_write_called",
+    "final_gate_called",
+    "operation_layer_called",
+    "order_created",
+    "registry_authority_changed",
+    "tier_policy_changed",
+    "live_profile_changed",
+    "mpg_member_live_scope_expanded",
+)
+PORTFOLIO_PROJECTION_FORBIDDEN_EFFECT_KEYS = (
+    "exchange_write_called",
+    "calls_exchange_write",
+    "final_gate_called",
+    "calls_finalgate",
+    "operation_layer_called",
+    "calls_operation_layer",
+    "order_created",
+    "places_order",
+    "registry_authority_changed",
+    "tier_policy_changed",
+    "live_profile_changed",
+    "order_sizing_changed",
+    "mpg_member_live_scope_expanded",
+    "l4_real_order_scope_expanded",
+    "preview_or_replay_treated_as_live_signal",
+)
+TRIAL_ENVELOPE_PROJECTION_FORBIDDEN_EFFECT_KEYS = (
+    *PORTFOLIO_PROJECTION_FORBIDDEN_EFFECT_KEYS,
+)
 DEFAULT_STRATEGYGROUP_REVIEW_ONLY_EVIDENCE_CLOSURE_WAVE_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json"
@@ -58,13 +126,11 @@ DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON = (
 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
 )
-DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON = (
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json"
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json"
 )
 SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
-MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
-DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
 
 P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "allocated_subaccount_profile_boundary_checked",
@@ -72,7 +138,7 @@ P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "disabled_smoke_not_real_execution_proof",
     "expanded_watcher_scope_execution_guard_checked",
     "fresh_signal_fast_auto_chain_checked",
-    "non_executing_prepare_auto_bridge_checked",
+    "execution_attempt_rehearsal_prepare_checked",
     "only_mpg_tiny_real_order_eligible_checked",
     "operation_layer_authorization_chain_guard_checked",
     "operation_layer_blocker_review_policy_checked",
@@ -84,7 +150,7 @@ P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "post_submit_finalize_result_identity_guard_checked",
     "reduce_only_recovery_standing_authorization_checked",
     "required_facts_readiness_checked",
-    "scoped_pipeline_operation_layer_handoff_checked",
+    "scoped_pipeline_operation_layer_submit_projection_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "strategygroup_adapter_boundary_checked",
 )
@@ -118,8 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         strategygroup_portfolio_board=_read_optional_json(
             Path(args.strategygroup_portfolio_board_json)
         ),
-        strategygroup_capital_trial_readiness_bridge=_read_optional_json(
-            Path(args.strategygroup_capital_trial_readiness_bridge_json)
+        strategygroup_capital_trial_envelope_projection=_read_optional_json(
+            Path(args.strategygroup_capital_trial_envelope_projection_json)
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -146,6 +212,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
 
+def _daily_check_waiting_for_market(
+    *,
+    daily_check: dict[str, Any],
+) -> bool:
+    typed_state = daily_check.get("owner_runtime_state")
+    if isinstance(typed_state, dict) and typed_state:
+        return typed_state.get("waiting_for_market") is True
+    runtime_status = str(daily_check.get("runtime_status") or "")
+    return runtime_status == "waiting_for_market"
+
+
 def build_goal_progress_report(
     *,
     daily_check: dict[str, Any],
@@ -156,7 +233,7 @@ def build_goal_progress_report(
     strategy_review_evidence_closure_wave: dict[str, Any] | None = None,
     strategy_review_deep_dive_wave: dict[str, Any] | None = None,
     strategygroup_portfolio_board: dict[str, Any] | None = None,
-    strategygroup_capital_trial_readiness_bridge: dict[str, Any] | None = None,
+    strategygroup_capital_trial_envelope_projection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -195,28 +272,13 @@ def build_goal_progress_report(
         if isinstance(daily_check.get("safety_invariants"), dict)
         else {}
     )
-    monitor_refresh_needed = checks.get("monitor_refresh_needed") is True
-    monitor_refresh_reasons = [
-        str(item) for item in checks.get("monitor_refresh_reasons") or []
-    ]
-    monitor_status = str(
-        daily_check.get("monitor_status")
-        or (
-            "deployment_issue"
-            if checks.get("deployment_issue") is True
-            else "needs_refresh"
-            if monitor_refresh_needed
-            else "fresh"
-        )
-    )
-
     p0 = _p0_track(
         daily_check=daily_check,
         checks=checks,
         owner=owner,
         visibility=visibility,
     )
-    p05_tracks = [
+    signal_observation_tracks = [
         _runtime_interaction_track(
             baseline=baseline,
             interaction=interaction,
@@ -250,34 +312,34 @@ def build_goal_progress_report(
         ),
         *(
             [
-                _strategygroup_capital_trial_readiness_bridge_track(
-                    strategygroup_capital_trial_readiness_bridge
+                _strategygroup_capital_trial_envelope_projection_track(
+                    strategygroup_capital_trial_envelope_projection
                 )
             ]
-            if strategygroup_capital_trial_readiness_bridge
+            if strategygroup_capital_trial_envelope_projection
             else []
         ),
         _safety_invariants_track(safety=safety),
     ]
     issues = _dedupe(
         blocker
-        for item in [p0, *p05_tracks]
+        for item in [p0, *signal_observation_tracks]
         for blocker in item.get("blockers", [])
     )
     hard_blockers = _dedupe(
         blocker
-        for item in [p0, *p05_tracks]
-        if item["id"] in {"p0_live_closure", "p05_safety_invariants"}
+        for item in [p0, *signal_observation_tracks]
+        if item["id"] in {"p0_live_closure", "safety_invariants_projection"}
         for blocker in item.get("blockers", [])
     )
     waiting_for_market = p0["status"] == "waiting_for_market"
-    p05_ready = all(item["status"] == "ready" for item in p05_tracks)
+    signal_observation_ready = all(item["status"] == "ready" for item in signal_observation_tracks)
     product_gaps = [item for item in issues if item not in hard_blockers]
     engineering_rehearsal_ready = next(
         (
             item["status"] == "ready"
-            for item in p05_tracks
-            if item["id"] == "p05_engineering_rehearsal_loop"
+            for item in signal_observation_tracks
+            if item["id"] == "engineering_rehearsal_projection"
         ),
         False,
     )
@@ -296,6 +358,7 @@ def build_goal_progress_report(
     live_closure_evidence_boundary = _live_closure_evidence_boundary(
         live_closure_evidence_verification=live_closure_evidence_verification,
         checks=checks,
+        waiting_for_market=waiting_for_market,
         live_cutover_readiness_boundary=live_cutover_readiness_boundary,
     )
     boundary_product_gaps = []
@@ -323,26 +386,32 @@ def build_goal_progress_report(
             "live_closure_completion_claim_without_verified_evidence"
         )
     product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
-    status = "ready"
-    processing = daily_check.get("status") == "processing" or (
-        visibility.get("category") == "processing"
+    preliminary_monitor_projection = monitor_status_projection(
+        status=str(daily_check.get("status") or ""),
+        artifacts=[daily_check],
+        default_runtime_status="temporarily_unavailable",
+        default_monitor_status="unknown",
     )
+    monitor_status = preliminary_monitor_projection.monitor_status
+    monitor_refresh_needed = preliminary_monitor_projection.monitor_refresh_needed
+    status = "ready"
+    processing = visibility.get("category") == "processing"
     if hard_blockers:
         status = "blocked"
     elif monitor_status == "deployment_issue":
         status = DEPLOYMENT_ISSUE_STATUS
-    elif monitor_refresh_needed and waiting_for_market and p05_ready:
+    elif monitor_refresh_needed and waiting_for_market and signal_observation_ready:
         status = MONITOR_REFRESH_STATUS
-    elif product_gaps or not p05_ready:
+    elif product_gaps or not signal_observation_ready:
         status = "degraded"
-    elif processing and p05_ready:
+    elif processing and signal_observation_ready:
         status = "processing"
-    elif waiting_for_market and p05_ready:
+    elif waiting_for_market and signal_observation_ready:
         status = "waiting_for_market"
     completion_boundary = _completion_boundary(
         checks=checks,
         waiting_for_market=waiting_for_market,
-        p05_ready=p05_ready,
+        signal_observation_ready=signal_observation_ready,
         engineering_rehearsal_ready=engineering_rehearsal_ready,
         hard_blockers=hard_blockers,
         product_gaps=product_gaps,
@@ -368,7 +437,7 @@ def build_goal_progress_report(
         completion_boundary = _completion_boundary(
             checks=checks,
             waiting_for_market=waiting_for_market,
-            p05_ready=p05_ready,
+            signal_observation_ready=signal_observation_ready,
             engineering_rehearsal_ready=engineering_rehearsal_ready,
             hard_blockers=hard_blockers,
             product_gaps=product_gaps,
@@ -381,21 +450,48 @@ def build_goal_progress_report(
             completion_boundary=completion_boundary,
             live_closure_evidence_boundary=live_closure_evidence_boundary,
         )
-        if not hard_blockers and (product_gaps or not p05_ready):
+        if not hard_blockers and (product_gaps or not signal_observation_ready):
             status = "degraded"
 
-    runtime_status = _runtime_status_for(
+    runtime_status = monitor_runtime_status_for(
         status=status,
         waiting_for_market=waiting_for_market,
     )
-    if status == MONITOR_REFRESH_STATUS:
-        runtime_status = "waiting_for_market"
-    elif status == DEPLOYMENT_ISSUE_STATUS:
-        runtime_status = "temporarily_unavailable"
-    owner_status = _owner_status_for(
+    monitor_projection = monitor_status_projection(
+        status=status,
+        artifacts=[daily_check],
         runtime_status=runtime_status,
-        monitor_status=monitor_status,
         owner_intervention_required=bool(hard_blockers),
+        waiting_for_market=waiting_for_market,
+    )
+    monitor_status = monitor_projection.monitor_status
+    owner_status = monitor_projection.owner_status
+    owner_runtime_state = monitor_projection.owner_runtime_state
+    monitor_refresh_needed = monitor_projection.monitor_refresh_needed
+    monitor_refresh_reasons = monitor_projection.monitor_refresh_reasons
+    owner_runtime_issues = owner_runtime_issues_projection(
+        blockers=hard_blockers,
+        non_market_gaps=product_gaps,
+        include_counts=True,
+        gap_key="product_gaps",
+        gap_count_key="product_gap_count",
+    )
+    signal_observation = {
+        "grade_code": "signal-observation-grade-review",
+        "ready": signal_observation_ready,
+        "state": "ready" if signal_observation_ready else "needs_work",
+    }
+    notification_projection = monitor_notification_projection(
+        monitor_refresh_needed=monitor_refresh_needed,
+        owner_notify=bool(hard_blockers),
+        owner_intervention_required=bool(
+            notification.get("owner_intervention_required")
+        ),
+        source_notification=notification,
+        source_prefix="daily_check",
+    )
+    capital_trial_boundary = _strategygroup_capital_trial_envelope_projection_boundary(
+        strategygroup_capital_trial_envelope_projection
     )
 
     return {
@@ -404,6 +500,10 @@ def build_goal_progress_report(
         "runtime_status": runtime_status,
         "monitor_status": monitor_status,
         "owner_status": owner_status,
+        "owner_runtime_state": owner_runtime_state,
+        "owner_runtime_issues": owner_runtime_issues,
+        "signal_observation": signal_observation,
+        "notification": notification_projection,
         "scope": "strategygroup_runtime_goal_progress_audit",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "interaction": {
@@ -417,27 +517,24 @@ def build_goal_progress_report(
             "places_order": False,
         },
         "owner_summary": {
-            "state": (
-                "等待机会"
-                if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}
-                else _owner_state(status)
+            "state": monitor_owner_state_label_for(
+                status,
+                local_labels=OWNER_PROGRESS_STATE_LABELS,
+                default_label="暂不可用",
             ),
-            "current_action": (
-                "继续等待市场机会"
-                if status == "waiting_for_market"
-                else "刷新本地 runtime monitor 缓存"
-                if status in {"needs_refresh", MONITOR_REFRESH_STATUS}
-                else "等待系统完成收口"
-                if status == "processing"
-                else "处理非市场收口缺口"
-                if status == "degraded"
-                else "处理目标进度阻断"
+            "non_authority_checkpoint": monitor_owner_action_label_for(
+                status,
+                local_labels=OWNER_PROGRESS_ACTION_LABELS,
+                default_label="刷新或修复 runtime monitor 权威状态",
             ),
+            "checkpoint_source": "goal_progress_status_projection",
             "owner_intervention_required": bool(hard_blockers),
             "risk_level": "L0 local audit",
             "p0": p0["status"],
-            "p05": "ready" if p05_ready else "needs_work",
-            "p05_strategy_portfolio": (
+            "signal_observation_state": (
+                "ready" if signal_observation_ready else "needs_work"
+            ),
+            "strategy_portfolio": (
                 "portfolio_screening_active"
                 if strategygroup_portfolio_board
                 and _strategygroup_portfolio_board_boundary(
@@ -446,15 +543,10 @@ def build_goal_progress_report(
                 == "portfolio_board_ready"
                 else "not_generated"
             ),
-            "p05_capital_trial": (
-                _strategygroup_capital_trial_readiness_bridge_boundary(
-                    strategygroup_capital_trial_readiness_bridge
-                )["selected_candidate_status"]
-                if strategygroup_capital_trial_readiness_bridge
-                and _strategygroup_capital_trial_readiness_bridge_boundary(
-                    strategygroup_capital_trial_readiness_bridge
-                )["status"]
-                == "capital_trial_readiness_bridge_ready"
+            "capital_trial": (
+                capital_trial_boundary["selected_candidate_status"]
+                if capital_trial_boundary["projection_status"]
+                == "trial_envelope_projection_ready"
                 else "not_generated"
             ),
         },
@@ -475,29 +567,9 @@ def build_goal_progress_report(
         "strategygroup_portfolio_board_boundary": (
             _strategygroup_portfolio_board_boundary(strategygroup_portfolio_board)
         ),
-        "strategygroup_capital_trial_readiness_bridge_boundary": (
-            _strategygroup_capital_trial_readiness_bridge_boundary(
-                strategygroup_capital_trial_readiness_bridge
-            )
-        ),
+        "strategygroup_capital_trial_envelope_projection_boundary": capital_trial_boundary,
         "p0_completion_audit_boundary": p0_completion_audit_boundary,
-        "checks": {
-            "blockers": hard_blockers,
-            "product_gaps": product_gaps,
-            "runtime_status": runtime_status,
-            "monitor_status": monitor_status,
-            "owner_status": owner_status,
-            "monitor_refresh_needed": monitor_refresh_needed,
-            "monitor_refresh_reasons": monitor_refresh_reasons,
-            "refresh_required": monitor_refresh_needed,
-            "automation_notify": monitor_refresh_needed,
-            "owner_notify": bool(hard_blockers),
-            "waiting_for_market": waiting_for_market,
-            "p05_ready": p05_ready,
-            "daily_check_status": daily_check.get("status"),
-            "daily_check_notification": notification.get("decision"),
-        },
-        "tracks": [p0, *p05_tracks],
+        "tracks": [p0, *signal_observation_tracks],
         "source_paths": {
             "daily_check_json": str(DEFAULT_DAILY_CHECK_JSON),
             "baseline_json": str(DEFAULT_BASELINE_JSON),
@@ -516,8 +588,8 @@ def build_goal_progress_report(
             "strategygroup_portfolio_board_json": str(
                 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON
             ),
-            "strategygroup_capital_trial_readiness_bridge_json": str(
-                DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON
+            "strategygroup_capital_trial_envelope_projection_json": str(
+                DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON
             ),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
@@ -554,10 +626,10 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
             checks,
             "operation_layer_evidence_relay_checked",
         ),
-        "scoped_pipeline_operation_layer_handoff_checked": (
+        "scoped_pipeline_operation_layer_submit_projection_checked": (
             _dry_run_required_check_present(
                 checks,
-                "scoped_pipeline_operation_layer_handoff_checked",
+                "scoped_pipeline_operation_layer_submit_projection_checked",
             )
         ),
         "operation_layer_authorization_chain_guard_checked": (
@@ -597,7 +669,7 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         ),
         "finalgate_to_operation_layer_evidence_covered": (
             fast_chain_checks["operation_layer_evidence_relay_checked"]
-            and fast_chain_checks["scoped_pipeline_operation_layer_handoff_checked"]
+            and fast_chain_checks["scoped_pipeline_operation_layer_submit_projection_checked"]
         ),
         "operation_layer_authorization_guard_covered": fast_chain_checks[
             "operation_layer_authorization_chain_guard_checked"
@@ -865,6 +937,7 @@ def _live_closure_evidence_boundary(
     *,
     live_closure_evidence_verification: dict[str, Any] | None,
     checks: dict[str, Any],
+    waiting_for_market: bool,
     live_cutover_readiness_boundary: dict[str, Any],
 ) -> dict[str, Any]:
     expected_stage_count = int(
@@ -900,7 +973,7 @@ def _live_closure_evidence_boundary(
             str(item) for item in real_order_readiness.get("waiting_keys") or []
         }
         no_signal_waiting = (
-            checks.get("waiting_for_market") is True
+            waiting_for_market
             and "fresh_signal" in real_order_waiting_keys
         )
         if source_status in {"live_closure_in_progress", "in_progress"}:
@@ -1045,11 +1118,11 @@ def _p0_completion_audit_boundary(
     has_full_audit_inputs = (
         bool(live_cutover_readiness.get("selected_strategy_group_id"))
         and bool(live_cutover_readiness.get("first_live_lane"))
-        and isinstance(live_cutover_readiness.get("sections"), list)
+        and isinstance(live_cutover_readiness.get("check_groups"), list)
     )
     if not has_full_audit_inputs:
         return {
-            "status": "not_generated_legacy_cutover_packet",
+            "status": "not_generated_legacy_cutover_artifact",
             "goal_complete": bool(completion_boundary.get("goal_complete")),
             "non_market_gap_count": 0,
             "non_market_gap_keys": [],
@@ -1116,7 +1189,7 @@ def _completion_boundary(
     *,
     checks: dict[str, Any],
     waiting_for_market: bool,
-    p05_ready: bool,
+    signal_observation_ready: bool,
     engineering_rehearsal_ready: bool,
     hard_blockers: list[str],
     product_gaps: list[str],
@@ -1138,7 +1211,7 @@ def _completion_boundary(
         and not product_gaps
     )
     waiting_for_real_fresh_signal = (
-        waiting_for_market and p05_ready and not hard_blockers and not product_gaps
+        waiting_for_market and signal_observation_ready and not hard_blockers and not product_gaps
     )
     if goal_complete:
         status = "complete"
@@ -1187,35 +1260,40 @@ def _p0_track(
     visibility: dict[str, Any],
 ) -> dict[str, Any]:
     blockers = _p0_action_blockers(checks)
-    waiting = checks.get("waiting_for_market") is True or daily_check.get("status") == "waiting_for_market"
-    processing = daily_check.get("status") == "processing" or (
-        visibility.get("category") == "processing"
+    waiting = _daily_check_waiting_for_market(
+        daily_check=daily_check,
     )
+    processing = visibility.get("category") == "processing"
     if blockers:
         status = "blocked"
         owner_state = "安全或工程阻断"
-        next_action = "先处理阻断，不进入真实订单路径"
+        progress_checkpoint = "先处理阻断，不进入真实订单路径"
     elif waiting:
         status = "waiting_for_market"
         owner_state = "等待市场机会"
-        next_action = "等待 fresh signal 后推进官方链路"
+        progress_checkpoint = "等待 fresh signal 后推进官方链路"
     elif processing:
         status = "processing"
         owner_state = str(owner.get("state") or visibility.get("label") or "处理中")
-        next_action = "等待系统完成收口"
+        progress_checkpoint = "等待系统完成收口"
     else:
         status = "ready"
-        owner_state = str(owner.get("state") or visibility.get("label") or "运行中")
-        next_action = "fresh signal 已出现时推进官方链路"
+        source_owner_state = str(owner.get("state") or visibility.get("label") or "")
+        owner_state = source_owner_state or "暂不可用"
+        progress_checkpoint = (
+            "fresh signal 已出现时推进官方链路"
+            if source_owner_state
+            else "刷新或修复 runtime monitor 权威状态"
+        )
     return {
         "id": "p0_live_closure",
         "label": "P0 第一笔边界内真实订单闭环",
         "status": status,
         "owner_state": owner_state,
-        "next_action": next_action,
+        "progress_checkpoint": progress_checkpoint,
         "evidence": [
             f"daily_check_status={daily_check.get('status')}",
-            f"waiting_for_market={checks.get('waiting_for_market')}",
+            f"derived_waiting_for_market={waiting}",
         ],
         "blockers": blockers,
     }
@@ -1261,8 +1339,8 @@ def _runtime_interaction_track(
     if checks.get("blockers"):
         blockers.append("daily_check_has_blockers")
     return _track(
-        track_id="p05_runtime_interaction_optimization",
-        label="P0.5 Runtime Interaction Optimization",
+        track_id="runtime_interaction_projection",
+        label="Runtime Interaction Projection",
         blockers=blockers,
         evidence=[
             f"interaction={interaction.get('level')}",
@@ -1271,7 +1349,7 @@ def _runtime_interaction_track(
             f"collected_remote_interaction_count={collected_interaction.get('remote_interaction_count', 0)}",
             "baseline_low_noise_commands=present" if not missing else "baseline_low_noise_commands=missing",
         ],
-        next_action="使用 L0 本地缓存进度，必要时才刷新一次 L1 快照",
+        progress_checkpoint="使用 L0 本地缓存进度，必要时才刷新一次 L1 快照",
     )
 
 
@@ -1322,8 +1400,8 @@ def _engineering_rehearsal_track(
         else "unknown"
     )
     return _track(
-        track_id="p05_engineering_rehearsal_loop",
-        label="P0.5 Engineering Rehearsal Loop",
+        track_id="engineering_rehearsal_projection",
+        label="Engineering Rehearsal Projection",
         blockers=blockers,
         evidence=[
             f"dry_run_audit={progress.get('dry_run_audit')}",
@@ -1333,7 +1411,7 @@ def _engineering_rehearsal_track(
             f"goal_chain_ready_segments={ready_goal_segment_text}",
             f"missing_goal_chain_segments={len(missing_goal_chain_segments)}",
         ],
-        next_action="保持 dry-run / mock signal / source readiness 日检",
+        progress_checkpoint="保持 dry-run / mock signal / source readiness 日检",
     )
 
 
@@ -1358,20 +1436,203 @@ def _owner_visibility_track(
     if owner.get("owner_intervention_required") is True and category != "safety_blocker":
         blockers.append("owner_intervention_required_without_safety_blocker")
     return _track(
-        track_id="p05_owner_visibility_loop",
-        label="P0.5 Owner Visibility Loop",
+        track_id="owner_visibility_projection",
+        label="Owner Visibility Projection",
         blockers=blockers,
         evidence=[
             f"category={category or 'unknown'}",
             f"notification={notification.get('decision')}",
             f"owner_intervention_required={owner.get('owner_intervention_required')}",
         ],
-        next_action="保持 Owner 进度层输出，不要求阅读原始证据包",
+        progress_checkpoint="保持 Owner 进度层输出，不要求阅读原始证据包",
     )
 
 
-def _strategy_review_evidence_closure_track(packet: dict[str, Any]) -> dict[str, Any]:
-    boundary = _strategy_review_evidence_closure_boundary(packet)
+def _projection_status(artifact: dict[str, Any]) -> str:
+    return str(artifact.get("status") or "unknown")
+
+
+def _projection_mapping(artifact: dict[str, Any], key: str) -> dict[str, Any]:
+    value = artifact.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _projection_mapping_first(
+    artifact: dict[str, Any],
+    *keys: str,
+) -> dict[str, Any]:
+    for key in keys:
+        value = _projection_mapping(artifact, key)
+        if value:
+            return value
+    return {}
+
+
+def _projection_int(mapping: dict[str, Any], key: str) -> int:
+    return int(mapping.get(key) or 0)
+
+
+def _projection_int_first(mapping: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None and value != "":
+            return int(value)
+    return 0
+
+
+def _projection_list_count(mapping: dict[str, Any], key: str) -> int:
+    value = mapping.get(key)
+    return len(value) if isinstance(value, list) else 0
+
+
+def _projection_list_count_first(mapping: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return 0
+
+
+def _projection_true(mapping: dict[str, Any], key: str) -> bool:
+    return mapping.get(key) is True
+
+
+def _projection_false(mapping: dict[str, Any], key: str) -> bool:
+    return mapping.get(key) is False
+
+
+def _projection_text(mapping: dict[str, Any], key: str, default: str) -> str:
+    return str(mapping.get(key) or default)
+
+
+def _projection_text_first(
+    mapping: dict[str, Any],
+    keys: tuple[str, ...],
+    default: str,
+) -> str:
+    for key in keys:
+        value = mapping.get(key)
+        if value:
+            return str(value)
+    return default
+
+
+def _append_unexpected_projection_status(
+    reject_reasons: list[str],
+    *,
+    actual_status: str,
+    expected_status: str,
+) -> None:
+    if actual_status != expected_status:
+        reject_reasons.append("projection_not_ready")
+
+
+def _append_forbidden_projection_effects(
+    reject_reasons: list[str],
+    *,
+    safety: dict[str, Any],
+    keys: tuple[str, ...],
+    legacy_authority_mirror_keys: tuple[str, ...] = (),
+) -> None:
+    for key in keys:
+        if _projection_true(safety, key):
+            reject_reasons.append(f"forbidden_effect:{key}")
+    reject_reasons.extend(
+        legacy_authority_mirror_present_errors(
+            safety,
+            label_prefix="",
+            keys=legacy_authority_mirror_keys,
+        )
+    )
+
+
+def _append_projection_remote_interaction_blocker(
+    reject_reasons: list[str],
+    *,
+    interaction: dict[str, Any],
+) -> None:
+    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
+        reject_reasons.append("remote_interaction_not_zero")
+
+
+def _append_projection_promote_authority_boundary_rejections(
+    reject_reasons: list[str],
+    *,
+    trial_envelope: dict[str, Any],
+) -> None:
+    if _projection_text(trial_envelope, "policy_outcome", "") != "promote":
+        return
+    if _projection_text(trial_envelope, "promotion_scope", "") != "intake_only":
+        reject_reasons.append("unscoped_promote_forbidden")
+    authority_boundary = _projection_mapping(
+        trial_envelope, "authority_boundary"
+    )
+    if _projection_text(authority_boundary, "promotion_scope", "") != "intake_only":
+        reject_reasons.append("authority_boundary_promotion_scope_missing")
+    if not _projection_false(authority_boundary, "unscoped_promote"):
+        reject_reasons.append("authority_boundary_unscoped_promote_not_false")
+    if not _projection_false(trial_envelope, "tiny_live_ready"):
+        reject_reasons.append("trial_envelope_tiny_live_ready_not_false")
+
+
+def _append_projection_basic_safety_rejections(
+    reject_reasons: list[str],
+    *,
+    summary: dict[str, Any],
+    trial_envelope: dict[str, Any],
+) -> None:
+    if _projection_int(summary, "live_permission_change_count") != 0:
+        reject_reasons.append("live_permission_change_count_not_zero")
+    reject_reasons.extend(
+        legacy_authority_mirror_present_errors(
+            trial_envelope,
+            label_prefix="trial_envelope.",
+        )
+    )
+    if not _projection_false(trial_envelope, "live_permission_change"):
+        reject_reasons.append("trial_envelope_live_permission_change_not_false")
+
+
+def _append_projection_admission_selection_rejections(
+    reject_reasons: list[str],
+    *,
+    artifact: dict[str, Any],
+    summary: dict[str, Any],
+) -> None:
+    projection_status = _projection_text(artifact, "projection_status", "unknown")
+    if projection_status != "trial_envelope_projection_ready":
+        reject_reasons.append("projection_status_not_ready")
+    if _projection_int(summary, "eligibility_row_count") < 5:
+        reject_reasons.append("eligibility_row_count_below_5")
+    if _projection_int(summary, "non_mpg_trial_candidate_count") < 1:
+        reject_reasons.append("non_mpg_trial_candidate_missing")
+    selected = _projection_text(summary, "selected_non_mpg_strategy_group_id", "")
+    if not selected or selected == "MPG-001":
+        reject_reasons.append("selected_non_mpg_candidate_invalid")
+    if not _projection_true(summary, "trial_envelope_generated"):
+        reject_reasons.append("trial_envelope_not_generated")
+
+
+def _append_projection_authority_claim_rejections(
+    reject_reasons: list[str],
+    *,
+    policy: dict[str, Any],
+    metadata: dict[str, Any],
+) -> None:
+    if _projection_true(policy, "runtime_owner_intervention_required"):
+        reject_reasons.append("owner_policy_checkpoint_became_runtime_intervention")
+    if _projection_true(metadata, "strategygroup_lifecycle_owner"):
+        reject_reasons.append("projection_claimed_lifecycle_owner")
+    if _projection_true(metadata, "tradeability_decision_source"):
+        reject_reasons.append("projection_claimed_tradeability_decision_source")
+    if _projection_true(metadata, "runtime_truth_source"):
+        reject_reasons.append("projection_claimed_runtime_truth_source")
+
+
+def _strategy_review_evidence_closure_track(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    boundary = _strategy_review_evidence_closure_boundary(artifact)
     blockers = [
         f"strategy_review_evidence_closure:{item}"
         for item in boundary["reject_reasons"]
@@ -1381,19 +1642,19 @@ def _strategy_review_evidence_closure_track(packet: dict[str, Any]) -> dict[str,
         f"phase_1={boundary['phase_1_status']}",
         f"phase_2={boundary['phase_2_status']}",
         f"phase_3={boundary['phase_3_status']}",
-        f"evidence_packet_count={boundary['evidence_packet_count']}",
-        f"next_owner_decision_count={boundary['next_owner_decision_count']}",
+        f"evidence_artifact_count={boundary['evidence_artifact_count']}",
+        f"next_owner_policy_item_count={boundary['next_owner_policy_item_count']}",
         "owner_policy_confirmation_required_now="
         + str(boundary["owner_policy_confirmation_required_now"]),
         "runtime_owner_intervention_required="
         + str(boundary["runtime_owner_intervention_required"]),
     ]
     return {
-        "id": "p05_strategy_review_evidence_closure",
-        "label": "P0.5 Strategy Review Evidence Closure",
+        "id": "strategy_review_evidence_closure_projection",
+        "label": "Strategy Review Evidence Projection",
         "status": "blocked" if blockers else "ready",
         "owner_state": "策略政策待确认" if not blockers else "需处理",
-        "next_action": (
+        "progress_checkpoint": (
             "等待 Owner 策略政策确认，不改变实盘权限"
             if not blockers
             else "修复策略复核证据闭合包"
@@ -1404,81 +1665,77 @@ def _strategy_review_evidence_closure_track(packet: dict[str, Any]) -> dict[str,
 
 
 def _strategy_review_evidence_closure_boundary(
-    packet: dict[str, Any] | None,
+    artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not packet:
+    if not artifact:
         return {
             "status": "not_generated",
             "phase_1_status": "not_generated",
             "phase_2_status": "not_generated",
             "phase_3_status": "not_generated",
-            "evidence_packet_count": 0,
-            "next_owner_decision_count": 0,
+            "evidence_artifact_count": 0,
+            "next_owner_policy_item_count": 0,
             "owner_policy_confirmation_required_now": False,
             "runtime_owner_intervention_required": False,
-            "real_order_authority": False,
             "reject_reasons": [],
         }
-    phase_status = packet.get("phase_status")
-    if not isinstance(phase_status, dict):
-        phase_status = {}
-    next_package = packet.get("next_owner_decision_package")
-    if not isinstance(next_package, dict):
-        next_package = {}
-    safety = packet.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
-    interaction = packet.get("interaction")
-    if not isinstance(interaction, dict):
-        interaction = {}
+    phase_status = _projection_mapping(artifact, "phase_status")
+    next_package = _projection_mapping(artifact, "next_owner_policy_package")
+    safety = _projection_mapping(artifact, "safety_invariants")
+    interaction = _projection_mapping(artifact, "interaction")
+    status = _projection_status(artifact)
     reject_reasons: list[str] = []
-    if packet.get("status") != "review_only_evidence_closure_wave_ready":
-        reject_reasons.append("packet_not_ready")
-    for key in (
-        "real_order_authority",
-        "exchange_write_called",
-        "final_gate_called",
-        "operation_layer_called",
-        "order_created",
-        "registry_authority_changed",
-        "tier_policy_changed",
-        "live_profile_changed",
-        "mpg_member_live_scope_expanded",
-    ):
-        if safety.get(key) is True:
-            reject_reasons.append(f"forbidden_effect:{key}")
-    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
-        reject_reasons.append("remote_interaction_not_zero")
+    _append_unexpected_projection_status(
+        reject_reasons,
+        actual_status=status,
+        expected_status="review_only_evidence_closure_wave_ready",
+    )
+    _append_forbidden_projection_effects(
+        reject_reasons,
+        safety=safety,
+        keys=REVIEW_PROJECTION_FORBIDDEN_EFFECT_KEYS,
+        legacy_authority_mirror_keys=LEGACY_AUTHORITY_MIRROR_KEYS,
+    )
+    _append_projection_remote_interaction_blocker(
+        reject_reasons,
+        interaction=interaction,
+    )
     return {
-        "status": str(packet.get("status") or "unknown"),
-        "phase_1_status": str(
-            phase_status.get("phase_1_owner_perception_projection") or "unknown"
+        "status": status,
+        "phase_1_status": _projection_text(
+            phase_status, "phase_1_owner_perception_projection", "unknown"
         ),
-        "phase_2_status": str(
-            phase_status.get("phase_2_evidence_closure_queue") or "unknown"
+        "phase_2_status": _projection_text(
+            phase_status, "phase_2_evidence_closure_queue", "unknown"
         ),
-        "phase_3_status": str(
-            phase_status.get("phase_3_next_owner_decision_package") or "unknown"
+        "phase_3_status": _projection_text_first(
+            phase_status,
+            (
+                "phase_3_next_owner_policy_package",
+            ),
+            "unknown",
         ),
-        "evidence_packet_count": len(
-            packet.get("evidence_closure_packets")
-            if isinstance(packet.get("evidence_closure_packets"), list)
-            else []
+        "evidence_artifact_count": _projection_list_count_first(
+            artifact,
+            "evidence_closure_artifacts",
         ),
-        "next_owner_decision_count": int(next_package.get("decision_count") or 0),
+        "next_owner_policy_item_count": _projection_int_first(
+            next_package,
+            "owner_policy_item_count",
+            "decision_count",
+        ),
         "owner_policy_confirmation_required_now": (
-            next_package.get("owner_policy_confirmation_required_now") is True
+            _projection_true(next_package, "owner_policy_confirmation_required_now")
         ),
         "runtime_owner_intervention_required": (
-            next_package.get("runtime_owner_intervention_required") is True
+            _projection_true(next_package, "runtime_owner_intervention_required")
         ),
-        "real_order_authority": safety.get("real_order_authority") is True,
         "reject_reasons": reject_reasons,
     }
 
 
-def _strategy_review_deep_dive_track(packet: dict[str, Any]) -> dict[str, Any]:
-    boundary = _strategy_review_deep_dive_boundary(packet)
+def _strategy_review_deep_dive_track(artifact: dict[str, Any]) -> dict[str, Any]:
+    boundary = _strategy_review_deep_dive_boundary(artifact)
     blockers = [
         f"strategy_review_deep_dive:{item}"
         for item in boundary["reject_reasons"]
@@ -1488,19 +1745,19 @@ def _strategy_review_deep_dive_track(packet: dict[str, Any]) -> dict[str, Any]:
         f"phase_1={boundary['phase_1_status']}",
         f"phase_2={boundary['phase_2_status']}",
         f"phase_3={boundary['phase_3_status']}",
-        f"deep_dive_packet_count={boundary['deep_dive_packet_count']}",
-        f"next_owner_decision_count={boundary['next_owner_decision_count']}",
+        f"deep_dive_artifact_count={boundary['deep_dive_artifact_count']}",
+        f"next_owner_policy_item_count={boundary['next_owner_policy_item_count']}",
         "owner_policy_confirmation_required_now="
         + str(boundary["owner_policy_confirmation_required_now"]),
         "runtime_owner_intervention_required="
         + str(boundary["runtime_owner_intervention_required"]),
     ]
     return {
-        "id": "p05_strategy_review_deep_dive",
-        "label": "P0.5 Strategy Review Deep Dive",
+        "id": "strategy_review_deep_dive_projection",
+        "label": "Strategy Review Deep Dive Projection",
         "status": "blocked" if blockers else "ready",
         "owner_state": "六条线等待政策决策" if not blockers else "需处理",
-        "next_action": (
+        "progress_checkpoint": (
             "等待 Owner 确认六条策略线下一步政策，不改变实盘权限"
             if not blockers
             else "修复策略深挖决策包"
@@ -1511,82 +1768,79 @@ def _strategy_review_deep_dive_track(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 def _strategy_review_deep_dive_boundary(
-    packet: dict[str, Any] | None,
+    artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not packet:
+    if not artifact:
         return {
             "status": "not_generated",
             "phase_1_status": "not_generated",
             "phase_2_status": "not_generated",
             "phase_3_status": "not_generated",
-            "deep_dive_packet_count": 0,
-            "next_owner_decision_count": 0,
+            "deep_dive_artifact_count": 0,
+            "next_owner_policy_item_count": 0,
             "owner_policy_confirmation_required_now": False,
             "runtime_owner_intervention_required": False,
-            "real_order_authority": False,
             "reject_reasons": [],
         }
-    phase_status = packet.get("phase_status")
-    if not isinstance(phase_status, dict):
-        phase_status = {}
-    next_package = packet.get("owner_decision_package")
-    if not isinstance(next_package, dict):
-        next_package = {}
-    safety = packet.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
-    interaction = packet.get("interaction")
-    if not isinstance(interaction, dict):
-        interaction = {}
+    phase_status = _projection_mapping(artifact, "phase_status")
+    next_package = _projection_mapping(artifact, "owner_policy_package")
+    safety = _projection_mapping(artifact, "safety_invariants")
+    interaction = _projection_mapping(artifact, "interaction")
+    status = _projection_status(artifact)
     reject_reasons: list[str] = []
-    if packet.get("status") != "review_only_deep_dive_ready_for_owner_decision":
-        reject_reasons.append("packet_not_ready")
-    for key in (
-        "real_order_authority",
-        "exchange_write_called",
-        "final_gate_called",
-        "operation_layer_called",
-        "order_created",
-        "registry_authority_changed",
-        "tier_policy_changed",
-        "live_profile_changed",
-        "mpg_member_live_scope_expanded",
-    ):
-        if safety.get(key) is True:
-            reject_reasons.append(f"forbidden_effect:{key}")
-    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
-        reject_reasons.append("remote_interaction_not_zero")
+    _append_unexpected_projection_status(
+        reject_reasons,
+        actual_status=status,
+        expected_status="review_only_deep_dive_ready_for_owner_policy",
+    )
+    _append_forbidden_projection_effects(
+        reject_reasons,
+        safety=safety,
+        keys=REVIEW_PROJECTION_FORBIDDEN_EFFECT_KEYS,
+        legacy_authority_mirror_keys=LEGACY_AUTHORITY_MIRROR_KEYS,
+    )
+    _append_projection_remote_interaction_blocker(
+        reject_reasons,
+        interaction=interaction,
+    )
     return {
-        "status": str(packet.get("status") or "unknown"),
-        "phase_1_status": str(
-            phase_status.get("phase_1_owner_perception_projection") or "unknown"
+        "status": status,
+        "phase_1_status": _projection_text(
+            phase_status, "phase_1_owner_perception_projection", "unknown"
         ),
-        "phase_2_status": str(
-            phase_status.get("phase_2_six_line_deep_dive") or "unknown"
+        "phase_2_status": _projection_text(
+            phase_status, "phase_2_six_line_deep_dive", "unknown"
         ),
-        "phase_3_status": str(
-            phase_status.get("phase_3_owner_policy_decision_package")
-            or "unknown"
+        "phase_3_status": _projection_text_first(
+            phase_status,
+            (
+                "phase_3_owner_policy_package",
+            ),
+            "unknown",
         ),
-        "deep_dive_packet_count": len(
-            packet.get("deep_dive_packets")
-            if isinstance(packet.get("deep_dive_packets"), list)
-            else []
+        "deep_dive_artifact_count": _projection_list_count_first(
+            artifact,
+            "deep_dive_artifacts",
         ),
-        "next_owner_decision_count": int(next_package.get("decision_count") or 0),
+        "next_owner_policy_item_count": _projection_int_first(
+            next_package,
+            "owner_policy_item_count",
+            "decision_count",
+        ),
         "owner_policy_confirmation_required_now": (
-            next_package.get("owner_policy_confirmation_required_now") is True
+            _projection_true(next_package, "owner_policy_confirmation_required_now")
         ),
         "runtime_owner_intervention_required": (
-            next_package.get("runtime_owner_intervention_required") is True
+            _projection_true(next_package, "runtime_owner_intervention_required")
         ),
-        "real_order_authority": safety.get("real_order_authority") is True,
         "reject_reasons": reject_reasons,
     }
 
 
-def _strategygroup_portfolio_board_track(packet: dict[str, Any]) -> dict[str, Any]:
-    boundary = _strategygroup_portfolio_board_boundary(packet)
+def _strategygroup_portfolio_board_track(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    boundary = _strategygroup_portfolio_board_boundary(artifact)
     blockers = [
         f"strategygroup_portfolio_board:{item}"
         for item in boundary["reject_reasons"]
@@ -1596,19 +1850,18 @@ def _strategygroup_portfolio_board_track(packet: dict[str, Any]) -> dict[str, An
         f"portfolio_row_count={boundary['portfolio_row_count']}",
         f"trial_candidate_count={boundary['trial_candidate_count']}",
         f"engineering_continuation_count={boundary['engineering_continuation_count']}",
-        f"owner_policy_decision_count={boundary['owner_policy_decision_count']}",
-        f"actionable_now_count={boundary['actionable_now_count']}",
+        f"owner_policy_queue_count={boundary['owner_policy_queue_count']}",
         f"live_permission_change_count={boundary['live_permission_change_count']}",
         "runtime_owner_intervention_required="
         + str(boundary["runtime_owner_intervention_required"]),
     ]
     return {
-        "id": "p05_strategygroup_portfolio_board",
-        "label": "P0.5 StrategyGroup Portfolio Board",
+        "id": "strategygroup_portfolio_projection",
+        "label": "StrategyGroup Portfolio Projection",
         "status": "blocked" if blockers else "ready",
         "owner_state": "策略组合筛选中" if not blockers else "需处理",
-        "next_action": (
-            "继续工程补证队列和 review-only 小资金候选池治理，不改变实盘权限"
+        "progress_checkpoint": (
+            "继续工程补证队列和 受控实盘候选池治理，不改变实盘权限"
             if not blockers
             else "修复 StrategyGroup Portfolio Board 证据或安全边界"
         ),
@@ -1618,265 +1871,217 @@ def _strategygroup_portfolio_board_track(packet: dict[str, Any]) -> dict[str, An
 
 
 def _strategygroup_portfolio_board_boundary(
-    packet: dict[str, Any] | None,
+    artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not packet:
+    if not artifact:
         return {
             "status": "not_generated",
             "portfolio_row_count": 0,
             "trial_candidate_count": 0,
             "engineering_continuation_count": 0,
-            "owner_policy_decision_count": 0,
-            "actionable_now_count": 0,
+            "owner_policy_queue_count": 0,
             "live_permission_change_count": 0,
             "runtime_owner_intervention_required": False,
-            "real_order_authority": False,
             "reject_reasons": [],
         }
-    summary = packet.get("portfolio_summary")
-    if not isinstance(summary, dict):
-        summary = {}
-    trial_pool = packet.get("trial_candidate_pool")
-    if not isinstance(trial_pool, dict):
-        trial_pool = {}
-    safety = packet.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
-    interaction = packet.get("interaction")
-    if not isinstance(interaction, dict):
-        interaction = {}
-    owner_projection = packet.get("owner_progress_projection")
-    if not isinstance(owner_projection, dict):
-        owner_projection = {}
+    summary = _projection_mapping(artifact, "portfolio_summary")
+    trial_pool = _projection_mapping(artifact, "trial_candidate_pool")
+    safety = _projection_mapping(artifact, "safety_invariants")
+    interaction = _projection_mapping(artifact, "interaction")
+    owner_projection = _projection_mapping(artifact, "owner_progress_projection")
+    status = _projection_status(artifact)
     reject_reasons: list[str] = []
-    if packet.get("status") != "portfolio_board_ready":
-        reject_reasons.append("packet_not_ready")
-    if int(summary.get("portfolio_row_count") or 0) < 10:
+    _append_unexpected_projection_status(
+        reject_reasons,
+        actual_status=status,
+        expected_status="portfolio_board_ready",
+    )
+    if _projection_int(summary, "portfolio_row_count") < 10:
         reject_reasons.append("portfolio_row_count_below_10")
-    if int(trial_pool.get("actionable_now_count") or 0) != 0:
-        reject_reasons.append("trial_pool_actionable_now_not_zero")
-    if int(trial_pool.get("live_permission_change_count") or 0) != 0:
+    if _projection_int(trial_pool, "live_permission_change_count") != 0:
         reject_reasons.append("trial_pool_live_permission_change_not_zero")
-    for key in (
-        "real_order_authority",
-        "exchange_write_called",
-        "calls_exchange_write",
-        "final_gate_called",
-        "calls_finalgate",
-        "operation_layer_called",
-        "calls_operation_layer",
-        "order_created",
-        "places_order",
-        "registry_authority_changed",
-        "tier_policy_changed",
-        "live_profile_changed",
-        "order_sizing_changed",
-        "mpg_member_live_scope_expanded",
-        "l4_real_order_scope_expanded",
-        "preview_or_replay_treated_as_live_signal",
-    ):
-        if safety.get(key) is True:
-            reject_reasons.append(f"forbidden_effect:{key}")
-    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
-        reject_reasons.append("remote_interaction_not_zero")
+    _append_forbidden_projection_effects(
+        reject_reasons,
+        safety=safety,
+        keys=PORTFOLIO_PROJECTION_FORBIDDEN_EFFECT_KEYS,
+        legacy_authority_mirror_keys=LEGACY_AUTHORITY_MIRROR_KEYS,
+    )
+    _append_projection_remote_interaction_blocker(
+        reject_reasons,
+        interaction=interaction,
+    )
     return {
-        "status": str(packet.get("status") or "unknown"),
-        "portfolio_row_count": int(summary.get("portfolio_row_count") or 0),
-        "trial_candidate_count": int(trial_pool.get("candidate_count") or 0),
-        "engineering_continuation_count": int(
-            summary.get("engineering_continuation_count") or 0
+        "status": status,
+        "portfolio_row_count": _projection_int(summary, "portfolio_row_count"),
+        "trial_candidate_count": _projection_int(trial_pool, "candidate_count"),
+        "engineering_continuation_count": _projection_int(
+            summary, "engineering_continuation_count"
         ),
-        "owner_policy_decision_count": int(
-            summary.get("owner_policy_decision_count") or 0
+        "owner_policy_queue_count": _projection_int_first(
+            summary,
+            "owner_policy_queue_count",
         ),
-        "actionable_now_count": int(trial_pool.get("actionable_now_count") or 0),
-        "live_permission_change_count": int(
-            trial_pool.get("live_permission_change_count") or 0
+        "live_permission_change_count": _projection_int(
+            trial_pool, "live_permission_change_count"
         ),
         "runtime_owner_intervention_required": (
-            owner_projection.get("owner_intervention_required") is True
+            _projection_true(owner_projection, "owner_intervention_required")
         ),
-        "real_order_authority": safety.get("real_order_authority") is True,
         "reject_reasons": reject_reasons,
     }
 
 
-def _strategygroup_capital_trial_readiness_bridge_track(
-    packet: dict[str, Any],
+def _strategygroup_capital_trial_envelope_projection_track(
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    boundary = _strategygroup_capital_trial_readiness_bridge_boundary(packet)
+    boundary = _strategygroup_capital_trial_envelope_projection_boundary(artifact)
     blockers = [
-        f"strategygroup_capital_trial_readiness_bridge:{item}"
+        f"strategygroup_capital_trial_envelope_projection:{item}"
         for item in boundary["reject_reasons"]
     ]
     evidence = [
         f"status={boundary['status']}",
+        f"projection_status={boundary['projection_status']}",
         f"eligibility_row_count={boundary['eligibility_row_count']}",
         f"non_mpg_trial_candidate_count={boundary['non_mpg_trial_candidate_count']}",
         f"selected_non_mpg_strategy_group_id={boundary['selected_non_mpg_strategy_group_id']}",
         f"selected_candidate_status={boundary['selected_candidate_status']}",
-        f"trial_packet_generated={boundary['trial_packet_generated']}",
-        f"actionable_now_count={boundary['actionable_now_count']}",
+        f"trial_envelope_generated={boundary['trial_envelope_generated']}",
         f"live_permission_change_count={boundary['live_permission_change_count']}",
-        f"real_order_authority_count={boundary['real_order_authority_count']}",
         "runtime_owner_intervention_required="
         + str(boundary["runtime_owner_intervention_required"]),
     ]
     return {
-        "id": "p05_strategygroup_capital_trial_readiness_bridge",
-        "label": "P0.5 Capital Trial Readiness Bridge",
+        "id": "capital_trial_readiness_projection",
+        "label": "Capital Trial Envelope Projection",
         "status": "blocked" if blockers else "ready",
         "owner_state": "资金试验候选准备中" if not blockers else "需处理",
-        "next_action": (
+        "progress_checkpoint": (
             "保留 "
             + str(boundary["selected_non_mpg_strategy_group_id"] or "候选策略组")
             + " 为首个非 MPG 预注册试验候选，继续工程补证和后续政策检查点"
             if not blockers
-            else "修复 Capital Trial Readiness Bridge 证据或安全边界"
+            else "修复 Capital Trial Envelope Projection 证据或安全边界"
         ),
         "evidence": evidence,
         "blockers": blockers,
     }
 
 
-def _strategygroup_capital_trial_readiness_bridge_boundary(
-    packet: dict[str, Any] | None,
+def _strategygroup_capital_trial_envelope_projection_boundary(
+    artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not packet:
+    if not artifact:
         return {
             "status": "not_generated",
+            "projection_status": "not_generated",
+            "projection_schema": "",
+            "projection_role": "trial_envelope_projection",
+            "strategygroup_lifecycle_owner": False,
+            "tradeability_decision_source": False,
+            "runtime_truth_source": False,
             "eligibility_row_count": 0,
             "non_mpg_trial_candidate_count": 0,
             "selected_non_mpg_strategy_group_id": None,
             "selected_candidate_status": "not_generated",
-            "decision": "not_generated",
+            "policy_outcome": "not_generated",
             "reason": "",
             "promotion_scope": "not_applicable",
             "promotion_target": "not_applicable",
             "tiny_live_ready": False,
             "next_checkpoint": "",
-            "trial_packet_generated": False,
-            "actionable_now_count": 0,
+            "trial_envelope_generated": False,
             "live_permission_change_count": 0,
-            "real_order_authority_count": 0,
             "owner_policy_checkpoint_count": 0,
             "runtime_owner_intervention_required": False,
-            "real_order_authority": False,
             "reject_reasons": [],
         }
-    summary = packet.get("capital_trial_summary")
-    if not isinstance(summary, dict):
-        summary = {}
-    trial_packet = packet.get("trial_packet_v0")
-    if not isinstance(trial_packet, dict):
-        trial_packet = {}
-    safety = packet.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
-    interaction = packet.get("interaction")
-    if not isinstance(interaction, dict):
-        interaction = {}
-    policy = packet.get("owner_policy_checkpoint")
-    if not isinstance(policy, dict):
-        policy = {}
+    summary = _projection_mapping(artifact, "capital_trial_summary")
+    trial_envelope = _projection_mapping(artifact, "trial_envelope_v0")
+    safety = _projection_mapping(artifact, "safety_invariants")
+    interaction = _projection_mapping(artifact, "interaction")
+    policy = _projection_mapping(artifact, "owner_policy_checkpoint")
+    metadata = _projection_mapping(artifact, "projection_metadata")
+    status = _projection_status(artifact)
     reject_reasons: list[str] = []
-    if packet.get("status") != "capital_trial_readiness_bridge_ready":
-        reject_reasons.append("packet_not_ready")
-    if int(summary.get("eligibility_row_count") or 0) < 5:
-        reject_reasons.append("eligibility_row_count_below_5")
-    if int(summary.get("non_mpg_trial_candidate_count") or 0) < 1:
-        reject_reasons.append("non_mpg_trial_candidate_missing")
-    selected = str(summary.get("selected_non_mpg_strategy_group_id") or "")
-    if not selected or selected == "MPG-001":
-        reject_reasons.append("selected_non_mpg_candidate_invalid")
-    if summary.get("trial_packet_generated") is not True:
-        reject_reasons.append("trial_packet_not_generated")
-    if int(summary.get("actionable_now_count") or 0) != 0:
-        reject_reasons.append("actionable_now_count_not_zero")
-    if int(summary.get("live_permission_change_count") or 0) != 0:
-        reject_reasons.append("live_permission_change_count_not_zero")
-    if int(summary.get("real_order_authority_count") or 0) != 0:
-        reject_reasons.append("real_order_authority_count_not_zero")
-    if trial_packet.get("actionable_now") is not False:
-        reject_reasons.append("trial_packet_actionable_now_not_false")
-    if trial_packet.get("live_permission_change") is not False:
-        reject_reasons.append("trial_packet_live_permission_change_not_false")
-    if trial_packet.get("real_order_authority") is not False:
-        reject_reasons.append("trial_packet_real_order_authority_not_false")
-    if trial_packet.get("decision") == "promote":
-        if trial_packet.get("promotion_scope") != "intake_only":
-            reject_reasons.append("unscoped_promote_forbidden")
-        authority_boundary = trial_packet.get("authority_boundary")
-        if not isinstance(authority_boundary, dict):
-            authority_boundary = {}
-        if authority_boundary.get("promotion_scope") != "intake_only":
-            reject_reasons.append("authority_boundary_promotion_scope_missing")
-        if authority_boundary.get("unscoped_promote") is not False:
-            reject_reasons.append("authority_boundary_unscoped_promote_not_false")
-        if trial_packet.get("tiny_live_ready") is not False:
-            reject_reasons.append("trial_packet_tiny_live_ready_not_false")
-    for key in (
-        "actionable_now",
-        "real_order_authority",
-        "exchange_write_called",
-        "calls_exchange_write",
-        "final_gate_called",
-        "calls_finalgate",
-        "operation_layer_called",
-        "calls_operation_layer",
-        "order_created",
-        "places_order",
-        "registry_authority_changed",
-        "tier_policy_changed",
-        "live_profile_changed",
-        "order_sizing_changed",
-        "mpg_member_live_scope_expanded",
-        "l4_real_order_scope_expanded",
-        "preview_or_replay_treated_as_live_signal",
-    ):
-        if safety.get(key) is True:
-            reject_reasons.append(f"forbidden_effect:{key}")
-    if interaction.get("remote_interaction_count", 0) not in {0, "0", None}:
-        reject_reasons.append("remote_interaction_not_zero")
-    if policy.get("runtime_owner_intervention_required") is True:
-        reject_reasons.append("owner_policy_checkpoint_became_runtime_intervention")
+    _append_projection_admission_selection_rejections(
+        reject_reasons,
+        artifact=artifact,
+        summary=summary,
+    )
+    _append_projection_basic_safety_rejections(
+        reject_reasons,
+        summary=summary,
+        trial_envelope=trial_envelope,
+    )
+    _append_projection_promote_authority_boundary_rejections(
+        reject_reasons,
+        trial_envelope=trial_envelope,
+    )
+    _append_forbidden_projection_effects(
+        reject_reasons,
+        safety=safety,
+        keys=TRIAL_ENVELOPE_PROJECTION_FORBIDDEN_EFFECT_KEYS,
+        legacy_authority_mirror_keys=LEGACY_AUTHORITY_MIRROR_KEYS,
+    )
+    _append_projection_remote_interaction_blocker(
+        reject_reasons,
+        interaction=interaction,
+    )
+    _append_projection_authority_claim_rejections(
+        reject_reasons,
+        policy=policy,
+        metadata=metadata,
+    )
     return {
-        "status": str(packet.get("status") or "unknown"),
-        "eligibility_row_count": int(summary.get("eligibility_row_count") or 0),
-        "non_mpg_trial_candidate_count": int(
-            summary.get("non_mpg_trial_candidate_count") or 0
+        "status": status,
+        "projection_status": _projection_text(
+            artifact, "projection_status", "unknown"
+        ),
+        "projection_schema": _projection_text(artifact, "projection_schema", ""),
+        "projection_role": _projection_text(
+            metadata, "artifact_role", "trial_envelope_projection"
+        ),
+        "strategygroup_lifecycle_owner": (
+            _projection_true(metadata, "strategygroup_lifecycle_owner")
+        ),
+        "tradeability_decision_source": (
+            _projection_true(metadata, "tradeability_decision_source")
+        ),
+        "runtime_truth_source": _projection_true(metadata, "runtime_truth_source"),
+        "eligibility_row_count": _projection_int(summary, "eligibility_row_count"),
+        "non_mpg_trial_candidate_count": _projection_int(
+            summary, "non_mpg_trial_candidate_count"
         ),
         "selected_non_mpg_strategy_group_id": (
             summary.get("selected_non_mpg_strategy_group_id")
         ),
-        "selected_candidate_status": str(
-            summary.get("selected_candidate_status") or "unknown"
+        "selected_candidate_status": _projection_text(
+            summary, "selected_candidate_status", "unknown"
         ),
-        "decision": str(trial_packet.get("decision") or "pending"),
-        "reason": str(trial_packet.get("reason") or ""),
-        "promotion_scope": str(
-            trial_packet.get("promotion_scope") or "not_applicable"
+        "policy_outcome": _projection_text(
+            trial_envelope, "policy_outcome", "pending"
         ),
-        "promotion_target": str(
-            trial_packet.get("promotion_target") or "not_applicable"
+        "reason": _projection_text(trial_envelope, "reason", ""),
+        "promotion_scope": _projection_text(
+            trial_envelope, "promotion_scope", "not_applicable"
         ),
-        "tiny_live_ready": trial_packet.get("tiny_live_ready") is True,
-        "next_checkpoint": str(trial_packet.get("next_checkpoint") or ""),
-        "trial_packet_generated": summary.get("trial_packet_generated") is True,
-        "actionable_now_count": int(summary.get("actionable_now_count") or 0),
-        "live_permission_change_count": int(
-            summary.get("live_permission_change_count") or 0
+        "promotion_target": _projection_text(
+            trial_envelope, "promotion_target", "not_applicable"
         ),
-        "real_order_authority_count": int(
-            summary.get("real_order_authority_count") or 0
+        "next_checkpoint": _projection_text(trial_envelope, "next_checkpoint", ""),
+        "trial_envelope_generated": _projection_true(
+            summary, "trial_envelope_generated"
         ),
-        "owner_policy_checkpoint_count": int(
-            summary.get("owner_policy_checkpoint_count") or 0
+        "live_permission_change_count": _projection_int(
+            summary, "live_permission_change_count"
+        ),
+        "owner_policy_checkpoint_count": _projection_int(
+            summary, "owner_policy_checkpoint_count"
         ),
         "runtime_owner_intervention_required": (
-            policy.get("runtime_owner_intervention_required") is True
+            _projection_true(policy, "runtime_owner_intervention_required")
         ),
-        "real_order_authority": safety.get("real_order_authority") is True,
         "reject_reasons": reject_reasons,
     }
 
@@ -1899,11 +2104,11 @@ def _safety_invariants_track(*, safety: dict[str, Any]) -> dict[str, Any]:
         and value is True
     ]
     return _track(
-        track_id="p05_safety_invariants",
-        label="P0.5 Safety Invariants",
+        track_id="safety_invariants_projection",
+        label="Safety Invariants Projection",
         blockers=[f"forbidden_effect:{item}" for item in forbidden_true],
         evidence=[f"forbidden_effect_count={len(forbidden_true)}"],
-        next_action="保持不触发 FinalGate、Operation Layer、exchange write 或订单动作",
+        progress_checkpoint="保持不触发 FinalGate、Operation Layer、exchange write 或订单动作",
     )
 
 
@@ -1913,70 +2118,27 @@ def _track(
     label: str,
     blockers: list[str],
     evidence: list[str],
-    next_action: str,
+    progress_checkpoint: str,
 ) -> dict[str, Any]:
     return {
         "id": track_id,
         "label": label,
         "status": "blocked" if blockers else "ready",
         "owner_state": "需处理" if blockers else "已就绪",
-        "next_action": next_action if not blockers else "处理该轨道阻断",
+        "progress_checkpoint": (
+            progress_checkpoint if not blockers else "处理该轨道阻断"
+        ),
         "evidence": evidence,
         "blockers": blockers,
     }
 
 
-def _owner_state(status: str) -> str:
-    if status == "blocked":
-        return "暂不可用"
-    if status == DEPLOYMENT_ISSUE_STATUS:
-        return "暂不可用"
-    if status == MONITOR_REFRESH_STATUS:
-        return "等待机会"
-    if status == "needs_refresh":
-        return "监控状态需刷新"
-    if status == "degraded":
-        return "非市场收口待处理"
-    if status == "processing":
-        return "处理中"
-    return "运行中"
-
-
-def _runtime_status_for(*, status: str, waiting_for_market: bool) -> str:
-    if status == DEPLOYMENT_ISSUE_STATUS:
-        return "temporarily_unavailable"
-    if waiting_for_market or status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
-        return "waiting_for_market"
-    if status == "processing":
-        return "processing"
-    if status in {"blocked", "degraded"}:
-        return "temporarily_unavailable"
-    return "running"
-
-
-def _owner_status_for(
-    *,
-    runtime_status: str,
-    monitor_status: str,
-    owner_intervention_required: bool,
-) -> str:
-    if owner_intervention_required:
-        return "needs_intervention"
-    if runtime_status == "waiting_for_market":
-        return "waiting_for_opportunity"
-    if runtime_status == "processing":
-        return "processing"
-    if runtime_status == "temporarily_unavailable":
-        return "temporarily_unavailable"
-    if monitor_status == "deployment_issue":
-        return "temporarily_unavailable"
-    return "running"
-
-
 def _owner_progress_text(report: dict[str, Any]) -> str:
     owner = report["owner_summary"]
     interaction = report["interaction"]
-    checks = report["checks"]
+    issues = report["owner_runtime_issues"]
+    signal_observation = report["signal_observation"]
+    owner_runtime_state = report["owner_runtime_state"]
     completion = report["completion_boundary"]
     p0_completion = report["p0_completion_audit_boundary"]
     entry_fast_chain = report["entry_fast_chain_boundary"]
@@ -1987,13 +2149,13 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     strategy_review = report["strategy_review_evidence_closure_boundary"]
     strategy_deep_dive = report["strategy_review_deep_dive_boundary"]
     portfolio_board = report["strategygroup_portfolio_board_boundary"]
-    capital_trial = report["strategygroup_capital_trial_readiness_bridge_boundary"]
+    capital_trial = report["strategygroup_capital_trial_envelope_projection_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
         f"- 报告时间: {report['generated_at_utc']}",
         f"- 当前阶段: {owner['state']}",
-        f"- 当前动作: {owner['current_action']}",
+        f"- 当前检查点: {owner['non_authority_checkpoint']}",
         f"- 风险等级: {owner['risk_level']}",
         f"- Owner 介入: {_yes_no(bool(owner['owner_intervention_required']))}",
         f"- 交互等级: {interaction['level']}",
@@ -2146,17 +2308,15 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Status: {strategy_review['status']}",
         f"- Phase 1 Owner perception: {strategy_review['phase_1_status']}",
         f"- Phase 2 evidence closure: {strategy_review['phase_2_status']}",
-        f"- Phase 3 next Owner decision package: {strategy_review['phase_3_status']}",
-        "- Evidence packet count: "
-        + str(strategy_review["evidence_packet_count"]),
-        "- Next Owner decision count: "
-        + str(strategy_review["next_owner_decision_count"]),
+        f"- Phase 3 next Owner policy package: {strategy_review['phase_3_status']}",
+        "- Evidence artifact count: "
+        + str(strategy_review["evidence_artifact_count"]),
+        "- Next Owner policy policy_item count: "
+        + str(strategy_review["next_owner_policy_item_count"]),
         "- Owner policy confirmation required now: "
         + _yes_no(bool(strategy_review["owner_policy_confirmation_required_now"])),
         "- Runtime Owner intervention required: "
         + _yes_no(bool(strategy_review["runtime_owner_intervention_required"])),
-        "- Real order authority: "
-        + _yes_no(bool(strategy_review["real_order_authority"])),
         "- Reject reasons: "
         + _list_or_none(
             [str(item) for item in strategy_review["reject_reasons"]]
@@ -2167,17 +2327,15 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Status: {strategy_deep_dive['status']}",
         f"- Phase 1 Owner perception: {strategy_deep_dive['phase_1_status']}",
         f"- Phase 2 six-line deep dive: {strategy_deep_dive['phase_2_status']}",
-        f"- Phase 3 next Owner decision package: {strategy_deep_dive['phase_3_status']}",
-        "- Deep-dive packet count: "
-        + str(strategy_deep_dive["deep_dive_packet_count"]),
-        "- Next Owner decision count: "
-        + str(strategy_deep_dive["next_owner_decision_count"]),
+        f"- Phase 3 next Owner policy package: {strategy_deep_dive['phase_3_status']}",
+        "- Deep-dive artifact count: "
+        + str(strategy_deep_dive["deep_dive_artifact_count"]),
+        "- Next Owner policy policy_item count: "
+        + str(strategy_deep_dive["next_owner_policy_item_count"]),
         "- Owner policy confirmation required now: "
         + _yes_no(bool(strategy_deep_dive["owner_policy_confirmation_required_now"])),
         "- Runtime Owner intervention required: "
         + _yes_no(bool(strategy_deep_dive["runtime_owner_intervention_required"])),
-        "- Real order authority: "
-        + _yes_no(bool(strategy_deep_dive["real_order_authority"])),
         "- Reject reasons: "
         + _list_or_none(
             [str(item) for item in strategy_deep_dive["reject_reasons"]]
@@ -2192,24 +2350,22 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + str(portfolio_board["trial_candidate_count"]),
         "- Engineering continuation count: "
         + str(portfolio_board["engineering_continuation_count"]),
-        "- Owner policy decision count: "
-        + str(portfolio_board["owner_policy_decision_count"]),
-        "- Actionable now count: "
-        + str(portfolio_board["actionable_now_count"]),
+        "- Owner policy queue count: "
+        + str(portfolio_board["owner_policy_queue_count"]),
         "- Live permission change count: "
         + str(portfolio_board["live_permission_change_count"]),
         "- Runtime Owner intervention required: "
         + _yes_no(bool(portfolio_board["runtime_owner_intervention_required"])),
-        "- Real order authority: "
-        + _yes_no(bool(portfolio_board["real_order_authority"])),
         "- Reject reasons: "
         + _list_or_none(
             [str(item) for item in portfolio_board["reject_reasons"]]
         ),
         "",
-        "## StrategyGroup Capital Trial Readiness Bridge Boundary",
+        "## StrategyGroup Capital Trial Envelope Projection Boundary",
         "",
         f"- Status: {capital_trial['status']}",
+        f"- Projection status: {capital_trial['projection_status']}",
+        f"- Projection role: {capital_trial['projection_role']}",
         "- Eligibility row count: "
         + str(capital_trial["eligibility_row_count"]),
         "- Non-MPG trial candidate count: "
@@ -2218,30 +2374,22 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + str(capital_trial["selected_non_mpg_strategy_group_id"] or "none"),
         "- Selected candidate status: "
         + str(capital_trial["selected_candidate_status"]),
-        "- Decision: "
-        + str(capital_trial["decision"]),
+        "- Policy outcome: "
+        + str(capital_trial["policy_outcome"]),
         "- Reason: "
         + str(capital_trial["reason"]),
         "- Promotion scope: "
         + str(capital_trial["promotion_scope"]),
         "- Promotion target: "
         + str(capital_trial["promotion_target"]),
-        "- Tiny live ready: "
-        + _yes_no(bool(capital_trial["tiny_live_ready"])),
         "- Next checkpoint: "
         + str(capital_trial["next_checkpoint"] or "none"),
-        "- Trial packet generated: "
-        + _yes_no(bool(capital_trial["trial_packet_generated"])),
-        "- Actionable now count: "
-        + str(capital_trial["actionable_now_count"]),
+        "- Trial envelope generated: "
+        + _yes_no(bool(capital_trial["trial_envelope_generated"])),
         "- Live permission change count: "
         + str(capital_trial["live_permission_change_count"]),
-        "- Real order authority count: "
-        + str(capital_trial["real_order_authority_count"]),
         "- Runtime Owner intervention required: "
         + _yes_no(bool(capital_trial["runtime_owner_intervention_required"])),
-        "- Real order authority: "
-        + _yes_no(bool(capital_trial["real_order_authority"])),
         "- Reject reasons: "
         + _list_or_none(
             [str(item) for item in capital_trial["reject_reasons"]]
@@ -2249,7 +2397,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         "## Tracks",
         "",
-        "| Track | Status | Owner state | Next action | Blockers |",
+        "| Track | Status | Owner state | Progress checkpoint | Blockers |",
         "| --- | --- | --- | --- | --- |",
     ]
     for track in report["tracks"]:
@@ -2260,7 +2408,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
                     str(track["label"]),
                     str(track["status"]),
                     str(track["owner_state"]),
-                    str(track["next_action"]),
+                    str(track["progress_checkpoint"]),
                     _list_or_none([str(item) for item in track.get("blockers", [])]),
                 ]
             )
@@ -2280,12 +2428,25 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
             )
             + " |"
         )
-    lines.extend(["", "## Checks", ""])
-    lines.append(f"- Waiting for market: {_yes_no(bool(checks['waiting_for_market']))}")
-    lines.append(f"- P0.5 ready: {_yes_no(bool(checks['p05_ready']))}")
-    lines.append(f"- Blockers: {_list_or_none([str(item) for item in checks['blockers']])}")
+    lines.extend(["", "## Owner Runtime State", ""])
     lines.append(
-        f"- Product gaps: {_list_or_none([str(item) for item in checks['product_gaps']])}"
+        "- Waiting for market: "
+        + _yes_no(bool(owner_runtime_state["waiting_for_market"]))
+    )
+    lines.append(
+        "- Signal Observation grade: "
+        f"{signal_observation['grade_code']} / {signal_observation['state']}"
+    )
+    lines.append(
+        "- Signal Observation ready: "
+        + _yes_no(bool(signal_observation["ready"]))
+    )
+    lines.extend(["", "## Owner Runtime Issues", ""])
+    lines.append(
+        f"- Blockers: {_list_or_none([str(item) for item in issues['blockers']])}"
+    )
+    lines.append(
+        f"- Product gaps: {_list_or_none([str(item) for item in issues['product_gaps']])}"
     )
     return "\n".join(lines)
 
@@ -2293,15 +2454,16 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
 def _print_human_report(report: dict[str, Any]) -> None:
     owner = report["owner_summary"]
     interaction = report["interaction"]
-    checks = report["checks"]
+    issues = report["owner_runtime_issues"]
+    signal_observation = report["signal_observation"]
     print(f"status={report['status']}")
     print(f"owner_state={owner['state']}")
-    print(f"current_action={owner['current_action']}")
+    print(f"non_authority_checkpoint={owner['non_authority_checkpoint']}")
     print(f"interaction={interaction['level']}")
     print(f"remote_interaction_count={interaction['remote_interaction_count']}")
-    print(f"p05_ready={str(checks['p05_ready']).lower()}")
-    if checks["blockers"]:
-        print("blockers=" + ",".join(checks["blockers"]))
+    print(f"signal_observation_ready={str(signal_observation['ready']).lower()}")
+    if issues["blockers"]:
+        print("blockers=" + ",".join(issues["blockers"]))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -2318,14 +2480,14 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
 
 
 def _build_live_cutover_readiness(path: Path) -> dict[str, Any]:
-    packet = runtime_live_cutover_readiness.build_cutover_readiness_packet(
+    artifact = runtime_live_cutover_readiness.build_cutover_readiness_artifact(
         path.parent / "artifacts"
     )
     _write_text_atomic(
         path,
-        json.dumps(packet, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        json.dumps(artifact, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
     )
-    return packet
+    return artifact
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -2374,13 +2536,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON),
     )
     parser.add_argument(
-        "--strategygroup-capital-trial-readiness-bridge-json",
-        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON),
+        "--strategygroup-capital-trial-envelope-projection-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",
         action="store_true",
-        help="Do not build a local live-cutover readiness packet when missing.",
+        help="Do not build a local live-cutover readiness artifact when missing.",
     )
     parser.add_argument("--output-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
     parser.add_argument(

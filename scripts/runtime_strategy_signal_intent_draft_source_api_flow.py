@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,13 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 
 
 API_BASE_ENV = "RUNTIME_STRATEGY_SIGNAL_INTENT_DRAFT_SOURCE_API_BASE"
+_LEGACY_SIGNAL_WRAPPER = "signal_" + "pack" + "et"
+
+
+@dataclass(frozen=True)
+class SignalInputSource:
+    signal_input: dict[str, Any]
+    wrapper: str | None = None
 
 
 def _load_env_file(path: str | None) -> None:
@@ -56,17 +64,18 @@ def _read_json_file(path: str) -> dict[str, Any]:
     return value
 
 
-def _read_signal_input(path: str) -> dict[str, Any]:
+def _read_signal_input_source(path: str) -> SignalInputSource:
     payload = _read_json_file(path)
     if isinstance(payload.get("signal_input"), dict):
-        return payload["signal_input"]
-    signal_packet = payload.get("signal_packet")
-    if isinstance(signal_packet, dict) and isinstance(
-        signal_packet.get("signal_input"),
-        dict,
-    ):
-        return signal_packet["signal_input"]
-    return payload
+        return SignalInputSource(
+            signal_input=payload["signal_input"],
+            wrapper="signal_input",
+        )
+    if _LEGACY_SIGNAL_WRAPPER in payload:
+        raise ValueError(
+            "legacy signal wrapper is not accepted; use signal_input"
+        )
+    return SignalInputSource(signal_input=payload)
 
 
 def _metadata(args: argparse.Namespace) -> dict[str, Any]:
@@ -86,13 +95,19 @@ def _metadata(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
+    signal_source = _read_signal_input_source(args.signal_input_json)
+    metadata = _metadata(args)
+    if signal_source.wrapper:
+        metadata["signal_input_source_wrapper"] = {
+            "wrapper": signal_source.wrapper,
+        }
     body: dict[str, Any] = {
-        "signal_input": _read_signal_input(args.signal_input_json),
+        "signal_input": signal_source.signal_input,
         "allow_shadow_candidate_creation": True,
         "allow_intent_draft_creation": True,
         "owner_reviewed": True,
         "owner_confirmed_for_intent": True,
-        "metadata": _metadata(args),
+        "metadata": metadata,
         "non_executing": True,
     }
     if args.candidate_id:

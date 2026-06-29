@@ -3,7 +3,7 @@
 
 The historical implementation lives in ``runtime_first_real_submit_api_flow``.
 That module remains available for replay / recovery / compatibility, while
-runtime-level bridge/cycle proofs should import the neutral names below.
+runtime-level lifecycle proof flows should import the neutral names below.
 """
 
 from __future__ import annotations

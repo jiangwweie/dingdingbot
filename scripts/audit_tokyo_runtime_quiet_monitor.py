@@ -81,11 +81,12 @@ def build_quiet_monitor_audit(
         },
         "owner_summary": {
             "state": "自动化配置已对齐" if status == "ready" else "自动化配置需修正",
-            "current_action": (
+            "non_authority_checkpoint": (
                 "继续低噪音监控"
                 if status == "ready"
                 else "修正 quiet monitor 自动化提示词"
             ),
+            "checkpoint_source": "quiet_monitor_audit_projection",
             "owner_intervention_required": False,
             "risk_level": "L0 local audit",
         },
@@ -125,8 +126,8 @@ def _checks_from_text(
         "non_market_gaps_none": "non-market gaps none",
         "zero_remote_interaction": "remote interaction count 0",
         "fresh_signal_notify": "fresh/runtime-ready signal",
-        "no_frontend_or_history_debt": (
-            "Do not advance frontend or historical-debt cleanup"
+        "no_external_client_release_or_history_debt": (
+            "Do not advance external-client release or historical-debt cleanup"
         ),
     }
     checks = []
@@ -206,7 +207,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         f"- 报告时间: {report['generated_at_utc']}",
         f"- 当前阶段: {owner['state']}",
-        f"- 当前动作: {owner['current_action']}",
+        f"- 当前检查点: {owner['non_authority_checkpoint']}",
         f"- 风险等级: {owner['risk_level']}",
         f"- Owner 介入: {_yes_no(bool(owner['owner_intervention_required']))}",
         f"- 交互等级: {interaction['level']}",
@@ -231,7 +232,7 @@ def _print_human_report(report: dict[str, Any]) -> None:
     checks = report["checks"]
     print(f"status={report['status']}")
     print(f"owner_state={owner['state']}")
-    print(f"current_action={owner['current_action']}")
+    print(f"non_authority_checkpoint={owner['non_authority_checkpoint']}")
     print(f"interaction={interaction['level']}")
     print(f"remote_interaction_count={interaction['remote_interaction_count']}")
     if checks["blockers"]:

@@ -17,6 +17,17 @@ def test_official_submit_adapter_preview_proof_passes(tmp_path):
     assert report["order_registration_draft_preview_id"].startswith(
         "runtime-order-registration-draft-preview-"
     )
+    assert "operator_command_plan" not in report
+    assert report["submit_adapter_preview_plan"] == {
+        "next_step": "build_scoped_local_registration_enablement",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "live_submit_allowed": False,
+        "local_registration_enabled": False,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "executes_real_submit": False,
+    }
 
     checks = report["checks"]
     assert checks["shadow_contract_passed"] is True
@@ -46,14 +57,14 @@ def test_official_submit_adapter_preview_proof_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_submit_adapter_preview_outputs_boundary_packet(tmp_path):
+def test_official_submit_adapter_preview_outputs_boundary_artifact(tmp_path):
     output_dir = tmp_path / "rtf083"
 
     report = script.build_proof_report(output_dir)
 
     expected_files = [
         "contract-report.json",
-        "submit-adapter-boundary-packet.json",
+        "submit-adapter-boundary-artifact.json",
         "submit-adapter-preview.json",
         "attempt-reservation-preview.json",
         "attempt-reservation.json",
@@ -68,33 +79,33 @@ def test_official_submit_adapter_preview_outputs_boundary_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "submit-adapter-boundary-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "submit-adapter-boundary-artifact.json").read_text()
     )
-    assert packet["status"] == "ready_for_local_registration_boundary_review"
-    assert packet["statuses"]["submit_adapter_preview"] == (
+    assert artifact["status"] == "ready_for_local_registration_boundary_review"
+    assert artifact["statuses"]["submit_adapter_preview"] == (
         "inputs_ready_adapter_not_implemented"
     )
-    assert packet["statuses"]["attempt_mutation"] == "applied"
-    assert packet["statuses"]["order_lifecycle_handoff"] == (
+    assert artifact["statuses"]["attempt_mutation"] == "applied"
+    assert artifact["statuses"]["order_lifecycle_handoff"] == (
         "ready_for_order_lifecycle_adapter"
     )
-    assert packet["statuses"]["order_registration_draft_preview"] == (
+    assert artifact["statuses"]["order_registration_draft_preview"] == (
         "inputs_ready_registration_draft_only"
     )
-    assert packet["local_registration_boundary"]["registration_draft_count"] == 2
-    assert packet["local_registration_boundary"][
+    assert artifact["local_registration_boundary"]["registration_draft_count"] == 2
+    assert artifact["local_registration_boundary"][
         "local_order_registration_enabled"
     ] is False
-    assert packet["runtime_attempt_budget_boundary"][
+    assert artifact["runtime_attempt_budget_boundary"][
         "budget_reservation_basis"
     ] == "max_loss_reference"
-    assert packet["runtime_attempt_budget_boundary"][
+    assert artifact["runtime_attempt_budget_boundary"][
         "budget_reservation_amount"
     ] == "0.44145873"
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_official_submit_adapter_preview_cli_stdout_is_json_only(

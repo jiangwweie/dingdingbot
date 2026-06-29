@@ -51,12 +51,12 @@ class RuntimeStrategySignalIntentDraftSourceStatus(str, Enum):
     PERSISTED_READY_INTENT_DRAFT = "persisted_ready_intent_draft"
 
 
-class RuntimeStrategySignalIntentDraftSourcePacket(BaseModel):
-    """Audit packet for strategy-signal -> shadow candidate -> ready draft."""
+class RuntimeStrategySignalIntentDraftSourceArtifact(BaseModel):
+    """Audit artifact for strategy-signal -> shadow candidate -> ready draft."""
 
     model_config = ConfigDict(extra="forbid")
 
-    packet_id: str = Field(min_length=1, max_length=260)
+    artifact_id: str = Field(min_length=1, max_length=260)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     strategy_family_id: str = Field(min_length=1, max_length=128)
     strategy_family_version_id: str = Field(min_length=1, max_length=128)
@@ -90,9 +90,9 @@ class RuntimeStrategySignalIntentDraftSourcePacket(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_ready_packet(
+    def _validate_ready_artifact(
         self,
-    ) -> "RuntimeStrategySignalIntentDraftSourcePacket":
+    ) -> "RuntimeStrategySignalIntentDraftSourceArtifact":
         if self.status == (
             RuntimeStrategySignalIntentDraftSourceStatus
             .PERSISTED_READY_INTENT_DRAFT
@@ -110,7 +110,7 @@ class RuntimeStrategySignalIntentDraftSourcePacket(BaseModel):
             ):
                 raise ValueError("intent draft source is not ready")
             if not self.ready_for_official_handoff_source:
-                raise ValueError("ready packet flag mismatch")
+                raise ValueError("ready artifact flag mismatch")
         return self
 
 
@@ -140,7 +140,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
         expires_at_ms: int | None = None,
         active_positions_count: int | None = None,
         metadata: dict | None = None,
-    ) -> RuntimeStrategySignalIntentDraftSourcePacket:
+    ) -> RuntimeStrategySignalIntentDraftSourceArtifact:
         preflight_blockers: list[str] = []
         if not allow_shadow_candidate_creation:
             preflight_blockers.append("shadow_candidate_creation_not_enabled")
@@ -153,7 +153,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
                 "owner_confirmed_for_intent_required_for_ready_draft_source"
             )
         if preflight_blockers:
-            return _packet(
+            return _artifact(
                 signal_input,
                 runtime=runtime,
                 scheduler_planning=None,
@@ -195,7 +195,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
             != RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
             or candidate is None
         ):
-            return _packet(
+            return _artifact(
                 signal_input,
                 runtime=runtime,
                 scheduler_planning=scheduler_planning,
@@ -227,7 +227,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
                 )
             )
         except Exception as exc:
-            return _packet(
+            return _artifact(
                 signal_input,
                 runtime=runtime,
                 scheduler_planning=scheduler_planning,
@@ -245,7 +245,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
         blockers: list[str] = []
         if draft.status != RuntimeExecutionIntentDraftStatus.READY_FOR_INTENT_CREATION:
             blockers.append("runtime_execution_intent_draft_not_ready")
-        return _packet(
+        return _artifact(
             signal_input,
             runtime=runtime,
             scheduler_planning=scheduler_planning,
@@ -272,7 +272,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
         )
 
 
-def _packet(
+def _artifact(
     signal_input: StrategyFamilySignalInput,
     *,
     runtime: StrategyRuntimeInstance,
@@ -286,7 +286,7 @@ def _packet(
     owner_reviewed: bool,
     owner_confirmed_for_intent: bool,
     metadata: dict | None,
-) -> RuntimeStrategySignalIntentDraftSourcePacket:
+) -> RuntimeStrategySignalIntentDraftSourceArtifact:
     candidate = (
         scheduler_planning.candidate_planning_result.candidate
         if scheduler_planning is not None
@@ -315,8 +315,8 @@ def _packet(
         status
         == RuntimeStrategySignalIntentDraftSourceStatus.PERSISTED_READY_INTENT_DRAFT
     )
-    return RuntimeStrategySignalIntentDraftSourcePacket(
-        packet_id=f"runtime-strategy-signal-intent-draft-source-{signal_input.evaluation_id}",
+    return RuntimeStrategySignalIntentDraftSourceArtifact(
+        artifact_id=f"runtime-strategy-signal-intent-draft-source-{signal_input.evaluation_id}",
         runtime_instance_id=runtime.runtime_instance_id,
         strategy_family_id=signal_input.strategy_family_id,
         strategy_family_version_id=signal_input.strategy_family_version_id,

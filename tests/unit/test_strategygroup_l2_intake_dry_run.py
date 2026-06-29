@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ def _load_module():
     return module
 
 
-def _l2_packet() -> dict:
+def _l2_artifact() -> dict:
     return {
         "status": "l2_readiness_review_has_conditional_candidate",
         "readiness_rows": [
@@ -72,7 +73,7 @@ def _handoff() -> dict:
         },
         "hard_stops": ["short_squeeze_risk_unbounded"],
         "execution_boundary": {
-            "research_handoff_only": True,
+            "research_intake_source_only": True,
             "runtime_registration_authorized": False,
             "candidate_creation_authorized": False,
             "final_gate_input": False,
@@ -92,13 +93,13 @@ def test_l2_intake_dry_run_passes_for_btpc_observe_only_handoff(tmp_path):
     handoff_root = tmp_path / "handoffs"
     _write_json(handoff_root / "BTPC-001" / "handoff.json", _handoff())
 
-    packet = module.build_l2_intake_dry_run(
-        l2_readiness_packet=_l2_packet(),
+    artifact = module.build_l2_intake_dry_run(
+        l2_readiness_artifact=_l2_artifact(),
         handoff_root=handoff_root,
     )
 
-    assert packet["status"] == "l2_intake_dry_run_passed"
-    assert packet["counts"] == {
+    assert artifact["status"] == "l2_intake_dry_run_passed"
+    assert artifact["counts"] == {
         "candidate_count": 1,
         "failed_count": 0,
         "forbidden_effect_count": 0,
@@ -108,37 +109,64 @@ def test_l2_intake_dry_run_passes_for_btpc_observe_only_handoff(tmp_path):
         "source_enabled_l2_count": 0,
         "source_readiness_row_count": 1,
     }
-    row = packet["dry_run_rows"][0]
+    row = artifact["dry_run_rows"][0]
     assert row["strategy_group_id"] == "BTPC-001"
     assert row["status"] == "passed"
     assert row["blockers"] == []
-    assert packet["decision"]["tier_policy_change_ready_for_review"] is True
-    assert packet["decision"]["no_candidate_reason"] is None
-    assert packet["decision"]["l4_scope_change_recommended"] is False
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["safety_invariants"]["tier_policy_changed"] is False
-    assert packet["safety_invariants"]["order_created"] is False
+    assert row["intake_source_json"].endswith("BTPC-001/handoff.json")
+    assert row["checks"]["intake_source_json_present"] is True
+    assert "handoff_json" not in row
+    assert "handoff_json_present" not in row["checks"]
+    assert "decision" not in artifact
+    review_outcome = artifact["review_outcome_state"]
+    assert review_outcome["tier_policy_change_ready_for_review"] is True
+    assert review_outcome["no_candidate_reason"] is None
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert review_outcome["tradeability_decision_source"] is False
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert "operator_command_plan" not in artifact
+    assert artifact["safety_invariants"]["tier_policy_changed"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]
+
+
+def test_l2_intake_dry_run_rejects_legacy_l2_readiness_packet_kwarg(tmp_path):
+    module = _load_module()
+
+    try:
+        module.build_l2_intake_dry_run(
+            l2_readiness_packet=_l2_artifact(),
+            handoff_root=tmp_path / "handoffs",
+        )
+    except TypeError as exc:
+        assert "l2_readiness_packet" in str(exc)
+    else:
+        raise AssertionError("legacy l2_readiness_packet kwarg must be rejected")
 
 
 def test_l2_intake_dry_run_fails_when_handoff_missing(tmp_path):
     module = _load_module()
 
-    packet = module.build_l2_intake_dry_run(
-        l2_readiness_packet=_l2_packet(),
+    artifact = module.build_l2_intake_dry_run(
+        l2_readiness_artifact=_l2_artifact(),
         handoff_root=tmp_path / "missing-handoffs",
     )
 
-    assert packet["status"] == "l2_intake_dry_run_failed"
-    assert packet["counts"]["failed_count"] == 1
-    assert "handoff_json_missing" in packet["dry_run_rows"][0]["blockers"]
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["status"] == "l2_intake_dry_run_failed"
+    assert artifact["counts"]["failed_count"] == 1
+    assert "strategy_intake_source_json_missing" in artifact["dry_run_rows"][0][
+        "blockers"
+    ]
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert "operator_command_plan" not in artifact
 
 
 def test_l2_intake_dry_run_explains_no_candidates_from_source_rows(tmp_path):
     module = _load_module()
-    l2_packet = _l2_packet()
-    l2_packet["status"] = "l2_readiness_review_already_enabled"
-    l2_packet["readiness_rows"] = [
+    l2_artifact = _l2_artifact()
+    l2_artifact["status"] = "l2_readiness_review_already_enabled"
+    l2_artifact["readiness_rows"] = [
         {
             "strategy_group_id": "BTPC-001",
             "symbol": "AVAX/USDT:USDT",
@@ -171,46 +199,84 @@ def test_l2_intake_dry_run_explains_no_candidates_from_source_rows(tmp_path):
         },
     ]
 
-    packet = module.build_l2_intake_dry_run(
-        l2_readiness_packet=l2_packet,
+    artifact = module.build_l2_intake_dry_run(
+        l2_readiness_artifact=l2_artifact,
         handoff_root=tmp_path / "handoffs",
     )
 
-    assert packet["status"] == "l2_intake_dry_run_no_candidates"
-    assert packet["counts"]["candidate_count"] == 0
-    assert packet["counts"]["source_enabled_l2_count"] == 1
-    assert packet["counts"]["source_blocked_count"] == 1
-    assert packet["decision"]["no_candidate_reason"] == (
+    assert artifact["status"] == "l2_intake_dry_run_no_candidates"
+    assert artifact["counts"]["candidate_count"] == 0
+    assert artifact["counts"]["source_enabled_l2_count"] == 1
+    assert artifact["counts"]["source_blocked_count"] == 1
+    assert "decision" not in artifact
+    review_outcome = artifact["review_outcome_state"]
+    assert review_outcome["no_candidate_reason"] == (
         "no_conditional_l2_review_candidates"
     )
-    assert packet["decision"]["enabled_l2_groups"] == ["BTPC-001"]
-    assert packet["decision"]["blocked_groups"] == ["VCB-001"]
-    source_rows = {row["strategy_group_id"]: row for row in packet["source_readiness_rows"]}
+    assert review_outcome["enabled_l2_groups"] == ["BTPC-001"]
+    assert review_outcome["blocked_groups"] == ["VCB-001"]
+    source_rows = {
+        row["strategy_group_id"]: row for row in artifact["source_readiness_rows"]
+    }
     assert source_rows["BTPC-001"]["l2_shadow_candidate_observation_enabled"] is True
     assert source_rows["VCB-001"]["blocking_gaps_before_l2"] == [
         "false_breakout_disable_state_missing"
     ]
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["safety_invariants"]["order_created"] is False
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert artifact["safety_invariants"]["order_created"] is False
 
 
 def test_l2_intake_dry_run_blocks_forbidden_source_effect(tmp_path):
     module = _load_module()
     handoff_root = tmp_path / "handoffs"
     _write_json(handoff_root / "BTPC-001" / "handoff.json", _handoff())
-    l2_packet = _l2_packet()
-    l2_packet["safety_invariants"]["order_created"] = True
+    l2_artifact = _l2_artifact()
+    l2_artifact["safety_invariants"]["order_created"] = True
 
-    packet = module.build_l2_intake_dry_run(
-        l2_readiness_packet=l2_packet,
+    artifact = module.build_l2_intake_dry_run(
+        l2_readiness_artifact=l2_artifact,
         handoff_root=handoff_root,
     )
 
-    assert packet["status"] == "blocked_forbidden_effect"
-    assert "source_l2_readiness.safety.order_created" in packet["safety_invariants"][
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert "source_l2_readiness.safety.order_created" in artifact["safety_invariants"][
         "source_forbidden_effects"
     ]
-    assert packet["operator_command_plan"]["calls_operation_layer"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["safety_invariants"]["operation_layer_called"] is False
+
+
+def test_l2_intake_dry_run_rejects_source_authority_mirrors(tmp_path):
+    module = _load_module()
+    handoff_root = tmp_path / "handoffs"
+    _write_json(handoff_root / "BTPC-001" / "handoff.json", _handoff())
+    l2_artifact = deepcopy(_l2_artifact())
+    l2_artifact["checks"] = {"actionable_now": False}
+    l2_artifact["safety_invariants"]["real_order_authority"] = False
+    l2_artifact["readiness_rows"][0]["actionable_now"] = False
+
+    artifact = module.build_l2_intake_dry_run(
+        l2_readiness_artifact=l2_artifact,
+        handoff_root=handoff_root,
+    )
+
+    forbidden = artifact["safety_invariants"]["source_forbidden_effects"]
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert (
+        "source_l2_readiness.checks."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert (
+        "source_l2_readiness.safety_invariants."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in forbidden
+    assert (
+        "source_l2_readiness.readiness_rows.BTPC-001."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert artifact["review_outcome_state"]["tradeability_decision_source"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["safety_invariants"]["operation_layer_called"] is False
 
 
 def test_l2_intake_dry_run_cli_writes_outputs(tmp_path, capsys):
@@ -220,7 +286,7 @@ def test_l2_intake_dry_run_cli_writes_outputs(tmp_path, capsys):
     l2_path = tmp_path / "l2.json"
     out_path = tmp_path / "dry-run.json"
     owner_path = tmp_path / "dry-run.md"
-    _write_json(l2_path, _l2_packet())
+    _write_json(l2_path, _l2_artifact())
 
     exit_code = module.main(
         [

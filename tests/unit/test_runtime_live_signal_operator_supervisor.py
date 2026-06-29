@@ -11,24 +11,24 @@ def test_supervisor_continues_waiting_until_max_cycles(tmp_path):
 
     async def cycle_builder(args):
         calls["count"] += 1
-        return _cycle_packet("waiting_for_runtime_compatible_signal")
+        return _cycle_artifact("waiting_for_runtime_compatible_signal")
 
-    packet = _run_supervisor(tmp_path, ["--max-cycles", "3"], cycle_builder)
+    artifact = _run_supervisor(tmp_path, ["--max-cycles", "3"], cycle_builder)
 
     assert calls["count"] == 3
-    assert packet["status"] == "supervisor_waiting_for_signal"
-    assert packet["cycles_completed"] == 3
-    assert packet["operator_command_plan"]["continue_observation_allowed"] is True
-    assert packet["safety_invariants"]["prepare_flow_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["status"] == "supervisor_waiting_for_signal"
+    assert artifact["cycles_completed"] == 3
+    assert artifact["live_operator_supervisor_plan"]["continue_observation_allowed"] is True
+    assert artifact["safety_invariants"]["prepare_flow_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_supervisor_stops_for_profile_review(tmp_path):
     async def cycle_builder(args):
-        return _cycle_packet(
+        return _cycle_artifact(
             "ready_for_owner_runtime_profile_decision",
-            profile_proposal_packet={
+            profile_proposal_artifact={
                 "status": "ready_for_owner_runtime_profile_decision",
                 "experimental_runtime_profile_proposal": {
                     "strategy_family_id": "RBR-001",
@@ -36,33 +36,33 @@ def test_supervisor_stops_for_profile_review(tmp_path):
             },
         )
 
-    packet = _run_supervisor(tmp_path, ["--max-cycles", "5"], cycle_builder)
+    artifact = _run_supervisor(tmp_path, ["--max-cycles", "5"], cycle_builder)
 
-    assert packet["status"] == "supervisor_profile_review_required"
-    assert packet["cycles_completed"] == 1
-    assert packet["operator_command_plan"]["requires_owner_runtime_profile_confirmation"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["safety_invariants"]["prepare_records_created"] is False
+    assert artifact["status"] == "supervisor_profile_review_required"
+    assert artifact["cycles_completed"] == 1
+    assert artifact["live_operator_supervisor_plan"]["requires_owner_runtime_profile_confirmation"] is True
+    assert artifact["live_operator_supervisor_plan"]["places_order"] is False
+    assert artifact["safety_invariants"]["prepare_records_created"] is False
 
 
 def test_supervisor_stops_for_prepare_review_without_prepare_records(tmp_path):
     async def cycle_builder(args):
-        return _cycle_packet(
+        return _cycle_artifact(
             "ready_for_prepare",
             signal_input_json=str(tmp_path / "ready-signal.json"),
         )
 
-    packet = _run_supervisor(tmp_path, ["--max-cycles", "5"], cycle_builder)
+    artifact = _run_supervisor(tmp_path, ["--max-cycles", "5"], cycle_builder)
 
-    assert packet["status"] == "supervisor_prepare_review_required"
-    assert packet["cycle_summaries"][0]["signal_input_json"].endswith("ready-signal.json")
-    assert packet["operator_command_plan"]["requires_prepare_review"] is True
-    assert packet["safety_invariants"]["prepare_flow_called"] is False
+    assert artifact["status"] == "supervisor_prepare_review_required"
+    assert artifact["cycle_summaries"][0]["signal_input_json"].endswith("ready-signal.json")
+    assert artifact["live_operator_supervisor_plan"]["requires_prepare_review"] is True
+    assert artifact["safety_invariants"]["prepare_flow_called"] is False
 
 
 def test_supervisor_stops_for_final_gate_after_explicit_prepare_records(tmp_path):
     async def cycle_builder(args):
-        return _cycle_packet(
+        return _cycle_artifact(
             "ready_for_final_gate_preflight",
             prepare_flow_called=True,
             prepare_records_created=True,
@@ -71,41 +71,41 @@ def test_supervisor_stops_for_final_gate_after_explicit_prepare_records(tmp_path
             submit_authorization_created=True,
         )
 
-    packet = _run_supervisor(
+    artifact = _run_supervisor(
         tmp_path,
         ["--max-cycles", "5", "--allow-prepare-records"],
         cycle_builder,
     )
 
-    assert packet["status"] == "supervisor_final_gate_review_required"
-    assert packet["operator_command_plan"]["requires_final_gate_review"] is True
-    assert packet["safety_invariants"]["prepare_flow_called"] is True
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
-    assert packet["safety_invariants"]["submit_authorization_created"] is True
-    assert packet["safety_invariants"]["executes_real_submit"] is False
+    assert artifact["status"] == "supervisor_final_gate_review_required"
+    assert artifact["live_operator_supervisor_plan"]["requires_final_gate_review"] is True
+    assert artifact["safety_invariants"]["prepare_flow_called"] is True
+    assert artifact["safety_invariants"]["prepare_records_created"] is True
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert artifact["safety_invariants"]["submit_authorization_created"] is True
+    assert artifact["safety_invariants"]["executes_real_submit"] is False
 
 
 def test_supervisor_blocks_for_forbidden_effect(tmp_path):
     async def cycle_builder(args):
-        return _cycle_packet(
+        return _cycle_artifact(
             "waiting_for_runtime_compatible_signal",
             forbidden={"order_created": True},
         )
 
-    packet = _run_supervisor(tmp_path, ["--max-cycles", "3"], cycle_builder, ok=False)
+    artifact = _run_supervisor(tmp_path, ["--max-cycles", "3"], cycle_builder, ok=False)
 
-    assert packet["status"] == "supervisor_blocked"
-    assert packet["stop_reason"] == "forbidden_effect_detected"
-    assert "cycle_1:order_created" in packet["blockers"]
-    assert packet["operator_command_plan"]["next_step"] == "stop_and_review_forbidden_effect"
+    assert artifact["status"] == "supervisor_blocked"
+    assert artifact["stop_reason"] == "forbidden_effect_detected"
+    assert "cycle_1:order_created" in artifact["blockers"]
+    assert artifact["live_operator_supervisor_plan"]["next_step"] == "stop_and_review_forbidden_effect"
 
 
 def test_supervisor_cli_stdout_is_json_only(monkeypatch, capsys, tmp_path):
     async def cycle_builder(args):
         print("inner noisy supervisor")
-        return _cycle_packet("waiting_for_runtime_compatible_signal")
+        return _cycle_artifact("waiting_for_runtime_compatible_signal")
 
     monkeypatch.setattr(
         sys,
@@ -145,11 +145,11 @@ def _run_supervisor(tmp_path, extra_args, cycle_builder, *, ok=True):
     return json.loads(output_json.read_text())
 
 
-def _cycle_packet(
+def _cycle_artifact(
     status,
     *,
     signal_input_json=None,
-    profile_proposal_packet=None,
+    profile_proposal_artifact=None,
     prepare_flow_called=False,
     prepare_records_created=False,
     shadow_candidate_created=False,
@@ -182,7 +182,7 @@ def _cycle_packet(
         "scope": "runtime_live_signal_operator_cycle",
         "status": status,
         "runtime_instance_id": "runtime-1",
-        "routing_packet": {
+        "routing_evidence": {
             "status": status
             if status != "ready_for_prepare"
             else "ready_for_current_runtime_signal_prepare",
@@ -191,11 +191,11 @@ def _cycle_packet(
             else "no_would_enter_signal_available",
         },
         "signal_input_json": signal_input_json,
-        "profile_proposal_packet": profile_proposal_packet,
+        "runtime_profile_proposal": profile_proposal_artifact,
         "blockers": []
         if status != "waiting_for_runtime_compatible_signal"
         else ["runtime_strategy_signal_not_found_in_strategy_shelf"],
-        "operator_command_plan": {
+        "live_operator_plan": {
             "next_step": "unit",
             "prepared_authorization_id": (
                 "auth-1" if submit_authorization_created else None

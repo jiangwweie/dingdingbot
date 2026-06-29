@@ -9,7 +9,9 @@ from src.application.runtime_closed_trade_lifecycle_review_service import (
     RuntimeClosedTradeLifecycleReviewService,
 )
 from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, Position
-from src.domain.runtime_semantic_review_packet import build_runtime_semantic_review_packet
+from src.domain.runtime_semantic_review_artifact import (
+    build_runtime_semantic_review_artifact,
+)
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
     StrategyRuntimeInstance,
@@ -132,18 +134,19 @@ async def test_closed_short_stopout_records_small_bounded_loss_review() -> None:
     record = review_repo.records[0]
     assert record.lifecycle_status == "closed_reviewed"
     assert record.review_status == "closed_reviewed"
-    assert record.metadata["review_decision"] == "revise"
+    assert record.metadata["review_outcome"] == "revise"
+    assert "review_decision" not in record.metadata
     assert record.metadata["right_tail_trade_path"]["entry_price"] == "6.595"
     assert record.metadata["right_tail_trade_path"]["exit_price"] == "6.635"
     assert record.metadata["right_tail_trade_path"]["mfe_price"] == "6.595"
     assert record.metadata["right_tail_trade_path"]["mae_price"] == "6.635"
     assert record.metadata["right_tail_trade_path"]["max_loss_budget"] == "0.08776474"
 
-    packet = build_runtime_semantic_review_packet(record)
-    assert packet.right_tail_review_status == "reviewed"
-    assert packet.semantic_trace_complete is False
-    assert "execution_intent_id" in packet.missing_semantic_ids
-    assert packet.calls_exchange is False
+    artifact = build_runtime_semantic_review_artifact(record)
+    assert artifact.right_tail_review_status == "reviewed"
+    assert artifact.semantic_trace_complete is False
+    assert "execution_intent_id" in artifact.missing_semantic_ids
+    assert artifact.calls_exchange is False
 
 
 @pytest.mark.asyncio

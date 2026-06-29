@@ -2,7 +2,7 @@
 """Build the review-only StrategyGroup deep-dive wave.
 
 This command continues the six approved review-only lanes until each lane has a
-next Owner policy decision. It is local evidence synthesis only: it does not
+next Owner policy point. It is local evidence synthesis only: it does not
 mutate registry authority, tier policy, live profile, FinalGate, Operation
 Layer, exchange state, or orders.
 """
@@ -13,15 +13,22 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-DEFAULT_EVIDENCE_CLOSURE_WAVE_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json"
+from strategygroup_non_executing_projection import (  # noqa: E402
+    review_only_forbidden_effects,
+    review_only_interaction,
+    review_only_legacy_authority_mirror_true_keys,
+    review_only_safety_invariants,
 )
+
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json"
@@ -30,14 +37,14 @@ DEFAULT_OUTPUT_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.md"
 )
-DEFAULT_OUTPUT_OWNER_DECISION = (
+DEFAULT_OUTPUT_OWNER_POLICY = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-owner-decision.md"
+    / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-owner-policy.md"
 )
 
 SCHEMA = "brc.strategygroup_review_only_deep_dive_wave.v1"
 
-DECISION_ORDER = (
+REVIEW_ORDER = (
     "BRF-001",
     "BTPC-001",
     "LSR-001",
@@ -46,21 +53,8 @@ DECISION_ORDER = (
     "MPG-001",
 )
 
-FORBIDDEN_EFFECTS = (
-    "registry_authority_changed",
-    "tier_policy_changed",
-    "live_profile_changed",
-    "order_sizing_changed",
-    "mpg_member_live_scope_expanded",
-    "l4_real_order_scope_expanded",
-    "shadow_candidate_created",
-    "execution_intent_created",
-    "final_gate_called",
-    "operation_layer_called",
-    "order_created",
-    "exchange_write_called",
-    "real_order_authority",
-)
+FORBIDDEN_EFFECTS = review_only_forbidden_effects()
+LEGACY_AUTHORITY_MIRROR_TRUE_KEYS = review_only_legacy_authority_mirror_true_keys()
 
 DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
     "BRF-001": {
@@ -74,13 +68,13 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "recommendation": (
             "continue_promote_review_but_hold_l1_until_squeeze_and_forward_outcome_complete"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "BRF-001 是否继续 promote-review 证据线，但暂不升 tier、不扩大实盘范围。"
         ),
         "next_if_approved": (
             "build_brf_squeeze_classifier_requiredfacts_forward_outcome_v2"
         ),
-        "decision_type": "promote_review_outcome",
+        "owner_policy_type": "promote_review_outcome",
         "options": [
             "continue_promote_review_without_tier_change",
             "keep_l1_observe_until_forward_outcome_completes",
@@ -104,11 +98,11 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "recommendation": (
             "keep_l2_shadow_attach_fact_sources_before_any_gate_relaxation"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "BTPC-001 是否继续 L2 shadow，并先完成事实源挂接，而不是放松 stale gate。"
         ),
         "next_if_approved": "attach_btpc_live_fact_sources_then_rerun_false_negative_review",
-        "decision_type": "l2_shadow_revise_boundary",
+        "owner_policy_type": "l2_shadow_revise_boundary",
         "options": [
             "keep_l2_shadow_attach_sources_first",
             "prepare_conditional_gate_relax_review_after_sources",
@@ -132,11 +126,11 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "recommendation": (
             "formalize_short_revival_rewrite_keep_l1_until_range_facts_complete"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "LSR-001 是否正式采用 short-revival rewrite 方向，并保持 observe-only。"
         ),
         "next_if_approved": "build_lsr_short_revival_v2_range_context_fixture",
-        "decision_type": "short_revival_rewrite_outcome",
+        "owner_policy_type": "short_revival_rewrite_outcome",
         "options": [
             "formalize_short_revival_rewrite",
             "keep_l1_generic_observe",
@@ -144,7 +138,7 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "policy_effects_blocked": ["live_scope_change", "l1_to_l2_promotion"],
         "findings": [
-            "both would_enter samples are forward-positive in the source packet",
+            "both would_enter samples are forward-positive in the source artifact",
             "side-specific short semantics still need separation from long preview logic",
             "range-context RequiredFacts remain review-only and not live authority",
         ],
@@ -160,11 +154,11 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "recommendation": (
             "open_formal_candidate_review_without_registry_admission"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "MI-001 是否进入正式候选复核，同时暂不进入 registry、不扩大实盘。"
         ),
-        "next_if_approved": "build_mi_overlap_concentration_registry_candidate_packet_v2",
-        "decision_type": "registry_identity_candidate_review",
+        "next_if_approved": "open_mi_identity_overlap_symbol_concentration_review",
+        "owner_policy_type": "registry_identity_candidate_review",
         "options": [
             "formal_candidate_review_without_admission",
             "mpg_support_capability_review",
@@ -184,16 +178,16 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "diagnostic_conclusion": (
             "CPM-RO has meaningful signal evidence, but the quality is mixed "
             "relative to MI and its family boundary is unresolved. Observation "
-            "asset plus merge review is the safer next decision."
+            "asset plus merge review is the safer next policy direction."
         ),
         "recommendation": (
             "keep_observation_asset_run_merge_review_before_independent_admission"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "CPM-RO-001 是否保留观察资产并进入 merge review，而不是独立 admission。"
         ),
-        "next_if_approved": "build_cpm_ro_merge_target_and_quality_comparison_packet_v2",
-        "decision_type": "registry_identity_merge_review",
+        "next_if_approved": "open_cpm_ro_semantic_source_merge_quality_review",
+        "owner_policy_type": "registry_identity_merge_review",
         "options": [
             "observe_asset_and_merge_review",
             "independent_strategy_review",
@@ -218,11 +212,11 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "recommendation": (
             "accept_member_role_split_hold_member_live_scope_until_exit_decay_review"
         ),
-        "decision_question": (
+        "owner_policy_question": (
             "MPG-001 是否接受 member role split 和 exit-decay 复核，但不扩大 member live scope。"
         ),
         "next_if_approved": "build_mpg_member_role_controls_v2_without_live_scope_expansion",
-        "decision_type": "member_role_exit_decay_boundary",
+        "owner_policy_type": "member_role_exit_decay_boundary",
         "options": [
             "accept_member_role_split_without_live_expansion",
             "keep_mpg_single_l4_box",
@@ -232,7 +226,7 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
         "findings": [
             "six member roles are present and can be separated for policy review",
             "exit horizons and decay controls exist as review inputs",
-            "no member receives live scope from this deep-dive packet",
+            "no member receives live scope from this deep-dive artifact",
         ],
     },
 }
@@ -240,40 +234,45 @@ DEEP_DIVE_SPECS: dict[str, dict[str, Any]] = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--evidence-closure-wave-json",
-        default=str(DEFAULT_EVIDENCE_CLOSURE_WAVE_JSON),
-    )
+    parser.add_argument("--evidence-closure-wave-json")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-md", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
+        "--output-owner-policy",
+        dest="output_owner_policy",
+        default=str(DEFAULT_OUTPUT_OWNER_POLICY),
+    )
+    parser.add_argument(
         "--output-owner-decision",
-        default=str(DEFAULT_OUTPUT_OWNER_DECISION),
+        dest="output_owner_policy",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
 
-    packet = build_review_only_deep_dive_wave(
+    review_artifact = build_review_only_deep_dive_wave(
         evidence_closure_wave=_load_json_object(Path(args.evidence_closure_wave_json))
+        if args.evidence_closure_wave_json
+        else {}
     )
 
     output_json = Path(args.output_json)
     output_md = Path(args.output_md)
-    output_owner_decision = Path(args.output_owner_decision)
+    output_owner_policy = Path(args.output_owner_policy)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
-    output_owner_decision.parent.mkdir(parents=True, exist_ok=True)
+    output_owner_policy.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(review_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    output_md.write_text(_markdown(packet, output_json), encoding="utf-8")
-    output_owner_decision.write_text(
-        _owner_decision_markdown(packet, output_owner_decision),
+    output_md.write_text(_markdown(review_artifact, output_json), encoding="utf-8")
+    output_owner_policy.write_text(
+        _owner_policy_markdown(review_artifact, output_owner_policy),
         encoding="utf-8",
     )
     print(
         json.dumps(
-            {"status": packet["status"], "output_json": str(output_json)},
+            {"status": review_artifact["status"], "output_json": str(output_json)},
             ensure_ascii=False,
         )
     )
@@ -285,47 +284,48 @@ def build_review_only_deep_dive_wave(
     evidence_closure_wave: dict[str, Any],
 ) -> dict[str, Any]:
     _validate_evidence_closure_wave(evidence_closure_wave)
-    source_packets = {
-        str(packet.get("strategy_group_id")): packet
-        for packet in _dict_rows(evidence_closure_wave.get("evidence_closure_packets"))
+    source_artifact_rows = _dict_rows(
+        evidence_closure_wave.get("evidence_closure_artifacts")
+    )
+    source_artifacts = {
+        str(artifact.get("strategy_group_id")): artifact
+        for artifact in source_artifact_rows
     }
-    missing = [group for group in DECISION_ORDER if group not in source_packets]
+    missing = [group for group in REVIEW_ORDER if group not in source_artifacts]
     if missing:
-        raise ValueError("missing evidence closure packets: " + ", ".join(missing))
+        raise ValueError("missing evidence closure artifacts: " + ", ".join(missing))
 
-    deep_dive_packets = [
-        _deep_dive_packet_for_group(group, source_packets[group])
-        for group in DECISION_ORDER
+    deep_dive_artifacts = [
+        _deep_dive_artifact_for_group(group, source_artifacts[group])
+        for group in REVIEW_ORDER
     ]
-    owner_decision_cards = [
-        _owner_decision_card(packet) for packet in deep_dive_packets
-    ]
+    owner_policy_items = [_owner_policy_item(artifact) for artifact in deep_dive_artifacts]
 
     return {
         "schema": SCHEMA,
         "scope": "strategygroup_review_only_six_line_deep_dive",
-        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "status": "review_only_deep_dive_ready_for_owner_policy",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "phase_status": {
             "phase_1_owner_perception_projection": "ready",
             "phase_2_six_line_deep_dive": "ready",
-            "phase_3_owner_policy_decision_package": "ready_for_owner_policy_decision",
+            "phase_3_owner_policy_package": "ready_for_owner_policy_review",
         },
         "closed_problem": (
             "The six review-only lanes now have concrete diagnostic conclusions "
-            "and next Owner policy decisions without changing live authority."
+            "and next Owner policy choices without changing live authority."
         ),
-        "deep_dive_packets": deep_dive_packets,
-        "owner_decision_package": {
-            "status": "owner_policy_decision_package_ready",
-            "decision_count": len(owner_decision_cards),
+        "deep_dive_artifacts": deep_dive_artifacts,
+        "owner_policy_package": {
+            "status": "owner_policy_package_ready",
+            "owner_policy_item_count": len(owner_policy_items),
             "owner_policy_confirmation_required_now": True,
             "runtime_owner_intervention_required": False,
-            "cards": owner_decision_cards,
+            "items": owner_policy_items,
         },
-        "owner_progress_projection": _owner_progress_projection(deep_dive_packets),
+        "owner_progress_projection": _owner_progress_projection(deep_dive_artifacts),
         "completion_boundary": {
-            "current_stage": "six_line_deep_dive_ready_for_owner_decision",
+            "current_stage": "six_line_deep_dive_ready_for_owner_policy_review",
             "owner_policy_confirmation_required_now": True,
             "runtime_owner_intervention_required": False,
             "blocked_until_separate_owner_confirmation": [
@@ -352,36 +352,48 @@ def build_review_only_deep_dive_wave(
     }
 
 
-def _validate_evidence_closure_wave(packet: dict[str, Any]) -> None:
-    if packet.get("status") != "review_only_evidence_closure_wave_ready":
+def _validate_evidence_closure_wave(artifact: dict[str, Any]) -> None:
+    if artifact.get("status") != "review_only_evidence_closure_wave_ready":
         raise ValueError(
-            "evidence closure wave is not ready: " + str(packet.get("status"))
+            "evidence closure wave is not ready: " + str(artifact.get("status"))
         )
-    safety = _as_dict(packet.get("safety_invariants"))
+    safety = _as_dict(artifact.get("safety_invariants"))
     forbidden = [key for key in FORBIDDEN_EFFECTS if safety.get(key) is True]
     if forbidden:
         raise ValueError("evidence closure wave has forbidden effects: " + str(forbidden))
-    interaction = _as_dict(packet.get("interaction"))
+    legacy_mirrors = [
+        key
+        for key in LEGACY_AUTHORITY_MIRROR_TRUE_KEYS
+        if safety.get(key) is True
+    ]
+    if legacy_mirrors:
+        raise ValueError(
+            "evidence closure wave has legacy authority mirrors: "
+            + str(legacy_mirrors)
+        )
+    interaction = _as_dict(artifact.get("interaction"))
     if _int(interaction.get("remote_interaction_count")) != 0:
         raise ValueError("evidence closure wave is not local-only")
 
 
-def _deep_dive_packet_for_group(group: str, source_packet: dict[str, Any]) -> dict[str, Any]:
+def _deep_dive_artifact_for_group(
+    group: str, source_artifact: dict[str, Any]
+) -> dict[str, Any]:
     spec = DEEP_DIVE_SPECS[group]
-    counts = _as_dict(source_packet.get("source_counts"))
+    counts = _as_dict(source_artifact.get("source_counts"))
     would_enter = _int(counts.get("would_enter_count"))
     would_enter_positive = _int(counts.get("would_enter_forward_positive_count"))
     no_action = _int(counts.get("no_action_count"))
     missed_positive = _int(counts.get("missed_no_action_forward_positive_count"))
     positive_total = _int(counts.get("positive_forward_outcome_count"))
 
-    packet: dict[str, Any] = {
+    artifact: dict[str, Any] = {
         "strategy_group_id": group,
         "owner_label": spec["owner_label"],
-        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "status": "review_only_deep_dive_ready_for_owner_policy",
         "review_only": True,
         "executed_system_action": spec["executed_system_action"],
-        "source_closure_result": source_packet.get("closure_result"),
+        "source_closure_result": source_artifact.get("closure_result"),
         "source_counts": {
             "would_enter_count": would_enter,
             "would_enter_forward_positive_count": would_enter_positive,
@@ -395,74 +407,81 @@ def _deep_dive_packet_for_group(group: str, source_packet: dict[str, Any]) -> di
         },
         "diagnostic_conclusion": spec["diagnostic_conclusion"],
         "deep_dive_findings": list(spec["findings"]),
-        "evidence_for": list(_list(source_packet.get("evidence_for"))),
-        "evidence_against": list(_list(source_packet.get("evidence_against"))),
-        "residual_uncertainties": _residual_uncertainties(group, source_packet),
-        "recommended_owner_decision": spec["recommendation"],
-        "decision_type": spec["decision_type"],
-        "decision_question": spec["decision_question"],
-        "decision_options": list(spec["options"]),
-        "next_system_action_if_approved": spec["next_if_approved"],
+        "evidence_for": list(_list(source_artifact.get("evidence_for"))),
+        "evidence_against": list(_list(source_artifact.get("evidence_against"))),
+        "residual_uncertainties": _residual_uncertainties(group, source_artifact),
+        "recommended_owner_policy": spec["recommendation"],
+        "owner_policy_type": spec["owner_policy_type"],
+        "owner_policy_question": spec["owner_policy_question"],
+        "owner_policy_options": list(spec["options"]),
+        "strategy_review_checkpoint_if_approved": spec["next_if_approved"],
         "policy_effects_blocked": list(spec["policy_effects_blocked"]),
         "does_not_authorize_live_execution": True,
-        "real_order_authority": False,
         "safety_invariants": _safety_invariants(),
     }
     if group == "BTPC-001":
-        packet["btpc_attribution"] = _as_dict(source_packet.get("btpc_attribution"))
+        artifact["btpc_attribution"] = _btpc_attribution(
+            _as_dict(source_artifact.get("btpc_attribution"))
+        )
     if group == "MPG-001":
-        packet["member_review"] = _as_dict(source_packet.get("member_review"))
-    return packet
+        artifact["member_review"] = _as_dict(source_artifact.get("member_review"))
+    return artifact
 
 
-def _owner_decision_card(packet: dict[str, Any]) -> dict[str, Any]:
+def _btpc_attribution(source: dict[str, Any]) -> dict[str, Any]:
+    return dict(source)
+
+
+def _owner_policy_item(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
-        "card_id": f"{packet['strategy_group_id']}:deep_dive_owner_decision",
-        "strategy_group_id": packet["strategy_group_id"],
-        "owner_label": packet["owner_label"],
-        "decision_type": packet["decision_type"],
-        "question": packet["decision_question"],
-        "default_recommendation": packet["recommended_owner_decision"],
-        "options": packet["decision_options"],
-        "evidence_for": packet["evidence_for"],
-        "evidence_against": packet["evidence_against"],
-        "diagnostic_conclusion": packet["diagnostic_conclusion"],
-        "next_system_action_if_approved": packet["next_system_action_if_approved"],
-        "policy_effects_blocked": packet["policy_effects_blocked"],
+        "policy_item_id": f"{artifact['strategy_group_id']}:deep_dive_owner_policy",
+        "strategy_group_id": artifact["strategy_group_id"],
+        "owner_label": artifact["owner_label"],
+        "owner_policy_type": artifact["owner_policy_type"],
+        "question": artifact["owner_policy_question"],
+        "default_recommendation": artifact["recommended_owner_policy"],
+        "options": artifact["owner_policy_options"],
+        "evidence_for": artifact["evidence_for"],
+        "evidence_against": artifact["evidence_against"],
+        "diagnostic_conclusion": artifact["diagnostic_conclusion"],
+        "strategy_review_checkpoint_if_approved": artifact["strategy_review_checkpoint_if_approved"],
+        "policy_effects_blocked": artifact["policy_effects_blocked"],
         "does_not_authorize_live_execution": True,
     }
 
 
-def _owner_progress_projection(deep_dive_packets: list[dict[str, Any]]) -> dict[str, Any]:
+def _owner_progress_projection(deep_dive_artifacts: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "status": "six_line_deep_dive_owner_progress_ready",
         "owner_summary": (
-            "P0 主链路等待可执行机会；P0.5 六条策略复核线已深挖到下一轮 "
+            "P0 主链路等待可执行机会；Signal Observation 六条策略复核线已深挖到下一轮 "
             "Owner 政策决策点；实盘权限没有变化。"
         ),
         "p0_state": "waiting_for_market",
         "p0_owner_label": "主链路等待机会",
-        "p0_5_state": "six_line_review_ready_for_owner_policy_decision",
-        "p0_5_owner_label": "六条策略复核线等待政策决策",
-        "deep_dive_packet_count": len(deep_dive_packets),
-        "next_owner_decision_count": len(deep_dive_packets),
+        "signal_observation_review_state": (
+            "six_line_review_ready_for_owner_policy_review"
+        ),
+        "signal_observation_owner_label": "六条策略复核线等待政策决策",
+        "deep_dive_artifact_count": len(deep_dive_artifacts),
+        "next_owner_policy_item_count": len(deep_dive_artifacts),
         "no_live_permission": True,
         "owner_intervention_required": False,
         "owner_policy_confirmation_required_now": True,
         "rows": [
             {
-                "strategy_group_id": packet["strategy_group_id"],
-                "owner_label": packet["owner_label"],
-                "status": packet["status"],
-                "recommended_owner_decision": packet["recommended_owner_decision"],
+                "strategy_group_id": artifact["strategy_group_id"],
+                "owner_label": artifact["owner_label"],
+                "status": artifact["status"],
+                "recommended_owner_policy": artifact["recommended_owner_policy"],
                 "does_not_authorize_live_execution": True,
             }
-            for packet in deep_dive_packets
+            for artifact in deep_dive_artifacts
         ],
     }
 
 
-def _residual_uncertainties(group: str, source_packet: dict[str, Any]) -> list[str]:
+def _residual_uncertainties(group: str, source_artifact: dict[str, Any]) -> list[str]:
     if group == "BRF-001":
         return [
             "latest would_enter forward outcome remains insufficient for promotion",
@@ -470,7 +489,7 @@ def _residual_uncertainties(group: str, source_packet: dict[str, Any]) -> list[s
             "RequiredFacts are not live-authority facts",
         ]
     if group == "BTPC-001":
-        attribution = _as_dict(source_packet.get("btpc_attribution"))
+        attribution = _as_dict(source_artifact.get("btpc_attribution"))
         return [
             f"live_required_fact_gap_count={_int(attribution.get('live_required_fact_gap_count'))}",
             f"source_attachment_pending_count={_int(attribution.get('source_attachment_pending_count'))}",
@@ -492,7 +511,7 @@ def _residual_uncertainties(group: str, source_packet: dict[str, Any]) -> list[s
         return [
             "merge target is unresolved",
             "forward quality is mixed relative to MI",
-            "independent admission is not justified by this packet",
+            "independent admission is not justified by this review artifact",
         ]
     if group == "MPG-001":
         return [
@@ -504,67 +523,41 @@ def _residual_uncertainties(group: str, source_packet: dict[str, Any]) -> list[s
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_review_only_deep_dive",
-        "remote_interaction_count": 0,
-        "server_files_mutated": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "approaches_real_order": False,
-    }
+    return review_only_interaction("L0_local_review_only_deep_dive")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "local_review_only": True,
-        "server_interaction": False,
-        "server_files_mutated": False,
-        "strategy_parameters_changed": False,
-        "registry_authority_changed": False,
-        "tier_policy_changed": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "mpg_member_live_scope_expanded": False,
-        "l4_real_order_scope_expanded": False,
-        "shadow_candidate_created": False,
-        "execution_intent_created": False,
-        "final_gate_called": False,
-        "operation_layer_called": False,
-        "order_created": False,
-        "exchange_write_called": False,
-        "real_order_authority": False,
-        "preview_or_replay_treated_as_live_signal": False,
-    }
+    return review_only_safety_invariants(
+        include_order_sizing_changed=True,
+        include_authority_mirrors=False,
+    )
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
         "## StrategyGroup Review-Only Deep-Dive Wave",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Evidence packets: `{len(packet['deep_dive_packets'])}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Deep-dive artifacts: `{len(artifact['deep_dive_artifacts'])}`",
         "- Owner policy confirmation required: "
-        + _yes_no(packet["owner_decision_package"]["owner_policy_confirmation_required_now"]),
+        + _yes_no(artifact["owner_policy_package"]["owner_policy_confirmation_required_now"]),
         "- Runtime Owner intervention required: "
-        + _yes_no(packet["owner_decision_package"]["runtime_owner_intervention_required"]),
-        "- Real order authority: 否",
+        + _yes_no(artifact["owner_policy_package"]["runtime_owner_intervention_required"]),
         f"- Output: `{output_json}`",
         "",
         "## Deep-Dive Results",
         "",
-        "| StrategyGroup | Diagnostic conclusion | Recommended Owner decision | Live permission |",
+        "| StrategyGroup | Diagnostic conclusion | Recommended Owner policy | Live permission |",
         "| --- | --- | --- | --- |",
     ]
-    for item in packet["deep_dive_packets"]:
+    for item in artifact["deep_dive_artifacts"]:
         lines.append(
             "| "
             + " | ".join(
                 [
                     f"`{item['strategy_group_id']}`",
                     str(item["diagnostic_conclusion"]),
-                    f"`{item['recommended_owner_decision']}`",
+                    f"`{item['recommended_owner_policy']}`",
                     "`false`",
                 ]
             )
@@ -582,9 +575,9 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _owner_decision_markdown(packet: dict[str, Any], output_path: Path) -> str:
+def _owner_policy_markdown(artifact: dict[str, Any], output_path: Path) -> str:
     lines = [
-        "## StrategyGroup Deep-Dive Owner Decision Package",
+        "## StrategyGroup Deep-Dive Owner Policy Package",
         "",
         "- 主链路: 等待可执行机会",
         "- 策略复核层: 六条线已深挖完成",
@@ -593,27 +586,27 @@ def _owner_decision_markdown(packet: dict[str, Any], output_path: Path) -> str:
         "- Runtime Owner 介入: 否",
         f"- Output: `{output_path}`",
         "",
-        "## Decision Cards",
+        "## Policy Policy items",
         "",
         "| StrategyGroup | 推荐决策 | 备选项 | 不授权 |",
         "| --- | --- | --- | --- |",
     ]
-    for card in packet["owner_decision_package"]["cards"]:
+    for policy_item in artifact["owner_policy_package"]["items"]:
         lines.append(
             "| "
             + " | ".join(
                 [
-                    f"`{card['strategy_group_id']}`",
-                    f"`{card['default_recommendation']}`",
-                    ", ".join(f"`{item}`" for item in card["options"]),
+                    f"`{policy_item['strategy_group_id']}`",
+                    f"`{policy_item['default_recommendation']}`",
+                    ", ".join(f"`{item}`" for item in policy_item["options"]),
                     "真实下单 / 提权 / registry admission",
                 ]
             )
             + " |"
         )
     lines.extend(["", "## Questions", ""])
-    for card in packet["owner_decision_package"]["cards"]:
-        lines.append(f"- `{card['strategy_group_id']}`: {card['question']}")
+    for policy_item in artifact["owner_policy_package"]["items"]:
+        lines.append(f"- `{policy_item['strategy_group_id']}`: {policy_item['question']}")
     return "\n".join(lines) + "\n"
 
 

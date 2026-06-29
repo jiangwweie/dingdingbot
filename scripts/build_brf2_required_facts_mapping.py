@@ -13,10 +13,25 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from src.domain.required_facts_readiness import (  # noqa: E402
+    RequiredFactDisableSpec,
+    RequiredFactObservationSpec,
+)
+from strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_TRIAL_ASSET_ADMISSION_PROPOSAL_JSON = (
     REPO_ROOT
@@ -123,6 +138,17 @@ REQUIRED_FACTS = [
     },
 ]
 
+ACCEPTED_REQUIRED_FACT_STATES = {
+    "closed_1h_ohlcv": ("fresh", "present", "ready"),
+    "closed_5m_ohlcv": ("fresh", "present", "ready"),
+    "rally_context": ("bear_or_weak_reclaim", "ready", "weak_rally"),
+    "rally_failure_trigger_state": ("active", "confirmed", "ready"),
+    "short_squeeze_risk_state": ("bounded", "clear", "clear_or_bounded"),
+    "strong_reclaim_disable_state": ("clear", "false", "inactive"),
+    "liquidity_downshift_state": ("clear", "false", "inactive"),
+    "spread_liquidity_state": ("acceptable", "normal", "ready"),
+}
+
 DISABLE_FACTS = [
     {
         "fact_key": "short_squeeze_risk_state",
@@ -166,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_brf2_required_facts_mapping(
+    artifact = build_brf2_required_facts_mapping(
         trial_asset_admission_proposal=_read_optional_json(
             Path(args.trial_asset_admission_proposal_json)
         ),
@@ -176,24 +202,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, artifact)
+    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_id": packet["strategy_group_id"],
-                "required_facts_mapping_ready": packet[
+                "status": artifact["status"],
+                "strategy_group_id": artifact["strategy_group_id"],
+                "required_facts_mapping_ready": artifact[
                     "required_facts_mapping_ready"
                 ],
-                "after_next_state": packet["after_next_state"],
+                "after_next_state": artifact["after_next_state"],
                 "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
         )
     )
-    return 0 if packet["status"] == "brf2_required_facts_mapping_ready" else 2
+    return 0 if artifact["status"] == "brf2_required_facts_mapping_ready" else 2
 
 
 def build_brf2_required_facts_mapping(
@@ -203,8 +229,8 @@ def build_brf2_required_facts_mapping(
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     proposal = _as_dict((trial_asset_admission_proposal or {}).get("proposal"))
-    policy_packet = brf2_owner_trial_policy_scope or {}
-    policy_recorded = _policy_recorded(policy_packet)
+    policy_artifact = brf2_owner_trial_policy_scope or {}
+    policy_recorded = _policy_recorded(policy_artifact)
     proposal_ready = (
         proposal.get("strategy_group_id") == "BRF2-001"
         and proposal.get("owner_policy_recorded") is True
@@ -212,6 +238,8 @@ def build_brf2_required_facts_mapping(
     )
     mapping_ready = policy_recorded and proposal_ready
     blockers = [] if mapping_ready else _blockers(policy_recorded, proposal_ready)
+    observation_specs = _required_fact_observation_specs()
+    disable_specs = _disable_fact_observation_specs()
     return {
         "schema": SCHEMA,
         "scope": "brf2_required_facts_mapping_for_armed_observation",
@@ -228,9 +256,9 @@ def build_brf2_required_facts_mapping(
         "required_facts_mapping_ready": mapping_ready,
         "fresh_signal_rule": FRESH_SIGNAL_RULE,
         "required_facts": REQUIRED_FACTS,
-        "required_fact_keys": [fact["fact_key"] for fact in REQUIRED_FACTS],
+        "required_fact_observation_specs": observation_specs,
         "disable_facts": DISABLE_FACTS,
-        "disable_fact_keys": [fact["fact_key"] for fact in DISABLE_FACTS],
+        "disable_fact_observation_specs": disable_specs,
         "block_conditions": [
             {
                 "condition": f"{fact['fact_key']}_missing_or_stale",
@@ -248,11 +276,11 @@ def build_brf2_required_facts_mapping(
         "armed_observation_entry_criteria": {
             "owner_policy_recorded": policy_recorded,
             "trial_asset_admission_proposal_ready": proposal_ready,
-            "all_required_fact_keys_mapped": mapping_ready,
+            "all_required_fact_observation_specs_mapped": mapping_ready,
             "disable_fact_blockers_mapped": mapping_ready,
             "fresh_signal_rule_mapped": mapping_ready,
         },
-        "next_action": (
+        "mapping_checkpoint": (
             "continue_brf2_armed_observation_until_fresh_signal"
             if mapping_ready
             else "close_brf2_required_facts_mapping_for_armed_observation"
@@ -270,12 +298,6 @@ def build_brf2_required_facts_mapping(
             "fresh_signal_rule_mapped": mapping_ready,
             "required_fact_count": len(REQUIRED_FACTS),
             "disable_fact_count": len(DISABLE_FACTS),
-            "actionable_now": False,
-            "real_order_authority": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
         },
         "interaction": _interaction(),
         "safety_invariants": _safety_invariants(),
@@ -291,42 +313,63 @@ def _blockers(policy_recorded: bool, proposal_ready: bool) -> list[str]:
     return blockers or ["required_facts_mapping_gap"]
 
 
-def _policy_recorded(packet: dict[str, Any]) -> bool:
-    policy = _as_dict(packet.get("policy"))
+def _required_fact_observation_specs() -> list[dict[str, Any]]:
+    return [
+        RequiredFactObservationSpec(
+            key=str(fact["fact_key"]),
+            accepted_statuses=ACCEPTED_REQUIRED_FACT_STATES[str(fact["fact_key"])],
+        ).as_signal_observation_spec()
+        for fact in REQUIRED_FACTS
+    ]
+
+
+def _disable_fact_observation_specs() -> list[dict[str, Any]]:
+    return [
+        RequiredFactDisableSpec(
+            key=str(fact["fact_key"]),
+            active_statuses=tuple(
+                sorted({str(item).lower() for item in fact["blocks_when"]})
+            ),
+            blocker=str(fact["blocker"]),
+        ).as_signal_disable_spec()
+        for fact in DISABLE_FACTS
+    ]
+
+
+def _policy_recorded(policy_artifact: dict[str, Any]) -> bool:
+    policy = _as_dict(policy_artifact.get("policy"))
     return (
-        packet.get("status") == "brf2_owner_trial_policy_scope_recorded"
-        and packet.get("brf2_policy_scope_recorded") is True
-        and packet.get("owner_policy_scope_missing") is False
+        policy_artifact.get("status") == "brf2_owner_trial_policy_scope_recorded"
+        and policy_artifact.get("brf2_policy_scope_recorded") is True
+        and policy_artifact.get("owner_policy_scope_missing") is False
         and policy.get("strategy_group_id") == "BRF2-001"
     )
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
         "## BRF2 RequiredFacts Mapping",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Generated: `{artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
-        f"- StrategyGroup: `{packet['strategy_group_id']}`",
-        f"- Current stage: `{packet['current_stage']}`",
-        f"- After next state: `{packet['after_next_state']}`",
-        f"- Mapping ready: `{_yes_no(packet['required_facts_mapping_ready'])}`",
-        f"- Actionable now: `{_yes_no(False)}`",
-        f"- Real order authority: `{_yes_no(False)}`",
+        f"- StrategyGroup: `{artifact['strategy_group_id']}`",
+        f"- Current stage: `{artifact['current_stage']}`",
+        f"- After next state: `{artifact['after_next_state']}`",
+        f"- Mapping ready: `{_yes_no(artifact['required_facts_mapping_ready'])}`",
         "",
         "## Fresh Signal",
         "",
-        f"- Signal id: `{packet['fresh_signal_rule']['signal_id']}`",
-        f"- Side: `{packet['fresh_signal_rule']['side']}`",
-        f"- Timeframes: `{', '.join(packet['fresh_signal_rule']['timeframes'])}`",
+        f"- Signal id: `{artifact['fresh_signal_rule']['signal_id']}`",
+        f"- Side: `{artifact['fresh_signal_rule']['side']}`",
+        f"- Timeframes: `{', '.join(artifact['fresh_signal_rule']['timeframes'])}`",
         "",
         "## Required Facts",
         "",
         "| Fact | Class | Source | Missing Behavior |",
         "| --- | --- | --- | --- |",
     ]
-    for fact in packet["required_facts"]:
+    for fact in artifact["required_facts"]:
         lines.append(
             "| `{}` | `{}` | `{}` | `{}` |".format(
                 fact["fact_key"],
@@ -349,32 +392,17 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_brf2_required_facts_mapping",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_brf2_required_facts_mapping")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "registry_authority_changed": False,
-        "tier_policy_changed": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "withdrawal_or_transfer_created": False,
-    }
+    return non_executing_safety_invariants(
+        (
+            "registry_authority_changed",
+            "tier_policy_changed",
+        ),
+        include_authority_mirrors=False,
+    )
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

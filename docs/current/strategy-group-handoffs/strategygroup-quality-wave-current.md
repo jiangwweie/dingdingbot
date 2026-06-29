@@ -9,9 +9,9 @@ last_verified: 2026-06-20
 
 ## 目的
 
-这份质量治理波次不是单策略报告。它把 BTPC / VCB / LSR / BRF / RBR 的 registry、tier review、Decision Ledger、handoff、replay、RequiredFacts 和本地 monitor 覆盖合并成一张可推进矩阵。
+这份质量治理波次不是单策略报告，也不是主判断源。它把 BTPC / VCB / LSR / BRF / RBR 的 registry、tier review、Strategy Asset State、handoff、replay、RequiredFacts 和本地 monitor 覆盖整理为质量证据 provenance。
 
-静态质量治理不授权实盘。Owner 风险接受可以影响 trial 或 tier policy 路径，但不能把 `actionable_now` 置为 true，也不能绕过运行时安全门。
+当前策略资产判断以 `strategy_asset_state.asset_rows` 为主；本波次只保留质量证据、gap 分类和审计覆盖。静态质量治理不授权实盘。Owner 风险接受可以影响 trial 或 tier policy 路径，但不能绕过运行时安全门。
 
 ## 总览
 
@@ -43,7 +43,7 @@ last_verified: 2026-06-20
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `fact_source_gap` / `classifier_gap`
 - 下一证据: classifier_fact_source_revision_review:BTPC-001_classifier_fact_source_revision_review
-- 不晋级原因: current ledger requires revision before any tier change
+- 不晋级原因: capture_gap_audit:BTPC remains blocked by stale/fact-source attribution despite Signal Observation priority; would_enter:0 high_priority_no_action:169 would_enter_forward_positive:0 missed_no_action_forward_positive:155; source_recommendation:revise
 - 下一工程 checkpoint: `complete_fact_source_and_classifier_revision_guard`
 
 ### `VCB-001` 波动压缩突破
@@ -55,7 +55,7 @@ last_verified: 2026-06-20
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
 - 下一证据: VCB-001_continue_observe_only
-- 不晋级原因: current ledger supports continued observation, not tier promotion
+- 不晋级原因: capture_gap_audit:current windows mostly fail compression breakout; keep classifier redesign as P1; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:keep_observing
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_VCB-001`
 
 ### `LSR-001` 流动性扫盘/短线复活
@@ -67,7 +67,7 @@ last_verified: 2026-06-20
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
 - 下一证据: classifier_fact_source_revision_review:LSR-001_classifier_fact_source_revision_review
-- 不晋级原因: current ledger requires revision before any tier change
+- 不晋级原因: capture_gap_audit:side-specific rewrite remains the dominant blocker; would_enter:2 high_priority_no_action:167 would_enter_forward_positive:2 missed_no_action_forward_positive:0; source_recommendation:revise
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_LSR-001`
 
 ### `BRF-001` 熊市反弹失败
@@ -79,7 +79,7 @@ last_verified: 2026-06-20
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `stale_or_missing_artifact_gap` / `replay_quality_gap`
 - 下一证据: promotion_evidence_review_only:BRF-001_forward_outcome_and_requiredfacts_review
-- 不晋级原因: current ledger does not provide live-scope authority
+- 不晋级原因: capture_gap_audit:official live_market windows produced BRF would_enter; review RequiredFacts and squeeze classifier before any tier change; would_enter:7 high_priority_no_action:162 would_enter_forward_positive:5 missed_no_action_forward_positive:134; source_recommendation:promote_review
 - 下一工程 checkpoint: `create_or_accept_explicit_missing_handoff_boundary_for_BRF-001`
 
 ### `RBR-001` 区间边界回归
@@ -91,7 +91,7 @@ last_verified: 2026-06-20
 - Owner policy action required: `false`
 - 主要 gap / 次要 gap: `parked_low_priority_gap` / `replay_quality_gap`
 - 下一证据: material_new_edge_evidence_before_reactivation
-- 不晋级原因: current ledger parks this StrategyGroup until new evidence
+- 不晋级原因: capture_gap_audit:parked vocabulary lane unless materially new positive forward evidence appears; would_enter:0 high_priority_no_action:0 would_enter_forward_positive:0 missed_no_action_forward_positive:0; source_recommendation:park
 - 下一工程 checkpoint: `keep_parked_until_material_new_edge_evidence`
 
 ## 权限边界

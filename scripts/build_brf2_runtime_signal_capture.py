@@ -13,10 +13,28 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from src.domain.required_facts_readiness import (  # noqa: E402
+    RequiredFactDisableSpec,
+    RequiredFactObservationSpec,
+    assess_required_fact_observation,
+    required_fact_disable_specs_from_rows,
+    required_fact_observation_specs_from_rows,
+)
+from strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_REQUIRED_FACTS_MAPPING_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-required-facts-mapping.json"
@@ -36,26 +54,6 @@ DEFAULT_OUTPUT_MD = (
 
 SCHEMA = "brc.brf2_runtime_signal_capture.v1"
 
-ACCEPTED_FACT_STATES = {
-    "closed_1h_ohlcv": {"ready", "present", "fresh"},
-    "closed_5m_ohlcv": {"ready", "present", "fresh"},
-    "rally_context": {"bear_or_weak_reclaim", "weak_rally", "ready"},
-    "rally_failure_trigger_state": {"confirmed", "ready", "active"},
-    "short_squeeze_risk_state": {"clear", "bounded", "clear_or_bounded"},
-    "strong_reclaim_disable_state": {"false", "clear", "inactive"},
-    "liquidity_downshift_state": {"false", "clear", "inactive"},
-    "spread_liquidity_state": {"acceptable", "ready", "normal"},
-}
-
-DISABLE_ACTIVE_STATES = {
-    "short_squeeze_risk_state": {"red", "unbounded", "unknown"},
-    "strong_reclaim_disable_state": {"true", "active"},
-    "rally_extension_invalidates_failure_state": {"true", "active"},
-    "liquidity_downshift_state": {"true", "active"},
-    "spread_liquidity_state": {"missing", "wide_spread", "thin_volume", "unknown"},
-}
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -68,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_brf2_runtime_signal_capture(
+    artifact = build_brf2_runtime_signal_capture(
         required_facts_mapping=_read_optional_json(
             Path(args.required_facts_mapping_json)
         ),
@@ -77,23 +75,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, artifact)
+    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_id": packet["strategy_group_id"],
-                "signal_state": packet["signal_detector_preview"][
+                "status": artifact["status"],
+                "strategy_group_id": artifact["strategy_group_id"],
+                "signal_state": artifact["signal_detector_preview"][
                     "current_signal_state"
                 ],
-                "fact_input_present": packet["fact_input_present"],
-                "watcher_tick_present": packet["watcher_tick_present"],
-                "fresh_signal_present": packet["signal_detector_preview"][
+                "fact_input_present": artifact["fact_input_present"],
+                "watcher_tick_present": artifact["watcher_tick_present"],
+                "fresh_signal_present": artifact["signal_detector_preview"][
                     "fresh_signal_present"
                 ],
-                "candidate_packet_ready": packet["candidate_packet_shape"][
-                    "candidate_packet_ready"
+                "shadow_candidate_shape_ready": artifact["shadow_candidate_shape"][
+                    "shadow_candidate_ready"
                 ],
                 "output_json": str(output_json),
             },
@@ -101,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if packet["status"] == "brf2_runtime_signal_capture_ready" else 2
+    return 0 if artifact["status"] == "brf2_runtime_signal_capture_ready" else 2
 
 
 def build_brf2_runtime_signal_capture(
@@ -120,23 +118,21 @@ def build_brf2_runtime_signal_capture(
     fact_input_status = str(fact_input.get("status") or "missing")
     fact_input_present = _fact_input_present(fact_input, facts)
     watcher_tick_present = fact_input.get("watcher_tick_present") is True
-    required_fact_keys = [
-        str(item)
-        for item in required_facts_mapping.get("required_fact_keys") or []
-        if str(item)
-    ]
-    disable_fact_keys = [
-        str(item)
-        for item in required_facts_mapping.get("disable_fact_keys") or []
-        if str(item)
-    ]
+    required_fact_specs = required_fact_observation_specs_from_rows(
+        required_facts_mapping.get("required_fact_observation_specs") or []
+    )
+    required_fact_keys = [spec.key for spec in required_fact_specs]
+    disable_fact_specs = required_fact_disable_specs_from_rows(
+        required_facts_mapping.get("disable_fact_observation_specs") or []
+    )
+    disable_fact_keys = [spec.key for spec in disable_fact_specs]
     required_status = [
-        _fact_status(fact_key, facts.get(fact_key), required=True)
-        for fact_key in required_fact_keys
+        _required_fact_status(spec, facts.get(spec.key))
+        for spec in required_fact_specs
     ]
     disable_status = [
-        _fact_status(fact_key, facts.get(fact_key), required=False)
-        for fact_key in disable_fact_keys
+        _disable_fact_status(spec, facts.get(spec.key))
+        for spec in disable_fact_specs
     ]
     missing_required = [
         row["fact_key"]
@@ -213,7 +209,7 @@ def build_brf2_runtime_signal_capture(
             "current_signal_state": current_signal_state,
             "first_blocker_class": first_blocker["class"],
             "first_blocker_owner": first_blocker["owner"],
-            "next_action": first_blocker["next_action"],
+            "signal_capture_checkpoint": first_blocker["repair_checkpoint"],
             "required_fact_status": required_status,
             "disable_fact_status": disable_status,
             "missing_required_fact_keys": missing_required,
@@ -228,29 +224,14 @@ def build_brf2_runtime_signal_capture(
             "blocked_fact_count": len(missing_required) + len(active_disable),
             "blocker_owner": first_blocker["owner"],
         },
-        "candidate_packet_shape": {
-            "candidate_packet_ready": fresh_signal_present,
-            "candidate_packet_type": "brf2_non_executing_short_signal_candidate",
+        "shadow_candidate_shape": {
+            "shadow_candidate_ready": fresh_signal_present,
+            "shadow_candidate_type": (
+                "brf2_non_executing_short_signal_candidate_evidence"
+            ),
             "strategy_group_id": "BRF2-001",
             "side": "short",
             "signal_id": str(fresh_signal_rule.get("signal_id") or ""),
-            "would_bind_required_facts": required_fact_keys,
-            "would_bind_disable_facts": disable_fact_keys,
-            "required_next_chain": [
-                "live_watcher_signal_packet_id",
-                "required_facts_readiness_packet_id",
-                "candidate_authorization_evidence",
-                "action_time_finalgate_packet_id",
-                "operation_layer_submit_authorization_id",
-            ],
-            "forbidden_until_action_time": [
-                "actionable_now",
-                "real_order_authority",
-                "finalgate_call",
-                "operation_layer_call",
-                "exchange_write",
-                "order_creation",
-            ],
             "fact_authority": fact_authority,
             "fact_authority_boundary": fact_authority_boundary,
         },
@@ -258,59 +239,54 @@ def build_brf2_runtime_signal_capture(
             "mapping_ready": mapping_ready,
             "fact_input_present": fact_input_present,
             "watcher_tick_present": watcher_tick_present,
-            "fact_input_status_ready": fact_input_status
-            == "brf2_runtime_signal_facts_ready",
-            "watcher_scope_ready": detector_ready,
-            "signal_detector_preview_ready": detector_ready,
-            "no_action_attribution_ready": detector_ready,
-            "candidate_packet_shape_ready": detector_ready,
             "fresh_signal_present": fresh_signal_present,
             "missing_required_fact_count": len(missing_required),
             "active_disable_fact_count": len(active_disable),
-            "actionable_now": False,
-            "real_order_authority": False,
-            "action_time_required_facts_satisfied": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
         },
         "interaction": _interaction(),
         "safety_invariants": _safety_invariants(),
     }
 
 
-def _fact_status(
-    fact_key: str,
+def _required_fact_status(
+    spec: RequiredFactObservationSpec,
     fact: dict[str, Any] | None,
-    *,
-    required: bool,
+) -> dict[str, Any]:
+    raw_state = _normalized_state(fact) if fact else ""
+    fresh = (
+        bool(fact)
+        and fact.get("fresh") is not False
+        and fact.get("stale") is not True
+    )
+    return assess_required_fact_observation(
+        fact_key=spec.key,
+        fact_present=bool(fact),
+        raw_status=raw_state,
+        fresh=fresh,
+        accepted_statuses=spec.accepted_statuses,
+    ).as_signal_observation_row()
+
+
+def _disable_fact_status(
+    spec: RequiredFactDisableSpec,
+    fact: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if not fact:
         return {
-            "fact_key": fact_key,
+            "fact_key": spec.key,
             "state": "missing",
             "raw_state": "",
             "fresh": False,
         }
     raw_state = _normalized_state(fact)
     fresh = fact.get("fresh") is not False and fact.get("stale") is not True
-    if not fresh:
-        state = "stale"
-    elif required:
-        state = (
-            "satisfied"
-            if raw_state in ACCEPTED_FACT_STATES.get(fact_key, {"ready"})
-            else "not_satisfied"
-        )
-    else:
-        state = (
-            "disable_active"
-            if raw_state in DISABLE_ACTIVE_STATES.get(fact_key, set())
-            else "clear"
-        )
+    state = (
+        "disable_active"
+        if raw_state in spec.active_statuses
+        else "clear"
+    )
     return {
-        "fact_key": fact_key,
+        "fact_key": spec.key,
         "state": state,
         "raw_state": raw_state,
         "fresh": fresh,
@@ -327,8 +303,8 @@ def _normalized_state(fact: dict[str, Any]) -> str:
     return "ready" if fact.get("ready") is True else ""
 
 
-def _facts_by_key(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    facts = packet.get("facts", packet)
+def _facts_by_key(source_artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    facts = source_artifact.get("facts", source_artifact)
     if isinstance(facts, dict):
         return {str(key): _as_dict(value) for key, value in facts.items()}
     if isinstance(facts, list):
@@ -343,25 +319,25 @@ def _facts_by_key(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _fact_input_present(
-    packet: dict[str, Any],
+    source_artifact: dict[str, Any],
     facts: dict[str, dict[str, Any]],
 ) -> bool:
-    if packet.get("status") == "brf2_runtime_signal_facts_missing_watcher_input":
+    if source_artifact.get("status") == "brf2_runtime_signal_facts_missing_watcher_input":
         return False
-    if packet.get("fact_input_present") is False:
+    if source_artifact.get("fact_input_present") is False:
         return False
-    return packet.get("fact_input_present") is True or bool(facts)
+    return source_artifact.get("fact_input_present") is True or bool(facts)
 
 
-def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
-    context = _as_dict(packet.get("source_signal_context"))
+def _signal_context(source_artifact: dict[str, Any]) -> dict[str, Any]:
+    context = _as_dict(source_artifact.get("source_signal_context"))
     if not context:
-        context = _as_dict(packet.get("signal_context"))
+        context = _as_dict(source_artifact.get("signal_context"))
     if not context:
         context = {
-            key: packet.get(key)
+            key: source_artifact.get(key)
             for key in (
-                "signal_packet_id",
+                "signal_observation_id",
                 "runtime_instance_id",
                 "symbol",
                 "exchange_symbol",
@@ -373,10 +349,10 @@ def _signal_context(packet: dict[str, Any]) -> dict[str, Any]:
                 "source_candidate_id",
                 "source_signal_type",
             )
-            if packet.get(key) not in {None, ""}
+            if source_artifact.get(key) not in {None, ""}
         }
     return {
-        "signal_packet_id": str(context.get("signal_packet_id") or ""),
+        "signal_observation_id": str(context.get("signal_observation_id") or ""),
         "runtime_instance_id": str(context.get("runtime_instance_id") or ""),
         "symbol": str(context.get("symbol") or ""),
         "exchange_symbol": str(context.get("exchange_symbol") or ""),
@@ -401,51 +377,49 @@ def _first_blocker(
         return {
             "class": "brf2_required_facts_mapping_not_ready",
             "owner": "engineering",
-            "next_action": "build_brf2_required_facts_mapping",
+            "repair_checkpoint": "build_brf2_required_facts_mapping",
         }
     if not fact_input_present:
         return {
             "class": "brf2_watcher_fact_input_missing",
             "owner": "engineering",
-            "next_action": "attach_brf2_watcher_fact_input_producer",
+            "repair_checkpoint": "attach_brf2_watcher_fact_input_producer",
         }
     if active_disable:
         return {
             "class": f"{active_disable[0]}_disable_active",
             "owner": "market",
-            "next_action": "continue_brf2_armed_observation_until_disable_clears",
+            "repair_checkpoint": "continue_brf2_armed_observation_until_disable_clears",
         }
     if missing_required:
         return {
             "class": "fresh_brf2_short_signal_absent",
             "owner": "market",
-            "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+            "repair_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
         }
     return {
         "class": "brf2_fresh_short_signal_present_non_executing",
         "owner": "runtime",
-        "next_action": "build_brf2_non_executing_candidate_packet",
+        "repair_checkpoint": "build_brf2_shadow_candidate_evidence",
     }
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
-    preview = packet["signal_detector_preview"]
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
+    preview = artifact["signal_detector_preview"]
     lines = [
         "## BRF2 Runtime Signal Capture",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Generated: `{artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
-        f"- StrategyGroup: `{packet['strategy_group_id']}`",
-        f"- Fact input present: `{_yes_no(packet.get('fact_input_present') is True)}`",
-        f"- Watcher tick present: `{_yes_no(packet.get('watcher_tick_present') is True)}`",
+        f"- StrategyGroup: `{artifact['strategy_group_id']}`",
+        f"- Fact input present: `{_yes_no(artifact.get('fact_input_present') is True)}`",
+        f"- Watcher tick present: `{_yes_no(artifact.get('watcher_tick_present') is True)}`",
         f"- Signal state: `{preview['current_signal_state']}`",
         f"- First blocker: `{preview['first_blocker_class']}`",
-        f"- Candidate packet ready: `{_yes_no(packet['candidate_packet_shape']['candidate_packet_ready'])}`",
-        f"- Fact authority: `{packet.get('fact_authority') or 'none'}`",
+        f"- Shadow candidate shape ready: `{_yes_no(artifact['shadow_candidate_shape']['shadow_candidate_ready'])}`",
+        f"- Fact authority: `{artifact.get('fact_authority') or 'none'}`",
         "- Action-time RequiredFacts satisfied: `否`",
-        f"- Actionable now: `{_yes_no(False)}`",
-        f"- Real order authority: `{_yes_no(False)}`",
         "",
         "## No-Action Attribution",
         "",
@@ -454,41 +428,25 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         "",
         "## Boundary",
         "",
-        "- This packet is watcher-facing and non-executing.",
+        "- This artifact is watcher-facing and non-executing.",
         "- Read-only observation facts can classify armed observation, but cannot satisfy action-time submit facts.",
         "- It does not call FinalGate, Operation Layer, or exchange write.",
-        "- A fresh signal here can only prepare the next non-executing candidate packet shape.",
+        "- A fresh signal here can only prepare the next non-executing shadow-candidate evidence shape.",
     ]
     return "\n".join(lines) + "\n"
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_brf2_runtime_signal_capture",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_brf2_runtime_signal_capture")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "candidate_created": False,
-        "execution_intent_created": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "withdrawal_or_transfer_created": False,
-    }
+    return non_executing_safety_invariants(
+        (
+            "candidate_created",
+        ),
+        include_authority_mirrors=False,
+    )
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

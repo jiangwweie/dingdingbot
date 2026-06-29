@@ -10,7 +10,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.runtime_live_position_monitor import (
-    RuntimeLivePositionMonitorPacket,
+    RuntimeLivePositionMonitorArtifact,
     RuntimeLivePositionMonitorStatus,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
@@ -67,14 +67,14 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
             "time_stop_review_only",
         ]
     )
-    runner_exit_automation: Literal["review_packet_only_first_stage"] = (
-        "review_packet_only_first_stage"
+    runner_exit_automation: Literal["review_evidence_only_first_stage"] = (
+        "review_evidence_only_first_stage"
     )
     runner_stop_update_authority: Literal["none_in_first_stage"] = (
         "none_in_first_stage"
     )
     runner_exit_review_required: Literal[True] = True
-    recommended_owner_decision: str
+    recommended_recovery_action: str
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -108,7 +108,7 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
 def build_runtime_position_exit_plan(
     *,
     runtime: StrategyRuntimeInstance,
-    monitor: RuntimeLivePositionMonitorPacket,
+    monitor: RuntimeLivePositionMonitorArtifact,
     local_open_orders: list[Any],
     exchange_open_stop_orders: list[Any],
     market_rule: Mapping[str, Any] | None,
@@ -249,7 +249,7 @@ def build_runtime_position_exit_plan(
         market_min_qty=min_qty,
         market_qty_step=qty_step,
         tp1_quantity_feasible=feasible,
-        recommended_owner_decision=recommended,
+        recommended_recovery_action=recommended,
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
         metadata={
@@ -263,7 +263,7 @@ def build_runtime_position_exit_plan(
                 "atr_trailing_review_only",
                 "time_stop_review_only",
             ],
-            "runner_exit_automation": "review_packet_only_first_stage",
+            "runner_exit_automation": "review_evidence_only_first_stage",
             "runner_stop_update_authority": "none_in_first_stage",
             "full_reduce_only_close_is_risk_reducing_under_standing_authorization": (
                 full_close_feasible
