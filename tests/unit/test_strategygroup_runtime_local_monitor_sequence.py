@@ -4526,6 +4526,46 @@ def test_local_monitor_sequence_brf2_runtime_signal_capture_projection_preserves
     )
 
 
+def test_local_monitor_sequence_brf2_runtime_signal_capture_projection_preserves_disable_blocker() -> None:
+    module = _load_module()
+    artifact = {
+        "status": "brf2_runtime_signal_capture_ready",
+        "strategy_group_id": "BRF2-001",
+        "fact_input_status": "brf2_runtime_signal_facts_ready",
+        "watcher_scope": {
+            "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
+        },
+        "signal_detector_preview": {
+            "fact_input_present": True,
+            "watcher_tick_present": True,
+            "current_signal_state": "blocked_by_disable_fact",
+            "fresh_signal_present": False,
+            "first_blocker_class": "short_squeeze_risk_state_disable_active",
+            "first_blocker_owner": "market",
+            "signal_capture_checkpoint": (
+                "continue_brf2_armed_observation_until_disable_clears"
+            ),
+            "missing_required_fact_keys": ["short_squeeze_risk_state"],
+            "active_disable_fact_keys": ["short_squeeze_risk_state"],
+        },
+        "no_action_attribution": {"blocked_fact_count": 2},
+        "shadow_candidate_shape": {"shadow_candidate_ready": False},
+    }
+
+    projection = module._sequence_brf2_runtime_signal_capture_summary(artifact)
+
+    assert projection["current_signal_state"] == "blocked_by_disable_fact"
+    assert projection["first_blocker_class"] == (
+        "short_squeeze_risk_state_disable_active"
+    )
+    assert projection["first_blocker_owner"] == "market"
+    assert projection["signal_capture_checkpoint"] == (
+        "continue_brf2_armed_observation_until_disable_clears"
+    )
+    assert projection["active_disable_fact_count"] == 1
+    assert projection["blocked_fact_count"] == 2
+
+
 def test_local_monitor_sequence_brf2_shadow_evidence_projection_is_provenance() -> None:
     module = _load_module()
     artifact = {
@@ -4567,6 +4607,38 @@ def test_local_monitor_sequence_brf2_shadow_evidence_projection_is_provenance() 
         assert removed_projection_field not in projection.as_dict()
     assert projection.as_dict() == (
         module._sequence_brf2_shadow_candidate_evidence_summary(artifact)
+    )
+
+
+def test_local_monitor_sequence_brf2_shadow_evidence_projection_preserves_disable_blocker() -> None:
+    module = _load_module()
+    artifact = {
+        "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
+        "strategy_group_id": "BRF2-001",
+        "shadow_candidate_evidence_ready": False,
+        "shadow_candidate_evidence": {
+            "shadow_candidate_evidence_id": "",
+            "signal_state": "blocked_by_disable_fact",
+        },
+        "first_blocker": {
+            "class": "short_squeeze_risk_state_disable_active",
+            "owner": "market",
+        },
+        "next_runtime_step": (
+            "continue_brf2_armed_observation_until_disable_clears"
+        ),
+    }
+
+    projection = module._sequence_brf2_shadow_candidate_evidence_summary(artifact)
+
+    assert projection["active"] is True
+    assert projection["signal_state"] == "blocked_by_disable_fact"
+    assert projection["first_blocker_class"] == (
+        "short_squeeze_risk_state_disable_active"
+    )
+    assert projection["first_blocker_owner"] == "market"
+    assert projection["next_runtime_step"] == (
+        "continue_brf2_armed_observation_until_disable_clears"
     )
 
 

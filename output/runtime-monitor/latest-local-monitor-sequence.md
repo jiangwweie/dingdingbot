@@ -32,12 +32,12 @@
 - BRF2 runtime signal facts: `brf2_runtime_signal_facts_ready`
 - BRF2 fact input / watcher tick: `是` / `是`
 - BRF2 runtime signal capture: `brf2_runtime_signal_capture_ready`
-- BRF2 signal state: `fresh_signal_absent`
-- BRF2 signal first blocker: `fresh_brf2_short_signal_absent` / `market`
+- BRF2 signal state: `blocked_by_disable_fact`
+- BRF2 signal first blocker: `short_squeeze_risk_state_disable_active` / `market`
 - BRF2 shadow candidate shape ready: `否`
 - BRF2 shadow candidate evidence: `brf2_shadow_candidate_evidence_waiting_for_fresh_signal`
 - BRF2 shadow evidence ready: `否`
-- BRF2 shadow evidence first blocker: `fresh_brf2_short_signal_absent` / `market`
+- BRF2 shadow evidence first blocker: `short_squeeze_risk_state_disable_active` / `market`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
