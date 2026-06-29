@@ -108,7 +108,7 @@
     "strategy_group_id": "BRF2-001"
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-29T14:12:30.416713+00:00",
+  "generated_at_utc": "2026-06-29T15:00:11.172000+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -377,7 +377,7 @@
       "decision_rows_count": 13,
       "july_bullish_rebound_trade_path_closure": {
         "capital_scope_uses_action_time_exchange_available_balance": true,
-        "cpm_mapping_gap_removed_from_first_blockers": false,
+        "cpm_mapping_gap_removed_from_first_blockers": true,
         "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
         "long_side_path_count": 3,
         "machine_consumed_path_count": 5,
@@ -1258,7 +1258,7 @@
     "decision_rows_count": 13,
     "july_bullish_rebound_trade_path_closure": {
       "capital_scope_uses_action_time_exchange_available_balance": true,
-      "cpm_mapping_gap_removed_from_first_blockers": false,
+      "cpm_mapping_gap_removed_from_first_blockers": true,
       "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
       "long_side_path_count": 3,
       "machine_consumed_path_count": 5,
@@ -1278,8 +1278,8 @@
     "top_after_next_state": "live_submit_ready",
     "top_blocker_owner": "market",
     "top_decision": "not_tradable_market_wait",
-    "top_first_blocker_class": "fresh_brf2_short_signal_absent",
+    "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
     "top_strategy_group_id": "BRF2-001",
-    "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_fresh_signal"
+    "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
   }
 }

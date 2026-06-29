@@ -1,7 +1,7 @@
 ## StrategyGroup Tradeability Decision
 
 - Status: `tradeability_decision_ready`
-- Generated: `2026-06-29T14:49:28.187939+00:00`
+- Generated: `2026-06-29T15:01:21.490919+00:00`
 - Output JSON: `output/runtime-monitor/latest-strategygroup-tradeability-decision.json`
 - Decision rows: `13`
 - Tradable now: `0`

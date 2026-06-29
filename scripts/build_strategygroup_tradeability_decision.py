@@ -1569,9 +1569,26 @@ def _trade_path_state(
         next_action = "continue_official_live_submit_chain"
         post_action_expected_state = "execution_attempt"
     elif row_classifier["decision"] == "not_tradable_market_wait":
-        first_blocker = spec["first_blocker"]
+        row_first_blocker = row_classifier["first_blocker_class"]
+        generic_market_wait_blockers = {
+            "fresh_executable_signal_absent",
+            "fresh_strategy_signal_absent",
+        }
+        inherit_row_market_blocker = (
+            bool(row_first_blocker)
+            and row_first_blocker not in generic_market_wait_blockers
+            and not row_first_blocker.startswith("fresh_")
+        )
+        if inherit_row_market_blocker:
+            first_blocker = row_first_blocker
+        else:
+            first_blocker = spec["first_blocker"]
         blocker_owner = row_classifier["blocker_owner"]
-        next_action = spec["next_action"]
+        next_action = (
+            row_classifier["next_action"]
+            if inherit_row_market_blocker
+            else spec["next_action"]
+        )
         post_action_expected_state = row_classifier["after_next_state"]
     else:
         first_blocker = row_classifier["first_blocker_class"]

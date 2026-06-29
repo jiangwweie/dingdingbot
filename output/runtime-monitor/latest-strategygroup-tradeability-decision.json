@@ -368,8 +368,8 @@
               "squeeze_risk_state_clear"
             ]
           },
-          "first_blocker": "fresh_brf2_short_signal_absent",
-          "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+          "first_blocker": "short_squeeze_risk_state_disable_active",
+          "next_action": "continue_brf2_armed_observation_until_disable_clears",
           "path_id": "BRF2-SHORT",
           "post_action_expected_state": "live_submit_ready",
           "priority": "P2",
@@ -1698,7 +1698,7 @@
       "trade_paths": []
     }
   ],
-  "generated_at_utc": "2026-06-29T14:49:28.187939+00:00",
+  "generated_at_utc": "2026-06-29T15:01:21.490919+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -1849,8 +1849,8 @@
             "squeeze_risk_state_clear"
           ]
         },
-        "first_blocker": "fresh_brf2_short_signal_absent",
-        "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+        "first_blocker": "short_squeeze_risk_state_disable_active",
+        "next_action": "continue_brf2_armed_observation_until_disable_clears",
         "path_id": "BRF2-SHORT",
         "post_action_expected_state": "live_submit_ready",
         "priority": "P2",
