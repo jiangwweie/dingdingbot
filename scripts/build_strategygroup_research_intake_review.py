@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build a main-control review for strategy-research intake candidates.
 
-This command consumes a research-only tiny-live intake packet and converts it
+This command consumes a research-only controlled-live intake packet and converts it
 into a final-side review artifact. It absorbs strategy assets for review,
-paper observation, and role coverage only. It does not grant tiny-live
+paper observation, and role coverage only. It does not grant controlled-live
 readiness, runtime authority, FinalGate input, Operation Layer input, exchange
 writes, tier-policy changes, live-profile changes, or order-sizing changes.
 """
@@ -439,7 +439,7 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
             "## Boundary",
             "",
             "- Main control absorbs strategy assets, RequiredFacts drafts, disable/review facts, risk envelope, path-risk evidence, and review mapping.",
-            "- Main control does not absorb tiny-live readiness, actionable authority, FinalGate input, Operation Layer input, live profile change, tier policy change, or exchange write permission.",
+            "- Main control does not absorb controlled-live readiness, actionable authority, FinalGate input, Operation Layer input, live profile change, tier policy change, or exchange write permission.",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"

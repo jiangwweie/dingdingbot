@@ -84,7 +84,7 @@ TINY_LIVE_PROFILE = {
 
 
 PROFILE_NAME = "tiny_live_50u_eth"
-DESCRIPTION = "50U engineering tiny-live rehearsal — ETH LONG-only, 1x leverage, 1 trade/day max"
+DESCRIPTION = "controlled-subaccount engineering rehearsal — ETH LONG-only, 1x leverage, 1 trade/day max"
 
 
 def print_profile_summary():

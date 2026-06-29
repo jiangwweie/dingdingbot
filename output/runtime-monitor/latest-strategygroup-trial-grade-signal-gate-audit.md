@@ -1,9 +1,9 @@
 ## Trial-Grade Signal Gate Audit
 
 - Status: `trial_grade_signal_gate_audit_ready`
-- Generated: `2026-06-23T12:25:43.729753+00:00`
+- Generated: `2026-06-29T11:31:03.805811+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json`
-- Scope: `30U bounded trial only`
+- Scope: `controlled subaccount live scope`
 - Actionable now: `否`
 - Real order authority: `否`
 

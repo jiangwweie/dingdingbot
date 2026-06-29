@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-23
+last_verified: 2026-06-29
 ---
 
 # Owner Runtime Operating Model
@@ -16,6 +16,11 @@ enable StrategyGroup
 -> Owner intervenes only when intervention is requested
 -> Owner reviews outcomes later
 ```
+
+The product default is live-trading first and audit second. Audit exists to
+explain what the system did, what it missed, and what should change after the
+fact. It should not become the normal path that prevents a scoped controlled-subaccount
+experiment from reaching an official execution attempt.
 
 ## Authority Split
 
@@ -79,7 +84,7 @@ monitor integration, runtime readiness, or a non-authority engineering defect,
 the system and agents should continue engineering progress instead of escalating
 ordinary process work to the Owner.
 
-Execution frictions in the small-capital pilot are engineering lifecycle
+Execution frictions in the controlled-subaccount pilot are engineering lifecycle
 branches first and live calibration questions second. Fill probability, coarse
 slippage, reject handling, partial-fill handling, protection acceptance,
 reconciliation, settlement, and PnL calculation should be modeled, tested, and
@@ -185,7 +190,7 @@ and what would promote, downshift, park, or kill it.
 
 | Field | Owner meaning |
 | --- | --- |
-| `trial_eligible` | This StrategyGroup may be considered for small-capital trial eligibility under scoped policy |
+| `trial_eligible` | This StrategyGroup may be considered for controlled-subaccount trial eligibility under scoped policy |
 | `actionable_now` | Fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account, and exchange facts currently allow action |
 
 No fresh signal makes `actionable_now=false`. It does not automatically make
@@ -195,14 +200,14 @@ the StrategyGroup a bad strategy or remove its trial eligibility.
 
 | Field | Owner meaning |
 | --- | --- |
-| `tiny_live_intake_candidate` | Main control may review this as a small-capital experimental asset |
+| `tiny_live_intake_candidate` | Main control may review this as a controlled-subaccount experimental asset |
 | `trial_asset_admission_candidate` | Main control is preparing registry, policy, facts, and risk-envelope admission |
 | `admitted_trial_asset` | The strategy exists as a final-owned trial asset, still without action-time order authority |
 | `armed_observation` | The system may observe it under scoped runtime rules |
 | `tiny_live_ready` | Non-executing readiness is closed; a future fresh signal still needs action-time gates |
 
 Owner approval may move a strategy through policy-dependent stages. It cannot
-turn research evidence, intake status, or tiny-live readiness into current
+turn research evidence, intake status, or controlled-live readiness into current
 `actionable_now`.
 
 ## Runtime Product State

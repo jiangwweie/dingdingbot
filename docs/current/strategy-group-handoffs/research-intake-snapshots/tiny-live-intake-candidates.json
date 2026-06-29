@@ -155,7 +155,7 @@
       "required_for_intake": true
     },
     {
-      "description": "There is enough historical evidence to justify small-capital experimentation.",
+      "description": "There is enough historical evidence to justify controlled-subaccount experimentation.",
       "id": "edge_evidence_exists",
       "required_for_intake": true
     },
@@ -185,7 +185,7 @@
     "evaluation_contract": "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md",
     "leverage_scenario": "1x through 5x are scenarios for path, liquidation, loss-envelope, and sensitivity review; they are not automatic authorization or automatic disqualification.",
     "right_tail_aspiration_anchor": "100% / 90d 100% is an aspiration and priority anchor, not a hard intake gate.",
-    "tiny_live_intake_candidate": "A strategy asset that main control may ingest for small-capital experimental review. It is not actionable_now, not FinalGate input, and not exchange execution authority.",
+    "tiny_live_intake_candidate": "A strategy asset that main control may ingest for controlled-subaccount experimental review. It is not actionable_now, not FinalGate input, and not exchange execution authority.",
     "tiny_live_ready": "A stricter downstream runtime state that still belongs to main control and requires official gates."
   },
   "main_control_handoff": {
@@ -197,7 +197,7 @@
       "do_not_change_order_sizing_defaults",
       "do_not_exchange_write"
     ],
-    "status_line": "BRF2 and RBR2 reached tiny-live intake candidate status as research assets; neither is tiny-live ready or execution authority."
+    "status_line": "BRF2 and RBR2 reached controlled-live intake candidate status as research assets; neither is controlled-live ready or execution authority."
   },
   "schema": "brc.strategy_research_tiny_live_intake_candidates.v1",
   "scope": "strategy_research_only",
@@ -209,7 +209,7 @@
       "BRF2-001",
       "RBR2-001"
     ],
-    "interpretation": "At least two strategy directions reached tiny-live intake candidate status, but neither has execution readiness or runtime authority.",
+    "interpretation": "At least two strategy directions reached controlled-live intake candidate status, but neither has execution readiness or runtime authority.",
     "not_tiny_live_ready_count": 2,
     "objective_met": true
   }

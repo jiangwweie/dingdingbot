@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controlled tiny-live bridge to local runtime cycle proof.
+"""Controlled-live bridge to local runtime cycle proof.
 
 RTF-102 composes:
 
@@ -378,7 +378,7 @@ def _safety_invariants(
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a controlled tiny-live bridge to local runtime cycle proof."
+            "Build a controlled-live bridge to local runtime cycle proof."
         )
     )
     parser.add_argument(

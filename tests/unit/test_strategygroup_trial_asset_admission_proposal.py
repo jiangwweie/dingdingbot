@@ -29,6 +29,27 @@ def _load_module():
 def _bridge() -> dict:
     return {
         "status": "capital_trial_readiness_bridge_ready",
+        "capital_trial_eligibility_rows": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "candidate_status": "identity_review_before_trial_prepare",
+                "pool_stage": "identity_candidate_review",
+                "symbol_scope": ["ETH/USDT:USDT"],
+                "side_scope": ["short", "long"],
+                "recent_opportunity_count": 18,
+                "would_enter_forward_positive_count": 13,
+                "tradable_forward_count": 13,
+                "ranking_score": 161,
+                "trial_blockers": [
+                    "registry_identity_or_registry_row_missing",
+                    "owner_policy_scope_not_confirmed",
+                    "owner_capital_scope_not_confirmed",
+                    "fresh_signal_absent",
+                ],
+                "actionable_now": False,
+                "real_order_authority": False,
+            }
+        ],
         "selected_non_mpg_trial_candidate": {
             "strategy_group_id": "BRF2-001",
             "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
@@ -75,10 +96,11 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
             "capital_scope": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
@@ -86,16 +108,18 @@ def _owner_policy_scope() -> dict:
             "symbol_scope": "brf2_research_supported_symbols_only",
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
                 "final_authority": "runtime_profile_and_action_time_exchange_facts",
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
@@ -142,6 +166,32 @@ def test_trial_asset_admission_proposal_promotes_engineering_to_owner_policy():
     assert packet["interaction"]["calls_operation_layer"] is False
     assert packet["interaction"]["calls_exchange_write"] is False
 
+    proposals = {
+        row["strategy_group_id"]: row for row in packet["additional_proposals"]
+    }
+    cpm = proposals["CPM-RO-001"]
+    evidence = cpm["absorbed_observation_evidence"]
+    assert cpm["proposed_stage"] == "trial_asset_admission_candidate"
+    assert cpm["owner_policy_recorded"] is True
+    assert cpm["owner_policy_scope_missing"] is False
+    assert cpm["next_action"] == (
+        "build_cpm_required_facts_mapping_and_runtime_watcher_scope"
+    )
+    assert cpm["after_next_state"] == "armed_observation"
+    assert evidence["market_move_detected"] is True
+    assert evidence["observe_only_would_enter_detected"] is True
+    assert evidence["strategy_group_id"] == "CPM-RO-001"
+    assert evidence["symbol"] == "ETH/USDT"
+    assert evidence["runtime_symbol"] == "ETH/USDT:USDT"
+    assert evidence["side"] == "short"
+    assert evidence["event_count"] == 4
+    assert evidence["current_authority"] == "observe_only"
+    assert evidence["not_order"] is True
+    assert evidence["no_order_permission"] is True
+    assert evidence["no_execution_permission"] is True
+    assert packet["checks"]["cpm_proposal_generated"] is True
+    assert packet["checks"]["cpm_observe_only_evidence_absorbed"] is True
+
 
 def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
     module = _load_module()
@@ -165,9 +215,11 @@ def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
     )
     assert proposal["after_next_state"] == "armed_observation"
     assert proposal["owner_policy_defaults"]["trial_identity"] == (
-        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+        "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     )
-    assert proposal["owner_policy_defaults"]["max_notional"]["amount"] == "150"
+    assert proposal["owner_policy_defaults"]["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert packet["owner_policy_checkpoint"]["owner_policy_required"] is False
     assert packet["owner_policy_checkpoint"]["owner_policy_recorded"] is True
     assert packet["checks"]["owner_policy_scope_missing"] is False

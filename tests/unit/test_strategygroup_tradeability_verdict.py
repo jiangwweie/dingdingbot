@@ -93,6 +93,39 @@ def _capital_trial_bridge() -> dict:
                 "real_order_authority": False,
             },
             {
+                "strategy_group_id": "CPM-RO-001",
+                "candidate_family": "portfolio_capture_gap",
+                "candidate_status": "identity_review_before_trial_prepare",
+                "identity_status": "identity_review_required",
+                "pool_stage": "identity_candidate_review",
+                "symbol_scope": ["ETH/USDT:USDT"],
+                "side_scope": ["short", "long"],
+                "recent_opportunity_count": 18,
+                "would_enter_forward_positive_count": 13,
+                "tradable_forward_count": 13,
+                "ranking_score": 161,
+                "trial_recommendation": "defer_until_identity_or_merge_review_closed",
+                "risk_boundary_missing": [
+                    "capital_scope",
+                    "max_notional",
+                    "valid_until",
+                    "slippage_limit",
+                    "trial_identity",
+                ],
+                "trial_blockers": [
+                    "registry_identity_or_registry_row_missing",
+                    "execution_tier_not_in_policy_or_registry",
+                    "formal_candidate_vs_sub_capability_vs_observe_asset_unresolved",
+                    "owner_policy_scope_not_confirmed",
+                    "owner_capital_scope_not_confirmed",
+                    "fresh_signal_absent",
+                    "action_time_finalgate_not_reached",
+                    "official_operation_layer_not_reached",
+                ],
+                "actionable_now": False,
+                "real_order_authority": False,
+            },
+            {
                 "strategy_group_id": "RBR2-001",
                 "candidate_family": "short_research_intake",
                 "research_intake_position": "role_only_intake_candidate",
@@ -244,6 +277,45 @@ def _trial_asset_admission_proposal() -> dict:
             "actionable_now": False,
             "real_order_authority": False,
         },
+        "additional_proposals": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "current_stage": "identity_candidate_review",
+                "proposed_stage": "trial_asset_admission_candidate",
+                "owner_policy_required": False,
+                "owner_policy_recorded": True,
+                "owner_policy_scope_missing": False,
+                "next_action": (
+                    "build_cpm_required_facts_mapping_and_runtime_watcher_scope"
+                ),
+                "after_next_state": "armed_observation",
+                "runtime_admission_plan": {
+                    "required_facts_draft": [
+                        "closed_1h_ohlcv",
+                        "closed_4h_ohlcv",
+                        "cpm_short_htf_trend_state",
+                    ],
+                    "disable_or_review_facts_draft": [
+                        "trend_flip_disable_state",
+                    ],
+                },
+                "absorbed_observation_evidence": {
+                    "market_move_detected": True,
+                    "observe_only_would_enter_detected": True,
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETH/USDT",
+                    "runtime_symbol": "ETH/USDT:USDT",
+                    "side": "short",
+                    "event_count": 4,
+                    "current_authority": "observe_only",
+                    "not_order": True,
+                    "no_order_permission": True,
+                    "no_execution_permission": True,
+                },
+                "actionable_now": False,
+                "real_order_authority": False,
+            }
+        ],
         "checks": {
             "owner_policy_blocker_present": True,
             "owner_decision_required": False,
@@ -288,10 +360,11 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
             "capital_scope": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
@@ -299,16 +372,18 @@ def _owner_policy_scope() -> dict:
             "symbol_scope": "brf2_research_supported_symbols_only",
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
                 "final_authority": "runtime_profile_and_action_time_exchange_facts",
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
@@ -327,7 +402,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
             "MPG-001": {
                 "stage": "armed_observation",
                 "runtime_readiness": {
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -339,7 +414,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
                     "armed_observation_ready": True,
                     "tiny_live_ready": False,
                     "live_submit_ready": False,
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -360,7 +435,7 @@ def _three_strategy_portfolio_with_brf2_armed_observation() -> dict:
             "SOR-001": {
                 "stage": "armed_observation",
                 "runtime_readiness": {
-                    "trial_grade_30u_standby_ready": True,
+                    "controlled_live_standby_ready": True,
                     "stage_5_waiting_live_opportunity_ready": True,
                     "action_time_preflight_pending_fresh_signal": True,
                 },
@@ -560,6 +635,47 @@ def test_tradeability_verdict_advances_brf2_to_policy_blocker_after_proposal():
     assert packet["checks"]["owner_decision_required"] is False
 
 
+def test_tradeability_verdict_advances_cpm_to_facts_blocker_after_admission_proposal():
+    module = _load_module()
+
+    packet = module.build_tradeability_verdict(
+        capital_trial_bridge=_capital_trial_bridge(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        live_submit_readiness=_live_submit_readiness(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["verdict_rows"]}
+    cpm = rows["CPM-RO-001"]
+    assert cpm["stage"] == "trial_asset_admission_candidate"
+    assert cpm["verdict"] == "not_tradable_facts"
+    assert cpm["first_blocker_class"] == "cpm_required_facts_mapping_gap"
+    assert cpm["blocker_owner"] == "engineering"
+    assert cpm["next_action"] == (
+        "build_cpm_required_facts_mapping_and_runtime_watcher_scope"
+    )
+    assert cpm["after_next_state"] == "armed_observation"
+    assert cpm["required_facts_status"] == "missing"
+    assert cpm["runtime_scope_status"]["trial_asset_admission_proposal_ready"] is True
+    assert cpm["runtime_scope_status"]["owner_policy_recorded"] is True
+    assert cpm["runtime_scope_status"]["observe_only_evidence_absorbed"] is True
+    assert cpm["runtime_scope_status"][
+        "latest_observe_only_would_enter_event_count"
+    ] == 4
+    assert cpm["evidence_snapshot"]["absorbed_observe_only_event_count"] == 4
+    assert cpm["evidence_snapshot"]["absorbed_observe_only_symbol"] == (
+        "ETH/USDT"
+    )
+    assert cpm["evidence_snapshot"]["absorbed_observe_only_side"] == "short"
+    assert cpm["actionable_now"] is False
+    assert cpm["real_order_authority"] is False
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert packet["summary"]["real_order_authority_count"] == 0
+
+
 def test_tradeability_verdict_advances_brf2_to_facts_blocker_after_policy_recorded():
     module = _load_module()
 
@@ -587,10 +703,14 @@ def test_tradeability_verdict_advances_brf2_to_facts_blocker_after_policy_record
     assert brf2["runtime_scope_status"]["owner_policy_recorded"] is True
     assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
     assert brf2["runtime_scope_status"]["brf2_trial_identity"] == (
-        "BRF2_TINY_SHORT_TRIAL_30U_V0"
+        "BRF2_CONTROLLED_SHORT_TRIAL_V0"
     )
-    assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
-    assert brf2["policy_scope"]["max_notional"]["amount"] == "150"
+    assert brf2["policy_scope"]["capital_scope"]["amount_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert brf2["policy_scope"]["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     secondary = {row["blocker"] for row in brf2["secondary_blockers"]}
     resolved = {row["blocker"] for row in brf2["resolved_blockers"]}
     assert "owner_capital_scope_not_confirmed" not in secondary
@@ -636,7 +756,7 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
     )
     assert brf2["after_next_state"] == "live_submit_ready"
     assert brf2["required_facts_status"] == "ready"
-    assert brf2["signal_grade_status"]["trial_grade_30u_standby_ready"] is True
+    assert brf2["signal_grade_status"]["controlled_live_standby_ready"] is True
     assert (
         brf2["signal_grade_status"]["stage_5_waiting_live_opportunity_ready"]
         is True
@@ -644,7 +764,7 @@ def test_tradeability_verdict_moves_brf2_to_market_wait_after_mapping():
     assert brf2["actionable_now"] is False
     assert brf2["real_order_authority"] is False
     assert packet["summary"]["tradable_now_count"] == 0
-    assert packet["summary"]["trial_grade_30u_standby_count"] == 3
+    assert packet["summary"]["controlled_live_standby_count"] == 3
     assert packet["summary"]["stage_5_waiting_live_opportunity_ready_count"] == 3
     assert packet["checks"]["market_wait_only_after_admission"] is True
 

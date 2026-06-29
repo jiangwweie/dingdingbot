@@ -1730,6 +1730,19 @@ def build_local_monitor_sequence_report(
             "trial_asset_admission_next_action": trial_admission_summary[
                 "next_action"
             ],
+            "cpm_trial_asset_admission_candidate": (
+                trial_admission_summary["cpm_proposed_stage"]
+                == "trial_asset_admission_candidate"
+            ),
+            "cpm_trial_admission_next_action": trial_admission_summary[
+                "cpm_next_action"
+            ],
+            "cpm_trial_admission_after_next_state": trial_admission_summary[
+                "cpm_after_next_state"
+            ],
+            "cpm_observe_only_event_count": trial_admission_summary[
+                "cpm_observe_only_event_count"
+            ],
             "brf2_owner_policy_recorded": brf2_policy_summary[
                 "owner_policy_recorded"
             ],
@@ -1827,8 +1840,20 @@ def build_local_monitor_sequence_report(
             "stage_5_status": three_strategy_portfolio_summary[
                 "stage_5_status"
             ],
-            "trial_grade_30u_standby_count": three_strategy_portfolio_summary[
-                "trial_grade_30u_standby_count"
+            "controlled_live_standby_count": three_strategy_portfolio_summary[
+                "controlled_live_standby_count"
+            ],
+            "cpm_live_trial_portfolio_candidate": three_strategy_portfolio_summary[
+                "cpm_live_trial_portfolio_candidate"
+            ],
+            "cpm_replaces_existing_seat": three_strategy_portfolio_summary[
+                "cpm_replaces_existing_seat"
+            ],
+            "cpm_portfolio_first_blocker_class": three_strategy_portfolio_summary[
+                "cpm_first_blocker_class"
+            ],
+            "cpm_portfolio_next_action": three_strategy_portfolio_summary[
+                "cpm_next_action"
             ],
             "action_time_preflight_pending_fresh_signal": (
                 three_strategy_portfolio_summary[
@@ -1856,8 +1881,8 @@ def build_local_monitor_sequence_report(
             "tradeability_tradable_now_count": tradeability_summary[
                 "tradable_now_count"
             ],
-            "tradeability_trial_grade_30u_standby_count": tradeability_summary[
-                "trial_grade_30u_standby_count"
+            "tradeability_controlled_live_standby_count": tradeability_summary[
+                "controlled_live_standby_count"
             ],
             "tradeability_stage_5_waiting_live_opportunity_ready_count": (
                 tradeability_summary[
@@ -1866,6 +1891,27 @@ def build_local_monitor_sequence_report(
             ),
             "tradeability_real_order_authority_count": tradeability_summary[
                 "real_order_authority_count"
+            ],
+            "cpm_tradeability_present": tradeability_summary["cpm_present"],
+            "cpm_tradeability_stage": tradeability_summary["cpm_stage"],
+            "cpm_tradeability_verdict": tradeability_summary["cpm_verdict"],
+            "cpm_tradeability_first_blocker_class": tradeability_summary[
+                "cpm_first_blocker_class"
+            ],
+            "cpm_tradeability_blocker_owner": tradeability_summary[
+                "cpm_blocker_owner"
+            ],
+            "cpm_tradeability_next_action": tradeability_summary[
+                "cpm_next_action"
+            ],
+            "cpm_tradeability_after_next_state": tradeability_summary[
+                "cpm_after_next_state"
+            ],
+            "cpm_tradeability_required_facts_status": tradeability_summary[
+                "cpm_required_facts_status"
+            ],
+            "cpm_tradeability_live_trial_portfolio_candidate": tradeability_summary[
+                "cpm_live_trial_portfolio_candidate"
             ],
             "trial_grade_signal_gate_audit_ready": (
                 trial_grade_signal_gate_audit_summary["ready"]
@@ -1888,19 +1934,19 @@ def build_local_monitor_sequence_report(
                     "hard_safety_gates_relaxed"
                 ]
             ),
-            "trial_grade_brf2_would_enter_30u_trial_if_same_structure": (
+            "trial_grade_brf2_would_enter_controlled_live_trial_if_same_structure": (
                 trial_grade_signal_gate_audit_summary[
                     "tomorrow_same_structure"
                 ].get("BRF2-001")
                 is True
             ),
-            "trial_grade_mpg_would_enter_30u_trial_if_same_structure": (
+            "trial_grade_mpg_would_enter_controlled_live_trial_if_same_structure": (
                 trial_grade_signal_gate_audit_summary[
                     "tomorrow_same_structure"
                 ].get("MPG-001")
                 is True
             ),
-            "trial_grade_sor_would_enter_30u_trial_if_same_structure": (
+            "trial_grade_sor_would_enter_controlled_live_trial_if_same_structure": (
                 trial_grade_signal_gate_audit_summary[
                     "tomorrow_same_structure"
                 ].get("SOR-001")
@@ -2670,6 +2716,7 @@ def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
 def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
     proposal = _as_dict(packet.get("proposal"))
     checkpoint = _as_dict(packet.get("owner_policy_checkpoint"))
+    cpm = _as_dict(packet.get("cpm_trial_admission_checkpoint"))
     return {
         "status": _status(packet) or "missing",
         "active": _status(packet) == "trial_asset_admission_proposal_ready",
@@ -2682,6 +2729,14 @@ def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
         ],
         "next_action": str(proposal.get("next_action") or ""),
         "after_next_state": str(proposal.get("after_next_state") or ""),
+        "proposal_count": _int(_as_dict(packet.get("checks")).get("proposal_count")),
+        "cpm": cpm,
+        "cpm_strategy_group_id": str(cpm.get("strategy_group_id") or ""),
+        "cpm_current_stage": str(cpm.get("current_stage") or ""),
+        "cpm_proposed_stage": str(cpm.get("proposed_stage") or ""),
+        "cpm_next_action": str(cpm.get("next_action") or ""),
+        "cpm_after_next_state": str(cpm.get("after_next_state") or ""),
+        "cpm_observe_only_event_count": _int(cpm.get("observe_only_event_count")),
         "actionable_now": False,
         "real_order_authority": False,
     }
@@ -2841,6 +2896,16 @@ def _sequence_brf2_candidate_packet_summary(
 def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
     seats = _as_dict(packet.get("seat_readiness"))
     selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
+    additional_candidates = _dict_rows(packet.get("additional_live_trial_candidates"))
+    cpm_candidate = next(
+        (
+            row
+            for row in additional_candidates
+            if row.get("strategy_group_id") == "CPM-RO-001"
+        ),
+        {},
+    )
+    cpm_blocker = _as_dict(cpm_candidate.get("first_blocker"))
     blocker_rows = [
         _as_dict(_as_dict(seats.get(strategy_id)).get("first_blocker"))
         for strategy_id in selected
@@ -2861,7 +2926,7 @@ def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[s
             packet.get("stage_5_live_opportunity_standby")
         ).get("ready")
         is True,
-        "trial_grade_30u_standby_count": _int(
+        "controlled_live_standby_count": _int(
             _as_dict(packet.get("stage_5_live_opportunity_standby")).get(
                 "standby_count"
             )
@@ -2889,6 +2954,23 @@ def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[s
             for blocker in blocker_rows
         ),
         "next_bottlenecks": _as_dict(packet.get("next_engineering_bottleneck")),
+        "additional_candidate_count": len(additional_candidates),
+        "cpm_live_trial_portfolio_candidate": bool(cpm_candidate),
+        "cpm_replaces_existing_seat": cpm_candidate.get(
+            "does_not_displace_existing_three_standby"
+        )
+        is False,
+        "cpm_stage": str(cpm_candidate.get("stage") or ""),
+        "cpm_first_blocker_class": str(
+            cpm_blocker.get("first_blocker_class") or ""
+        ),
+        "cpm_blocker_owner": str(cpm_blocker.get("blocker_owner") or ""),
+        "cpm_next_action": str(cpm_blocker.get("next_action") or ""),
+        "cpm_observe_only_event_count": _int(
+            _as_dict(cpm_candidate.get("absorbed_observation_evidence")).get(
+                "event_count"
+            )
+        ),
         "actionable_now": False,
         "real_order_authority": False,
     }
@@ -2903,6 +2985,14 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
         if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
             top_row = row
             break
+    cpm_row = next(
+        (
+            row
+            for row in verdict_rows
+            if str(row.get("strategy_group_id") or "") == "CPM-RO-001"
+        ),
+        {},
+    )
     row_count = _int(summary.get("row_count"))
     row_count_matches_verdict_rows = row_count == len(verdict_rows)
     return {
@@ -2912,8 +3002,8 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "verdict_rows_count": len(verdict_rows),
         "row_count_matches_verdict_rows": row_count_matches_verdict_rows,
         "tradable_now_count": _int(summary.get("tradable_now_count")),
-        "trial_grade_30u_standby_count": _int(
-            summary.get("trial_grade_30u_standby_count")
+        "controlled_live_standby_count": _int(
+            summary.get("controlled_live_standby_count")
         ),
         "stage_5_waiting_live_opportunity_ready_count": _int(
             summary.get("stage_5_waiting_live_opportunity_ready_count")
@@ -2930,6 +3020,25 @@ def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "top_next_action": str(summary.get("top_next_action") or "missing"),
         "top_blocker_owner": str(top_row.get("blocker_owner") or "unknown"),
         "top_after_next_state": str(top_row.get("after_next_state") or "unknown"),
+        "cpm_present": bool(cpm_row),
+        "cpm_stage": str(cpm_row.get("stage") or ""),
+        "cpm_verdict": str(cpm_row.get("verdict") or ""),
+        "cpm_first_blocker_class": str(cpm_row.get("first_blocker_class") or ""),
+        "cpm_blocker_owner": str(cpm_row.get("blocker_owner") or ""),
+        "cpm_next_action": str(cpm_row.get("next_action") or ""),
+        "cpm_after_next_state": str(cpm_row.get("after_next_state") or ""),
+        "cpm_required_facts_status": str(
+            cpm_row.get("required_facts_status") or ""
+        ),
+        "cpm_live_trial_portfolio_candidate": _as_dict(
+            cpm_row.get("runtime_scope_status")
+        ).get("live_trial_portfolio_candidate")
+        is True,
+        "cpm_observe_only_event_count": _int(
+            _as_dict(cpm_row.get("evidence_snapshot")).get(
+                "absorbed_observe_only_event_count"
+            )
+        ),
         "owner_decision_required": _as_dict(packet.get("checks")).get(
             "owner_decision_required"
         )
@@ -2953,7 +3062,7 @@ def _sequence_trial_grade_signal_gate_audit_summary(
         assessment = _as_dict(row.get("signal_grade_current_assessment"))
         projection = _as_dict(row.get("fixture_replay_projection"))
         tomorrow[str(strategy_group_id)] = (
-            tomorrow_row.get("would_enter_30u_trial") is True
+            tomorrow_row.get("would_enter_controlled_live_trial") is True
         )
         current_gate[str(strategy_group_id)] = str(
             assessment.get("current_gate_looks_like") or "unknown"
@@ -3225,15 +3334,18 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- RBR/RBR2 role review: `{observation_layer.get('role_review_count', 0)}`",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
-        f"- 小资金试验候选状态: `{experiment_candidate.get('status', 'missing')}`",
-        f"- 小资金试验候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
+        f"- 受控实盘候选状态: `{experiment_candidate.get('status', 'missing')}`",
+        f"- 受控实盘候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
         f"- 做空试验候选策略组: `{experiment_candidate.get('selected_short_strategy_group_id') or 'none'}`",
         f"- 晋级范围: `{experiment_candidate.get('promotion_scope') or 'not_applicable'}`",
-        f"- tiny-live ready: `{_yes_no(experiment_candidate.get('tiny_live_ready') is True)}`",
+        f"- controlled-live ready: `{_yes_no(experiment_candidate.get('tiny_live_ready') is True)}`",
         f"- 准入提案状态: `{trial_admission.get('status', 'missing')}`",
         f"- 准入提案策略组: `{trial_admission.get('strategy_group_id') or 'none'}`",
         f"- 准入提案下一状态: `{trial_admission.get('after_next_state') or 'none'}`",
         f"- Owner policy required: `{_yes_no(trial_admission.get('owner_policy_required') is True)}`",
+        f"- CPM 准入候选: `{trial_admission.get('cpm_proposed_stage') or 'none'}`",
+        f"- CPM 观察证据数: `{trial_admission.get('cpm_observe_only_event_count', 0)}`",
+        f"- CPM 准入下一动作: `{trial_admission.get('cpm_next_action') or 'none'}`",
         f"- BRF2 Owner policy recorded: `{_yes_no(brf2_policy.get('owner_policy_recorded') is True)}`",
         f"- BRF2 next blocker: `{brf2_policy.get('brf2_new_first_blocker', 'missing')}`",
         f"- BRF2 RequiredFacts mapping: `{brf2_required_facts_mapping.get('status', 'missing')}`",
@@ -3253,14 +3365,19 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
         f"- 第五阶段状态: `{three_strategy_portfolio.get('stage_5_status', 'missing')}`",
-        f"- 30U trial standby 席位: `{three_strategy_portfolio.get('trial_grade_30u_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- 受控实盘 standby 席位: `{three_strategy_portfolio.get('controlled_live_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- CPM 组合候选: `{_yes_no(three_strategy_portfolio.get('cpm_live_trial_portfolio_candidate') is True)}` / replaces existing seat `{_yes_no(three_strategy_portfolio.get('cpm_replaces_existing_seat') is True)}`",
+        f"- CPM 组合第一阻断: `{three_strategy_portfolio.get('cpm_first_blocker_class') or 'none'}` / `{three_strategy_portfolio.get('cpm_blocker_owner') or 'unknown'}`",
         f"- Fresh signal 后 action-time preflight: `{_yes_no(three_strategy_portfolio.get('action_time_preflight_pending_fresh_signal') is True)}`",
         f"- 交易资格状态: `{tradeability.get('status', 'missing')}`",
         f"- 交易资格 Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_verdict', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
         f"- 下一动作: `{tradeability.get('top_next_action', 'missing')}`",
+        f"- CPM 交易资格: `{tradeability.get('cpm_stage') or 'none'}` / `{tradeability.get('cpm_verdict') or 'none'}`",
+        f"- CPM 第一阻断: `{tradeability.get('cpm_first_blocker_class') or 'none'}` / `{tradeability.get('cpm_blocker_owner') or 'unknown'}`",
+        f"- CPM 下一动作: `{tradeability.get('cpm_next_action') or 'none'}`",
         f"- 当前可交易数量: `{tradeability.get('tradable_now_count', 0)}`",
-        f"- Tradeability trial-grade standby: `{tradeability.get('trial_grade_30u_standby_count', 0)}`",
+        f"- Tradeability trial-grade standby: `{tradeability.get('controlled_live_standby_count', 0)}`",
         f"- Trial-grade signal audit: `{trial_grade_audit.get('status', 'missing')}`",
         f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_trial_submit_count_30d', 0)}`",
         f"- Trial-grade hard gates relaxed: `{_yes_no(trial_grade_audit.get('hard_safety_gates_relaxed') is True)}`",

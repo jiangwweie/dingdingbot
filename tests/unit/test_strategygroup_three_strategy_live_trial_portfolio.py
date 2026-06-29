@@ -47,6 +47,21 @@ def _tier_policy() -> dict:
 
 def _capital_trial_bridge() -> dict:
     return {
+        "capital_trial_eligibility_rows": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "candidate_status": "identity_review_before_trial_prepare",
+                "pool_stage": "identity_candidate_review",
+                "symbol_scope": ["ETH/USDT:USDT"],
+                "side_scope": ["short", "long"],
+                "recent_opportunity_count": 18,
+                "would_enter_forward_positive_count": 13,
+                "tradable_forward_count": 13,
+                "ranking_score": 161,
+                "actionable_now": False,
+                "real_order_authority": False,
+            }
+        ],
         "selected_non_mpg_trial_candidate": {
             "strategy_group_id": "BRF2-001",
             "side_scope": ["short"],
@@ -63,6 +78,7 @@ def _capital_trial_bridge() -> dict:
 
 def _trial_admission_proposal() -> dict:
     return {
+        "status": "trial_asset_admission_proposal_ready",
         "proposal": {
             "strategy_group_id": "BRF2-001",
             "owner_policy_recorded": True,
@@ -72,7 +88,58 @@ def _trial_admission_proposal() -> dict:
                 "required_facts_draft": ["closed_1h_ohlcv", "squeeze_risk_state"],
                 "disable_or_review_facts_draft": ["short_squeeze_risk_state"],
             },
-        }
+        },
+        "additional_proposals": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "current_stage": "identity_candidate_review",
+                "proposed_stage": "trial_asset_admission_candidate",
+                "owner_policy_required": False,
+                "owner_policy_recorded": True,
+                "owner_policy_scope_missing": False,
+                "owner_policy_defaults": {
+                    "capital_scope": {
+                        "type": "isolated_subaccount_full_allocation",
+                        "allocation_mode": "full_available_isolated_subaccount",
+                        "amount_source": "action_time_exchange_available_balance",
+                        "currency": "USDT",
+                        "loss_capable": True,
+                    },
+                    "max_notional": {
+                        "currency": "USDT",
+                        "balance_source": "action_time_exchange_available_balance",
+                    },
+                    "symbol_scope": ["ETH/USDT:USDT"],
+                    "side_scope": ["short"],
+                    "leverage_scenario": "5x_scenario_not_authority",
+                    "attempt_cap": 3,
+                    "loss_unit": {
+                        "currency": "USDT",
+                        "balance_source": "action_time_exchange_available_balance",
+                    },
+                },
+                "runtime_admission_plan": {
+                    "required_facts_draft": [
+                        "closed_1h_ohlcv",
+                        "closed_4h_ohlcv",
+                        "cpm_short_htf_trend_state",
+                    ],
+                    "disable_or_review_facts_draft": [
+                        "trend_flip_disable_state",
+                    ],
+                },
+                "absorbed_observation_evidence": {
+                    "market_move_detected": True,
+                    "observe_only_would_enter_detected": True,
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETH/USDT",
+                    "runtime_symbol": "ETH/USDT:USDT",
+                    "side": "short",
+                    "event_count": 4,
+                    "current_authority": "observe_only",
+                },
+            }
+        ],
     }
 
 
@@ -83,10 +150,11 @@ def _owner_policy_scope() -> dict:
         "owner_policy_scope_missing": False,
         "policy": {
             "strategy_group_id": "BRF2-001",
-            "trial_identity": "BRF2_TINY_SHORT_TRIAL_30U_V0",
+            "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
             "capital_scope": {
                 "type": "isolated_subaccount_full_allocation",
-                "amount": "30",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
                 "currency": "USDT",
                 "loss_capable": True,
             },
@@ -94,16 +162,18 @@ def _owner_policy_scope() -> dict:
             "symbol_scope": "brf2_research_supported_symbols_only",
             "leverage_scenario": "5x_scenario_not_authority",
             "max_notional": {
-                "amount": "150",
                 "currency": "USDT",
-                "basis": "30U capital x 5x scenario",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
                 "final_authority": "runtime_profile_and_action_time_exchange_facts",
             },
             "attempt_cap": 3,
             "loss_unit": {
-                "amount": "10",
                 "currency": "USDT",
-                "basis": "30U / 3 attempts",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
             },
             "daily_loss_cap_units": 1,
             "max_consecutive_losses": 2,
@@ -188,10 +258,10 @@ def _trial_grade_signal_gate_audit() -> dict:
                 "max_loss_estimate_usdt": "30",
             },
             "tomorrow_same_structure_assessment": {
-                "would_enter_30u_trial": True,
+                "would_enter_controlled_live_trial": True,
             },
             "authority_boundary": {
-                "trial_grade_signal_can_prepare_30u_trial": True,
+                "trial_grade_signal_can_prepare_controlled_live": True,
                 "trial_grade_signal_can_bypass_hard_safety_gates": False,
             },
         }
@@ -214,7 +284,7 @@ def _trial_grade_signal_gate_audit() -> dict:
         },
         "summary": {"hard_safety_gates_relaxed": False},
         "live_trial_policy_update": {
-            "scope": "30U_bounded_trial_only",
+            "scope": "controlled_subaccount_live_scope",
             "does_not_change_production_grade_authority": True,
         },
     }
@@ -262,6 +332,26 @@ def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     assert packet["checks"]["all_seats_have_first_blocker"] is True
     assert packet["checks"]["all_seats_have_required_facts"] is True
     assert packet["checks"]["all_seats_have_review_hooks"] is True
+    assert packet["checks"]["cpm_live_trial_portfolio_candidate"] is True
+    assert packet["checks"]["cpm_replaces_existing_seat"] is False
+
+    cpm = {
+        row["strategy_group_id"]: row
+        for row in packet["additional_live_trial_candidates"]
+    }["CPM-RO-001"]
+    assert cpm["portfolio_relationship"] == "fourth_live_trial_portfolio_candidate"
+    assert cpm["does_not_displace_existing_three_standby"] is True
+    assert cpm["stage"] == "trial_asset_admission_candidate"
+    assert cpm["first_blocker"]["verdict"] == "not_tradable_facts"
+    assert cpm["first_blocker"]["first_blocker_class"] == (
+        "cpm_required_facts_mapping_gap"
+    )
+    assert cpm["first_blocker"]["blocker_owner"] == "engineering"
+    assert cpm["runtime_readiness"]["armed_observation_ready"] is False
+    assert cpm["absorbed_observation_evidence"]["event_count"] == 4
+    assert cpm["absorbed_observation_evidence"]["current_authority"] == "observe_only"
+    assert cpm["actionable_now"] is False
+    assert cpm["real_order_authority"] is False
 
     brf2 = packet["seat_readiness"]["BRF2-001"]
     assert brf2["stage"] == "admitted_trial_asset"
@@ -276,8 +366,12 @@ def test_three_strategy_portfolio_selects_mpg_brf2_and_sor():
     assert brf2["owner_policy_required"] is False
     assert brf2["owner_policy_recorded"] is True
     assert brf2["owner_policy_scope_missing"] is False
-    assert brf2["policy_scope"]["capital_scope"]["amount"] == "30"
-    assert brf2["policy_scope"]["max_notional"]["amount"] == "150"
+    assert brf2["policy_scope"]["capital_scope"]["amount_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert brf2["policy_scope"]["max_notional"]["balance_source"] == (
+        "action_time_exchange_available_balance"
+    )
     assert brf2["first_blocker"]["blocker_owner"] == "engineering"
     assert brf2["first_blocker"]["first_blocker_class"] == (
         "required_facts_mapping_gap"
@@ -335,7 +429,7 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
     )
     assert brf2["runtime_readiness"]["tiny_live_ready"] is False
     assert brf2["runtime_readiness"]["live_submit_ready"] is False
-    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is True
+    assert brf2["runtime_readiness"]["controlled_live_standby_ready"] is True
     assert (
         brf2["runtime_readiness"]["stage_5_waiting_live_opportunity_ready"] is True
     )
@@ -347,7 +441,7 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
     assert brf2["trial_grade_signal_status"]["trial_grade_audit_ready"] is True
     assert (
         brf2["trial_grade_signal_status"][
-            "trial_grade_signal_can_prepare_30u_trial"
+            "trial_grade_signal_can_prepare_controlled_live"
         ]
         is True
     )
@@ -382,8 +476,8 @@ def test_three_strategy_portfolio_moves_brf2_to_armed_observation_after_mapping(
         packet["stage_5_live_opportunity_standby"]["hard_safety_gates_relaxed"]
         is False
     )
-    assert packet["checks"]["trial_grade_30u_standby_ready"] is True
-    assert packet["checks"]["trial_grade_30u_standby_count"] == 3
+    assert packet["checks"]["controlled_live_standby_ready"] is True
+    assert packet["checks"]["controlled_live_standby_count"] == 3
     assert packet["checks"]["stage_5_waiting_live_opportunity"] is True
     assert packet["checks"]["action_time_preflight_pending_fresh_signal"] is True
     assert packet["checks"]["hard_safety_gates_relaxed"] is False
@@ -400,7 +494,7 @@ def test_three_strategy_portfolio_blocks_stage_5_when_production_authority_chang
 
     assert packet["stage_5_live_opportunity_standby"]["ready"] is False
     assert packet["stage_5_live_opportunity_standby"]["standby_count"] == 0
-    assert packet["checks"]["trial_grade_30u_standby_ready"] is False
+    assert packet["checks"]["controlled_live_standby_ready"] is False
     assert packet["seat_readiness"]["BRF2-001"]["trial_grade_signal_status"][
         "production_grade_authority_changed"
     ] is True
@@ -420,7 +514,7 @@ def test_three_strategy_portfolio_blocks_stage_5_when_hard_safety_bypass_allowed
         "standby_strategy_groups"
     ]
     assert packet["seat_readiness"]["BRF2-001"]["runtime_readiness"][
-        "trial_grade_30u_standby_ready"
+        "controlled_live_standby_ready"
     ] is False
 
 
@@ -436,7 +530,7 @@ def test_three_strategy_portfolio_blocks_stage_5_when_brf2_mapping_not_ready():
     )
 
     brf2 = packet["seat_readiness"]["BRF2-001"]
-    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is False
+    assert brf2["runtime_readiness"]["controlled_live_standby_ready"] is False
     assert brf2["runtime_readiness"]["armed_observation_ready"] is False
     assert packet["stage_5_live_opportunity_standby"]["ready"] is False
 
@@ -457,7 +551,7 @@ def test_three_strategy_portfolio_blocks_stage_5_when_audit_row_missing():
     ] is False
 
 
-def test_three_strategy_portfolio_blocks_stage_5_when_policy_scope_is_not_30u():
+def test_three_strategy_portfolio_blocks_stage_5_when_policy_scope_is_not_controlled_subaccount():
     module = _load_module()
     audit = copy.deepcopy(_trial_grade_signal_gate_audit())
     audit["live_trial_policy_update"]["scope"] = "production_trial"
@@ -468,7 +562,7 @@ def test_three_strategy_portfolio_blocks_stage_5_when_policy_scope_is_not_30u():
     assert packet["stage_5_live_opportunity_standby"][
         "trial_grade_policy_scope"
     ] == "production_trial"
-    assert packet["checks"]["trial_grade_30u_standby_count"] == 0
+    assert packet["checks"]["controlled_live_standby_count"] == 0
 
 
 def test_three_strategy_portfolio_surfaces_brf2_fact_input_gap_after_mapping():

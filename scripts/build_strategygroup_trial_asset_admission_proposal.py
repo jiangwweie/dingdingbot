@@ -37,6 +37,30 @@ DEFAULT_BRF2_OWNER_TRIAL_POLICY_SCOPE_JSON = (
 )
 
 SCHEMA = "brc.strategygroup_trial_asset_admission_proposal.v1"
+CPM_STRATEGY_GROUP_ID = "CPM-RO-001"
+CPM_LAST_NIGHT_WINDOW = "2026-06-24T18:00:00+08:00/2026-06-25T02:00:00+08:00"
+CPM_ETH_SHORT_OBSERVE_ONLY_EVENTS = [
+    "2026-06-24T21:00:00+08:00",
+    "2026-06-24T23:00:00+08:00",
+    "2026-06-25T00:00:00+08:00",
+    "2026-06-25T01:00:00+08:00",
+]
+CPM_REQUIRED_FACTS_DRAFT = [
+    "closed_1h_ohlcv",
+    "closed_4h_ohlcv",
+    "cpm_short_htf_trend_state",
+    "cpm_short_bounce_depth_state",
+    "cpm_short_loss_confirmation_state",
+    "spread_liquidity_state",
+    "funding_mark_state",
+    "protection_plan_state",
+]
+CPM_DISABLE_OR_REVIEW_FACTS_DRAFT = [
+    "strong_reclaim_disable_state",
+    "trend_flip_disable_state",
+    "wide_spread_disable_state",
+    "thin_liquidity_disable_state",
+]
 
 OWNER_POLICY_FIELDS = (
     "capital_scope",
@@ -123,9 +147,15 @@ def build_trial_asset_admission_proposal(
         strategy_group_id=strategy_group_id,
         packet=brf2_owner_trial_policy_scope or {},
     )
+    additional_proposals = _additional_proposals(
+        capital_trial_bridge=capital_trial_bridge,
+        existing_strategy_group_id=strategy_group_id,
+    )
+    proposals = [proposal] if proposal else []
+    proposals.extend(additional_proposals)
     status = (
         "trial_asset_admission_proposal_ready"
-        if proposal and not _forbidden_effects(capital_trial_bridge, trial_packet)
+        if proposals and not _forbidden_effects(capital_trial_bridge, trial_packet)
         else "trial_asset_admission_proposal_needs_input"
     )
     forbidden_effects = _forbidden_effects(capital_trial_bridge, trial_packet)
@@ -138,6 +168,9 @@ def build_trial_asset_admission_proposal(
         "generated_at_utc": generated_at_utc
         or datetime.now(timezone.utc).isoformat(),
         "proposal": proposal,
+        "proposals": proposals,
+        "additional_proposals": additional_proposals,
+        "cpm_trial_admission_checkpoint": _cpm_checkpoint(additional_proposals),
         "owner_policy_checkpoint": {
             "owner_policy_required": bool(proposal) and not owner_policy_recorded,
             "owner_policy_recorded": owner_policy_recorded,
@@ -148,6 +181,18 @@ def build_trial_asset_admission_proposal(
         },
         "checks": {
             "proposal_generated": bool(proposal),
+            "proposal_count": len(proposals),
+            "cpm_proposal_generated": any(
+                item.get("strategy_group_id") == CPM_STRATEGY_GROUP_ID
+                for item in additional_proposals
+            ),
+            "cpm_observe_only_evidence_absorbed": any(
+                _as_dict(item.get("absorbed_observation_evidence")).get(
+                    "observe_only_would_enter_detected"
+                )
+                is True
+                for item in additional_proposals
+            ),
             "registry_policy_mutated": False,
             "tier_policy_mutated": False,
             "runtime_profile_mutated": False,
@@ -173,6 +218,185 @@ def build_trial_asset_admission_proposal(
             "calls_exchange_write": False,
             "places_order": False,
         },
+    }
+
+
+def _additional_proposals(
+    *,
+    capital_trial_bridge: dict[str, Any],
+    existing_strategy_group_id: str,
+) -> list[dict[str, Any]]:
+    proposals: list[dict[str, Any]] = []
+    cpm_row = _candidate_row(capital_trial_bridge, CPM_STRATEGY_GROUP_ID)
+    if cpm_row and existing_strategy_group_id != CPM_STRATEGY_GROUP_ID:
+        proposals.append(_cpm_proposal(cpm_row))
+    return proposals
+
+
+def _candidate_row(packet: dict[str, Any], strategy_group_id: str) -> dict[str, Any]:
+    for row in _dict_rows(packet.get("capital_trial_eligibility_rows")):
+        if str(row.get("strategy_group_id") or "") == strategy_group_id:
+            return row
+    selected = _as_dict(packet.get("selected_non_mpg_trial_candidate"))
+    if str(selected.get("strategy_group_id") or "") == strategy_group_id:
+        return selected
+    return {}
+
+
+def _cpm_checkpoint(proposals: list[dict[str, Any]]) -> dict[str, Any]:
+    proposal = next(
+        (
+            item
+            for item in proposals
+            if item.get("strategy_group_id") == CPM_STRATEGY_GROUP_ID
+        ),
+        {},
+    )
+    evidence = _as_dict(proposal.get("absorbed_observation_evidence"))
+    return {
+        "active": bool(proposal),
+        "strategy_group_id": str(proposal.get("strategy_group_id") or ""),
+        "current_stage": str(proposal.get("current_stage") or ""),
+        "proposed_stage": str(proposal.get("proposed_stage") or ""),
+        "policy_scope_ready_for_trial_candidate": proposal.get(
+            "owner_policy_recorded"
+        )
+        is True,
+        "required_facts_mapping_ready": False,
+        "observe_only_would_enter_detected": evidence.get(
+            "observe_only_would_enter_detected"
+        )
+        is True,
+        "observe_only_event_count": _int(evidence.get("event_count")),
+        "next_action": str(proposal.get("next_action") or ""),
+        "after_next_state": str(proposal.get("after_next_state") or ""),
+        "actionable_now": False,
+        "real_order_authority": False,
+    }
+
+
+def _cpm_proposal(candidate: dict[str, Any]) -> dict[str, Any]:
+    symbol_scope = _string_list(candidate.get("symbol_scope")) or ["ETH/USDT:USDT"]
+    side_scope = ["short"]
+    return {
+        "strategy_group_id": CPM_STRATEGY_GROUP_ID,
+        "current_stage": str(candidate.get("pool_stage") or "identity_candidate_review"),
+        "proposed_stage": "trial_asset_admission_candidate",
+        "proposal_type": "non_applying_cpm_controlled_subaccount_trial_candidate_draft",
+        "owner_policy_required": False,
+        "owner_policy_recorded": True,
+        "owner_policy_scope_missing": False,
+        "owner_policy_scope_source": "standing_owner_controlled_subaccount_scope_for_candidate_review",
+        "owner_policy_fields": list(OWNER_POLICY_FIELDS),
+        "owner_policy_defaults": {
+            "capital_scope": {
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
+                "currency": "USDT",
+                "loss_capable": True,
+            },
+            "max_notional": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance * leverage_scenario",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation x leverage scenario",
+                "final_authority": "runtime_profile_and_action_time_exchange_facts",
+            },
+            "valid_until": "one_review_cycle",
+            "slippage_limit": "action_time_runtime_fact_required",
+            "trial_identity": "CPM_RO_ETH_SHORT_CONTROLLED_TRIAL_V0",
+            "symbol_scope": symbol_scope,
+            "side_scope": side_scope,
+            "leverage_scenario": "5x_scenario_not_authority",
+            "attempt_cap": 3,
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
+            "daily_loss_cap_units": 1,
+            "max_consecutive_losses": 2,
+            "pause_conditions": [
+                "three_attempts_without_positive_review",
+                "required_facts_stale_or_missing",
+                "protection_plan_missing",
+                "trend_flip_disable_state_true",
+            ],
+            "authority_boundary": (
+                "policy_scope_draft_only; actionable_now=false; "
+                "real_order_authority=false; no_finalgate_no_operation_layer"
+            ),
+        },
+        "proposed_registry_row": {
+            "strategy_group_id": CPM_STRATEGY_GROUP_ID,
+            "default_tier": "trial_admission",
+            "trial_eligible": False,
+            "supported_sides": side_scope,
+            "evidence_status": "trial_asset_admission_candidate_from_observe_only",
+            "required_facts_summary": {
+                "strategy": CPM_REQUIRED_FACTS_DRAFT,
+                "disable_or_review": CPM_DISABLE_OR_REVIEW_FACTS_DRAFT,
+            },
+            "risk_envelope": {
+                "path_risk_known": True,
+                "max_attempts_limited": 3,
+                "loss_unit_source": "action_time_exchange_available_balance",
+                "loss_unit_calculation": (
+                    "action_time_exchange_available_balance / attempt_cap"
+                ),
+                "stop_or_protection_required": True,
+                "pause_after_failures": 3,
+                "review_required": True,
+            },
+            "authority_boundary": (
+                "proposal_only; not_registry_authority; not_runtime_admission; "
+                "actionable_now=false; real_order_authority=false"
+            ),
+        },
+        "proposed_tier_policy_row": {
+            "tier": "trial_admission",
+            "mode": "trial_asset_admission_candidate",
+            "reason": (
+                "CPM observe-only ETH short evidence is absorbed as candidate "
+                "evidence; RequiredFacts and watcher scope remain before armed observation"
+            ),
+        },
+        "runtime_admission_plan": {
+            "watcher_scope": "ETH/USDT:USDT short read_only_until_cpm_required_facts_mapping",
+            "required_facts_draft": CPM_REQUIRED_FACTS_DRAFT,
+            "disable_or_review_facts_draft": CPM_DISABLE_OR_REVIEW_FACTS_DRAFT,
+            "fresh_signal_source": "future_runtime_observation_only",
+            "protection_plan_required": True,
+            "review_ledger_required": True,
+        },
+        "absorbed_observation_evidence": {
+            "source": "last_night_readonly_replay_audit",
+            "market_window": CPM_LAST_NIGHT_WINDOW,
+            "market_move_detected": True,
+            "observe_only_would_enter_detected": True,
+            "strategy_group_id": CPM_STRATEGY_GROUP_ID,
+            "symbol": "ETH/USDT",
+            "runtime_symbol": "ETH/USDT:USDT",
+            "side": "short",
+            "event_count": len(CPM_ETH_SHORT_OBSERVE_ONLY_EVENTS),
+            "event_times": CPM_ETH_SHORT_OBSERVE_ONLY_EVENTS,
+            "reason_codes": [
+                "cpm_short_htf_trend_intact",
+                "cpm_short_bounce_depth_normal",
+                "cpm_short_loss_confirmed",
+            ],
+            "current_authority": "observe_only",
+            "recommended_state_transition": "trial_admission_review",
+            "not_order": True,
+            "no_order_permission": True,
+            "no_execution_permission": True,
+        },
+        "next_action": "build_cpm_required_facts_mapping_and_runtime_watcher_scope",
+        "after_next_state": "armed_observation",
+        "actionable_now": False,
+        "real_order_authority": False,
     }
 
 
@@ -315,6 +539,7 @@ def _owner_policy_defaults(policy: dict[str, Any]) -> dict[str, Any]:
 
 def _markdown(packet: dict[str, Any], output_json: Path) -> str:
     proposal = _as_dict(packet.get("proposal"))
+    cpm = _as_dict(packet.get("cpm_trial_admission_checkpoint"))
     fields = _string_list(
         _as_dict(packet.get("owner_policy_checkpoint")).get("owner_policy_fields")
     )
@@ -331,6 +556,10 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         f"- Owner policy recorded: `{_yes_no(proposal.get('owner_policy_recorded') is True)}`",
         f"- Next action: `{proposal.get('next_action', 'none')}`",
         f"- Real order authority: `{_yes_no(False)}`",
+        f"- Proposal count: `{_int(_as_dict(packet.get('checks')).get('proposal_count'))}`",
+        f"- CPM candidate active: `{_yes_no(cpm.get('active') is True)}`",
+        f"- CPM observe-only events absorbed: `{cpm.get('observe_only_event_count', 0)}`",
+        f"- CPM next action: `{cpm.get('next_action') or 'none'}`",
         "",
         "## Owner Policy Fields",
         "",
@@ -404,6 +633,19 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item)]
+
+
+def _dict_rows(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _read_json(path: Path) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-23
+last_verified: 2026-06-29
 ---
 
 # Main Control Roadmap
@@ -18,7 +18,7 @@ config, verified runtime state, explicit Owner policy, or generated evidence
 from the current monitor sequence.
 
 The main goal is still the StrategyGroup runtime pilot, but the global project
-objective is profitability through a small-capital right-tail experimentation
+objective is profitability through a controlled-subaccount right-tail experimentation
 system:
 
 ```text
@@ -35,8 +35,9 @@ bounded-aggressive real-order loop when a fresh signal exists and all official
 runtime gates pass.
 ```
 
-Dry-run audit and source readiness are support tracks for that target. Frontend
-UI work has been externalized and is no longer part of the main runtime goal.
+Dry-run audit and source readiness are support tracks for that target. They
+must not become the target. Frontend UI work has been externalized and is no
+longer part of the main runtime goal.
 
 This file is not a frontend design spec or historical packet index. It is also
 not a generic research backlog: research, replay, paper/simulator, and cost-model
@@ -64,17 +65,19 @@ or
 cannot trade because first blocker X remains
 ```
 
-The current planning phase is strategy learning on top of a live-ready P0
-chain. P0 remains ready for the first selected StrategyGroup allocated-subaccount
-live closure. P0.5 must now turn market observations into StrategyGroup learning
-decisions:
+The current planning phase is controlled-subaccount live-trading first on top of the
+live-ready P0 chain. Strategy learning continues, but it is subordinate to
+getting admitted StrategyGroups through the real trading lifecycle. P0 remains
+ready for the first selected StrategyGroup allocated-subaccount live closure.
+P0.5 must now turn market observations into either execution candidates or
+specific strategy fixes:
 
 ```text
-live path waits
+live path stays primary
 -> broad read-only observation continues
 -> no-action / would-enter rows are captured
--> replay-to-review explains or challenges them
--> classifier, facts, cost, freshness, and tier gaps become decisions
+-> trial-grade eligible structures move toward execution candidates
+-> rejected structures become classifier, facts, cost, freshness, or tier fixes
 -> stage-worthy decisions deploy once, not continuously
 ```
 
@@ -88,17 +91,18 @@ The next phase is governed by eight execution constraints:
 | Authority split | Owner controls policy and tier/risk scope; the system continues normal process execution inside selected boundaries |
 | Capability closure | Every goal-mode task must close one engineering problem class, unlock a concrete capability, and expose the next engineering bottleneck |
 | Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
-| Decision-ledger gate | New P0.5 artifacts must change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| Trade lifecycle gate | New P0.5 artifacts must either create an execution candidate, remove a first blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
 | Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
 | Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / decision ledger surfaces |
 
-The deploy-worthy checkpoint for the current P0.5 phase is:
+The deploy-worthy checkpoint for the current P0.5 phase is no longer a pure
+review loop. It is:
 
 ```text
 high-priority no-action
--> StrategyGroup Decision Ledger
--> replay-to-review matching
+-> execution-candidate or first-blocker classification
+-> strategy fix or trade attempt path
 -> one current decision per StrategyGroup
 -> local monitor sequence
 -> targeted tests pass
@@ -196,7 +200,7 @@ not a fixed return-qualification frame.
 | --- | --- | --- |
 | `100%` or similar target | Right-tail aspiration anchor and priority signal | Mandatory pass/fail intake threshold |
 | `5x` or similar leverage | Scenario for liquidation, path-risk, and loss-envelope review | Automatic live authorization or automatic disqualification |
-| `tiny_live_intake_candidate` | Main control may ingest the asset for small-capital experimental review | Tiny-live ready, actionable now, or exchange-write authority |
+| `tiny_live_intake_candidate` | Main control may ingest the asset for controlled-subaccount experimental review | Controlled-live ready, actionable now, or exchange-write authority |
 | `path_risk_known` | Stop-hit and adverse-path risks are measured and reviewable | Path is safe |
 | `risk_envelope_defined` | Attempt cap, loss cap, pause rule, or review boundary exists | Risk is eliminated |
 
@@ -251,17 +255,17 @@ Small-capital execution frictions are not reasons to stop the engineering lane:
 
 | Friction | Default engineering treatment |
 | --- | --- |
-| Fill probability | Try through official small-capital path after gates pass; handle timeout/reject |
+| Fill probability | Try through official controlled-subaccount path after gates pass; handle timeout/reject |
 | Slippage | Use coarse spread/fee/funding buffer, then calibrate from live outcomes |
 | Protection acceptance | Pre-check exchange rules and implement failure recovery/hard stop |
 | Partial fill | Model lifecycle state and follow-up protection/reconciliation |
 | Reject recovery | Classify reject, stop or retry inside official boundary, then review |
 | PnL settlement | Estimate before action, reconcile after fills, record Review Ledger outcome |
 
-Every Goal Packet should state `Capability unlocked` and
-`Next engineering bottleneck`. If it only produces a packet or explains why
-progress is blocked, the architecture verdict should be `partial` unless the
-Evidence Packet proves no engineering closure is currently possible.
+Every execution brief should state the lifecycle capability or first blocker it
+changes. If it only produces a packet or explains why progress is blocked, the
+architecture verdict should be `partial` unless the evidence proves no
+engineering closure is currently possible.
 
 ### Rehearsal-Before-Live Policy
 

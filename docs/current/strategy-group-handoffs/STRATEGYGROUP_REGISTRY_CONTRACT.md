@@ -80,7 +80,7 @@ Each StrategyGroup registry row should define these fields:
 | `regime_fit` | Market regime, session, product class, or crowding context where it belongs |
 | `supported_sides` | Allowed side set, such as long, short, overlay, or context-only |
 | `default_tier` | Default runtime-governance tier |
-| `trial_eligible` | Whether the StrategyGroup may be considered for small-capital trial eligibility |
+| `trial_eligible` | Whether the StrategyGroup may be considered for controlled-subaccount trial eligibility |
 | `tradeability_stage` | Lifecycle stage, such as `tiny_live_intake_candidate`, `trial_asset_admission_candidate`, `admitted_trial_asset`, `armed_observation`, `tiny_live_ready`, or `live_submit_ready` |
 | `first_tradeability_blocker` | Current first non-runtime reason it cannot trade, when known |
 | `actionable_now` | Whether it can submit now; usually generated at runtime, not hand-authored |
@@ -100,7 +100,7 @@ The registry must separate strategy eligibility from action-time execution:
 
 | Field | Meaning | Source |
 | --- | --- | --- |
-| `trial_eligible` | This StrategyGroup is allowed to enter the small-capital trial candidate pool under scoped Owner policy | Registry plus Owner policy |
+| `trial_eligible` | This StrategyGroup is allowed to enter the controlled-subaccount trial candidate pool under scoped Owner policy | Registry plus Owner policy |
 | `actionable_now` | A real action is currently allowed because fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, and account/exchange facts all pass | Runtime state only |
 
 No fresh signal means `actionable_now=false`. It does not necessarily mean
@@ -159,7 +159,7 @@ The registry should prefer these labels:
 | --- | --- |
 | `experiment_worthy` | Thesis and risk envelope justify further bounded work |
 | `paper_observation_candidate` | Worth live read-only observation without submit authority |
-| `tiny_live_intake_candidate` | Worth main-control intake as a small-capital experimental asset |
+| `tiny_live_intake_candidate` | Worth main-control intake as a controlled-subaccount experimental asset |
 | `trial_asset_admission_candidate` | Worth formal final-owned admission preparation |
 | `admitted_trial_asset` | Accepted as a final-owned trial asset without action-time authority |
 | `armed_observation` | Runtime may observe under scoped rules without real-order authority |

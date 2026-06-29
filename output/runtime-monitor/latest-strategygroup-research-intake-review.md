@@ -21,4 +21,4 @@
 ## Boundary
 
 - Main control absorbs strategy assets, RequiredFacts drafts, disable/review facts, risk envelope, path-risk evidence, and review mapping.
-- Main control does not absorb tiny-live readiness, actionable authority, FinalGate input, Operation Layer input, live profile change, tier policy change, or exchange write permission.
+- Main control does not absorb controlled-live readiness, actionable authority, FinalGate input, Operation Layer input, live profile change, tier policy change, or exchange write permission.

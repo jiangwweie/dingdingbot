@@ -224,7 +224,7 @@ def build_packet(
         first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(),
         runtime_profile_proposal_snapshot=proposal,
         reason=(
-            "Owner/Codex confirms bounded small-capital runtime profile proposal "
+            "Owner/Codex confirms bounded controlled-subaccount runtime profile proposal "
             "for strategy-runtime draft creation review."
         ),
         evidence_refs=evidence_refs,

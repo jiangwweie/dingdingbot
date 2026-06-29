@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controlled tiny-live bridge to official preflight proof.
+"""Controlled-live bridge to official preflight proof.
 
 RTF-101 proves the RTF-100 bridge can hand a ready selector state into the
 existing official prepare / FinalGate / controlled-submit preflight proof,
@@ -418,7 +418,7 @@ def _safety_invariants(
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a controlled tiny-live bridge to official preflight proof."
+            "Build a controlled-live bridge to official preflight proof."
         )
     )
     parser.add_argument(

@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-23
+last_verified: 2026-06-29
 ---
 
 # AI Agent Constraints
@@ -25,12 +25,33 @@ Owner enables a StrategyGroup
 
 The Owner should not need to read raw evidence packets to operate the system.
 Evidence packets are audit artifacts under the Owner-facing control board.
+They explain what happened or what was missed; they do not define the main
+product path.
 
-The global business objective is profitability through a small-capital
+The global business objective is profitability through a controlled-subaccount
 right-tail StrategyGroup experimentation system. During the current stage,
-profit is not the engineering acceptance test. Engineering work is valuable
-only when it improves opportunity discovery, runtime capture, execution
-quality, risk-capital governance, or the review loop.
+engineering acceptance is not "more audit coverage"; it is progress toward a
+bounded real trading lifecycle. Engineering work is valuable only when it
+improves opportunity discovery, runtime capture, tradeability, real execution
+attempts, protection, reconciliation, or post-trade learning.
+
+Default priority:
+
+```text
+live-trading lifecycle first
+audit / replay / review second
+```
+
+First principle:
+
+```text
+Real trading first, then explanation.
+```
+
+Audit, replay, and review are support systems. They should diagnose missed
+trades, explain outcomes, and update StrategyGroup decisions. They should not
+be allowed to replace submit readiness, create endless preparation layers, or
+make a strategy look "handled" when it still cannot reach an execution attempt.
 
 The project is aggressive inside explicit constraints. The Owner-provided
 subaccount allocation is already the risk-control result and may be treated as
@@ -75,6 +96,17 @@ readiness are already closed. A strategy such as a research-side short
 candidate may be `tiny_live_intake_candidate` and still have the first blocker
 `asset_admission`.
 
+Do not leave a blocker at generic "missing facts" or "quality gap". A blocker
+is complete only when it states:
+
+- the exact missing fact, trigger, source, classifier, policy, or runtime state;
+- why the system cannot produce it now;
+- which script, module, watcher, mapping, registry row, policy record, or
+  strategy rule must change;
+- the concrete next repair;
+- the expected post-repair state, such as `armed_observation`,
+  `action_time_facts_ready`, `execution_attempt_ready`, or `park_or_kill`.
+
 ## Global Authority Model
 
 Agents must preserve this split:
@@ -111,17 +143,15 @@ intervention.
 
 ## Capability-Closure Discipline
 
-Goal-mode tasks must not stop at explanation. Each task must close one
-engineering problem class, unlock one concrete capability, and expose the next
-engineering bottleneck.
+Execution work must not stop at explanation. Each non-trivial change should
+either move the trading lifecycle forward or expose the first blocker that
+prevents it from moving.
 
-Required Evidence Packet fields for non-trivial work:
+Useful close-out facts are:
 
-- `closed_engineering_problem`;
-- `capability_unlocked`;
-- `next_engineering_bottleneck`;
-- validation proving the capability works or the bottleneck is
-  machine-checkable.
+- the lifecycle capability changed;
+- the first blocker changed or stayed the same for a clear reason;
+- validation proving the behavior works or the blocker is machine-checkable.
 
 Do not mark a task complete when it only says a capability is missing. Convert
 the missing capability into code, tests, generated checks, monitor integration,
@@ -224,9 +254,11 @@ first copy, normalize, or absorb the research package into a final-owned
 snapshot or structured intake artifact, then generate verdict and admission
 outputs from final-owned inputs.
 
-Goal-mode work must follow `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`.
-Architecture direction should enter execution as one bounded Goal Packet, and
-execution must return an Evidence Packet before the next architectural verdict.
+Goal-mode task-packet constraints are deprecated for current mainline work.
+Architecture direction should enter execution as a short execution brief tied to
+the trading lifecycle. The brief must identify the first blocker or lifecycle
+capability it changes, and must avoid adding new packet, report, or governance
+layers unless it replaces and reduces an older surface.
 
 ## P0 / P0.5 Execution Discipline
 

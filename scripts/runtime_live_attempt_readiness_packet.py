@@ -5,7 +5,7 @@ RTF-094 is a summarizer over an already produced
 ``runtime_active_observation_monitor`` packet.  It does not call the API,
 create prepare records, register orders, submit to the exchange, mutate runtime
 budget, or move funds.  Its job is to turn the current live observation state
-into a compact operator packet for the next tiny-live attempt decision.
+into a compact operator packet for the next controlled-live attempt decision.
 """
 
 from __future__ import annotations

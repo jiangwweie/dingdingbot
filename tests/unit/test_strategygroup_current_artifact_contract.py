@@ -62,7 +62,7 @@ def test_current_trial_grade_signal_gate_audit_artifact_matches_monitor_sequence
         "hard_safety_gate_list"
     ]
     live_trial_policy_update = audit["live_trial_policy_update"]
-    assert live_trial_policy_update["scope"] == "30U_bounded_trial_only"
+    assert live_trial_policy_update["scope"] == "controlled_subaccount_live_scope"
     assert (
         live_trial_policy_update["does_not_change_production_grade_authority"]
         is True
@@ -139,11 +139,11 @@ def test_current_trial_grade_signal_gate_audit_artifact_matches_monitor_sequence
     assert brf2["risk_envelope"]["path_risk_treatment"] == (
         "known_path_risk_enters_envelope_not_trade_denial"
     )
-    assert brf2["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert brf2["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
 
     sor = rows["SOR-001"]
     assert sor["fixture_replay_projection"]["trial_grade_trigger_case_count"] == 1
-    assert sor["tomorrow_same_structure_assessment"]["would_enter_30u_trial"] is True
+    assert sor["tomorrow_same_structure_assessment"]["would_enter_controlled_live_trial"] is True
 
     assert checks["trial_grade_signal_gate_audit_ready"] is True
     assert checks["trial_grade_strategy_group_count"] == summary["strategy_group_count"]
@@ -153,11 +153,11 @@ def test_current_trial_grade_signal_gate_audit_artifact_matches_monitor_sequence
     assert checks["trial_grade_action_time_submit_count_30d"] == 0
     assert checks["trial_grade_hard_safety_gates_relaxed"] is False
     assert (
-        checks["trial_grade_brf2_would_enter_30u_trial_if_same_structure"]
+        checks["trial_grade_brf2_would_enter_controlled_live_trial_if_same_structure"]
         is True
     )
     assert (
-        checks["trial_grade_sor_would_enter_30u_trial_if_same_structure"]
+        checks["trial_grade_sor_would_enter_controlled_live_trial_if_same_structure"]
         is True
     )
 
@@ -214,15 +214,15 @@ def test_current_brf2_owner_trial_policy_scope_artifact_is_complete():
     assert policy_packet["brf2_policy_scope_recorded"] is True
     assert policy_packet["owner_policy_scope_missing"] is False
     assert policy["strategy_group_id"] == "BRF2-001"
-    assert policy["trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
-    assert policy["capital_scope"]["amount"] == "30"
+    assert policy["trial_identity"] == "BRF2_CONTROLLED_SHORT_TRIAL_V0"
+    assert policy["capital_scope"]["amount_source"] == "action_time_exchange_available_balance"
     assert policy["capital_scope"]["currency"] == "USDT"
     assert policy["capital_scope"]["loss_capable"] is True
     assert policy["side_scope"] == ["short"]
     assert policy["leverage_scenario"] == "5x_scenario_not_authority"
-    assert policy["max_notional"]["amount"] == "150"
+    assert policy["max_notional"]["balance_source"] == "action_time_exchange_available_balance"
     assert policy["attempt_cap"] == 3
-    assert policy["loss_unit"]["amount"] == "10"
+    assert policy["loss_unit"]["balance_source"] == "action_time_exchange_available_balance"
     assert policy_packet["safety_invariants"]["actionable_now"] is False
     assert policy_packet["safety_invariants"]["real_order_authority"] is False
     assert policy_packet["safety_invariants"]["calls_finalgate"] is False
@@ -403,7 +403,7 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert brf2["trial_grade_signal_status"]["trial_grade_audit_ready"] is True
     assert (
         brf2["trial_grade_signal_status"][
-            "trial_grade_signal_can_prepare_30u_trial"
+            "trial_grade_signal_can_prepare_controlled_live"
         ]
         is True
     )
@@ -417,7 +417,7 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert brf2["required_facts_mapping_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_plan_ready"] is True
     assert brf2["runtime_readiness"]["armed_observation_ready"] is True
-    assert brf2["runtime_readiness"]["trial_grade_30u_standby_ready"] is True
+    assert brf2["runtime_readiness"]["controlled_live_standby_ready"] is True
     assert (
         brf2["runtime_readiness"]["stage_5_waiting_live_opportunity_ready"] is True
     )
@@ -455,10 +455,10 @@ def test_current_three_strategy_live_trial_portfolio_artifact_is_complete():
     assert checks["live_trial_market_wait_count"] == 3
     assert checks["stage_5_waiting_live_opportunity_ready"] is True
     assert checks["stage_5_status"] == "phase_5_waiting_for_live_opportunity"
-    assert checks["trial_grade_30u_standby_count"] == 3
+    assert checks["controlled_live_standby_count"] == 3
     assert checks["action_time_preflight_pending_fresh_signal"] is True
     assert checks["stage_5_hard_safety_gates_relaxed"] is False
-    assert checks["tradeability_trial_grade_30u_standby_count"] == 3
+    assert checks["tradeability_controlled_live_standby_count"] == 3
     assert checks["tradeability_stage_5_waiting_live_opportunity_ready_count"] == 3
     assert checks["brf2_owner_policy_recorded"] is True
     assert checks["brf2_owner_policy_scope_missing"] is False

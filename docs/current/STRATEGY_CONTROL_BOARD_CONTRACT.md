@@ -77,7 +77,7 @@ but it must not become a raw diagnostic table.
 | missing replay coverage that changes a decision | 样本不足，等待本地补充 |
 | classifier / facts gap that changes a decision | 策略条件待调整 |
 | parked low-priority vocabulary | 暂停观察，不影响主线 |
-| tiny-live intake but not admitted | 有实验价值，待主控准入 |
+| controlled-live intake but not admitted | 有实验价值，待主控准入 |
 | admitted but missing Owner policy | 待确认风险范围 |
 | admitted and armed but no fresh signal | 等待机会 |
 | facts or runtime gate missing | 系统处理中或暂不可用 |

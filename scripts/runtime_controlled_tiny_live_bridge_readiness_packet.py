@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build controlled tiny-live bridge readiness from selector refresh output.
+"""Build controlled-live bridge readiness from selector refresh output.
 
 RTF-100 consumes a selector-driven refresh packet and decides whether the
 runtime can move toward the existing official prepare / FinalGate /
@@ -201,7 +201,7 @@ def build_bridge_readiness_packet(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build controlled tiny-live bridge readiness packet.",
+        description="Build controlled-live bridge readiness packet.",
     )
     parser.add_argument("--refresh-json", required=True)
     parser.add_argument("--deployed-head")

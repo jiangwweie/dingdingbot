@@ -2,7 +2,7 @@
 title: TRADEABILITY_VERDICT_CONTRACT
 status: CURRENT
 authority: docs/current/TRADEABILITY_VERDICT_CONTRACT.md
-last_verified: 2026-06-23
+last_verified: 2026-06-29
 ---
 
 # Tradeability Verdict Contract
@@ -17,7 +17,7 @@ If not, what is the first blocker, who owns it, and what exact action removes it
 ```
 
 It exists because the project goal is not more governance artifacts. The goal is
-bounded-aggressive small-capital trading experimentation:
+bounded-aggressive controlled-subaccount trading experimentation:
 
 ```text
 experiment-worthy strategy asset
@@ -32,6 +32,22 @@ experiment-worthy strategy asset
 
 The verdict is a thin read model. It is not a ledger, strategy registry, policy
 store, FinalGate input, Operation Layer input, or exchange-write authority.
+It is also not an audit-first surface. Its default job is to route a strategy
+toward a bounded real execution attempt, or name the earliest blocker that must
+be removed before that attempt can happen. Audit and review consume the verdict;
+they do not replace the trading path.
+
+First principle:
+
+```text
+Real trading first, then explanation.
+```
+
+The verdict must not hide behind generic blocker labels. If the first blocker
+is `not_tradable_facts`, `not_tradable_strategy_quality`,
+`not_tradable_execution_gate`, or `not_tradable_market_wait`, the row must carry
+the concrete missing condition, why it is missing, the repair owner, the next
+repair action, and the expected post-repair state.
 
 ## Core Rule
 
@@ -90,6 +106,9 @@ Each row should contain:
 | `real_order_authority` | Official runtime path only |
 | `authority_boundary` | Why this verdict does or does not authorize real orders |
 
+Rows with generic `missing_fact`, `quality_gap`, `waiting`, or `not_ready`
+wording without root-cause fields are invalid for current main-control use.
+
 ## Lifecycle Progression
 
 The main-control path from research to trading is:
@@ -112,7 +131,7 @@ research_candidate
 | `trial_asset_admission_candidate` | Main control is preparing a scoped trial asset | Draft registry, tier, policy, facts, and risk envelope | Set `actionable_now=true` |
 | `admitted_trial_asset` | The StrategyGroup exists as a final-owned trial asset | Be included in monitor, policy, and tier review | Submit real orders without action-time gates |
 | `armed_observation` | Runtime may watch the strategy as a scoped non-executing or trial-eligible asset | Detect fresh signals and assemble facts | Bypass FinalGate / Operation Layer |
-| `tiny_live_ready` | Non-executing readiness is closed for a scoped small-capital trial | Wait for fresh signal and action-time facts | Treat readiness as a live signal |
+| `tiny_live_ready` | Non-executing readiness is closed for a scoped controlled-subaccount trial | Wait for fresh signal and action-time facts | Treat readiness as a live signal |
 | `live_submit_ready` | Current action-time state may proceed through official real-order path | Call official FinalGate and Operation Layer | Bypass protection, scope, or exchange facts |
 
 ## Research Intake Rule
@@ -158,7 +177,7 @@ Promotion decisions must carry a scope:
 | `intake_only` | Promote from research review into main-control intake only |
 | `trial_admission` | Promote into trial asset admission preparation |
 | `armed_observation` | Promote into runtime observation without real-order authority |
-| `tiny_live_ready_review` | Promote for non-executing tiny-live readiness closure |
+| `tiny_live_ready_review` | Promote for non-executing controlled-live readiness closure |
 | `l4_eligibility_review` | Promote for Owner-scoped L4 eligibility review |
 
 `promote` without scope is ambiguous and should be treated as invalid for new

@@ -1,18 +1,22 @@
 # Main-Control Task Card
 
-Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-15
+Status: DEPRECATED_PILOT_SUPPLEMENT
+Last updated: 2026-06-29
 
-## Goal
+## Deprecated
 
-Consume the first StrategyGroup handoff batch as Strategy Picker, watcher
-scope, RequiredFacts readiness, and runtime bridge inputs.
+This was an early pilot note for consuming the first StrategyGroup handoff
+batch. It is not current execution authority and must not be copied as a task
+template.
 
-## Done When
+Current main-control work should use a short execution brief and stay tied to
+the live trading lifecycle:
 
-1. Five StrategyGroups appear in handoff intake.
-2. Exchange-ready symbols can enter observation even when other supported
-   symbols are unavailable.
-3. Semantics binding and evaluator route are configured for the pilot groups.
-4. Fresh candidates remain blocked until fresh signal, RequiredFacts, FinalGate,
-   and Operation Layer evidence pass.
+```text
+Signal Observation
+-> StrategyGroup State
+-> Tradeability Decision
+-> Execution Attempt
+-> Order Lifecycle
+-> Review Outcome
+```

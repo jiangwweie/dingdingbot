@@ -1,5 +1,5 @@
 {
-  "audit_question": "Are MPG-001, BRF2-001, and SOR-001 fresh signal gates production-grade strict or suitable for bounded 30U trial-grade?",
+  "audit_question": "Are MPG-001, BRF2-001, and SOR-001 fresh signal gates production-grade strict or suitable for controlled subaccount trial-grade?",
   "checks": {
     "actionable_now": false,
     "all_selected_strategy_groups_covered": true,
@@ -14,7 +14,7 @@
     "risk_expressed_as_envelope": true,
     "signal_grade_catalog_present": true
   },
-  "generated_at_utc": "2026-06-23T12:25:43.729753+00:00",
+  "generated_at_utc": "2026-06-29T11:31:03.805811+00:00",
   "hard_safety_gate_list": [
     "selected_strategygroup_scope",
     "allocated_subaccount_profile_boundary",
@@ -53,7 +53,7 @@
     "does_not_change_production_grade_authority": true,
     "does_not_expand_live_profile": true,
     "production_grade_signal_required_for_scale_up": true,
-    "scope": "30U_bounded_trial_only",
+    "scope": "controlled_subaccount_live_scope",
     "trial_grade_signal_may_enter_bounded_trial": true
   },
   "safety_invariants": {
@@ -88,7 +88,7 @@
     },
     "trial_grade_signal": {
       "may_place_order": "only_inside_scoped_small_capital_trial_after_action_time_gates",
-      "use": "enter_30u_bounded_live_trial"
+      "use": "enter_controlled_subaccount_live_trial"
     }
   },
   "status": "trial_grade_signal_gate_audit_ready",
@@ -99,7 +99,7 @@
         "real_order_authority": false,
         "replay_or_proxy_counts_are_live_signals": false,
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true
+        "trial_grade_signal_can_prepare_controlled_live": true
       },
       "false_positive_review_pack": [
         {
@@ -175,14 +175,16 @@
       "risk_envelope": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
           "loss_capable": true,
           "type": "isolated_subaccount_full_allocation"
         },
         "loss_unit": {
-          "amount": "10",
-          "basis": "30U / 3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "max_consecutive_losses": 2,
@@ -205,7 +207,7 @@
       "tomorrow_same_structure_assessment": {
         "if_same_structure_appears_tomorrow": "enter_non_executing_trial_candidate_review_then_action_time_gate",
         "reason": "BRF2 can use BRF short would-enter proxy for trial-grade review, but submit still needs live action-time facts.",
-        "would_enter_30u_trial": true
+        "would_enter_controlled_live_trial": true
       },
       "trial_grade_gate_profile": {
         "grade": "trial_grade_signal",
@@ -216,7 +218,7 @@
           "short_squeeze_risk_not_red",
           "strong_reclaim_not_active",
           "spread_liquidity_not_unknown",
-          "30U_policy_envelope",
+          "controlled_subaccount_policy_envelope",
           "action_time_live_required_facts_before_submit"
         ],
         "warnings_allowed": [
@@ -315,7 +317,7 @@
         "real_order_authority": false,
         "replay_or_proxy_counts_are_live_signals": false,
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true
+        "trial_grade_signal_can_prepare_controlled_live": true
       },
       "false_positive_review_pack": [
         {
@@ -372,14 +374,16 @@
       "risk_envelope": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
-          "type": "trial_grade_audit_envelope_not_sizing_default"
+          "type": "isolated_subaccount_full_allocation"
         },
         "current_stage": "armed_observation",
         "loss_unit": {
-          "amount": "10",
-          "basis": "3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "max_consecutive_losses": 2,
@@ -402,7 +406,7 @@
       "tomorrow_same_structure_assessment": {
         "if_same_structure_appears_tomorrow": "enter_trial_only_if_selected_scope_and_action_time_hard_gates_pass",
         "reason": "MPG trial-grade can treat false-breakout/fast-reversal risk as envelope risk, not as authority bypass.",
-        "would_enter_30u_trial": true
+        "would_enter_controlled_live_trial": true
       },
       "trial_grade_gate_profile": {
         "grade": "trial_grade_signal",
@@ -488,7 +492,7 @@
         "real_order_authority": false,
         "replay_or_proxy_counts_are_live_signals": false,
         "trial_grade_signal_can_bypass_hard_safety_gates": false,
-        "trial_grade_signal_can_prepare_30u_trial": true
+        "trial_grade_signal_can_prepare_controlled_live": true
       },
       "false_positive_review_pack": [
         {
@@ -558,9 +562,10 @@
       "risk_envelope": {
         "attempt_cap": 3,
         "capital_scope": {
-          "amount": "30",
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
           "currency": "USDT",
-          "type": "proposed_trial_only_not_policy_authority"
+          "type": "isolated_subaccount_full_allocation"
         },
         "handoff_risk_defaults": {
           "default_exit_horizon": "72h_branch_specific",
@@ -574,8 +579,9 @@
           "risk_tier": "tiny"
         },
         "loss_unit": {
-          "amount": "10",
-          "basis": "3 attempts",
+          "balance_source": "action_time_exchange_available_balance",
+          "basis": "controlled subaccount dynamic allocation / attempt cap",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
           "currency": "USDT"
         },
         "max_consecutive_losses": 2,
@@ -597,7 +603,7 @@
       "tomorrow_same_structure_assessment": {
         "if_same_structure_appears_tomorrow": "enter_non_executing_session_trial_review_then_action_time_gate",
         "reason": "SOR replay source now defines trial-grade session trigger behavior; submit still needs live action-time facts.",
-        "would_enter_30u_trial": true
+        "would_enter_controlled_live_trial": true
       },
       "trial_grade_gate_profile": {
         "grade": "trial_grade_signal",
@@ -607,7 +613,7 @@
           "session_window_matched",
           "post_open_decay_not_active",
           "stop_protection_required",
-          "30U_policy_envelope",
+          "controlled_subaccount_policy_envelope",
           "action_time_live_required_facts_before_submit"
         ],
         "warnings_allowed": [
@@ -621,7 +627,7 @@
           "currently_blocks_production_grade": false,
           "production_grade_treatment": "production_confidence_and_session_quality_required",
           "recommendation": "downgrade_to_warning_for_trial",
-          "trial_grade_treatment": "lower_confidence_can_be_warning_inside_30u_trial"
+          "trial_grade_treatment": "lower_confidence_can_be_warning_inside_controlled_subaccount_trial"
         },
         {
           "condition": "closed_open_range_and_trigger_bar",
@@ -689,7 +695,7 @@
   "summary": {
     "action_time_trial_submit_count_30d": 0,
     "hard_safety_gates_relaxed": false,
-    "next_engineering_bottleneck": "convert trial-grade audit into 30U trial admission policy wording and runtime trigger calibration without changing production authority.",
+    "next_engineering_bottleneck": "convert trial-grade audit into controlled subaccount admission policy wording and runtime trigger calibration without changing production authority.",
     "production_grade_observation_count_30d": 0,
     "risk_treatment": "strategy_risk_to_envelope_not_generic_blocker",
     "strategy_group_count": 3,

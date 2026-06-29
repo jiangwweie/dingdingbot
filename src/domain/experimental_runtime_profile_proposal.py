@@ -333,7 +333,7 @@ def _proposal(
         owner_confirmation_keys=_owner_confirmation_keys(binding=binding, side=side),
         metadata={
             "objective": "small_capital_bounded_runtime_right_tail_experiment",
-            "capital_base_source": "owner_supplied_or_default_30u",
+            "capital_base_source": "owner_supplied_or_default_controlled_subaccount",
             "loss_inside_budget_is_accepted": True,
             "runaway_behavior_is_forbidden": True,
             "manual_withdrawal_only": True,

@@ -1,8 +1,8 @@
 ## BRF2 Non-Executing Candidate Packet
 
 - Status: `brf2_non_executing_candidate_packet_waiting_for_fresh_signal`
-- Generated: `2026-06-23T10:44:12.132801+00:00`
-- Output JSON: `output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json`
+- Generated: `2026-06-29T11:31:01.098398+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json`
 - StrategyGroup: `BRF2-001`
 - Candidate packet ready: `否`
 - Signal state: `fresh_signal_absent`

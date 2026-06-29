@@ -100,7 +100,7 @@ Owner decisions.
 | Strategy asset registry baseline | `docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json` and `docs/current/strategy-group-handoffs/strategygroup-registry-baseline.md` |
 | Current StrategyGroup tier review | `docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json` and `docs/current/strategy-group-handoffs/strategygroup-tier-review-current.md` |
 | Current StrategyGroup quality wave | `docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json` and `docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.md` |
-| Goal-mode task handoff contract | `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` |
+| Execution coordination convention | Lightweight lifecycle-first execution brief in `AGENTS.md` and `docs/current/AI_AGENT_CONSTRAINTS.md` |
 | Runtime tier definitions | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md` |
 | Machine tier mapping | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` |
 | RequiredFacts classes | `docs/current/strategy-group-handoffs/main-control-required-facts-map.md` |
@@ -199,7 +199,7 @@ The long-term system should record Owner policy as explicit, scoped events:
 | --- | --- |
 | `allow_l2_shadow` | Owner allows non-executing shadow candidate review |
 | `allow_l3_armed_observation` | Owner allows armed observation without real-order authority |
-| `allow_l4_live_trial` | Owner allows small-capital real-order eligibility inside official boundaries |
+| `allow_l4_live_trial` | Owner allows controlled-subaccount real-order eligibility inside official boundaries |
 | `force_downshift` | Owner or system downgrades a StrategyGroup tier |
 | `park_strategygroup` | Owner or system pauses strategy asset allocation |
 | `kill_strategygroup` | Owner or system marks the StrategyGroup as no longer worth active work |

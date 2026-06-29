@@ -10,7 +10,7 @@ last_verified: 2026-06-23
 ## Purpose
 
 This file defines how agents, strategy-research workers, and main-control
-reviewers should evaluate StrategyGroup candidates during the small-capital
+reviewers should evaluate StrategyGroup candidates during the controlled-subaccount
 right-tail experiment.
 
 It exists to prevent strategy review from drifting into either:
@@ -56,7 +56,7 @@ Use this evaluation frame:
 Does the strategy have a meaningful right-tail or portfolio-role thesis?
 Can the known failure modes be expressed?
 Can the loss envelope be bounded?
-Can replay, paper observation, or tiny-live intake teach the system something?
+Can replay, paper observation, or controlled-live intake teach the system something?
 Can final main-control absorb the artifact without creating execution authority?
 ```
 
@@ -79,7 +79,7 @@ Did the strategy look like stable year-round alpha?
 | `path_risk_known` | Path and stop-hit risks are measured and reviewable | Path is safe or execution-ready |
 | `risk_envelope_defined` | Attempt cap, loss cap, pause condition, or equivalent review boundary exists | Risk is eliminated |
 | `absorption_ready_research_asset` | Research artifact can be read by final main-control for review | Runtime admission or order authority |
-| `tiny_live_intake_candidate` | Main control may ingest it as a small-capital experimental asset for review | Tiny-live ready, actionable now, or real-order authorized |
+| `tiny_live_intake_candidate` | Main control may ingest it as a controlled-subaccount experimental asset for review | Controlled-live ready, actionable now, or real-order authorized |
 | `trial_asset_admission_candidate` | Main control is preparing registry, policy, facts, runtime scope, and risk-envelope admission | Runtime admission or order authority |
 | `admitted_trial_asset` | Strategy exists as a final-owned experimental asset under scoped governance | Action-time submit authority |
 | `armed_observation` | Runtime may observe the scoped asset and assemble non-executing evidence | Real-order authority |
@@ -89,13 +89,13 @@ Did the strategy look like stable year-round alpha?
 ## Signal Grade Semantics
 
 Signal grade must be explicit. A strategy such as `BRF2-001` may be suitable
-for a bounded small-capital trial before it has enough evidence for production
+for a bounded controlled-subaccount trial before it has enough evidence for production
 expansion. Do not hide that distinction inside a generic `fresh_signal` label.
 
 | Signal type | May place order | Use |
 | --- | --- | --- |
 | `observe_only_signal` | No | Record, replay, repair classifier, and improve RequiredFacts |
-| `trial_grade_signal` | Yes, only inside scoped small-capital trial boundaries | Enter a bounded trial such as the 30 USDT BRF2 trial after hard safety gates still pass |
+| `trial_grade_signal` | Yes, only inside scoped controlled-subaccount boundaries | Enter a bounded controlled-subaccount trial after hard safety gates still pass |
 | `production_grade_signal` | Yes, at higher or normalized production grade after later promotion | Support future scale-up or regularized runtime operation |
 | `invalid_signal` | No | Attribution, replay, and rule repair |
 
@@ -179,7 +179,7 @@ facts.
 | `research_candidate` | A plausible strategy idea or vocabulary item | Strategy thesis and rough regime fit | Research only |
 | `replay_candidate` | Worth replay or event extraction | Event definition, sample source, rough outcome question | No runtime authority |
 | `paper_observation_candidate` | Worth live read-only observation | RequiredFacts draft, disable/review facts, paper packet shape | No submit authority |
-| `tiny_live_intake_candidate` | Worth main-control review as a small-capital experimental asset | Thesis, risk envelope, path-risk evidence, replay/paper evidence, boundary-clean handoff | Not tiny-live ready |
+| `tiny_live_intake_candidate` | Worth main-control review as a controlled-subaccount experimental asset | Thesis, risk envelope, path-risk evidence, replay/paper evidence, boundary-clean handoff | Not controlled-live ready |
 | `trial_asset_admission_candidate` | Worth formal final-owned admission preparation | Registry proposal, policy-scope draft, RequiredFacts draft, risk envelope, hard-stop summary | No runtime authority |
 | `admitted_trial_asset` | Accepted into final-owned strategy asset layer | Registry/tier/policy representation and explicit non-authority boundary | No action-time authority |
 | `armed_observation` | Worth runtime observation under scoped rules | Watcher scope, signal definition, fact mapping, disable/downshift facts | No direct submit authority |
@@ -199,7 +199,7 @@ Every promising strategy direction should answer:
 | What is the loss envelope? | Define attempt cap, loss cap, pause rule, or review trigger |
 | What facts are required? | Draft market, strategy, derivatives, risk, account, and exchange facts |
 | What should disable or downshift it? | Convert known failures into reviewable facts |
-| What should happen next? | Replay, paper observation, tiny-live intake, revise, park, or reject |
+| What should happen next? | Replay, paper observation, controlled-live intake, revise, park, or reject |
 
 ## Decision Language
 
@@ -241,11 +241,11 @@ Promotion language must be scoped:
 | `intake_only` | Promote only into main-control intake review |
 | `trial_admission` | Promote into formal trial asset admission preparation |
 | `armed_observation` | Promote into scoped runtime observation without real-order authority |
-| `tiny_live_ready_review` | Promote into non-executing tiny-live readiness closure |
+| `tiny_live_ready_review` | Promote into non-executing controlled-live readiness closure |
 | `l4_eligibility_review` | Promote into Owner-scoped L4 eligibility review |
 
 Generic `promote` is too broad for new artifacts because it can confuse
-research intake, observation, tiny-live readiness, and real-order eligibility.
+research intake, observation, controlled-live readiness, and real-order eligibility.
 
 ## Replay And Paper Observation
 
@@ -278,7 +278,7 @@ Final main-control may absorb strategy-research output only as one of:
 | Absorption route | Meaning |
 | --- | --- |
 | `paper_observation_candidate` | Observe and record future cases without submit authority |
-| `tiny_live_intake_candidate` | Review as small-capital experimental asset, still not live-ready |
+| `tiny_live_intake_candidate` | Review as controlled-subaccount experimental asset, still not live-ready |
 | `trial_asset_admission_candidate` | Prepare final-owned registry, policy, facts, tier, and risk envelope |
 | `admitted_trial_asset` | Represent the strategy as a final-owned trial asset, still non-executing until runtime gates pass |
 | `armed_observation` | Observe under scoped runtime rules without real-order authority |

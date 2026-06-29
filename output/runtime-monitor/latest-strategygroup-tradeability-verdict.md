@@ -1,7 +1,7 @@
 ## StrategyGroup Tradeability Verdict
 
 - Status: `tradeability_verdict_ready`
-- Generated: `2026-06-23T12:25:43.859634+00:00`
+- Generated: `2026-06-29T11:31:03.912879+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-verdict.json`
 - Verdict rows: `13`
 - Tradable now: `0`
@@ -21,7 +21,7 @@
 | `LSR-001` | `trial_asset_admission_candidate` | `not_tradable_facts` | `required_facts_or_classifier_mapping_unclosed` | `engineering` | `close_requiredfacts_classifier_and_replay_mapping` | `armed_observation` |
 | `BRF-001` | `trial_asset_admission_candidate` | `not_tradable_facts` | `required_facts_or_classifier_mapping_unclosed` | `engineering` | `close_requiredfacts_classifier_and_replay_mapping` | `armed_observation` |
 | `MI-001` | `trial_asset_admission_candidate` | `not_tradable_asset_admission` | `strategy_group_not_admitted_as_final_trial_asset` | `engineering` | `build_trial_asset_admission_proposal` | `trial_asset_admission_candidate` |
-| `CPM-RO-001` | `trial_asset_admission_candidate` | `not_tradable_asset_admission` | `strategy_group_not_admitted_as_final_trial_asset` | `engineering` | `build_trial_asset_admission_proposal` | `trial_asset_admission_candidate` |
+| `CPM-RO-001` | `trial_asset_admission_candidate` | `not_tradable_facts` | `cpm_required_facts_mapping_gap` | `engineering` | `build_cpm_required_facts_mapping_and_runtime_watcher_scope` | `armed_observation` |
 | `FBS-001` | `admitted_trial_asset` | `not_tradable_strategy_quality` | `experiment_worthiness_or_loss_envelope_unclosed` | `strategy_review` | `complete_experiment_worthiness_and_loss_envelope_review` | `trial_asset_admission_candidate` |
 | `PMR-001` | `admitted_trial_asset` | `not_tradable_strategy_quality` | `experiment_worthiness_or_loss_envelope_unclosed` | `strategy_review` | `complete_experiment_worthiness_and_loss_envelope_review` | `trial_asset_admission_candidate` |
 | `SOR-001` | `armed_observation` | `not_tradable_market_wait` | `fresh_session_range_signal_absent` | `market` | `continue_session_range_armed_observation_until_fresh_signal` | `live_submit_ready` |

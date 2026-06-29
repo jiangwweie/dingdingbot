@@ -144,7 +144,7 @@
     "next_action": "continue_brf2_armed_observation_until_fresh_signal",
     "owner": "market"
   },
-  "generated_at_utc": "2026-06-23T10:44:12.132801+00:00",
+  "generated_at_utc": "2026-06-29T11:31:01.098398+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

@@ -459,7 +459,7 @@ regressing from the standing recovery route back to the retired
 | Isolation packet | `runtime_legacy_compatibility_isolation_packet.py` now reports `standing_recovery_proof_artifacts_present=true` and `standing_recovery_proofs_have_no_legacy_owner_close_terms=true` |
 | Blocked regression | Unit coverage injects `monitor_position_or_owner_authorize_reduce_only_close` and requires `standing_recovery_proof_uses_legacy_owner_close_terms` |
 | Local packet run | `/tmp/runtime-legacy-isolation.json`: `status=legacy_compatibility_isolated_from_runtime_mainline`, `blockers=[]` |
-| Verification | `14 passed` for legacy isolation plus controlled tiny-live bridge proof tests; `py_compile` passed for the isolation packet scripts |
+| Verification | `14 passed` for legacy isolation plus controlled controlled-live bridge proof tests; `py_compile` passed for the isolation packet scripts |
 | Safety | This is local packet/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-18 Real-Order Readiness Matrix Summary
@@ -531,7 +531,7 @@ check, and keeps healthy market-waiting low-noise.
 
 ### 2026-06-18 Bridge Proof Standing-Recovery Fixture Checkpoint
 
-The controlled tiny-live bridge proof fixtures now use the same standing
+The controlled controlled-live bridge proof fixtures now use the same standing
 reduce-only recovery selector state as the runtime continuation chain. This
 keeps local proof artifacts from reintroducing the old
 `owner_authorize_reduce_only_close` selected action while the official route

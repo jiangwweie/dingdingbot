@@ -66,6 +66,7 @@ DEFAULT_OUTPUT_MD = (
 )
 
 SCHEMA = "brc.strategygroup_tradeability_verdict.v1"
+CPM_STRATEGY_GROUP_ID = "CPM-RO-001"
 
 VERDICT_ORDER = {
     "tradable_now": 0,
@@ -397,6 +398,9 @@ def _verdict_row(
         trial_grade_row=trial_grade_row,
         portfolio_seat=portfolio_seat,
     )
+    absorbed_observation = _as_dict(
+        admission_proposal.get("absorbed_observation_evidence")
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
@@ -454,6 +458,24 @@ def _verdict_row(
                 brf2_non_executing_candidate_packet.get("candidate_packet_ready")
                 is True
             ),
+            "current_authority": str(
+                absorbed_observation.get("current_authority") or ""
+            ),
+            "latest_observe_only_would_enter_event_count": _int(
+                absorbed_observation.get("event_count")
+            ),
+            "observe_only_evidence_absorbed": absorbed_observation.get(
+                "observe_only_would_enter_detected"
+            )
+            is True,
+            "live_trial_portfolio_candidate": str(
+                portfolio_seat.get("portfolio_relationship") or ""
+            )
+            == "fourth_live_trial_portfolio_candidate",
+            "does_not_displace_existing_three_standby": portfolio_seat.get(
+                "does_not_displace_existing_three_standby"
+            )
+            is True,
         },
         "signal_grade_status": signal_grade_status,
         "evidence_snapshot": {
@@ -467,6 +489,14 @@ def _verdict_row(
             "trial_recommendation": str(candidate.get("trial_recommendation") or ""),
             "latest_observe_only_symbol": str(observed_row.get("symbol") or ""),
             "latest_observe_only_side": str(observed_row.get("side") or ""),
+            "absorbed_observation_evidence": absorbed_observation,
+            "absorbed_observe_only_event_count": _int(
+                absorbed_observation.get("event_count")
+            ),
+            "absorbed_observe_only_symbol": str(
+                absorbed_observation.get("symbol") or ""
+            ),
+            "absorbed_observe_only_side": str(absorbed_observation.get("side") or ""),
         },
         "actionable_now": actionable_now,
         "real_order_authority": real_order_authority,
@@ -559,6 +589,8 @@ def _first_blocker(
         )
         if brf2_capture_blocker:
             return brf2_capture_blocker
+    if strategy_group_id == CPM_STRATEGY_GROUP_ID and admission_proposal:
+        return _cpm_admission_blocker(admission_proposal)
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         live_submit_readiness=live_submit_readiness,
@@ -689,6 +721,30 @@ def _brf2_runtime_signal_capture_blocker(packet: dict[str, Any]) -> dict[str, st
             "live_submit_ready",
         )
     return {}
+
+
+def _cpm_admission_blocker(admission_proposal: dict[str, Any]) -> dict[str, str]:
+    owner_policy_recorded = (
+        admission_proposal.get("owner_policy_recorded") is True
+        and admission_proposal.get("owner_policy_scope_missing") is False
+    )
+    if not owner_policy_recorded:
+        return _classifier(
+            "not_tradable_policy",
+            "owner_trial_scope_or_capital_policy_missing",
+            "CPM trial admission candidate exists, but controlled subaccount policy scope is not recorded",
+            "owner",
+            "record_cpm_controlled_subaccount_policy_scope",
+            "trial_asset_admission_candidate",
+        )
+    return _classifier(
+        "not_tradable_facts",
+        "cpm_required_facts_mapping_gap",
+        "CPM ETH short observe-only evidence is absorbed; RequiredFacts mapping and runtime watcher scope are not closed",
+        "engineering",
+        "build_cpm_required_facts_mapping_and_runtime_watcher_scope",
+        "armed_observation",
+    )
 
 
 def _brf2_non_executing_candidate_packet_blocker(
@@ -886,9 +942,16 @@ def _observe_only_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]
 def _admission_proposals_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if _status(packet) != "trial_asset_admission_proposal_ready":
         return {}
-    proposal = _as_dict(packet.get("proposal"))
-    strategy_id = str(proposal.get("strategy_group_id") or "")
-    return {strategy_id: proposal} if strategy_id else {}
+    rows: dict[str, dict[str, Any]] = {}
+    for proposal in [
+        _as_dict(packet.get("proposal")),
+        *_dict_rows(packet.get("proposals")),
+        *_dict_rows(packet.get("additional_proposals")),
+    ]:
+        strategy_id = str(proposal.get("strategy_group_id") or "")
+        if strategy_id:
+            rows[strategy_id] = proposal
+    return rows
 
 
 def _owner_policy_scopes_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -903,7 +966,12 @@ def _portfolio_seats_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not packet:
         return {}
     seats = _as_dict(packet.get("seat_readiness"))
-    return {str(key): _as_dict(value) for key, value in seats.items()}
+    rows = {str(key): _as_dict(value) for key, value in seats.items()}
+    for row in _dict_rows(packet.get("additional_live_trial_candidates")):
+        strategy_id = str(row.get("strategy_group_id") or "")
+        if strategy_id:
+            rows[strategy_id] = row
+    return rows
 
 
 def _trial_grade_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -924,8 +992,8 @@ def _signal_grade_status(
         return {
             "strategy_group_id": strategy_group_id,
             "trial_grade_audit_ready": False,
-            "trial_grade_30u_standby_ready": runtime_readiness.get(
-                "trial_grade_30u_standby_ready"
+            "controlled_live_standby_ready": runtime_readiness.get(
+                "controlled_live_standby_ready"
             )
             is True,
             "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
@@ -952,8 +1020,8 @@ def _signal_grade_status(
         "current_gate_looks_like": str(
             assessment.get("current_gate_looks_like") or "unknown"
         ),
-        "trial_grade_30u_standby_ready": runtime_readiness.get(
-            "trial_grade_30u_standby_ready"
+        "controlled_live_standby_ready": runtime_readiness.get(
+            "controlled_live_standby_ready"
         )
         is True,
         "stage_5_waiting_live_opportunity_ready": runtime_readiness.get(
@@ -972,11 +1040,11 @@ def _signal_grade_status(
         "max_loss_estimate_usdt": str(
             projection.get("max_loss_estimate_usdt") or ""
         ),
-        "would_enter_30u_trial_if_same_structure": (
-            tomorrow.get("would_enter_30u_trial") is True
+        "would_enter_controlled_live_trial_if_same_structure": (
+            tomorrow.get("would_enter_controlled_live_trial") is True
         ),
-        "trial_grade_signal_can_prepare_30u_trial": (
-            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        "trial_grade_signal_can_prepare_controlled_live": (
+            authority.get("trial_grade_signal_can_prepare_controlled_live") is True
         ),
         "trial_grade_signal_can_bypass_hard_safety_gates": (
             authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
@@ -1099,6 +1167,8 @@ def _required_facts_status(
     text = " ".join(blockers).lower()
     if strategy_group_id == "MPG-001":
         return "action_time_only"
+    if strategy_group_id == CPM_STRATEGY_GROUP_ID and portfolio_seat:
+        return "missing"
     if candidate.get("required_facts_draft"):
         return "missing"
     if any(token in text for token in ("fact", "stale", "classifier", "rewrite", "squeeze")):
@@ -1256,7 +1326,7 @@ def _summary(
         by_verdict[str(row["verdict"])] = by_verdict.get(str(row["verdict"]), 0) + 1
         by_owner[str(row["blocker_owner"])] = by_owner.get(str(row["blocker_owner"]), 0) + 1
     trial_grade_standby_count = sum(
-        _as_dict(row.get("signal_grade_status")).get("trial_grade_30u_standby_ready")
+        _as_dict(row.get("signal_grade_status")).get("controlled_live_standby_ready")
         is True
         for row in rows
     )
@@ -1283,7 +1353,7 @@ def _summary(
         "strategy_review_first_blocker_count": by_owner.get("strategy_review", 0),
         "by_verdict": by_verdict,
         "by_blocker_owner": by_owner,
-        "trial_grade_30u_standby_count": trial_grade_standby_count,
+        "controlled_live_standby_count": trial_grade_standby_count,
         "stage_5_waiting_live_opportunity_ready_count": stage_5_ready_count,
         "selected_strategy_group_id": selected_strategy_group_id,
         "selected_candidate_strategy_group_id": str(

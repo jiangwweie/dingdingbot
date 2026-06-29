@@ -61,6 +61,7 @@ DEFAULT_OUTPUT_MD = (
 
 SCHEMA = "brc.three_strategy_live_trial_portfolio.v1"
 SELECTED_STRATEGY_GROUPS = ("MPG-001", "BRF2-001", "SOR-001")
+CPM_STRATEGY_GROUP_ID = "CPM-RO-001"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,7 +157,8 @@ def build_three_strategy_live_trial_portfolio(
     registry_rows = _rows_by_id(registry.get("rows"))
     tier_rows = _as_dict(tier_policy.get("current_strategy_groups"))
     selected = _as_dict(capital_trial_bridge.get("selected_non_mpg_trial_candidate"))
-    proposal = _as_dict((trial_asset_admission_proposal or {}).get("proposal"))
+    proposals = _admission_proposals_by_id(trial_asset_admission_proposal or {})
+    proposal = _as_dict(proposals.get("BRF2-001"))
     owner_policy_scope = brf2_owner_trial_policy_scope or {}
     required_facts_mapping = brf2_required_facts_mapping or {}
 
@@ -171,6 +173,10 @@ def build_three_strategy_live_trial_portfolio(
         ),
         "SOR-001": _sor_seat(registry_rows, tier_rows, signal_coverage or {}),
     }
+    additional_candidates = _additional_live_trial_candidates(
+        capital_trial_bridge=capital_trial_bridge,
+        admission_proposals=proposals,
+    )
     stage_5_standby = _attach_trial_grade_standby(
         seats,
         trial_grade_signal_gate_audit or {},
@@ -213,6 +219,17 @@ def build_three_strategy_live_trial_portfolio(
             for strategy_id in selected_strategy_groups
         },
         "stage_5_live_opportunity_standby": stage_5_standby,
+        "additional_live_trial_candidates": additional_candidates,
+        "candidate_pool_summary": {
+            "additional_candidate_count": len(additional_candidates),
+            "contains_cpm": any(
+                row.get("strategy_group_id") == CPM_STRATEGY_GROUP_ID
+                for row in additional_candidates
+            ),
+            "selected_three_preserved": selected_strategy_groups
+            == list(SELECTED_STRATEGY_GROUPS),
+            "cpm_replaces_existing_seat": False,
+        },
         "review_hooks": {
             strategy_id: seats[strategy_id]["review_hooks"]
             for strategy_id in selected_strategy_groups
@@ -231,7 +248,7 @@ def build_three_strategy_live_trial_portfolio(
         "replacement_rationale": {
             "replacement_used": False,
             "selected_replacement": "",
-            "reason": "SOR-001 has sufficient current registry, tier, handoff, and RequiredFacts support",
+            "reason": "SOR-001 has sufficient current registry, tier, handoff, and RequiredFacts support; CPM is added as fourth candidate until RequiredFacts and watcher scope close",
             "fallback_order": ["FBS-001", "TEQ-001", "BTPC-001"],
         },
         "objective_met": objective_met,
@@ -256,8 +273,13 @@ def build_three_strategy_live_trial_portfolio(
                 bool(seats[strategy_id]["review_hooks"])
                 for strategy_id in selected_strategy_groups
             ),
-            "trial_grade_30u_standby_ready": stage_5_standby["ready"],
-            "trial_grade_30u_standby_count": stage_5_standby["standby_count"],
+            "controlled_live_standby_ready": stage_5_standby["ready"],
+            "controlled_live_standby_count": stage_5_standby["standby_count"],
+            "cpm_live_trial_portfolio_candidate": any(
+                row.get("strategy_group_id") == CPM_STRATEGY_GROUP_ID
+                for row in additional_candidates
+            ),
+            "cpm_replaces_existing_seat": False,
             "stage_5_waiting_live_opportunity": stage_5_standby["ready"],
             "action_time_preflight_pending_fresh_signal": stage_5_standby[
                 "action_time_preflight_pending_fresh_signal"
@@ -290,6 +312,7 @@ def build_three_strategy_live_trial_portfolio(
             "strategy_seat_table": [
                 seats[strategy_id] for strategy_id in selected_strategy_groups
             ],
+            "additional_live_trial_candidates": additional_candidates,
             "remaining_first_blockers": first_blockers,
             "next_live_submit_condition": (
                 "fresh seat-scoped signal plus RequiredFacts, candidate evidence, "
@@ -320,6 +343,119 @@ def build_three_strategy_live_trial_portfolio(
         },
         "interaction": _interaction(),
         "safety_invariants": _safety_invariants(),
+    }
+
+
+def _admission_proposals_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for proposal in [
+        _as_dict(packet.get("proposal")),
+        *_dict_rows(packet.get("proposals")),
+        *_dict_rows(packet.get("additional_proposals")),
+    ]:
+        strategy_id = str(proposal.get("strategy_group_id") or "")
+        if strategy_id:
+            rows[strategy_id] = proposal
+    return rows
+
+
+def _additional_live_trial_candidates(
+    *,
+    capital_trial_bridge: dict[str, Any],
+    admission_proposals: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    cpm_proposal = _as_dict(admission_proposals.get(CPM_STRATEGY_GROUP_ID))
+    if not cpm_proposal:
+        return []
+    cpm_bridge_row = _capital_trial_row(capital_trial_bridge, CPM_STRATEGY_GROUP_ID)
+    return [_cpm_live_trial_candidate(cpm_proposal, cpm_bridge_row)]
+
+
+def _capital_trial_row(packet: dict[str, Any], strategy_group_id: str) -> dict[str, Any]:
+    for row in _dict_rows(packet.get("capital_trial_eligibility_rows")):
+        if str(row.get("strategy_group_id") or "") == strategy_group_id:
+            return row
+    return {}
+
+
+def _cpm_live_trial_candidate(
+    proposal: dict[str, Any],
+    bridge_row: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = _as_dict(proposal.get("absorbed_observation_evidence"))
+    owner_defaults = _as_dict(proposal.get("owner_policy_defaults"))
+    runtime_plan = _as_dict(proposal.get("runtime_admission_plan"))
+    return {
+        "strategy_group_id": CPM_STRATEGY_GROUP_ID,
+        "seat": "candidate-D",
+        "portfolio_relationship": "fourth_live_trial_portfolio_candidate",
+        "recommended_relationship": "fourth_candidate_no_displacement",
+        "does_not_displace_existing_three_standby": True,
+        "replacement_recommendation": "do_not_replace_sor_until_cpm_requiredfacts_and_watcher_scope_close",
+        "candidate_stage": "trial_asset_admission_candidate",
+        "stage": "trial_asset_admission_candidate",
+        "strategy_thesis": "ETH short continuation / controlled pullback momentum after high-timeframe weakness",
+        "admitted_or_selected_as_live_trial_asset": False,
+        "registry_admitted": False,
+        "trial_asset_admission_proposal_ready": True,
+        "owner_policy_required": False,
+        "owner_policy_recorded": proposal.get("owner_policy_recorded") is True,
+        "owner_policy_status": "controlled_subaccount_scope_draft_recorded_for_candidate_review",
+        "policy_scope": {
+            "capital_scope": _as_dict(owner_defaults.get("capital_scope")),
+            "symbol_scope": _string_list(owner_defaults.get("symbol_scope"))
+            or ["ETH/USDT:USDT"],
+            "side_scope": _string_list(owner_defaults.get("side_scope")) or ["short"],
+            "leverage_scenario": owner_defaults.get("leverage_scenario"),
+            "max_notional": _as_dict(owner_defaults.get("max_notional")),
+            "attempt_cap": owner_defaults.get("attempt_cap"),
+            "loss_unit": owner_defaults.get("loss_unit"),
+            "profile": "runtime_profile_and_action_time_exchange_facts",
+            "missing_policy_fields": [],
+        },
+        "symbol_scope": _string_list(owner_defaults.get("symbol_scope"))
+        or ["ETH/USDT:USDT"],
+        "side_scope": _string_list(owner_defaults.get("side_scope")) or ["short"],
+        "required_facts": _string_list(runtime_plan.get("required_facts_draft")),
+        "disable_or_review_facts": _string_list(
+            runtime_plan.get("disable_or_review_facts_draft")
+        ),
+        "required_facts_mapping_ready": False,
+        "runtime_readiness": {
+            "armed_observation_ready": False,
+            "blocked_by": "cpm_required_facts_mapping_gap",
+            "tiny_live_ready": False,
+            "live_submit_ready": False,
+            "controlled_live_standby_ready": False,
+            "stage_5_waiting_live_opportunity_ready": False,
+        },
+        "first_blocker": {
+            "verdict": "not_tradable_facts",
+            "first_blocker_class": "cpm_required_facts_mapping_gap",
+            "blocker_owner": "engineering",
+            "next_action": "build_cpm_required_facts_mapping_and_runtime_watcher_scope",
+        },
+        "tradeability_projection": {
+            "can_trade": False,
+            "verdict": "not_tradable_facts",
+            "next_state_after_blocker_removed": "armed_observation",
+        },
+        "absorbed_observation_evidence": evidence,
+        "recent_opportunity_count": _int(bridge_row.get("recent_opportunity_count")),
+        "would_enter_forward_positive_count": _int(
+            bridge_row.get("would_enter_forward_positive_count")
+        ),
+        "tradable_forward_count": _int(bridge_row.get("tradable_forward_count")),
+        "ranking_score": _int(bridge_row.get("ranking_score")),
+        "authority_boundary": _authority_boundary(),
+        "review_hooks": [
+            "strategygroup_decision_ledger",
+            "cpm_trial_admission_review",
+            "post_submit_review_ledger_after_real_attempt",
+        ],
+        "next_bottleneck": "cpm_required_facts_mapping_gap",
+        "actionable_now": False,
+        "real_order_authority": False,
     }
 
 
@@ -737,24 +873,35 @@ def _sor_seat(
         "observed_no_action_count": no_action_count,
         "policy_scope": {
             "capital_scope": {
-                "amount": "30",
                 "currency": "USDT",
-                "type": "trial_grade_audit_envelope_not_sizing_default",
+                "type": "isolated_subaccount_full_allocation",
+                "allocation_mode": "full_available_isolated_subaccount",
+                "amount_source": "action_time_exchange_available_balance",
             },
             "symbol_scope": ["session_eligible_perps"],
             "side_scope": ["short", "long_revival_only"],
             "leverage_scenario": "trial_grade_scenario_not_production_authority",
             "attempt_cap": 3,
-            "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+            "loss_unit": {
+                "currency": "USDT",
+                "calculation": "action_time_exchange_available_balance / attempt_cap",
+                "balance_source": "action_time_exchange_available_balance",
+                "basis": "controlled subaccount dynamic allocation / attempt cap",
+            },
             "profile": "existing_observation_profile_boundary",
         },
         "owner_policy_required": False,
-        "owner_policy_status": "trial_grade_30u_observation_policy_recorded_not_production_authority",
+        "owner_policy_status": "controlled_subaccount_observation_policy_recorded_not_production_authority",
         "symbol_scope": ["session_eligible_perps"],
         "side_scope": ["short", "long_revival_only"],
         "leverage_scenario": "trial_grade_scenario_not_production_authority",
         "attempt_cap": 3,
-        "loss_unit": {"amount": "10", "currency": "USDT", "basis": "3 attempts"},
+        "loss_unit": {
+            "currency": "USDT",
+            "calculation": "action_time_exchange_available_balance / attempt_cap",
+            "balance_source": "action_time_exchange_available_balance",
+            "basis": "controlled subaccount dynamic allocation / attempt cap",
+        },
         "pause_conditions": [
             "outside_session_window",
             "post_open_decay_disable_state_true",
@@ -828,8 +975,8 @@ def _attach_trial_grade_standby(
         )
         standby_ready = (
             signal_status["trial_grade_audit_ready"]
-            and signal_status["trial_grade_policy_scope"] == "30U_bounded_trial_only"
-            and signal_status["trial_grade_signal_can_prepare_30u_trial"]
+            and signal_status["trial_grade_policy_scope"] == "controlled_subaccount_live_scope"
+            and signal_status["trial_grade_signal_can_prepare_controlled_live"]
             and not signal_status["production_grade_authority_changed"]
             and seat.get("admitted_or_selected_as_live_trial_asset") is True
             and seat.get("owner_policy_required") is False
@@ -839,7 +986,7 @@ def _attach_trial_grade_standby(
             and not hard_safety_gates_relaxed
             and not signal_status["trial_grade_signal_can_bypass_hard_safety_gates"]
         )
-        runtime_readiness["trial_grade_30u_standby_ready"] = standby_ready
+        runtime_readiness["controlled_live_standby_ready"] = standby_ready
         runtime_readiness["stage_5_waiting_live_opportunity_ready"] = standby_ready
         runtime_readiness["action_time_preflight_pending_fresh_signal"] = standby_ready
         runtime_readiness["trial_grade_policy_scope"] = policy_update.get(
@@ -940,11 +1087,11 @@ def _trial_grade_signal_status(
         "max_loss_estimate_usdt": str(
             projection.get("max_loss_estimate_usdt") or ""
         ),
-        "would_enter_30u_trial_if_same_structure": (
-            tomorrow.get("would_enter_30u_trial") is True
+        "would_enter_controlled_live_trial_if_same_structure": (
+            tomorrow.get("would_enter_controlled_live_trial") is True
         ),
-        "trial_grade_signal_can_prepare_30u_trial": (
-            authority.get("trial_grade_signal_can_prepare_30u_trial") is True
+        "trial_grade_signal_can_prepare_controlled_live": (
+            authority.get("trial_grade_signal_can_prepare_controlled_live") is True
         ),
         "trial_grade_signal_can_bypass_hard_safety_gates": (
             authority.get("trial_grade_signal_can_bypass_hard_safety_gates") is True
@@ -1078,6 +1225,29 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
                 blocker["next_action"],
             )
         )
+    additional = _dict_rows(packet.get("additional_live_trial_candidates"))
+    if additional:
+        lines.extend(
+            [
+                "",
+                "## Additional Candidates",
+                "",
+                "| StrategyGroup | Relationship | Stage | Verdict | First Blocker | Next Action |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in additional:
+            blocker = _as_dict(row.get("first_blocker"))
+            lines.append(
+                "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+                    row.get("strategy_group_id"),
+                    row.get("portfolio_relationship"),
+                    row.get("stage"),
+                    blocker.get("verdict"),
+                    blocker.get("first_blocker_class"),
+                    blocker.get("next_action"),
+                )
+            )
     lines.extend(
         [
             "",

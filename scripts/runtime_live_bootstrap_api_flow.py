@@ -198,7 +198,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "market_structure": "closed-candle price action",
                 "entry_logic_family": "catalog-bound price-action trigger",
                 "exit_logic_family": "TP1 partial plus runner/trailing metadata",
-                "risk_model": "bounded small-capital attempts; no runaway",
+                "risk_model": "bounded controlled-subaccount attempts; no runaway",
                 "supported_symbols": _supported_symbols(self._config),
                 "supported_timeframes": [self._config.timeframe],
                 "required_data": ["closed_ohlcv", "trusted_account_facts", "active_positions"],

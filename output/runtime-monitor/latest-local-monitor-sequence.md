@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-23T12:25:43.867010+00:00
+- 报告时间: 2026-06-29T11:31:03.919839+00:00
 - 当前阶段: 等待机会
 - 当前动作: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -16,15 +16,18 @@
 - RBR/RBR2 role review: `1`
 - 策略 intake 状态: `research_intake_review_ready`
 - 策略 intake 候选: `BRF2-001, RBR2-001`
-- 小资金试验候选状态: `capital_trial_readiness_bridge_ready`
-- 小资金试验候选策略组: `BRF2-001`
+- 受控实盘候选状态: `capital_trial_readiness_bridge_ready`
+- 受控实盘候选策略组: `BRF2-001`
 - 做空试验候选策略组: `BRF2-001`
 - 晋级范围: `intake_only`
-- tiny-live ready: `否`
+- controlled-live ready: `否`
 - 准入提案状态: `trial_asset_admission_proposal_ready`
 - 准入提案策略组: `BRF2-001`
 - 准入提案下一状态: `armed_observation`
 - Owner policy required: `否`
+- CPM 准入候选: `trial_asset_admission_candidate`
+- CPM 观察证据数: `4`
+- CPM 准入下一动作: `build_cpm_required_facts_mapping_and_runtime_watcher_scope`
 - BRF2 Owner policy recorded: `是`
 - BRF2 next blocker: `required_facts_mapping_gap`
 - BRF2 RequiredFacts mapping: `brf2_required_facts_mapping_ready`
@@ -44,12 +47,17 @@
 - 三策略席位数: `3`
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - 第五阶段状态: `phase_5_waiting_for_live_opportunity`
-- 30U trial standby 席位: `3` / `3`
+- 受控实盘 standby 席位: `3` / `3`
+- CPM 组合候选: `是` / replaces existing seat `否`
+- CPM 组合第一阻断: `cpm_required_facts_mapping_gap` / `engineering`
 - Fresh signal 后 action-time preflight: `是`
 - 交易资格状态: `tradeability_verdict_ready`
 - 交易资格 Top: `BRF2-001` / `not_tradable_market_wait`
 - 第一阻断: `fresh_brf2_short_signal_absent` / `market`
 - 下一动作: `continue_brf2_armed_observation_until_fresh_signal`
+- CPM 交易资格: `trial_asset_admission_candidate` / `not_tradable_facts`
+- CPM 第一阻断: `cpm_required_facts_mapping_gap` / `engineering`
+- CPM 下一动作: `build_cpm_required_facts_mapping_and_runtime_watcher_scope`
 - 当前可交易数量: `0`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`

@@ -21,7 +21,6 @@ Before interpreting StrategyGroup handoffs, follow:
 
 ```text
 docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 ```
 

@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-23
-Current phase: StrategyGroup runtime-governance pilot
+Last updated: 2026-06-29
+Current phase: controlled-subaccount live-trading first pilot
 
 ## Current Document Authority
 
@@ -24,7 +24,6 @@ docs/current/TRADEABILITY_VERDICT_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
 docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 docs/current/strategy-group-handoffs/main-control-handoff-index.md
@@ -55,8 +54,9 @@ Archives preserve provenance.
 
 `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` defines source classes and
 authority order. `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md`
-defines the StrategyGroup asset layer. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`
-defines how architecture direction becomes bounded execution work.
+defines the StrategyGroup asset layer. Execution coordination is lightweight
+and lifecycle-first: architecture direction enters implementation as a short
+execution brief, not a long task-card contract.
 
 Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,
@@ -76,6 +76,33 @@ surface says intervention is needed.
 
 The system is not an institutional quant platform, a raw packet browser, or a
 manual evidence-interpretation workflow.
+
+The project must keep moving toward real trading. Mainline work should not
+continue proving governance readiness for its own sake. If a StrategyGroup can
+trade inside Owner-approved trial scope, the system should route it toward
+action-time facts, FinalGate, Operation Layer, Execution Attempt, and Review
+Outcome. If it cannot trade, the system must expose the first blocker, blocker
+owner, and next checkpoint instead of hiding behind generic waiting states or
+additional preparation layers.
+
+The default priority is live-trading lifecycle first, audit second. Audit,
+review, replay, and evidence artifacts exist to explain trades, diagnose missed
+trades, and improve the next trade. They must not become the main product path
+or a substitute for reaching a bounded real execution attempt.
+
+First principle:
+
+```text
+Real trading first, then explanation.
+```
+
+Any blocker that prevents a scoped StrategyGroup from progressing toward a real
+execution attempt must be diagnosed to root cause. A generic "missing facts",
+"not ready", "quality gap", or "waiting" answer is incomplete unless it states:
+the exact missing condition, why the system cannot produce it now, which source
+or module must change, the next concrete repair, and whether the expected state
+after repair is armed observation, action-time facts, execution attempt, or a
+strategy park/kill decision.
 
 The project is a bounded-aggressive real-profit experiment. The Owner-provided
 subaccount allocation is already the upstream risk-control decision and may be
@@ -128,7 +155,7 @@ real lifecycle review.
 Promotion language must be scoped. A research-side short candidate such as
 `BRF2-001` may be promoted for `intake_only` or `trial_admission` without being
 promoted to live readiness. Generic `promote` wording is invalid when it hides
-whether the scope is intake, armed observation, tiny-live readiness, or L4
+whether the scope is intake, armed observation, controlled-live readiness, or L4
 eligibility.
 
 The Owner is not an operator. Owner-facing product surfaces must not turn
@@ -355,27 +382,25 @@ outcomes.
 Codex owns requirements analysis, planning, architecture options, core
 decisions, core implementation, code review, and merge readiness decisions.
 
-Claude Code owns bounded implementation and tests from Codex-issued task cards.
+Claude Code owns bounded implementation and tests from Codex-issued execution
+briefs.
 Claude must not redefine scope, architecture, priorities, runtime profiles, or
 strategy parameters.
 
-Claude tasks must include:
+Execution briefs should be short and lifecycle-first. They should state:
 
 ```text
-Task ID
-Goal
-Why
-Allowed files
-Forbidden files
-Requirements
-Global Authority Model
-Capability Unlocked
-Next Engineering Bottleneck
-Rehearsal/Simulation Boundary
-Tests
-Done When
-Hard Stop
+objective
+why it matters for the trading lifecycle
+touched surface, when bounded scoping is needed
+no-go boundaries
+validation
+stop condition
 ```
+
+Do not require long task-card markdown scaffolds such as allowed-file lists,
+forbidden-file lists, done-when blocks, or hard-stop boilerplate unless the
+change touches protected core runtime files or live authority.
 
 ## Core Files
 
@@ -391,7 +416,8 @@ src/application/reconciliation.py
 src/application/startup_reconciliation_service.py
 ```
 
-Claude can touch a core file only when the task card explicitly allows it.
+Claude can touch a core file only when a Codex execution brief explicitly
+allows it.
 
 ## Engineering Constraints
 
