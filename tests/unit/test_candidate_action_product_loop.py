@@ -126,7 +126,7 @@ def test_candidate_action_product_loop_represents_four_stage_non_live_contract()
     for item in loops.values():
         assert item.backend_actionable is False
         assert item.may_execute_live is False
-        assert item.frontend_action_enabled is False
+        assert item.owner_action_enabled is False
         assert item.places_order is False
         assert item.exchange_write_action is False
     assert bundle.no_action_guarantee["places_order"] is False

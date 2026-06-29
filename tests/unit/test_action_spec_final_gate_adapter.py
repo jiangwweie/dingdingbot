@@ -89,7 +89,7 @@ def test_adapter_marks_complete_spec_ready_for_official_final_gate_only():
         "This candidate can be converted to an ActionSpec"
     )
     assert result.final_gate_preview.may_execute_live is False
-    assert result.final_gate_preview.frontend_action_enabled is False
+    assert result.final_gate_preview.owner_action_enabled is False
     assert result.final_gate_preview.places_order is False
     assert result.final_gate_is_execution_gate is True
     assert result.no_action_guarantee["places_order"] is False
@@ -185,7 +185,7 @@ def test_adapter_keeps_volatility_proposal_only():
     assert result.final_gate_preview.status == "proposal_only"
     assert "proposal_only_candidate" in result.hard_blockers
     assert result.final_gate_preview.may_execute_live is False
-    assert result.final_gate_preview.frontend_action_enabled is False
+    assert result.final_gate_preview.owner_action_enabled is False
 
 
 def test_adapter_keeps_bnb_historical_sample_dry_run_only():
