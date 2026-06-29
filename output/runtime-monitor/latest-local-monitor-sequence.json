@@ -50,23 +50,23 @@
   },
   "brf2_runtime_signal_capture": {
     "active": true,
-    "active_disable_fact_count": 2,
-    "blocked_fact_count": 3,
-    "current_signal_state": "blocked_by_disable_fact",
+    "active_disable_fact_count": 0,
+    "blocked_fact_count": 2,
+    "current_signal_state": "fresh_signal_absent",
     "execution_attempt_required_for_lifecycle_entry": true,
     "fact_input_present": true,
     "fact_input_status": "brf2_runtime_signal_facts_ready",
-    "first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "first_blocker_class": "fresh_brf2_short_signal_absent",
     "first_blocker_owner": "market",
     "fresh_signal_present": false,
     "live_submit_readiness_source": "runtime_safety_state",
-    "missing_required_fact_count": 1,
+    "missing_required_fact_count": 2,
     "primary_judgment_source": false,
     "projection_role": "runtime_readiness_signal_capture_projection",
     "ready": true,
     "runtime_truth_source": false,
     "shadow_candidate_shape_ready": false,
-    "signal_capture_checkpoint": "continue_brf2_armed_observation_until_disable_clears",
+    "signal_capture_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
     "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
     "state_source": "brf2_runtime_signal_capture",
     "status": "brf2_runtime_signal_capture_ready",
@@ -94,21 +94,21 @@
   },
   "brf2_shadow_candidate_evidence": {
     "active": true,
-    "first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "first_blocker_class": "fresh_brf2_short_signal_absent",
     "first_blocker_owner": "market",
-    "next_runtime_step": "continue_brf2_armed_observation_until_disable_clears",
+    "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
     "non_executing_evidence": true,
     "primary_judgment_source": false,
     "projection_role": "shadow_candidate_evidence_provenance",
     "shadow_candidate_evidence_id": "",
     "shadow_candidate_evidence_ready": false,
-    "signal_state": "blocked_by_disable_fact",
+    "signal_state": "fresh_signal_absent",
     "state_source": "brf2_shadow_candidate_evidence",
     "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
     "strategy_group_id": "BRF2-001"
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-29T11:49:54.278641+00:00",
+  "generated_at_utc": "2026-06-29T14:05:38.556204+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -188,23 +188,23 @@
     },
     "brf2_runtime_signal_capture": {
       "active": true,
-      "active_disable_fact_count": 2,
-      "blocked_fact_count": 3,
-      "current_signal_state": "blocked_by_disable_fact",
+      "active_disable_fact_count": 0,
+      "blocked_fact_count": 2,
+      "current_signal_state": "fresh_signal_absent",
       "execution_attempt_required_for_lifecycle_entry": true,
       "fact_input_present": true,
       "fact_input_status": "brf2_runtime_signal_facts_ready",
-      "first_blocker_class": "short_squeeze_risk_state_disable_active",
+      "first_blocker_class": "fresh_brf2_short_signal_absent",
       "first_blocker_owner": "market",
       "fresh_signal_present": false,
       "live_submit_readiness_source": "runtime_safety_state",
-      "missing_required_fact_count": 1,
+      "missing_required_fact_count": 2,
       "primary_judgment_source": false,
       "projection_role": "runtime_readiness_signal_capture_projection",
       "ready": true,
       "runtime_truth_source": false,
       "shadow_candidate_shape_ready": false,
-      "signal_capture_checkpoint": "continue_brf2_armed_observation_until_disable_clears",
+      "signal_capture_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
       "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
       "state_source": "brf2_runtime_signal_capture",
       "status": "brf2_runtime_signal_capture_ready",
@@ -232,15 +232,15 @@
     },
     "brf2_shadow_candidate_evidence": {
       "active": true,
-      "first_blocker_class": "short_squeeze_risk_state_disable_active",
+      "first_blocker_class": "fresh_brf2_short_signal_absent",
       "first_blocker_owner": "market",
-      "next_runtime_step": "continue_brf2_armed_observation_until_disable_clears",
+      "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
       "non_executing_evidence": true,
       "primary_judgment_source": false,
       "projection_role": "shadow_candidate_evidence_provenance",
       "shadow_candidate_evidence_id": "",
       "shadow_candidate_evidence_ready": false,
-      "signal_state": "blocked_by_disable_fact",
+      "signal_state": "fresh_signal_absent",
       "state_source": "brf2_shadow_candidate_evidence",
       "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
       "strategy_group_id": "BRF2-001"
@@ -250,20 +250,21 @@
     "owner_intervention_required": false,
     "risk_level": "L0_local_monitor_sequence",
     "signal_observation_grade": {
-      "broader_actionable_would_enter_count": 4,
-      "broader_would_enter_count": 5,
+      "broader_actionable_would_enter_count": 0,
+      "broader_would_enter_count": 1,
       "grade_code": "signal-observation-grade-review",
-      "high_priority_no_action_count": 3,
+      "high_priority_no_action_count": 4,
       "latest_observe_only_would_enter": {
-        "confidence": "0.65",
+        "confidence": "0.57",
         "not_live_signal": true,
-        "side": "long",
-        "strategy_group_id": "MI-001",
-        "symbol": "SOL/USDT:USDT"
+        "side": "short",
+        "strategy_group_id": "RBR-001",
+        "symbol": "ADA/USDT:USDT"
       },
       "main_chain_state": "waiting_for_executable_fresh_signal",
-      "no_action_attribution_count": 3,
+      "no_action_attribution_count": 4,
       "no_action_attribution_strategy_group_ids": [
+        "BRF-001",
         "BTPC-001",
         "LSR-001",
         "VCB-001"
@@ -325,7 +326,7 @@
       "hard_safety_gates_relaxed": false,
       "market_wait_count": 3,
       "next_bottlenecks": {
-        "BRF2-001": "short_squeeze_risk_state_disable_active",
+        "BRF2-001": "fresh_signal_wait",
         "MPG-001": "fresh_signal_wait",
         "SOR-001": "fresh_signal_wait"
       },
@@ -374,6 +375,19 @@
         "runtime_trade_allowed_rows": 0
       },
       "decision_rows_count": 13,
+      "july_bullish_rebound_trade_path_closure": {
+        "capital_scope_uses_action_time_exchange_available_balance": true,
+        "cpm_mapping_gap_removed_from_first_blockers": false,
+        "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
+        "long_side_path_count": 3,
+        "machine_consumed_path_count": 5,
+        "machine_consumption_surface": "tradeability_decision",
+        "rbr_exit_decision_count": 1,
+        "rbr_observe_only_has_exit_decision": false,
+        "required_path_ids_present": true,
+        "short_side_guard_path_count": 2,
+        "status": "july_bullish_rebound_trade_path_closure_ready"
+      },
       "owner_intervention_required": false,
       "projection_role": "tradeability_decision_projection",
       "row_count": 13,
@@ -383,9 +397,9 @@
       "top_after_next_state": "live_submit_ready",
       "top_blocker_owner": "market",
       "top_decision": "not_tradable_market_wait",
-      "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
+      "top_first_blocker_class": "fresh_brf2_short_signal_absent",
       "top_strategy_group_id": "BRF2-001",
-      "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
+      "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_fresh_signal"
     },
     "trial_asset_admission": {
       "active": true,
@@ -426,20 +440,21 @@
   "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
   "scope": "strategygroup_runtime_local_monitor_sequence",
   "signal_observation_grade": {
-    "broader_actionable_would_enter_count": 4,
-    "broader_would_enter_count": 5,
+    "broader_actionable_would_enter_count": 0,
+    "broader_would_enter_count": 1,
     "grade_code": "signal-observation-grade-review",
-    "high_priority_no_action_count": 3,
+    "high_priority_no_action_count": 4,
     "latest_observe_only_would_enter": {
-      "confidence": "0.65",
+      "confidence": "0.57",
       "not_live_signal": true,
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "SOL/USDT:USDT"
+      "side": "short",
+      "strategy_group_id": "RBR-001",
+      "symbol": "ADA/USDT:USDT"
     },
     "main_chain_state": "waiting_for_executable_fresh_signal",
-    "no_action_attribution_count": 3,
+    "no_action_attribution_count": 4,
     "no_action_attribution_strategy_group_ids": [
+      "BRF-001",
       "BTPC-001",
       "LSR-001",
       "VCB-001"
@@ -457,46 +472,46 @@
     "state": "observation_active"
   },
   "source_paths": {
-    "brf2_required_facts_mapping_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
-    "brf2_runtime_signal_capture_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
-    "brf2_runtime_signal_facts_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-runtime-signal-facts.json",
-    "brf2_shadow_candidate_evidence_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json",
-    "btpc_classifier_rule_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
-    "btpc_l2_keep_revise_fact_source_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json",
-    "btpc_l2_shadow_fact_quality_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
-    "btpc_live_derivatives_fact_source_mapping_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
-    "btpc_local_fact_proxy_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
-    "btpc_proxy_replay_quality_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
-    "completion_audit_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
-    "daily_check_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-daily-check.json",
-    "dry_run_audit_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
-    "goal_progress_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.json",
-    "l2_intake_dry_run_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-intake-dry-run.json",
-    "l2_readiness_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-readiness-review.json",
-    "l2_tier_policy_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-tier-policy-review.json",
-    "live_cutover_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-live-cutover-readiness.json",
-    "opportunity_review_work_loop_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-opportunity-review-work-loop.json",
-    "post_revision_replay_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-post-revision-replay-review.json",
-    "replay_lab_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-replay-lab.json",
-    "signal_coverage_expansion_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
-    "signal_coverage_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
-    "strategy_asset_state_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategy-asset-state.json",
-    "strategygroup_btpc_fact_classifier_guard_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
-    "strategygroup_capital_trial_envelope_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json",
-    "strategygroup_capital_trial_envelope_projection_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
-    "strategygroup_handoff_boundary_closure_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
-    "strategygroup_lifecycle_rehearsal_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
-    "strategygroup_owner_policy_package_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-owner-policy-package.json",
-    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
-    "strategygroup_pre_live_rehearsal_readiness_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
-    "strategygroup_quality_closure_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-quality-closure-wave.json",
-    "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
-    "strategygroup_research_intake_review_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
-    "strategygroup_review_only_deep_dive_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json",
-    "strategygroup_runtime_safety_state_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-safety-state.json",
-    "strategygroup_tradeability_decision_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
-    "strategygroup_trial_asset_admission_proposal_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
-    "strategygroup_trial_grade_signal_gate_audit_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
+    "brf2_required_facts_mapping_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
+    "brf2_runtime_signal_capture_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
+    "brf2_runtime_signal_facts_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-facts.json",
+    "brf2_shadow_candidate_evidence_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json",
+    "btpc_classifier_rule_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
+    "btpc_l2_keep_revise_fact_source_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json",
+    "btpc_l2_shadow_fact_quality_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
+    "btpc_live_derivatives_fact_source_mapping_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
+    "btpc_local_fact_proxy_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
+    "btpc_proxy_replay_quality_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
+    "completion_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+    "daily_check_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
+    "dry_run_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
+    "goal_progress_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
+    "l2_intake_dry_run_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-intake-dry-run.json",
+    "l2_readiness_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-readiness-review.json",
+    "l2_tier_policy_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-tier-policy-review.json",
+    "live_cutover_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
+    "opportunity_review_work_loop_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-review-work-loop.json",
+    "post_revision_replay_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-post-revision-replay-review.json",
+    "replay_lab_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-replay-lab.json",
+    "signal_coverage_expansion_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
+    "signal_coverage_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
+    "strategy_asset_state_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategy-asset-state.json",
+    "strategygroup_btpc_fact_classifier_guard_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
+    "strategygroup_capital_trial_envelope_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json",
+    "strategygroup_capital_trial_envelope_projection_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
+    "strategygroup_handoff_boundary_closure_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
+    "strategygroup_lifecycle_rehearsal_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
+    "strategygroup_owner_policy_package_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-owner-policy-package.json",
+    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+    "strategygroup_pre_live_rehearsal_readiness_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
+    "strategygroup_quality_closure_wave_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-quality-closure-wave.json",
+    "strategygroup_quality_wave_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
+    "strategygroup_research_intake_review_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
+    "strategygroup_review_only_deep_dive_wave_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json",
+    "strategygroup_runtime_safety_state_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-safety-state.json",
+    "strategygroup_tradeability_decision_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
+    "strategygroup_trial_asset_admission_proposal_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
+    "strategygroup_trial_grade_signal_gate_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
   },
   "status": "waiting_for_market_monitor_refresh_needed",
   "steps": [
@@ -524,21 +539,21 @@
         "uses_snapshot_level": "L1_readonly_snapshot"
       },
       "name": "daily_check",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-daily-check.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
       "returncode": 2,
       "status": "waiting_for_market_monitor_refresh_needed"
     },
     {
       "interaction": {},
       "name": "runtime_dry_run_audit_chain",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
       "returncode": 0,
       "status": "passed"
     },
     {
       "interaction": {},
       "name": "live_cutover_readiness",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-live-cutover-readiness.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
       "returncode": 0,
       "status": "live_cutover_waiting_for_fresh_signal"
     },
@@ -554,7 +569,7 @@
         "server_files_mutated": false
       },
       "name": "strategygroup_portfolio_board",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
       "returncode": 0,
       "status": "portfolio_board_ready"
     },
@@ -570,7 +585,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_research_intake_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-research-intake-review.json",
       "returncode": 0,
       "status": "research_intake_review_ready"
     },
@@ -587,7 +602,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_capital_trial_envelope_projection",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
       "returncode": 0,
       "status": "trial_envelope_projection_ready"
     },
@@ -603,7 +618,7 @@
         "remote_interaction_count": 0
       },
       "name": "brf2_owner_trial_policy_scope",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json",
       "returncode": 0,
       "status": "brf2_owner_trial_policy_scope_recorded"
     },
@@ -619,7 +634,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_trial_asset_admission_proposal",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
       "returncode": 0,
       "status": "trial_asset_admission_proposal_ready"
     },
@@ -635,7 +650,7 @@
         "remote_interaction_count": 0
       },
       "name": "brf2_required_facts_mapping",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json",
       "returncode": 0,
       "status": "brf2_required_facts_mapping_ready"
     },
@@ -651,7 +666,7 @@
         "remote_interaction_count": 0
       },
       "name": "brf2_runtime_signal_facts",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-runtime-signal-facts.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-facts.json",
       "returncode": 0,
       "status": "brf2_runtime_signal_facts_ready"
     },
@@ -667,7 +682,7 @@
         "remote_interaction_count": 0
       },
       "name": "brf2_runtime_signal_capture",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-capture.json",
       "returncode": 0,
       "status": "brf2_runtime_signal_capture_ready"
     },
@@ -683,7 +698,7 @@
         "remote_interaction_count": 0
       },
       "name": "brf2_shadow_candidate_evidence",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json",
       "returncode": 0,
       "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal"
     },
@@ -699,7 +714,7 @@
         "remote_interaction_count": 0
       },
       "name": "goal_progress",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
       "returncode": 0,
       "status": "waiting_for_market_monitor_refresh_needed"
     },
@@ -726,14 +741,14 @@
         "remote_interaction_count": 0
       },
       "name": "completion_audit",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
       "returncode": 0,
       "status": "not_complete_waiting_for_market"
     },
     {
       "interaction": {},
       "name": "replay_lab",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-replay-lab.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-replay-lab.json",
       "returncode": 0,
       "status": "passed"
     },
@@ -750,9 +765,9 @@
         "remote_interaction_count": 0
       },
       "name": "signal_coverage",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-diagnostic.json",
       "returncode": 0,
-      "status": "mainline_no_signal_broader_would_enter"
+      "status": "mainline_no_signal_low_priority_broader_would_enter"
     },
     {
       "interaction": {
@@ -766,9 +781,9 @@
         "remote_interaction_count": 0
       },
       "name": "signal_coverage_expansion_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-signal-coverage-expansion-review.json",
       "returncode": 0,
-      "status": "review_needed_broader_observe_only_would_enter"
+      "status": "low_priority_observe_only_would_enter_parked"
     },
     {
       "interaction": {
@@ -782,7 +797,7 @@
         "remote_interaction_count": 0
       },
       "name": "l2_readiness_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-readiness-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-readiness-review.json",
       "returncode": 0,
       "status": "l2_readiness_review_already_enabled"
     },
@@ -798,7 +813,7 @@
         "remote_interaction_count": 0
       },
       "name": "l2_intake_dry_run",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-intake-dry-run.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-intake-dry-run.json",
       "returncode": 0,
       "status": "l2_intake_dry_run_no_candidates"
     },
@@ -814,7 +829,7 @@
         "remote_interaction_count": 0
       },
       "name": "l2_tier_policy_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-l2-tier-policy-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-tier-policy-review.json",
       "returncode": 0,
       "status": "l2_tier_policy_review_no_candidates"
     },
@@ -830,7 +845,7 @@
         "remote_interaction_count": 0
       },
       "name": "post_revision_replay_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-post-revision-replay-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-post-revision-replay-review.json",
       "returncode": 0,
       "status": "passed"
     },
@@ -846,7 +861,7 @@
         "remote_interaction_count": 0
       },
       "name": "opportunity_review_work_loop",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-opportunity-review-work-loop.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-review-work-loop.json",
       "returncode": 0,
       "status": "review_work_loop_ready"
     },
@@ -862,7 +877,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_l2_shadow_fact_quality_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json",
       "returncode": 0,
       "status": "btpc_l2_shadow_fact_quality_review_ready"
     },
@@ -878,7 +893,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_local_fact_proxy_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-local-fact-proxy-review.json",
       "returncode": 0,
       "status": "btpc_local_fact_proxy_review_ready"
     },
@@ -894,7 +909,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_proxy_replay_quality_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-proxy-replay-quality-review.json",
       "returncode": 0,
       "status": "btpc_proxy_replay_quality_review_ready"
     },
@@ -910,7 +925,7 @@
         "remote_interaction_count": 0
       },
       "name": "opportunity_review_work_loop_final",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-opportunity-review-work-loop.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-opportunity-review-work-loop.json",
       "returncode": 0,
       "status": "review_work_loop_ready"
     },
@@ -926,7 +941,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_l2_keep_revise_fact_source_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json",
       "returncode": 0,
       "status": "btpc_l2_keep_revise_fact_source_review_ready"
     },
@@ -942,7 +957,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_live_derivatives_fact_source_mapping",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json",
       "returncode": 0,
       "status": "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority"
     },
@@ -958,7 +973,7 @@
         "remote_interaction_count": 0
       },
       "name": "btpc_classifier_rule_review",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-btpc-classifier-rule-review.json",
       "returncode": 0,
       "status": "btpc_classifier_rule_review_recorded_without_live_authority"
     },
@@ -974,14 +989,14 @@
         "remote_interaction_count": 0
       },
       "name": "strategy_asset_state",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategy-asset-state.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategy-asset-state.json",
       "returncode": 0,
       "status": "strategy_asset_state_ready"
     },
     {
       "interaction": {},
       "name": "strategygroup_quality_wave",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json",
       "returncode": 0,
       "status": "quality_wave_ready"
     },
@@ -997,7 +1012,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_handoff_boundary_closure",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-handoff-boundary-closure-current.json",
       "returncode": 0,
       "status": "handoff_boundary_closure_ready"
     },
@@ -1013,7 +1028,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_btpc_fact_classifier_guard",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-btpc-fact-classifier-guard-current.json",
       "returncode": 0,
       "status": "btpc_fact_classifier_guard_ready"
     },
@@ -1029,7 +1044,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_lifecycle_rehearsal",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-lifecycle-rehearsal-current.json",
       "returncode": 0,
       "status": "lifecycle_rehearsal_ready"
     },
@@ -1045,7 +1060,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_pre_live_rehearsal_readiness",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
+      "output_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.json",
       "returncode": 0,
       "status": "pre_live_rehearsal_ready"
     },
@@ -1061,7 +1076,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_runtime_safety_state",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-runtime-safety-state.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-safety-state.json",
       "returncode": 0,
       "status": "live_submit_standby_waiting_for_market"
     },
@@ -1077,7 +1092,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_trial_grade_signal_gate_audit",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json",
       "returncode": 0,
       "status": "trial_grade_signal_gate_audit_ready"
     },
@@ -1093,7 +1108,7 @@
         "remote_interaction_count": 0
       },
       "name": "three_strategy_live_trial_portfolio",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
       "returncode": 0,
       "status": "three_strategy_live_trial_portfolio_ready"
     },
@@ -1109,7 +1124,7 @@
         "remote_interaction_count": 0
       },
       "name": "strategygroup_tradeability_decision",
-      "output_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
       "returncode": 0,
       "status": "tradeability_decision_ready"
     }
@@ -1192,7 +1207,7 @@
     "hard_safety_gates_relaxed": false,
     "market_wait_count": 3,
     "next_bottlenecks": {
-      "BRF2-001": "short_squeeze_risk_state_disable_active",
+      "BRF2-001": "fresh_signal_wait",
       "MPG-001": "fresh_signal_wait",
       "SOR-001": "fresh_signal_wait"
     },
@@ -1241,6 +1256,19 @@
       "runtime_trade_allowed_rows": 0
     },
     "decision_rows_count": 13,
+    "july_bullish_rebound_trade_path_closure": {
+      "capital_scope_uses_action_time_exchange_available_balance": true,
+      "cpm_mapping_gap_removed_from_first_blockers": false,
+      "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
+      "long_side_path_count": 3,
+      "machine_consumed_path_count": 5,
+      "machine_consumption_surface": "tradeability_decision",
+      "rbr_exit_decision_count": 1,
+      "rbr_observe_only_has_exit_decision": false,
+      "required_path_ids_present": true,
+      "short_side_guard_path_count": 2,
+      "status": "july_bullish_rebound_trade_path_closure_ready"
+    },
     "owner_intervention_required": false,
     "projection_role": "tradeability_decision_projection",
     "row_count": 13,
@@ -1250,8 +1278,8 @@
     "top_after_next_state": "live_submit_ready",
     "top_blocker_owner": "market",
     "top_decision": "not_tradable_market_wait",
-    "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "top_first_blocker_class": "fresh_brf2_short_signal_absent",
     "top_strategy_group_id": "BRF2-001",
-    "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
+    "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_fresh_signal"
   }
 }

@@ -495,6 +495,7 @@ def refresh_product_state_artifacts(
     cookie: str | None = None,
     opener: Callable[..., Any] = urllib.request.urlopen,
     generated_at_ms: int | None = None,
+    refresh_api_readmodels: bool = True,
     collect_live_facts_before_refresh: bool = False,
     handoff_dir: Path | None = None,
     env_file: Path | None = None,
@@ -831,7 +832,7 @@ def refresh_product_state_artifacts(
                 "output_json": str(resolved_goal_status_output_json),
             }
 
-    if cookie is None:
+    if refresh_api_readmodels and cookie is None:
         try:
             cookie = _operator_cookie()
         except Exception as exc:
@@ -843,7 +844,18 @@ def refresh_product_state_artifacts(
         "enabled": False,
         "status": "skipped",
     }
-    if cookie is None:
+    if not refresh_api_readmodels:
+        artifacts.append(
+            {
+                "endpoint": "api_readmodels",
+                "output_json": None,
+                "status": "skipped_by_request",
+                "api_freshness_status": None,
+                "api_blocker_count": 0,
+                "api_warning_count": 0,
+            }
+        )
+    elif cookie is None:
         for endpoint, filename in ENDPOINTS:
             output_path = output_dir / filename
             blockers.append(f"{filename}:refresh_skipped:operator_cookie_unavailable")
@@ -898,7 +910,7 @@ def refresh_product_state_artifacts(
                 blockers.append(f"{filename}:refresh_failed:{type(exc).__name__}")
                 warnings.append(str(exc))
 
-    if cookie is None:
+    if refresh_api_readmodels and cookie is None:
         evidence_path = output_dir / "owner-console-source-readiness.json"
         unavailable_evidence = _source_readiness_unavailable_evidence(
             output_dir=output_dir,
@@ -945,6 +957,7 @@ def refresh_product_state_artifacts(
         "safety_invariants": {
             "readmodel_refresh_only": True,
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
+            "optional_api_readmodel_refresh": refresh_api_readmodels,
             "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
             "optional_chain_closure_status_refresh": refresh_chain_closure_status,
             "optional_live_closure_evidence_refresh": refresh_live_closure_evidence,
@@ -974,6 +987,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-json")
     parser.add_argument("--label", default="strategygroup-runtime-product-state-refresh")
     parser.add_argument("--timeout-seconds", type=int, default=30)
+    parser.add_argument(
+        "--skip-api-readmodel-refresh",
+        action="store_true",
+        help=(
+            "Refresh only explicitly requested local artifacts and do not call "
+            "operator-authenticated readmodel APIs or overwrite their outputs."
+        ),
+    )
     parser.add_argument("--collect-live-facts-before-refresh", action="store_true")
     parser.add_argument("--handoff-dir")
     parser.add_argument("--env-file")
@@ -1082,6 +1103,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=Path(args.output_dir).expanduser(),
         label=args.label,
         timeout_seconds=args.timeout_seconds,
+        refresh_api_readmodels=not args.skip_api_readmodel_refresh,
         collect_live_facts_before_refresh=args.collect_live_facts_before_refresh,
         handoff_dir=Path(args.handoff_dir).expanduser() if args.handoff_dir else None,
         env_file=Path(args.env_file).expanduser() if args.env_file else None,

@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-29T11:49:54.278641+00:00
+- 报告时间: 2026-06-29T14:05:38.556204+00:00
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -10,9 +10,9 @@
 - 服务器修改: 否
 - 接近真实订单: 否
 - Signal Observation grade: `signal-observation-grade-review` / `observation_active`
-- Signal Observation would-enter / no-action: `5` / `3`
-- 昨晚观察信号: `MI-001` / `SOL/USDT:USDT` / `long`
-- No-action 归因队列: `3`
+- Signal Observation would-enter / no-action: `1` / `4`
+- 昨晚观察信号: `RBR-001` / `ADA/USDT:USDT` / `short`
+- No-action 归因队列: `4`
 - RBR/RBR2 role review: `1`
 - 策略 intake 状态: `research_intake_review_ready`
 - 策略 intake 候选: `BRF2-001, RBR2-001`
@@ -32,12 +32,12 @@
 - BRF2 runtime signal facts: `brf2_runtime_signal_facts_ready`
 - BRF2 fact input / watcher tick: `是` / `是`
 - BRF2 runtime signal capture: `brf2_runtime_signal_capture_ready`
-- BRF2 signal state: `blocked_by_disable_fact`
-- BRF2 signal first blocker: `short_squeeze_risk_state_disable_active` / `market`
+- BRF2 signal state: `fresh_signal_absent`
+- BRF2 signal first blocker: `fresh_brf2_short_signal_absent` / `market`
 - BRF2 shadow candidate shape ready: `否`
 - BRF2 shadow candidate evidence: `brf2_shadow_candidate_evidence_waiting_for_fresh_signal`
 - BRF2 shadow evidence ready: `否`
-- BRF2 shadow evidence first blocker: `short_squeeze_risk_state_disable_active` / `market`
+- BRF2 shadow evidence first blocker: `fresh_brf2_short_signal_absent` / `market`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
@@ -46,8 +46,8 @@
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - Tradeability Decision 状态: `tradeability_decision_ready`
 - Tradeability Decision Top: `BRF2-001` / `not_tradable_market_wait`
-- 第一阻断: `short_squeeze_risk_state_disable_active` / `market`
-- 下一检查点: `continue_brf2_armed_observation_until_disable_clears`
+- 第一阻断: `fresh_brf2_short_signal_absent` / `market`
+- 下一检查点: `continue_brf2_armed_observation_until_fresh_signal`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
 - Trial-grade 30d observation / action-time submit: `0` / `0`
@@ -73,8 +73,8 @@
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |
-| signal_coverage | mainline_no_signal_broader_would_enter | 0 |
-| signal_coverage_expansion_review | review_needed_broader_observe_only_would_enter | 0 |
+| signal_coverage | mainline_no_signal_low_priority_broader_would_enter | 0 |
+| signal_coverage_expansion_review | low_priority_observe_only_would_enter_parked | 0 |
 | l2_readiness_review | l2_readiness_review_already_enabled | 0 |
 | l2_intake_dry_run | l2_intake_dry_run_no_candidates | 0 |
 | l2_tier_policy_review | l2_tier_policy_review_no_candidates | 0 |

@@ -98,6 +98,10 @@ def _capital_trial_envelope_projection() -> dict:
                 "candidate_family": "short_research_intake",
                 "research_intake_position": "role_only_intake_candidate",
                 "candidate_status": "role_only_short_experiment_candidate_watchlist",
+                "strategy_asset_decision": "keep_observing",
+                "first_blocker": "RBR2-001_role_only_range_detector_classifier_merge_note",
+                "next_action": "keep_rbr2_as_range_detector_classifier_review_input",
+                "post_action_expected_state": "classifier_review_input",
                 "side_scope": ["short"],
                 "trial_blockers": [
                     "best role is filler not main right-tail engine",
@@ -183,6 +187,16 @@ def _signal_coverage() -> dict:
         },
         "broader_observation": {
             "would_enter_signals": [
+                {
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETH/USDT:USDT",
+                    "side": "long",
+                    "signal_type": "would_enter",
+                    "not_live_signal": True,
+                    "actionable_now": False,
+                    "real_order_authority": False,
+                    "reason": "CPM-RO-001_registry_identity_review",
+                },
                 {
                     "strategy_group_id": "RBR-001",
                     "symbol": "ADA/USDT:USDT",
@@ -879,21 +893,22 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
     }
 
     assert packet["checks"]["july_bullish_rebound_paths_consumed"] is True
-    assert packet["checks"]["cpm_mapping_gap_removed_from_first_blockers"] is True
+    assert packet["checks"]["cpm_non_market_blocker_preserved"] is True
     assert closure["summary"]["required_long_paths_present"] is True
     assert closure["summary"]["required_short_guard_paths_present"] is True
     assert closure["summary"]["long_side_path_count"] == 3
     assert closure["summary"]["short_side_guard_path_count"] == 2
+    assert closure["summary"]["required_rbr_exit_rows_present"] is True
     assert closure["checks"]["capital_scope_uses_action_time_exchange_available_balance"]
     assert closure["checks"]["no_fixed_30u_contract"] is True
+    assert closure["checks"]["rbr_observe_only_has_exit_decision"] is True
 
     assert rows["CPM-RO-001"]["first_blocker_class"] == (
-        "fresh_cpm_long_signal_absent"
+        "cpm_registry_identity_gap"
     )
-    assert rows["CPM-RO-001"]["stage"] == "armed_observation"
-    assert "cpm_required_facts_mapping_gap" not in {
-        row["first_blocker_class"] for row in packet["decision_rows"]
-    }
+    assert rows["CPM-RO-001"]["decision"] == "not_tradable_asset_admission"
+    assert rows["CPM-RO-001"]["stage"] == "observe_only_would_enter"
+    assert rows["CPM-RO-001"]["required_facts_status"] == "missing"
 
     assert paths["CPM-LONG"]["trigger_required_facts"] == [
         "htf_trend_intact",
@@ -913,12 +928,17 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
         "funding_not_extreme",
         "action_time_available_balance",
     ]
-    assert paths["CPM-LONG"]["first_blocker"] == "fresh_cpm_long_signal_absent"
-    assert paths["CPM-SHORT"]["first_blocker"] == "fresh_cpm_short_signal_absent"
+    assert paths["CPM-LONG"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-LONG"]["blocker_owner"] == "engineering"
+    assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-SHORT"]["blocker_owner"] == "engineering"
     assert paths["BRF2-SHORT"]["required_facts_mapping_status"] == "ready"
     assert paths["BRF2-SHORT"]["first_blocker"] == "fresh_brf2_short_signal_absent"
     assert paths["MPG-LONG"]["first_blocker"] == "fresh_mpg_long_signal_absent"
-    assert paths["SOR-LONG"]["first_blocker"] == "fresh_sor_long_signal_absent"
+    assert paths["SOR-LONG"]["first_blocker"] == (
+        "strategy_group_not_admitted_as_final_trial_asset"
+    )
+    assert paths["SOR-LONG"]["blocker_owner"] == "engineering"
 
     mpg_diff = paths["MPG-LONG"]["production_vs_trial_trigger_diff"]
     sor_diff = paths["SOR-LONG"]["production_vs_trial_trigger_diff"]
@@ -930,7 +950,7 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
     assert "Operation Layer" in sor_diff["cannot_relax"]
 
     assert exits["RBR-001"]["exit_decision"] == "park"
-    assert exits["RBR2-001"]["exit_decision"] == "merge_as_classifier"
+    assert exits["RBR2-001"]["exit_decision"] == "keep_observing"
     for path in paths.values():
         assert path["can_trade_now"] is False
         assert path["capital_scope_source"] == (
@@ -941,6 +961,31 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
         assert path["post_action_expected_state"]
         assert "actionable_now" not in path
         assert "real_order_authority" not in path
+
+
+def test_july_closure_does_not_pass_rbr_exit_check_when_rows_are_absent():
+    module = _load_module()
+
+    closure = module._july_bullish_rebound_trade_path_closure(
+        [
+            {
+                "strategy_group_id": "MPG-001",
+                "trade_paths": [
+                    {
+                        "path_id": "MPG-LONG",
+                        "side": "long",
+                        "capital_scope_source": (
+                            "action_time_exchange_available_balance"
+                        ),
+                        "can_trade_now": False,
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert closure["summary"]["required_rbr_exit_rows_present"] is False
+    assert closure["checks"]["rbr_observe_only_has_exit_decision"] is False
 
 
 def test_tradeability_decision_does_not_default_portfolio_blocker_to_market_wait():

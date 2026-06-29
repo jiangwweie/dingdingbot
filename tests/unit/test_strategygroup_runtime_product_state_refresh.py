@@ -92,6 +92,7 @@ def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side
     assert artifact["safety_invariants"] == {
         "readmodel_refresh_only": True,
         "optional_signed_get_live_facts_precollect": False,
+        "optional_api_readmodel_refresh": True,
         "optional_dry_run_audit_chain_refresh": False,
         "optional_chain_closure_status_refresh": False,
         "optional_live_closure_evidence_refresh": False,
@@ -644,6 +645,80 @@ def test_refresh_product_state_artifacts_auth_missing_does_not_block_local_audit
     assert artifact["safety_invariants"]["places_order"] is False
     assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is True
     assert "optional_source_readiness_fallback" not in artifact["safety_invariants"]
+
+
+def test_refresh_product_state_artifacts_can_skip_api_readmodels_for_local_artifact_refresh(
+    tmp_path,
+    monkeypatch,
+):
+    def missing_cookie():
+        raise AssertionError("operator cookie should not be requested")
+
+    def dry_run_builder(output_dir):
+        return {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 14,
+            "checks": {"dangerous_effects_absent": True},
+            "required_checks": {"all_scenarios_passed": True},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+                "disabled_smoke_is_real_execution_proof": False,
+            },
+        }
+
+    def chain_closure_status_builder(**kwargs):
+        return {
+            "scope": "runtime_execution_chain_closure_status",
+            "status": "non_market_execution_chain_ready",
+            "real_execution": {
+                "real_order_allowed": False,
+                "missing_live_proofs": ["live_fresh_signal"],
+            },
+        }
+
+    monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+
+    artifact = refresh_product_state_artifacts(
+        api_base="http://unit",
+        output_dir=tmp_path,
+        label="unit",
+        generated_at_ms=1,
+        refresh_api_readmodels=False,
+        refresh_dry_run_audit_chain=True,
+        dry_run_output_dir=tmp_path / "dry",
+        dry_run_output_json=tmp_path / "runtime-dry-run-audit-chain.json",
+        dry_run_builder=dry_run_builder,
+        refresh_chain_closure_status=True,
+        chain_closure_output_json=tmp_path
+        / "runtime-execution-chain-closure-status.json",
+        chain_closure_status_builder=chain_closure_status_builder,
+    )
+
+    assert artifact["status"] == "refreshed"
+    assert artifact["blockers"] == []
+    assert artifact["artifacts"] == [
+        {
+            "endpoint": "api_readmodels",
+            "output_json": None,
+            "status": "skipped_by_request",
+            "api_freshness_status": None,
+            "api_blocker_count": 0,
+            "api_warning_count": 0,
+        }
+    ]
+    assert artifact["source_readiness_unavailable_evidence"] == {
+        "enabled": False,
+        "status": "skipped",
+    }
+    assert artifact["dry_run_audit_refresh"]["status"] == "passed"
+    assert artifact["chain_closure_status_refresh"]["status"] == (
+        "non_market_execution_chain_ready"
+    )
+    assert artifact["safety_invariants"]["optional_api_readmodel_refresh"] is False
+    assert not (tmp_path / "owner-console-source-readiness.json").exists()
 
 
 def test_deploy_channel_status_wins_over_docs_only_readonly_head_mismatch(tmp_path):

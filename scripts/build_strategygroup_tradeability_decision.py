@@ -287,7 +287,6 @@ def build_tradeability_decision(
     all_ids.update(portfolio_seats)
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
-    all_ids.add("CPM-RO-001")
 
     selected_strategy_group_id = _selected_strategy_group_id(
         capital_trial_envelope_projection=capital_trial_envelope_projection,
@@ -368,8 +367,8 @@ def build_tradeability_decision(
                 "machine_consumed_path_count"
             ]
             >= 5,
-            "cpm_mapping_gap_removed_from_first_blockers": july_trade_paths["checks"][
-                "cpm_mapping_gap_removed_from_first_blockers"
+            "cpm_non_market_blocker_preserved": july_trade_paths["checks"][
+                "cpm_non_market_blocker_preserved"
             ],
         },
         "interaction": _interaction(),
@@ -432,9 +431,11 @@ def _decision_row(
         candidate=candidate,
         admission_proposal=admission_proposal,
         owner_policy_scope=owner_policy_scope,
+        registry_row=registry_row,
         registry_present=registry_present,
         tier_present=tier_present,
         tier_row=tier_row,
+        observed_row=observed_row,
         portfolio_seat=portfolio_seat,
         brf2_runtime_signal_capture=brf2_runtime_signal_capture,
         brf2_candidate_authorization_state=brf2_candidate_authorization_state,
@@ -482,14 +483,23 @@ def _decision_row(
             registry_row.get("required_facts_summary")
         ),
     )
-    if strategy_group_id == "CPM-RO-001":
-        required_facts_status = "ready"
+    if (
+        strategy_group_id == "CPM-RO-001"
+        and classifier["decision"] not in {"tradable_now", "not_tradable_market_wait"}
+    ):
+        required_facts_status = "missing"
     trade_paths = _trade_paths_for_strategy(
         strategy_group_id=strategy_group_id,
         row_classifier=classifier,
         required_facts_status=required_facts_status,
     )
-    observe_only_exit = _observe_only_exit_for_strategy(strategy_group_id)
+    observe_only_exit = _observe_only_exit_for_strategy(
+        strategy_group_id=strategy_group_id,
+        stage=stage,
+        candidate=candidate,
+        registry_row=registry_row,
+        observed_row=observed_row,
+    )
     row = {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
@@ -576,9 +586,11 @@ def _first_blocker(
     candidate: dict[str, Any],
     admission_proposal: dict[str, Any],
     owner_policy_scope: dict[str, Any],
+    registry_row: dict[str, Any],
     registry_present: bool,
     tier_present: bool,
     tier_row: dict[str, Any],
+    observed_row: dict[str, Any],
     portfolio_seat: dict[str, Any],
     brf2_runtime_signal_capture: dict[str, Any],
     brf2_candidate_authorization_state: dict[str, Any],
@@ -604,12 +616,38 @@ def _first_blocker(
             "complete_role_merge_or_classifier_review",
             "classifier_or_role_support_asset",
         )
+    if strategy_group_id == "CPM-RO-001":
+        cpm = _cpm_first_blocker(
+            stage=stage,
+            registry_present=registry_present,
+            tier_present=tier_present,
+            candidate=candidate,
+            registry_row=registry_row,
+            tier_row=tier_row,
+            observed_row=observed_row,
+            admission_proposal=admission_proposal,
+            owner_policy_scope=owner_policy_scope,
+            portfolio_seat=portfolio_seat,
+            blockers=blockers,
+        )
+        if cpm:
+            return cpm
     if stage == "observe_only_would_enter":
-        exit_rule = _observe_only_exit_for_strategy(strategy_group_id)
+        exit_rule = _observe_only_exit_for_strategy(
+            strategy_group_id=strategy_group_id,
+            stage=stage,
+            candidate=candidate,
+            registry_row=registry_row,
+            observed_row=observed_row,
+        )
         return _classifier(
             "not_tradable_strategy_quality",
             str(exit_rule.get("first_blocker") or "observe_only_exit_decision_required"),
-            "latest would-enter is observe-only and now has a main-control exit decision",
+            (
+                "latest would-enter is observe-only and has a fact-backed main-control exit decision"
+                if exit_rule
+                else "latest would-enter is observe-only and lacks an explicit exit decision"
+            ),
             "strategy_review",
             str(exit_rule.get("next_action") or "apply_observe_only_exit_decision"),
             str(exit_rule.get("post_action_expected_state") or "strategy_asset_state_updated"),
@@ -637,15 +675,6 @@ def _first_blocker(
             "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
             "runtime",
             "continue_official_live_submit_chain",
-            "live_submit_ready",
-        )
-    if strategy_group_id == "CPM-RO-001":
-        return _classifier(
-            "not_tradable_market_wait",
-            "fresh_cpm_long_signal_absent",
-            "CPM RequiredFacts mapping and watcher scope are defined; no fresh CPM long rebound signal exists",
-            "market",
-            "continue_cpm_long_short_armed_observation_until_fresh_signal",
             "live_submit_ready",
         )
     if strategy_group_id == "BRF2-001":
@@ -797,6 +826,113 @@ def _brf2_runtime_signal_capture_blocker(artifact: dict[str, Any]) -> dict[str, 
     return {}
 
 
+def _cpm_first_blocker(
+    *,
+    stage: str,
+    registry_present: bool,
+    tier_present: bool,
+    candidate: dict[str, Any],
+    registry_row: dict[str, Any],
+    tier_row: dict[str, Any],
+    observed_row: dict[str, Any],
+    admission_proposal: dict[str, Any],
+    owner_policy_scope: dict[str, Any],
+    portfolio_seat: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, str]:
+    text = " ".join(
+        [
+            stage,
+            " ".join(blockers),
+            str(candidate.get("identity_status") or ""),
+            str(candidate.get("candidate_status") or ""),
+            str(observed_row.get("decision") or ""),
+            str(observed_row.get("reason") or ""),
+            str(registry_row.get("first_tradeability_blocker") or ""),
+            str(portfolio_seat.get("first_tradeability_blocker") or ""),
+        ]
+    ).lower()
+    if (
+        not registry_present
+        or not tier_present
+        or "registry_identity" in text
+        or "identity_review" in text
+        or "identity incomplete" in text
+        or "scope_unclear" in text
+    ):
+        return _classifier(
+            "not_tradable_asset_admission",
+            "cpm_registry_identity_gap",
+            "CPM is visible as an observation/review asset, but registry identity or tier scope is not closed",
+            "engineering",
+            "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+            "trial_asset_admission_candidate",
+        )
+
+    runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
+    owner_policy_recorded = (
+        owner_policy_scope.get("owner_policy_recorded") is True
+        or admission_proposal.get("owner_policy_recorded") is True
+        or portfolio_seat.get("owner_policy_recorded") is True
+        or _as_dict(portfolio_seat.get("policy_scope")).get("owner_policy_recorded")
+        is True
+    )
+    owner_policy_missing = (
+        admission_proposal.get("owner_policy_scope_missing") is True
+        or portfolio_seat.get("owner_policy_scope_missing") is True
+        or _as_dict(portfolio_seat.get("policy_scope")).get("owner_policy_scope_missing")
+        is True
+        or "missing_policy" in text
+        or "owner_policy" in text
+    )
+    if owner_policy_missing and not owner_policy_recorded:
+        return _classifier(
+            "not_tradable_policy",
+            "cpm_policy_missing",
+            "CPM identity exists, but Owner policy/profile/scope is not recorded for armed observation",
+            "owner",
+            "record_cpm_owner_trial_scope_policy",
+            "admitted_trial_asset",
+        )
+
+    required_facts_mapping_ready = (
+        portfolio_seat.get("required_facts_mapping_ready") is True
+        or runtime_readiness.get("required_facts_mapping_ready") is True
+    )
+    watcher_scope_ready = (
+        portfolio_seat.get("watcher_scope_ready") is True
+        or runtime_readiness.get("watcher_scope_ready") is True
+        or runtime_readiness.get("armed_observation_ready") is True
+    )
+    if not required_facts_mapping_ready:
+        return _classifier(
+            "not_tradable_facts",
+            "cpm_required_facts_mapping_gap",
+            "CPM RequiredFacts mapping is not closed enough for armed observation",
+            "engineering",
+            "close_cpm_required_facts_mapping",
+            "armed_observation",
+        )
+    if not watcher_scope_ready:
+        return _classifier(
+            "not_tradable_facts",
+            "cpm_watcher_scope_gap",
+            "CPM watcher scope is not attached to the runtime observation path",
+            "engineering",
+            "attach_cpm_watcher_scope_before_market_wait_projection",
+            "armed_observation",
+        )
+
+    return _classifier(
+        "not_tradable_market_wait",
+        "fresh_cpm_long_signal_absent",
+        "CPM identity, policy, RequiredFacts mapping, and watcher scope are closed; no fresh CPM long rebound signal exists",
+        "market",
+        "continue_cpm_long_short_armed_observation_until_fresh_signal",
+        "live_submit_ready",
+    )
+
+
 def _brf2_candidate_authorization_state_blocker(
     state: dict[str, Any],
 ) -> dict[str, str]:
@@ -916,8 +1052,6 @@ def _stage(
         runtime_safety_state=runtime_safety_state,
     ):
         return "live_submit_ready"
-    if strategy_group_id == "CPM-RO-001":
-        return "armed_observation"
     owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
@@ -1278,6 +1412,11 @@ def _july_bullish_rebound_trade_path_closure(
     path_ids = {str(path.get("path_id") or "") for path in paths}
     long_path_ids = {str(path.get("path_id") or "") for path in paths if path.get("side") == "long"}
     short_path_ids = {str(path.get("path_id") or "") for path in paths if path.get("side") == "short"}
+    rbr_exit_strategy_ids = {
+        str(exit_row.get("strategy_group_id") or "")
+        for exit_row in exits
+    }
+    required_rbr_exit_strategy_ids = {"RBR-001", "RBR2-001"}
     trigger_diffs = {
         str(path.get("path_id")): _as_dict(path.get("production_vs_trial_trigger_diff"))
         for path in paths
@@ -1303,6 +1442,9 @@ def _july_bullish_rebound_trade_path_closure(
                 path_id in path_ids for path_id in {"BRF2-SHORT", "CPM-SHORT"}
             ),
             "rbr_exit_decision_count": len(exits),
+            "required_rbr_exit_rows_present": (
+                required_rbr_exit_strategy_ids <= rbr_exit_strategy_ids
+            ),
             "tradable_now_count": sum(
                 path.get("can_trade_now") is True for path in paths
             ),
@@ -1320,21 +1462,41 @@ def _july_bullish_rebound_trade_path_closure(
                     "CPM-SHORT",
                 }
             ),
-            "cpm_mapping_gap_removed_from_first_blockers": all(
-                blocker != "cpm_required_facts_mapping_gap"
+            "cpm_non_market_blocker_preserved": all(
+                blocker
+                not in {
+                    "fresh_cpm_long_signal_absent",
+                    "fresh_cpm_short_signal_absent",
+                }
+                or next(
+                    (
+                        row.get("stage")
+                        in {"armed_observation", "tiny_live_ready", "live_submit_ready"}
+                        and row.get("required_facts_status") in {"ready", "action_time_only"}
+                        for row in rows
+                        if str(row.get("strategy_group_id") or "")
+                        in {"CPM-RO-001", "CPM-001"}
+                    ),
+                    False,
+                )
                 for strategy_id, blocker in first_blockers.items()
                 if strategy_id in {"CPM-RO-001", "CPM-001"}
             ),
-            "rbr_observe_only_has_exit_decision": all(
-                _as_dict(row.get("observe_only_exit")).get("exit_decision")
-                in {
-                    "upgrade_to_trial_candidate",
-                    "merge_as_classifier",
-                    "park",
-                    "kill",
-                }
-                for row in rows
-                if str(row.get("strategy_group_id") or "") in {"RBR-001", "RBR2-001"}
+            "rbr_observe_only_has_exit_decision": (
+                required_rbr_exit_strategy_ids <= rbr_exit_strategy_ids
+                and all(
+                    exit_row.get("exit_decision")
+                    in {
+                        "upgrade_to_trial_candidate",
+                        "merge_as_classifier",
+                        "keep_observing",
+                        "park",
+                        "kill",
+                    }
+                    for exit_row in exits
+                    if str(exit_row.get("strategy_group_id") or "")
+                    in required_rbr_exit_strategy_ids
+                )
             ),
             "capital_scope_uses_action_time_exchange_available_balance": all(
                 path.get("capital_scope_source")
@@ -1385,10 +1547,22 @@ def _trade_path_state(
     required_facts_status: str,
 ) -> dict[str, Any]:
     spec = _trade_path_spec(path_id)
-    first_blocker = spec["first_blocker"]
     can_trade_now = row_classifier["decision"] == "tradable_now"
     if can_trade_now:
         first_blocker = "none"
+        blocker_owner = "runtime"
+        next_action = "continue_official_live_submit_chain"
+        post_action_expected_state = "execution_attempt"
+    elif row_classifier["decision"] == "not_tradable_market_wait":
+        first_blocker = spec["first_blocker"]
+        blocker_owner = row_classifier["blocker_owner"]
+        next_action = spec["next_action"]
+        post_action_expected_state = row_classifier["after_next_state"]
+    else:
+        first_blocker = row_classifier["first_blocker_class"]
+        blocker_owner = row_classifier["blocker_owner"]
+        next_action = row_classifier["next_action"]
+        post_action_expected_state = row_classifier["after_next_state"]
     return {
         "strategy_group_id": strategy_group_id,
         "path_id": path_id,
@@ -1403,15 +1577,9 @@ def _trade_path_state(
         "capital_scope_source": "action_time_exchange_available_balance",
         "can_trade_now": can_trade_now,
         "first_blocker": first_blocker,
-        "blocker_owner": "runtime" if can_trade_now else "market",
-        "next_action": (
-            "continue_official_live_submit_chain"
-            if can_trade_now
-            else spec["next_action"]
-        ),
-        "post_action_expected_state": (
-            "live_submit_ready" if not can_trade_now else "execution_attempt"
-        ),
+        "blocker_owner": blocker_owner,
+        "next_action": next_action,
+        "post_action_expected_state": post_action_expected_state,
         "required_facts_mapping_status": spec.get(
             "required_facts_mapping_status",
             "ready" if required_facts_status in {"ready", "action_time_only"} else required_facts_status,
@@ -1697,26 +1865,60 @@ def _sor_trigger_diff() -> dict[str, Any]:
     }
 
 
-def _observe_only_exit_for_strategy(strategy_group_id: str) -> dict[str, Any]:
-    if strategy_group_id == "RBR-001":
+def _observe_only_exit_for_strategy(
+    *,
+    strategy_group_id: str,
+    stage: str,
+    candidate: dict[str, Any],
+    registry_row: dict[str, Any],
+    observed_row: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        strategy_group_id == "RBR-001"
+        and stage == "observe_only_would_enter"
+        and observed_row
+        and registry_row
+    ):
         return {
             "strategy_group_id": "RBR-001",
             "exit_decision": "park",
-            "reason": "range-boundary rejection remains low-priority observe-only and lacks a bounded real loss envelope for the current July bullish/rebound mainline",
+            "reason": "latest observe-only row exists, but range-boundary rejection remains L1/observe-only and lacks a bounded real loss envelope for the current July bullish/rebound mainline",
             "first_blocker": "rbr_loss_boundary_not_expressible_for_mainline",
             "next_action": "park_rbr_until_material_new_edge_or_loss_boundary_evidence",
             "post_action_expected_state": "parked_not_mainline_blocker",
+            "evidence_source": "signal_coverage_observe_only_row + registry_row",
             "authority_boundary": "observe_only_exit_rule; no trial admission; no live authority",
         }
-    if strategy_group_id == "RBR2-001":
+    rbr2_explicit_decision = str(
+        candidate.get("strategy_asset_decision")
+        or candidate.get("asset_state_decision")
+        or candidate.get("review_outcome")
+        or ""
+    )
+    if strategy_group_id == "RBR2-001" and rbr2_explicit_decision:
+        exit_decision = (
+            "merge_as_classifier"
+            if rbr2_explicit_decision in {"merge", "merge_as_classifier"}
+            else rbr2_explicit_decision
+        )
         return {
             "strategy_group_id": "RBR2-001",
-            "exit_decision": "merge_as_classifier",
-            "reason": "role-only range-boundary vocabulary should support CPM/SOR classification instead of occupying a standalone live path",
-            "first_blocker": "rbr2_role_only_classifier_merge_pending",
-            "next_action": "merge_rbr2_range_boundary_features_into_cpm_sor_classifier_review",
-            "post_action_expected_state": "classifier_support_asset",
-            "authority_boundary": "classifier_merge_rule; no standalone submit authority",
+            "exit_decision": exit_decision,
+            "reason": "RBR2 exit decision is projected only from explicit Strategy Asset State or candidate review outcome",
+            "first_blocker": str(
+                candidate.get("first_blocker")
+                or "rbr2_explicit_asset_state_decision_present"
+            ),
+            "next_action": str(
+                candidate.get("next_action")
+                or "apply_rbr2_explicit_strategy_asset_state_decision"
+            ),
+            "post_action_expected_state": str(
+                candidate.get("post_action_expected_state")
+                or "strategy_asset_state_updated"
+            ),
+            "evidence_source": "explicit_candidate_strategy_asset_decision",
+            "authority_boundary": "strategy_asset_state_exit_projection; no standalone submit authority",
         }
     return {}
 
