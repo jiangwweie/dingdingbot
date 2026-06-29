@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the StrategyGroup runtime dry-run audit chain packet.
+"""Build the StrategyGroup runtime dry-run audit chain artifact.
 
-The packet exercises the same readiness/dispatch/handoff semantics used by the
+The artifact exercises the same readiness/dispatch/handoff semantics used by the
 watcher path with local fixtures only. It is intentionally non-executing: it
 does not call Tokyo, does not call exchange write paths, does not create real
 orders, and does not treat disabled smoke as real submit proof.
@@ -23,19 +23,19 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_fresh_signal_readiness_bridge as readiness_bridge  # noqa: E402
+from scripts import runtime_fresh_signal_readiness_evidence  # noqa: E402
 from scripts import runtime_real_signal_scoped_local_registration_pipeline as scoped_pipeline  # noqa: E402
 from scripts import runtime_official_submit_disabled_smoke_from_handoff as disabled_smoke  # noqa: E402
 from scripts import runtime_signal_watcher_resume_dispatcher as dispatcher  # noqa: E402
 from src.domain.runtime_executable_submit_readiness import (  # noqa: E402
     RuntimeExecutableSubmitReadinessEvidence,
-    build_runtime_executable_submit_readiness_packet,
+    build_runtime_executable_submit_readiness_artifact,
 )
 from src.domain.runtime_official_submit_handoff import (  # noqa: E402
-    build_runtime_official_submit_handoff_packet,
+    build_runtime_official_submit_handoff_artifact,
 )
 from src.domain.strategygroup_runtime_replay import (  # noqa: E402
-    build_mpg001_replay_lab_packet,
+    build_mpg001_replay_lab_report,
 )
 
 
@@ -112,12 +112,12 @@ STRATEGY_SPECIFIC_INPUT_FIELDS = [
     "required_facts",
     "risk_defaults",
     "hard_stops",
-    "sample_signal_packet",
-    "sample_no_signal_packet",
-    "sample_stale_signal_packet",
-    "sample_conflict_packet",
+    "sample_signal_artifact",
+    "sample_no_signal_artifact",
+    "sample_stale_signal_artifact",
+    "sample_conflict_artifact",
 ]
-STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS = [
+STRATEGY_INTAKE_SOURCE_FORBIDDEN_EXECUTION_FIELDS = [
     "candidate",
     "authorization",
     "runtime_grant",
@@ -207,8 +207,8 @@ class _ScopedPipelineClient:
                 "http_status": 200,
                 "body": {
                     "status": "ready_for_executable_submit",
-                    "packet_id": "dry-run-readiness-1",
-                    "source_strategy_planning_packet_id": "dry-run-plan-1",
+                    "artifact_id": "dry-run-readiness-1",
+                    "source_strategy_planning_artifact_id": "dry-run-plan-1",
                     "source_authorization_id": "dry-run-source-auth-1",
                     "signal_evaluation_id": "dry-run-signal-eval-1",
                     "order_candidate_id": "dry-run-order-candidate-1",
@@ -266,7 +266,7 @@ class _ScopedPipelineClient:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "prepared_packet_blocked",
+                    "status": "prepared_evidence_blocked",
                     "available_evidence_ids": {
                         "trusted_submit_fact_snapshot_id": (
                             "dry-run-trusted-facts-1"
@@ -424,7 +424,7 @@ def _operation_evidence_report(*, blockers: list[str] | None = None) -> dict[str
 def _legacy_local_registration_probe_report() -> dict[str, Any]:
     report = _operation_evidence_report(
         blockers=[
-            "first_real_submit_packet_unavailable:"
+            "first_real_submit_evidence_unavailable:"
             "runtimeexecutionorderlifecycleadapterresult_not_found",
             "preview_disabled_first_real_submit_action_http_404",
         ]
@@ -525,7 +525,7 @@ def _operation_layer_relay_checks(
     }
 
 
-def _fresh_loop_packet(
+def _fresh_loop_artifact(
     *,
     output_dir: Path,
     status: str,
@@ -545,15 +545,15 @@ def _fresh_loop_packet(
                 "timestamp_ms": int(time.time() * 1000),
             },
         )
-    packet = {
+    artifact = {
         "scope": "runtime_fresh_signal_prepare_loop",
         "status": status,
         "runtime_instance_id": RUNTIME_ID,
         "signal_input_json": str(signal_path) if signal else None,
         "post_submit_finalize_flow": {
             "status": "finalized_ready_for_next_attempt",
-            "post_submit_finalize_packet": {
-                "packet_id": "dry-run-post-submit-finalize-1",
+            "post_submit_finalize_payload": {
+                "artifact_id": "dry-run-post-submit-finalize-1",
                 "authorization_id": "dry-run-consumed-auth-1",
                 "runtime_instance_id": RUNTIME_ID,
                 "post_submit_reconciliation_evidence_id": (
@@ -591,7 +591,7 @@ def _fresh_loop_packet(
         },
     }
     path = output_dir / f"{status}-fresh-loop.json"
-    _write_json(path, packet)
+    _write_json(path, artifact)
     return path
 
 
@@ -606,7 +606,7 @@ def _readiness_args(
         runtime_instance_id=RUNTIME_ID,
         fresh_signal_loop_json=str(fresh_loop_path),
         evidence_json=str(evidence_json) if evidence_json else None,
-        first_real_submit_packet_json=None,
+        first_real_submit_evidence_json=None,
         fresh_submit_authorization_id=FRESH_AUTHORIZATION_ID,
         mode="disabled_smoke",
         owner_confirmed_for_real_submit_action=False,
@@ -629,10 +629,10 @@ def _planning_flow(status: str = "ready_for_final_gate_preflight") -> dict[str, 
         "scope": "runtime_next_attempt_strategy_plan_api_flow",
         "status": status,
         "api_payload": {
-            "packet_id": "dry-run-strategy-plan-1",
+            "artifact_id": "dry-run-strategy-plan-1",
             "runtime_instance_id": RUNTIME_ID,
             "source_authorization_id": "dry-run-consumed-auth-1",
-            "post_submit_finalize_packet_id": "dry-run-post-submit-finalize-1",
+            "post_submit_finalize_payload_id": "dry-run-post-submit-finalize-1",
             "status": status,
             "next_attempt_gate_status": "ready_for_fresh_signal",
             "signal_evaluation_id": "dry-run-signal-eval-1",
@@ -668,7 +668,7 @@ def _handoff_flow() -> dict[str, Any]:
         "runtime_instance_id": RUNTIME_ID,
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {
+        "handoff_plan": {
             "requires_fresh_submit_authorization": True,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -795,9 +795,9 @@ def _resume_pack_waiting() -> dict[str, Any]:
     }
 
 
-def _non_executing_prepare_packet() -> dict[str, Any]:
+def _non_executing_prepare_artifact() -> dict[str, Any]:
     return {
-        "scope": "runtime_next_attempt_prepare_packet",
+        "scope": "runtime_next_attempt_prepare_artifact",
         "status": "ready_for_final_gate_preflight",
         "ids": {
             "authorization_id": FRESH_AUTHORIZATION_ID,
@@ -805,7 +805,7 @@ def _non_executing_prepare_packet() -> dict[str, Any]:
             "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
             "order_candidate_id": "dry-run-order-candidate-1",
         },
-        "operator_command_plan": {
+        "prepare_artifact_plan": {
             "prepared_authorization_id": FRESH_AUTHORIZATION_ID,
             "not_executed": True,
             "live_submit_allowed": False,
@@ -1002,24 +1002,24 @@ def _disabled_handoff_path(output_dir: Path) -> Path:
         account_facts_fresh=True,
         duplicate_submit_guard_ready=True,
     )
-    readiness = build_runtime_executable_submit_readiness_packet(
+    readiness = build_runtime_executable_submit_readiness_artifact(
         runtime_instance_id=RUNTIME_ID,
-        source_strategy_planning_packet_id="dry-run-strategy-plan-1",
+        source_strategy_planning_artifact_id="dry-run-strategy-plan-1",
         source_authorization_id="dry-run-consumed-auth-1",
         strategy_planning_status="ready_for_final_gate_preflight",
         evidence=evidence,
         order_candidate_id="dry-run-order-candidate-1",
         signal_evaluation_id="dry-run-signal-eval-1",
-        source_release_packet_id="dry-run-release-1",
+        source_release_evidence_id="dry-run-release-1",
         now_ms=int(time.time() * 1000),
     )
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=readiness,
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=readiness,
         fresh_submit_authorization_id=FRESH_AUTHORIZATION_ID,
         now_ms=int(time.time() * 1000),
     )
     path = output_dir / "disabled-submit-handoff.json"
-    _write_json(path, {"packet": handoff.model_dump(mode="json")})
+    _write_json(path, {"artifact": handoff.model_dump(mode="json")})
     return path
 
 
@@ -1067,37 +1067,37 @@ def _disabled_handoff_path_from_operation_layer_evidence(
         account_facts_fresh=True,
         duplicate_submit_guard_ready=True,
     )
-    readiness = build_runtime_executable_submit_readiness_packet(
+    readiness = build_runtime_executable_submit_readiness_artifact(
         runtime_instance_id=RUNTIME_ID,
-        source_strategy_planning_packet_id="dry-run-scoped-pipeline-plan-1",
+        source_strategy_planning_artifact_id="dry-run-scoped-pipeline-plan-1",
         source_authorization_id="dry-run-consumed-auth-1",
         strategy_planning_status="ready_for_final_gate_preflight",
         evidence=evidence,
         order_candidate_id="dry-run-order-candidate-1",
         signal_evaluation_id="dry-run-signal-eval-1",
-        source_release_packet_id="dry-run-release-1",
+        source_release_evidence_id="dry-run-release-1",
         now_ms=int(time.time() * 1000),
     )
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=readiness,
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=readiness,
         fresh_submit_authorization_id=FRESH_AUTHORIZATION_ID,
         now_ms=int(time.time() * 1000),
     )
     path = output_dir / "scoped-pipeline-disabled-submit-handoff.json"
-    _write_json(path, {"packet": handoff.model_dump(mode="json")})
+    _write_json(path, {"artifact": handoff.model_dump(mode="json")})
     return path
 
 
 def _disabled_smoke_args(path: Path) -> argparse.Namespace:
     return argparse.Namespace(
-        handoff_json=str(path),
+        handoff_artifact_json=str(path),
         output=None,
         env_file=None,
         api_base="http://dry-run.local",
     )
 
 
-def _dispatcher_disabled_smoke_packet(
+def _dispatcher_disabled_smoke_artifact(
     *,
     operation_layer_evidence: dict[str, Any],
     operation_layer_evidence_path: str,
@@ -1130,7 +1130,7 @@ def _dispatcher_disabled_smoke_packet(
     try:
         dispatcher._session_cookie = fake_session_cookie
         dispatcher._request_json = fake_request_json
-        packet = dispatcher.build_dispatch_packet(
+        dispatcher_artifact = dispatcher.build_dispatch_artifact(
             resume_pack=_resume_pack_finalgate_ready(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
@@ -1144,8 +1144,8 @@ def _dispatcher_disabled_smoke_packet(
     finally:
         dispatcher._session_cookie = original_session_cookie
         dispatcher._request_json = original_request_json
-    packet["dry_run_dispatcher_disabled_smoke_calls"] = calls
-    return packet
+    dispatcher_artifact["dry_run_dispatcher_disabled_smoke_calls"] = calls
+    return dispatcher_artifact
 
 
 def _fake_closed_loop_shape() -> dict[str, Any]:
@@ -1210,26 +1210,26 @@ def _fake_closed_loop_shape() -> dict[str, Any]:
     }
 
 
-def _load_strategy_group_handoffs(
+def _load_strategy_group_intake_sources(
     handoff_root: Path = DEFAULT_HANDOFF_ROOT,
 ) -> dict[str, Any]:
-    handoffs: dict[str, Any] = {}
+    intake_sources: dict[str, Any] = {}
     for path in sorted(handoff_root.glob("*/handoff.json")):
         payload = _read_json(path)
         strategy_group_id = str(payload.get("strategy_group_id") or path.parent.name)
-        handoffs[strategy_group_id] = {"path": str(path), "payload": payload}
-    return handoffs
+        intake_sources[strategy_group_id] = {"path": str(path), "payload": payload}
+    return intake_sources
 
 
 def _shared_runtime_pipeline_validation() -> dict[str, Any]:
-    handoffs = _load_strategy_group_handoffs()
-    found_groups = set(handoffs)
+    intake_sources = _load_strategy_group_intake_sources()
+    found_groups = set(intake_sources)
     missing_groups = sorted(EXPECTED_STRATEGY_GROUPS - found_groups)
     expansion_groups = sorted(
         group
         for group in (found_groups - EXPECTED_STRATEGY_GROUPS)
         if group in EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS
-        and _is_expansion_observe_only_handoff(handoffs[group]["payload"])
+        and _is_expansion_observe_only_source(intake_sources[group]["payload"])
     )
     unexpected_groups = sorted(
         found_groups - EXPECTED_STRATEGY_GROUPS - set(expansion_groups)
@@ -1238,9 +1238,9 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
     blockers: list[str] = []
 
     for strategy_group_id in [*sorted(EXPECTED_STRATEGY_GROUPS), *expansion_groups]:
-        item = handoffs.get(strategy_group_id)
+        item = intake_sources.get(strategy_group_id)
         if item is None:
-            blockers.append(f"missing_strategy_group_handoff:{strategy_group_id}")
+            blockers.append(f"missing_strategy_group_intake_source:{strategy_group_id}")
             continue
         payload = item["payload"]
         is_expansion_observe_only = strategy_group_id in expansion_groups
@@ -1256,7 +1256,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         mode = mode if isinstance(mode, dict) else {}
         forbidden_execution_fields_present = sorted(
             field
-            for field in STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS
+            for field in STRATEGY_INTAKE_SOURCE_FORBIDDEN_EXECUTION_FIELDS
             if field in payload
         )
         row_checks = {
@@ -1267,7 +1267,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             "has_risk_defaults": bool(risk_defaults),
             "has_hard_stops": bool(payload.get("hard_stops")),
             "no_execution_pipeline_fields": not forbidden_execution_fields_present,
-            "research_handoff_only": boundary.get("research_handoff_only") is True,
+            "research_intake_source_only": boundary.get("research_intake_source_only") is True,
             "does_not_authorize_execution_boundary": all(
                 boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
             ),
@@ -1305,7 +1305,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         rows.append(
             {
                 "strategy_group_id": strategy_group_id,
-                "handoff_json": item["path"],
+                "intake_source_json": item["path"],
                 "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
                 "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
                 "sample_input_contract": {
@@ -1344,7 +1344,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
 
     if unexpected_groups:
         blockers.extend(
-            f"unexpected_strategy_group_handoff:{item}" for item in unexpected_groups
+            f"unexpected_strategy_group_intake_source:{item}" for item in unexpected_groups
         )
 
     checks = {
@@ -1415,8 +1415,8 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         "unexpected_strategy_groups": unexpected_groups,
         "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
         "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
-        "strategy_handoff_forbidden_execution_fields": (
-            STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS
+        "strategy_intake_source_forbidden_execution_fields": (
+            STRATEGY_INTAKE_SOURCE_FORBIDDEN_EXECUTION_FIELDS
         ),
         "rows": rows,
         "checks": checks,
@@ -1433,7 +1433,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
     }
 
 
-def _is_expansion_observe_only_handoff(payload: dict[str, Any]) -> bool:
+def _is_expansion_observe_only_source(payload: dict[str, Any]) -> bool:
     boundary = payload.get("execution_boundary")
     boundary = boundary if isinstance(boundary, dict) else {}
     mode = payload.get("mode_recommendation")
@@ -1442,7 +1442,7 @@ def _is_expansion_observe_only_handoff(payload: dict[str, Any]) -> bool:
     risk_defaults = risk_defaults if isinstance(risk_defaults, dict) else {}
     return (
         str(mode.get("default") or "") == "observe_only"
-        and boundary.get("research_handoff_only") is True
+        and boundary.get("research_intake_source_only") is True
         and all(
             boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
         )
@@ -1596,13 +1596,13 @@ def _runtime_tier_policy_validation(
 
 
 def _scenario_no_signal(output_dir: Path) -> dict[str, Any]:
-    fresh_path = _fresh_loop_packet(
+    fresh_path = _fresh_loop_artifact(
         output_dir=output_dir,
         status="waiting_for_signal",
         signal=False,
         blockers=["strategy_signal_not_ready_for_shadow_candidate_prepare"],
     )
-    readiness = readiness_bridge._build_packet(
+    readiness = runtime_fresh_signal_readiness_evidence._build_evidence(
         _readiness_args(
             output_dir=output_dir,
             fresh_loop_path=fresh_path,
@@ -1612,15 +1612,15 @@ def _scenario_no_signal(output_dir: Path) -> dict[str, Any]:
         planning_builder=lambda args: _planning_flow(),
         handoff_builder=lambda args: _handoff_flow(),
     )
-    dispatch = dispatcher.build_dispatch_packet(
+    dispatch = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_waiting(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="no_signal",
         expected="waiting_for_signal; no candidate, authorization, FinalGate, or Operation Layer",
-        artifacts={"readiness_bridge": readiness, "resume_dispatch": dispatch},
+        artifacts={"readiness_evidence": readiness, "resume_dispatch": dispatch},
         passed=(
             readiness["status"] == "waiting_for_signal"
             and dispatch["status"] == "waiting_for_market"
@@ -1635,8 +1635,8 @@ def _mock_fresh_signal_freshness_checks(
     fresh_path: Path,
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
-    packet = _read_json(fresh_path)
-    signal_path_value = packet.get("signal_input_json")
+    fresh_loop_artifact = _read_json(fresh_path)
+    signal_path_value = fresh_loop_artifact.get("signal_input_json")
     signal_path = Path(str(signal_path_value)) if signal_path_value else None
     signal = _read_json(signal_path) if signal_path and signal_path.exists() else {}
     now_ms = int(time.time() * 1000)
@@ -1685,12 +1685,12 @@ def _mock_fresh_signal_freshness_checks(
 
 def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
     evidence_path = _readiness_evidence_path(output_dir)
-    fresh_path = _fresh_loop_packet(
+    fresh_path = _fresh_loop_artifact(
         output_dir=output_dir,
         status="ready_for_final_gate_preflight",
         blockers=[],
     )
-    readiness = readiness_bridge._build_packet(
+    readiness = runtime_fresh_signal_readiness_evidence._build_evidence(
         _readiness_args(
             output_dir=output_dir,
             fresh_loop_path=fresh_path,
@@ -1700,12 +1700,12 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         planning_builder=lambda args: _planning_flow(),
         handoff_builder=lambda args: _handoff_flow(),
     )
-    finalgate_plan = dispatcher.build_dispatch_packet(
+    finalgate_plan = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_ready_for_finalgate(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
     )
-    operation_layer = dispatcher.build_dispatch_packet(
+    operation_layer = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -1751,7 +1751,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             _operation_layer_submit_called(operation_layer) is False
         ),
     }
-    legacy_probe = dispatcher.build_dispatch_packet(
+    legacy_probe = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -1791,7 +1791,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             legacy_probe,
         )
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="mock_fresh_signal_dry_run_pass",
         expected=(
             "evidence IDs connect through the official Operation Layer handoff, "
@@ -1800,7 +1800,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             "finalize/reconciliation/budget/review shapes are present"
         ),
         artifacts={
-            "readiness_bridge": readiness,
+            "readiness_evidence": readiness,
             "fast_auto_chain_checks": fast_auto_chain_checks,
             "finalgate_dispatch_plan": finalgate_plan,
             "operation_layer_evidence_prep": operation_layer,
@@ -1832,7 +1832,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
     )
 
 
-def _scenario_scoped_pipeline_operation_layer_handoff(
+def _scenario_scoped_pipeline_operation_layer_submit_projection(
     output_dir: Path,
 ) -> dict[str, Any]:
     signal_path = _scoped_pipeline_signal_path(output_dir)
@@ -1851,7 +1851,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
     )
     if not isinstance(operation_layer_evidence, dict):
         operation_layer_evidence = {}
-    dispatch = dispatcher.build_dispatch_packet(
+    dispatch = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -1879,7 +1879,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         _disabled_smoke_args(scoped_disabled_handoff_path),
         client=_DisabledSmokeClient(),
     )
-    dispatcher_disabled_smoke = _dispatcher_disabled_smoke_packet(
+    dispatcher_disabled_smoke = _dispatcher_disabled_smoke_artifact(
         operation_layer_evidence=operation_layer_evidence,
         operation_layer_evidence_path=str(
             pipeline_report.get("operation_layer_evidence_after_local_registration_path")
@@ -1905,7 +1905,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         "deployment_readiness_evidence_id",
     }
     scoped_disabled_submit_checks = {
-        "handoff_query_uses_pipeline_evidence_ids": all(
+        "submit_projection_query_uses_pipeline_evidence_ids": all(
             scoped_disabled_query.get(name) == ids.get(name)
             for name in required_submit_query_ids
         ),
@@ -1985,8 +1985,8 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         scoped_disabled_smoke,
         dispatcher_disabled_smoke,
     )
-    return _scenario_packet(
-        name="scoped_pipeline_operation_layer_handoff",
+    return _scenario_report(
+        name="scoped_pipeline_operation_layer_submit_projection",
         expected=(
             "real pipeline-shaped scoped local registration proof emits "
             "Operation Layer evidence consumed by dispatcher without submit"
@@ -2006,7 +2006,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
             *dispatch.get("blockers", []),
             *scoped_disabled_smoke.get("blockers", []),
             *[
-                f"scoped_pipeline_handoff_check_failed:{name}"
+                f"scoped_pipeline_submit_projection_check_failed:{name}"
                 for name, value in checks.items()
                 if not value
             ],
@@ -2019,14 +2019,14 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
     )
 
 
-def _scenario_non_executing_prepare_auto_bridge(output_dir: Path) -> dict[str, Any]:
+def _scenario_execution_attempt_rehearsal_prepare(output_dir: Path) -> dict[str, Any]:
     del output_dir
     prepare_calls: list[dict[str, Any]] = []
     finalgate_calls: list[dict[str, Any]] = []
 
     def prepare_runner(command_plan: dict[str, Any]) -> dict[str, Any]:
         prepare_calls.append(dict(command_plan))
-        return _non_executing_prepare_packet()
+        return _non_executing_prepare_artifact()
 
     def request_json(**kwargs: Any) -> dict[str, Any]:
         finalgate_calls.append(dict(kwargs))
@@ -2053,7 +2053,7 @@ def _scenario_non_executing_prepare_auto_bridge(output_dir: Path) -> dict[str, A
     )
     dispatcher._request_json = request_json  # noqa: SLF001
     try:
-        dispatch = dispatcher.build_dispatch_packet(
+        dispatch = dispatcher.build_dispatch_artifact(
             resume_pack=_resume_pack_ready_for_non_executing_prepare(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
@@ -2089,12 +2089,12 @@ def _scenario_non_executing_prepare_auto_bridge(output_dir: Path) -> dict[str, A
         "no_dangerous_effects": not _dangerous_effects(dispatch),
     }
     blockers = [
-        f"non_executing_prepare_auto_bridge:{name}"
+        f"execution_attempt_rehearsal_prepare:{name}"
         for name, value in checks.items()
         if value is not True
     ]
-    return _scenario_packet(
-        name="non_executing_prepare_auto_bridge",
+    return _scenario_report(
+        name="execution_attempt_rehearsal_prepare",
         expected=(
             "ready_for_non_executing_prepare can call the official "
             "non-executing prepare wrapper and continue to FinalGate without "
@@ -2112,13 +2112,13 @@ def _scenario_non_executing_prepare_auto_bridge(output_dir: Path) -> dict[str, A
 
 
 def _scenario_required_facts_missing(output_dir: Path) -> dict[str, Any]:
-    fresh_path = _fresh_loop_packet(
+    fresh_path = _fresh_loop_artifact(
         output_dir=output_dir,
         status="ready_for_prepare",
         blockers=[],
     )
     planning_calls: list[Any] = []
-    readiness = readiness_bridge._build_packet(
+    readiness = runtime_fresh_signal_readiness_evidence._build_evidence(
         _readiness_args(
             output_dir=output_dir,
             fresh_loop_path=fresh_path,
@@ -2133,17 +2133,17 @@ def _scenario_required_facts_missing(output_dir: Path) -> dict[str, Any]:
         and planning_calls == []
         and not _dangerous_effects(readiness)
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="required_facts_missing",
         expected="clear missing_fact blocker before Operation Layer",
-        artifacts={"readiness_bridge": readiness},
+        artifacts={"readiness_evidence": readiness},
         passed=passed,
         blockers=readiness.get("blockers", []) or ["missing_fact:readiness_evidence"],
     )
 
 
 def _scenario_active_conflict(output_dir: Path) -> dict[str, Any]:
-    conflict = dispatcher.build_dispatch_packet(
+    conflict = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -2159,7 +2159,7 @@ def _scenario_active_conflict(output_dir: Path) -> dict[str, Any]:
         and _operation_layer_submit_called(conflict) is False
         and not _dangerous_effects(conflict)
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="active_position_or_open_order_conflict",
         expected="conflict blocks before Operation Layer action",
         artifacts={"resume_dispatch": conflict},
@@ -2219,7 +2219,7 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
     results: dict[str, Any] = {}
     blockers: list[str] = []
     for name, spec in blocker_cases.items():
-        packet = dispatcher.build_dispatch_packet(
+        dispatcher_artifact = dispatcher.build_dispatch_artifact(
             resume_pack=_resume_pack_finalgate_ready(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
@@ -2231,12 +2231,14 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             ),
             execute_operation_layer_submit=False,
         )
-        review = packet.get("operation_layer_blocker_review") or {}
+        review = dispatcher_artifact.get("operation_layer_blocker_review") or {}
         checks = {
-            "submit_blocked": packet.get("status") == "operation_layer_blocked",
-            "class_matches": packet.get("blocker_class") == spec["expected_class"],
-            "review_packet_ready": (
-                review.get("status") == "submit_blocked_review_packet_ready"
+            "submit_blocked": dispatcher_artifact.get("status")
+            == "operation_layer_blocked",
+            "class_matches": dispatcher_artifact.get("blocker_class")
+            == spec["expected_class"],
+            "review_artifact_ready": (
+                review.get("status") == "submit_blocked_review_artifact_ready"
             ),
             "project_progress_allowed": (
                 review.get("project_progress_allowed") is True
@@ -2248,18 +2250,21 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             "owner_state_matches": (
                 review.get("owner_console_state") == spec["expected_owner_state"]
             ),
-            "operation_layer_not_called": _operation_layer_submit_called(packet) is False,
-            "no_dangerous_effects": not _dangerous_effects(packet),
+            "operation_layer_not_called": _operation_layer_submit_called(
+                dispatcher_artifact
+            )
+            is False,
+            "no_dangerous_effects": not _dangerous_effects(dispatcher_artifact),
         }
         results[name] = {
             "blocker": spec["blocker"],
             "expected_class": spec["expected_class"],
-            "packet_status": packet.get("status"),
-            "blocker_class": packet.get("blocker_class"),
+            "source_status": dispatcher_artifact.get("status"),
+            "blocker_class": dispatcher_artifact.get("blocker_class"),
             "owner_console_state": review.get("owner_console_state"),
             "owner_sentence": review.get("owner_sentence"),
             "checks": checks,
-            "packet": packet,
+            "dispatcher_artifact": dispatcher_artifact,
         }
         blockers.extend(
             f"{name}:{check_name}"
@@ -2292,11 +2297,11 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
         for check_name, ok in matrix_checks.items()
         if ok is not True
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="operation_layer_blocker_review_matrix",
         expected=(
             "active position, open order, protection, budget, duplicate submit, "
-            "and scope mismatches produce reviewable blocked packets while "
+            "and scope mismatches produce reviewable blocked artifacts while "
             "keeping real submit forbidden"
         ),
         artifacts={"review_matrix": results, "matrix_checks": matrix_checks},
@@ -2312,7 +2317,7 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
         runtime_instance_id = (
             f"dry-run-runtime-{strategy_group_id.lower().replace('_', '-')}"
         )
-        selected_dispatches[strategy_group_id] = dispatcher.build_dispatch_packet(
+        selected_dispatches[strategy_group_id] = dispatcher.build_dispatch_artifact(
             resume_pack=_resume_pack_ready_for_finalgate(
                 strategy_group_id=strategy_group_id,
                 runtime_instance_id=runtime_instance_id,
@@ -2331,7 +2336,7 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
             and dispatch.get("command_plan", {}).get("method") == "GET"
         )
     selected_dispatch = selected_dispatches["MPG-001"]
-    out_of_scope_dispatch = dispatcher.build_dispatch_packet(
+    out_of_scope_dispatch = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_ready_for_finalgate(
             strategy_group_id="SOR-001",
             runtime_instance_id="dry-run-runtime-sor-001",
@@ -2378,7 +2383,7 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
         for name, value in checks.items()
         if value is not True
     ]
-    return _scenario_packet(
+    return _scenario_report(
         name="selected_strategygroup_dispatch_guard",
         expected=(
             "selected MPG-001 mock fresh signal can reach FinalGate dispatch, "
@@ -2421,7 +2426,7 @@ def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[s
             "status": "waiting_for_signal",
         },
     ]
-    expanded_observation = dispatcher.build_dispatch_packet(
+    expanded_observation = dispatcher.build_dispatch_artifact(
         resume_pack=expanded_waiting_resume,
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -2440,7 +2445,7 @@ def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[s
         "dry-run-runtime-sor-001",
     ]
     ambiguous_actionable_resume["runtime_signal_summaries"] = []
-    ambiguous_action = dispatcher.build_dispatch_packet(
+    ambiguous_action = dispatcher.build_dispatch_artifact(
         resume_pack=ambiguous_actionable_resume,
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -2448,7 +2453,7 @@ def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[s
         execute_preflight=True,
     )
 
-    out_of_scope_action = dispatcher.build_dispatch_packet(
+    out_of_scope_action = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_ready_for_finalgate(
             strategy_group_id="SOR-001",
             runtime_instance_id="dry-run-runtime-sor-001",
@@ -2510,7 +2515,7 @@ def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[s
         for name, value in checks.items()
         if value is not True
     ]
-    return _scenario_packet(
+    return _scenario_report(
         name="expanded_watcher_scope_execution_guard",
         expected=(
             "expanded watcher scope may observe multiple runtimes, but any "
@@ -2534,7 +2539,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     stale_report["steps"][0]["id_summary"]["authorization_id"] = (
         "dry-run-stale-auth-previous-attempt"
     )
-    stale_operation_layer = dispatcher.build_dispatch_packet(
+    stale_operation_layer = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -2548,7 +2553,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     missing_auth_report = _operation_evidence_report()
     missing_auth_report["ids"].pop("authorization_id", None)
     missing_auth_report["steps"][0]["id_summary"].pop("authorization_id", None)
-    missing_auth_operation_layer = dispatcher.build_dispatch_packet(
+    missing_auth_operation_layer = dispatcher.build_dispatch_artifact(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
@@ -2609,7 +2614,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
         for name, value in checks.items()
         if value is not True
     ]
-    return _scenario_packet(
+    return _scenario_report(
         name="operation_layer_authorization_chain_guard",
         expected=(
             "stale or missing Operation Layer authorization evidence blocks "
@@ -2638,12 +2643,12 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
             {
                 "method": kwargs.get("method"),
                 "url_kind": "post_submit_finalize"
-                if "post-submit-finalize-packets" in str(kwargs.get("url") or "")
+                if "post-submit-finalize-payloads" in str(kwargs.get("url") or "")
                 else "operation_layer_submit",
                 "body_keys": sorted((kwargs.get("body") or {}).keys()),
             }
         )
-        if "post-submit-finalize-packets" in str(kwargs.get("url") or ""):
+        if "post-submit-finalize-payloads" in str(kwargs.get("url") or ""):
             return {
                 "http_status": 200,
                 "error": False,
@@ -2705,7 +2710,7 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
     dispatcher._session_cookie = session_cookie
     dispatcher._request_json = request_json
     try:
-        packet = dispatcher.build_dispatch_packet(
+        dispatcher_artifact = dispatcher.build_dispatch_artifact(
             resume_pack=_resume_pack_finalgate_ready(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
@@ -2721,7 +2726,8 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
         dispatcher._request_json = original_request_json
 
     checks = {
-        "dispatcher_reached_settled_status": packet.get("status") == "settled",
+        "dispatcher_reached_settled_status": dispatcher_artifact.get("status")
+        == "settled",
         "submit_endpoint_called_once": (
             len(
                 [
@@ -2737,24 +2743,24 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
             == 1
         ),
         "next_attempt_gate_ready": (
-            packet.get("post_submit_finalize_result", {})
+            dispatcher_artifact.get("post_submit_finalize_result", {})
             .get("body", {})
             .get("next_attempt_gate", {})
             .get("status")
             == "ready_for_fresh_signal"
         ),
         "budget_settlement_recorded": bool(
-            packet.get("post_submit_finalize_result", {})
+            dispatcher_artifact.get("post_submit_finalize_result", {})
             .get("body", {})
             .get("post_submit_budget_settlement_id")
         ),
         "review_recorded": bool(
-            packet.get("post_submit_finalize_result", {})
+            dispatcher_artifact.get("post_submit_finalize_result", {})
             .get("body", {})
             .get("submit_outcome_review_id")
         ),
         "no_withdrawal_or_transfer": (
-            packet.get("safety_invariants", {}).get(
+            dispatcher_artifact.get("safety_invariants", {}).get(
                 "withdrawal_or_transfer_created"
             )
             is False
@@ -2770,7 +2776,7 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
         "actual_withdrawal_or_transfer_created": False,
         "checks": checks,
         "api_calls": calls,
-        "dispatcher_packet": packet,
+        "dispatcher_artifact": dispatcher_artifact,
     }
 
 
@@ -2783,7 +2789,7 @@ def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, An
         and closed_loop["actual_order_lifecycle_called"] is False
         and closed_loop["actual_withdrawal_or_transfer_created"] is False
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="mock_operation_layer_submit_finalize_pass",
         expected=(
             "dispatcher submit and post-submit finalize path reaches settled "
@@ -2793,7 +2799,7 @@ def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, An
         artifacts={"mock_operation_layer_closed_loop": closed_loop},
         passed=passed,
         blockers=[
-            *closed_loop.get("dispatcher_packet", {}).get("blockers", []),
+            *closed_loop.get("dispatcher_artifact", {}).get("blockers", []),
             *[
                 f"closed_loop_check_failed:{name}"
                 for name, value in closed_loop["checks"].items()
@@ -2869,7 +2875,7 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
             **base_finalize_body,
             "next_attempt_gate": {
                 "status": "blocked",
-                "blockers": ["review_required_before_next_action"],
+                "blockers": ["review_required_before_next_attempt"],
             },
         },
         "finalize_not_complete": {
@@ -2906,7 +2912,7 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                         "method": kwargs.get("method"),
                         "url_kind": (
                             "post_submit_finalize"
-                            if "post-submit-finalize-packets"
+                            if "post-submit-finalize-payloads"
                             in str(kwargs.get("url") or "")
                             else "operation_layer_submit"
                         ),
@@ -2926,7 +2932,7 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
 
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
-            packet = dispatcher.build_dispatch_packet(
+            dispatcher_artifact = dispatcher.build_dispatch_artifact(
                 resume_pack=_resume_pack_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
@@ -2939,23 +2945,24 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
             )
             checks = {
                 "blocked_before_next_attempt": (
-                    packet.get("status") == "post_submit_finalize_blocked"
-                    and packet.get("dispatch_status")
+                    dispatcher_artifact.get("status")
+                    == "post_submit_finalize_blocked"
+                    and dispatcher_artifact.get("dispatch_status")
                     == "blocked_by_post_submit_finalize_incomplete_closed_loop"
-                    and packet.get("dispatch_action") is None
+                    and dispatcher_artifact.get("dispatch_action") is None
                 ),
                 "owner_state_halts_new_entries": (
-                    packet.get("owner_state", {}).get("downgrade_mode")
+                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
                     == "halt_new_entries_until_post_submit_settled"
                 ),
                 "finalize_endpoint_called": (
-                    packet.get("safety_invariants", {}).get(
+                    dispatcher_artifact.get("safety_invariants", {}).get(
                         "official_post_submit_finalize_called"
                     )
                     is True
                 ),
                 "no_withdrawal_or_transfer": (
-                    packet.get("safety_invariants", {}).get(
+                    dispatcher_artifact.get("safety_invariants", {}).get(
                         "withdrawal_or_transfer_created"
                     )
                     is False
@@ -2973,8 +2980,8 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
             }
             results[name] = {
                 "checks": checks,
-                "blockers": packet.get("blockers", []),
-                "packet": packet,
+                "blockers": dispatcher_artifact.get("blockers", []),
+                "dispatcher_artifact": dispatcher_artifact,
                 "api_calls": calls,
             }
     finally:
@@ -3038,7 +3045,7 @@ def _scenario_post_submit_closed_loop_evidence_guard(output_dir: Path) -> dict[s
         guard["status"] == "passed"
         and all(guard.get("checks", {}).values())
     )
-    return _scenario_packet(
+    return _scenario_report(
         name="post_submit_closed_loop_evidence_guard",
         expected=(
             "post-submit finalize must include submit result, budget settlement, "
@@ -3108,7 +3115,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "submit_outcome": "position_still_open_after_finalize",
             "position_state": "active_position_open",
             "protection_state": "exchange_native_hard_stop_required",
-            "finalize_policy": "record_open_position_lifecycle_packet",
+            "finalize_policy": "record_open_position_lifecycle_artifact",
             "reconciliation_policy": "continue_position_monitoring",
             "budget_policy": "keep_budget_reserved_until_flat_or_released",
             "review_policy": "record_open_position_status_snapshot",
@@ -3248,7 +3255,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
                         "method": kwargs.get("method"),
                         "url_kind": (
                             "post_submit_finalize"
-                            if "post-submit-finalize-packets"
+                            if "post-submit-finalize-payloads"
                             in str(kwargs.get("url") or "")
                             else "operation_layer_submit"
                         ),
@@ -3262,7 +3269,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
 
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
-            packet = dispatcher.build_dispatch_packet(
+            dispatcher_artifact = dispatcher.build_dispatch_artifact(
                 resume_pack=_resume_pack_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
@@ -3275,14 +3282,15 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
             )
             checks = {
                 "blocked_before_finalize": (
-                    packet.get("status") == "operation_layer_submit_failed"
-                    and packet.get("dispatch_status")
+                    dispatcher_artifact.get("status")
+                    == "operation_layer_submit_failed"
+                    and dispatcher_artifact.get("dispatch_status")
                     == "official_operation_layer_submit_result_identity_mismatch"
-                    and packet.get("dispatch_action") is None
-                    and "post_submit_finalize_result" not in packet
+                    and dispatcher_artifact.get("dispatch_action") is None
+                    and "post_submit_finalize_result" not in dispatcher_artifact
                 ),
                 "owner_state_halts_new_entries": (
-                    packet.get("owner_state", {}).get("downgrade_mode")
+                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
                     == "halt_new_entries_until_reconciled"
                 ),
                 "operation_layer_called_once": (
@@ -3306,7 +3314,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
                     == 0
                 ),
                 "no_withdrawal_or_transfer": (
-                    packet.get("safety_invariants", {}).get(
+                    dispatcher_artifact.get("safety_invariants", {}).get(
                         "withdrawal_or_transfer_created"
                     )
                     is False
@@ -3314,8 +3322,8 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
             }
             results[name] = {
                 "checks": checks,
-                "blockers": packet.get("blockers", []),
-                "packet": packet,
+                "blockers": dispatcher_artifact.get("blockers", []),
+                "dispatcher_artifact": dispatcher_artifact,
                 "api_calls": calls,
             }
     finally:
@@ -3348,7 +3356,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
 def _scenario_operation_layer_submit_result_identity_guard(output_dir: Path) -> dict[str, Any]:
     guard = _mock_operation_layer_submit_result_identity_guard()
     passed = guard["status"] == "passed" and all(guard.get("checks", {}).values())
-    return _scenario_packet(
+    return _scenario_report(
         name="operation_layer_submit_result_identity_guard",
         expected=(
             "Operation Layer submit result authorization, runtime, and reservation "
@@ -3436,7 +3444,7 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                 url = str(kwargs.get("url") or "")
                 url_kind = (
                     "post_submit_finalize"
-                    if "post-submit-finalize-packets" in url
+                    if "post-submit-finalize-payloads" in url
                     else "operation_layer_submit"
                 )
                 calls.append(
@@ -3457,7 +3465,7 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
 
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
-            packet = dispatcher.build_dispatch_packet(
+            dispatcher_artifact = dispatcher.build_dispatch_artifact(
                 resume_pack=_resume_pack_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
@@ -3470,13 +3478,14 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
             )
             checks = {
                 "blocked_after_finalize_response": (
-                    packet.get("status") == "post_submit_finalize_blocked"
-                    and packet.get("dispatch_status")
+                    dispatcher_artifact.get("status")
+                    == "post_submit_finalize_blocked"
+                    and dispatcher_artifact.get("dispatch_status")
                     == "post_submit_finalize_result_identity_mismatch"
-                    and packet.get("dispatch_action") is None
+                    and dispatcher_artifact.get("dispatch_action") is None
                 ),
                 "owner_state_halts_new_entries": (
-                    packet.get("owner_state", {}).get("downgrade_mode")
+                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
                     == "halt_new_entries_until_post_submit_settled"
                 ),
                 "operation_layer_called_once": (
@@ -3499,9 +3508,9 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                     )
                     == 1
                 ),
-                "did_not_settle": packet.get("status") != "settled",
+                "did_not_settle": dispatcher_artifact.get("status") != "settled",
                 "no_withdrawal_or_transfer": (
-                    packet.get("safety_invariants", {}).get(
+                    dispatcher_artifact.get("safety_invariants", {}).get(
                         "withdrawal_or_transfer_created"
                     )
                     is False
@@ -3509,8 +3518,8 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
             }
             results[name] = {
                 "checks": checks,
-                "blockers": packet.get("blockers", []),
-                "packet": packet,
+                "blockers": dispatcher_artifact.get("blockers", []),
+                "dispatcher_artifact": dispatcher_artifact,
                 "api_calls": calls,
             }
     finally:
@@ -3547,7 +3556,7 @@ def _scenario_post_submit_finalize_result_identity_guard(
 ) -> dict[str, Any]:
     guard = _mock_post_submit_finalize_result_identity_guard()
     passed = guard["status"] == "passed" and all(guard.get("checks", {}).values())
-    return _scenario_packet(
+    return _scenario_report(
         name="post_submit_finalize_result_identity_guard",
         expected=(
             "Post-submit finalize result authorization, runtime, and reservation "
@@ -3559,7 +3568,7 @@ def _scenario_post_submit_finalize_result_identity_guard(
     )
 
 
-def _scenario_packet(
+def _scenario_report(
     *,
     name: str,
     expected: str,
@@ -3628,18 +3637,18 @@ def _dangerous_effects(*values: Any) -> list[str]:
     return sorted(set(effects))
 
 
-def _operation_layer_submit_called(packet: dict[str, Any]) -> bool:
-    safety = packet.get("safety_invariants")
+def _operation_layer_submit_called(artifact: dict[str, Any]) -> bool:
+    safety = artifact.get("safety_invariants")
     return isinstance(safety, dict) and safety.get("official_operation_layer_submit_called") is True
 
 
-def build_audit_chain(output_dir: Path) -> dict[str, Any]:
+def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     scenarios = [
         _scenario_no_signal(output_dir),
         _scenario_mock_pass(output_dir),
-        _scenario_scoped_pipeline_operation_layer_handoff(output_dir),
-        _scenario_non_executing_prepare_auto_bridge(output_dir),
+        _scenario_scoped_pipeline_operation_layer_submit_projection(output_dir),
+        _scenario_execution_attempt_rehearsal_prepare(output_dir),
         _scenario_mock_operation_layer_closed_loop(output_dir),
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
@@ -3653,7 +3662,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     runtime_tier_policy = _runtime_tier_policy_validation()
-    runtime_replay_lab = build_mpg001_replay_lab_packet(
+    runtime_replay_lab = build_mpg001_replay_lab_report(
         generated_at_ms=int(time.time() * 1000)
     ).model_dump(mode="json")
     blockers = [
@@ -3712,36 +3721,36 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             _scenario_artifact(
                 scenarios,
                 "required_facts_missing",
-                "readiness_bridge",
+                "readiness_evidence",
             ).get("status")
             == "ready_for_readiness_evidence"
         ),
-        "scoped_pipeline_operation_layer_handoff_checked": (
+        "scoped_pipeline_operation_layer_submit_projection_checked": (
             _scenario_artifact(
                 scenarios,
-                "scoped_pipeline_operation_layer_handoff",
+                "scoped_pipeline_operation_layer_submit_projection",
                 "checks",
             )
             != {}
             and all(
                 _scenario_artifact(
                     scenarios,
-                    "scoped_pipeline_operation_layer_handoff",
+                    "scoped_pipeline_operation_layer_submit_projection",
                     "checks",
                 ).values()
             )
         ),
-        "non_executing_prepare_auto_bridge_checked": (
+        "execution_attempt_rehearsal_prepare_checked": (
             _scenario_artifact(
                 scenarios,
-                "non_executing_prepare_auto_bridge",
+                "execution_attempt_rehearsal_prepare",
                 "checks",
             )
             != {}
             and all(
                 _scenario_artifact(
                     scenarios,
-                    "non_executing_prepare_auto_bridge",
+                    "execution_attempt_rehearsal_prepare",
                     "checks",
                 ).values()
             )
@@ -3836,7 +3845,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             and "allocated_subaccount_profile_boundary"
             in (runtime_tier_policy.get("l4_real_order_requirements") or [])
         ),
-        "strategy_handoff_no_execution_pipeline_fields_checked": (
+        "strategy_intake_no_execution_pipeline_fields_checked": (
             shared_pipeline.get("status") == "passed"
             and shared_pipeline.get("checks", {}).get(
                 "all_strategy_groups_have_no_execution_pipeline_fields"
@@ -4128,8 +4137,8 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "allocated_subaccount_profile_boundary_checked": checks[
             "allocated_subaccount_profile_boundary_checked"
         ],
-        "strategy_handoff_no_execution_pipeline_fields_checked": checks[
-            "strategy_handoff_no_execution_pipeline_fields_checked"
+        "strategy_intake_no_execution_pipeline_fields_checked": checks[
+            "strategy_intake_no_execution_pipeline_fields_checked"
         ],
         "runtime_tier_policy_checked": checks[
             "runtime_tier_policy_checked"
@@ -4206,14 +4215,14 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "post_submit_finalize_result_identity_guard_checked": checks[
             "post_submit_finalize_result_identity_guard_checked"
         ],
-        "non_executing_prepare_auto_bridge_checked": checks[
-            "non_executing_prepare_auto_bridge_checked"
+        "execution_attempt_rehearsal_prepare_checked": checks[
+            "execution_attempt_rehearsal_prepare_checked"
         ],
         "required_facts_readiness_checked": checks[
             "required_facts_readiness_checked"
         ],
-        "scoped_pipeline_operation_layer_handoff_checked": checks[
-            "scoped_pipeline_operation_layer_handoff_checked"
+        "scoped_pipeline_operation_layer_submit_projection_checked": checks[
+            "scoped_pipeline_operation_layer_submit_projection_checked"
         ],
     }
     return {
@@ -4253,6 +4262,10 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     }
 
 
+def build_audit_chain(output_dir: Path) -> dict[str, Any]:
+    return build_audit_artifact(output_dir)
+
+
 def _scenario_artifact(
     scenarios: list[dict[str, Any]],
     scenario_name: str,
@@ -4267,7 +4280,7 @@ def _scenario_artifact(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build the non-executing runtime dry-run audit chain packet."
+        description="Build the non-executing runtime dry-run audit chain artifact."
     )
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
@@ -4278,7 +4291,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     output_dir = Path(args.output_dir).expanduser()
     with redirect_stdout(sys.stderr):
-        report = build_audit_chain(output_dir)
+        report = build_audit_artifact(output_dir)
     output_json = Path(args.output_json).expanduser()
     _write_json(output_json, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

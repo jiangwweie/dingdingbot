@@ -222,7 +222,7 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     module = _load_module()
 
     packet = module.build_l2_readiness_review(
-        expansion_review_packet=_expansion_review(),
+        expansion_review_artifact=_expansion_review(),
         expansion_policy=_policy(),
     )
 
@@ -238,10 +238,13 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
         "forbidden_effect_count": 0,
         "review_row_count": 4,
     }
-    assert packet["decision"]["handoff_intake_recommended_groups"] == ["BTPC-001"]
-    assert packet["decision"]["tier_policy_change_recommended"] is False
-    assert packet["decision"]["l4_scope_change_recommended"] is False
-    assert packet["decision"]["shadow_candidate_creation_recommended_now"] is False
+    assert "decision" not in packet
+    review_outcome = packet["review_outcome_state"]
+    assert review_outcome["handoff_intake_recommended_groups"] == ["BTPC-001"]
+    assert review_outcome["tier_policy_change_recommended"] is False
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert review_outcome["shadow_candidate_creation_recommended_now"] is False
+    assert review_outcome["tradeability_decision_source"] is False
     rows = {row["strategy_group_id"]: row for row in packet["readiness_rows"]}
     assert rows["BTPC-001"]["conditional_l2_review_candidate"] is True
     assert rows["BTPC-001"]["may_create_shadow_candidate_now"] is False
@@ -282,6 +285,8 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["safety_invariants"]["does_not_change_tier_policy"] is True
     assert packet["safety_invariants"]["does_not_expand_l4_real_order_scope"] is True
+    assert "operator_command_plan" not in packet
+    assert "execution_intent_created" not in packet["safety_invariants"]
 
 
 def test_l2_readiness_review_recognizes_enabled_l2_group():
@@ -296,14 +301,15 @@ def test_l2_readiness_review_recognizes_enabled_l2_group():
     policy["strategy_groups"]["BTPC-001"]["blocking_gaps_before_l2"] = []
 
     packet = module.build_l2_readiness_review(
-        expansion_review_packet=_expansion_review(),
+        expansion_review_artifact=_expansion_review(),
         expansion_policy=policy,
     )
 
     assert packet["status"] == "l2_readiness_review_already_enabled"
     assert packet["counts"]["conditional_l2_candidate_count"] == 0
     assert packet["counts"]["enabled_l2_count"] == 1
-    assert packet["decision"]["enabled_l2_groups"] == ["BTPC-001"]
+    assert "decision" not in packet
+    assert packet["review_outcome_state"]["enabled_l2_groups"] == ["BTPC-001"]
     rows = {row["strategy_group_id"]: row for row in packet["readiness_rows"]}
     assert rows["BTPC-001"]["l2_shadow_candidate_observation_enabled"] is True
     assert rows["BTPC-001"]["may_place_real_order_now"] is False
@@ -327,7 +333,7 @@ def test_l2_readiness_review_carries_enabled_l2_group_without_fresh_review_row()
     ]
 
     packet = module.build_l2_readiness_review(
-        expansion_review_packet=expansion,
+        expansion_review_artifact=expansion,
         expansion_policy=policy,
     )
 
@@ -337,14 +343,15 @@ def test_l2_readiness_review_carries_enabled_l2_group_without_fresh_review_row()
     assert rows["BTPC-001"]["l2_shadow_candidate_observation_enabled"] is True
     assert rows["BTPC-001"]["may_place_real_order_now"] is False
     assert packet["counts"]["enabled_l2_count"] == 1
-    assert packet["decision"]["enabled_l2_groups"] == ["BTPC-001"]
+    assert "decision" not in packet
+    assert packet["review_outcome_state"]["enabled_l2_groups"] == ["BTPC-001"]
 
 
 def test_l2_readiness_review_reports_no_rows():
     module = _load_module()
 
     packet = module.build_l2_readiness_review(
-        expansion_review_packet={"status": "no_expansion_review_needed", "review_rows": []},
+        expansion_review_artifact={"status": "no_expansion_review_needed", "review_rows": []},
         expansion_policy=_policy(),
     )
 
@@ -359,7 +366,7 @@ def test_l2_readiness_review_blocks_forbidden_source_effect():
     expansion["safety_invariants"]["order_created"] = True
 
     packet = module.build_l2_readiness_review(
-        expansion_review_packet=expansion,
+        expansion_review_artifact=expansion,
         expansion_policy=_policy(),
     )
 
@@ -367,7 +374,40 @@ def test_l2_readiness_review_blocks_forbidden_source_effect():
     assert "expansion_review.safety.order_created" in packet["safety_invariants"][
         "source_forbidden_effects"
     ]
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+    assert "operator_command_plan" not in packet
+
+
+def test_l2_readiness_review_rejects_source_authority_mirror_fields():
+    module = _load_module()
+    expansion = _expansion_review()
+    expansion["safety_invariants"]["real_order_authority"] = False
+    expansion["review_rows"][0]["actionable_now"] = False
+    policy = _policy()
+    policy["strategy_groups"]["BTPC-001"]["real_order_authority"] = False
+
+    packet = module.build_l2_readiness_review(
+        expansion_review_artifact=expansion,
+        expansion_policy=policy,
+    )
+
+    assert packet["status"] == "blocked_forbidden_effect"
+    effects = packet["safety_invariants"]["source_forbidden_effects"]
+    assert (
+        "expansion_review.safety_invariants."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert (
+        "expansion_review.review_rows.BTPC-001."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in effects
+    assert (
+        "expansion_policy.strategy_groups.BTPC-001."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
 
 
 def test_l2_readiness_review_cli_writes_json_and_owner_progress(tmp_path, capsys):
@@ -405,3 +445,29 @@ def test_l2_readiness_review_cli_writes_json_and_owner_progress(tmp_path, capsys
         "Action | Blocking gaps |"
     ) in owner_text
     assert "historical_open_interest_window_missing" in owner_text
+
+
+def test_l2_readiness_review_cli_omitted_expansion_review_does_not_read_default(
+    tmp_path,
+):
+    module = _load_module()
+    policy_path = tmp_path / "policy.json"
+    output_path = tmp_path / "l2-review.json"
+    owner_path = tmp_path / "l2-review.md"
+    policy_path.write_text(json.dumps(_policy()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--expansion-policy-json",
+            str(policy_path),
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] == "l2_readiness_review_no_rows"
+    assert packet["counts"]["review_row_count"] == 0

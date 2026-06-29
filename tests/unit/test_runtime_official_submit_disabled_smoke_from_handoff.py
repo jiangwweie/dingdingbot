@@ -5,12 +5,12 @@ import sys
 
 from scripts import runtime_official_submit_disabled_smoke_from_handoff as flow
 from src.domain.runtime_official_submit_handoff import (
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
 )
 from tests.unit.test_runtime_official_submit_handoff import _readiness
 from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
-    build_runtime_official_submit_handoff_packet,
+    build_runtime_official_submit_handoff_artifact,
 )
 
 
@@ -38,8 +38,8 @@ class _Client:
 
 
 def _handoff_payload(**overrides) -> dict:
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         now_ms=1_765_000_000_001,
         **overrides,
@@ -49,9 +49,9 @@ def _handoff_payload(**overrides) -> dict:
 
 def _args(tmp_path, payload: dict, **overrides):
     path = tmp_path / "handoff.json"
-    path.write_text(json.dumps({"packet": payload}), encoding="utf-8")
+    path.write_text(json.dumps({"artifact": payload}), encoding="utf-8")
     values = {
-        "handoff_json": str(path),
+        "handoff_artifact_json": str(path),
         "output": None,
         "env_file": None,
         "api_base": "http://unit",
@@ -106,7 +106,7 @@ def test_disabled_smoke_from_handoff_refuses_real_gateway_handoff(tmp_path):
         mode=RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION,
         owner_confirmed_for_real_submit_action=True,
     )
-    handoff = RuntimeOfficialSubmitHandoffPacket.model_validate(payload)
+    handoff = RuntimeOfficialSubmitHandoffArtifact.model_validate(payload)
     assert handoff.ready_for_official_submit_call is True
     client = _Client()
 
@@ -145,7 +145,7 @@ def test_disabled_smoke_from_handoff_cli_stdout_is_json_only(monkeypatch, capsys
         "argv",
         [
             "runtime_official_submit_disabled_smoke_from_handoff.py",
-            "--handoff-json",
+            "--handoff-artifact-json",
             "handoff.json",
         ],
     )

@@ -3,13 +3,13 @@ from pydantic import ValidationError
 
 from src.domain.runtime_executable_submit_readiness import (
     RuntimeExecutableSubmitReadinessEvidence,
-    build_runtime_executable_submit_readiness_packet,
+    build_runtime_executable_submit_readiness_artifact,
 )
 from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
     RuntimeOfficialSubmitHandoffStatus,
-    build_runtime_official_submit_handoff_packet,
+    build_runtime_official_submit_handoff_artifact,
 )
 
 
@@ -35,22 +35,22 @@ def _readiness(**overrides):
     )
     values = {
         "runtime_instance_id": "runtime-1",
-        "source_strategy_planning_packet_id": "strategy-plan-1",
+        "source_strategy_planning_artifact_id": "strategy-plan-1",
         "source_authorization_id": "consumed-auth-1",
         "strategy_planning_status": "ready_for_final_gate_preflight",
         "signal_evaluation_id": "signal-eval-1",
         "order_candidate_id": "order-candidate-1",
-        "source_release_packet_id": "release-1",
+        "source_release_evidence_id": "release-1",
         "evidence": evidence,
         "now_ms": 1_765_000_000_000,
     }
     values.update(overrides)
-    return build_runtime_executable_submit_readiness_packet(**values)
+    return build_runtime_executable_submit_readiness_artifact(**values)
 
 
 def test_ready_disabled_smoke_handoff_uses_fresh_authorization_and_official_endpoint():
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         now_ms=1_765_000_000_001,
     )
@@ -70,13 +70,17 @@ def test_ready_disabled_smoke_handoff_uses_fresh_authorization_and_official_endp
         "trusted-facts-1"
     )
     assert handoff.source_consumed_authorization_id == "consumed-auth-1"
+    assert handoff.metadata["read_only_submit_projection"] is True
+    assert handoff.metadata["execution_attempt_source"] is False
+    assert handoff.metadata["lifecycle_authority"] is False
+    assert "read_only_handoff" not in handoff.metadata
     assert handoff.order_lifecycle_called is False
     assert handoff.exchange_order_submitted is False
 
 
 def test_blocks_reusing_consumed_authorization_as_fresh_submit_authorization():
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="consumed-auth-1",
         now_ms=1,
     )
@@ -93,8 +97,8 @@ def test_blocks_when_readiness_is_not_ready():
         order_candidate_id=None,
     )
 
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=readiness,
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=readiness,
         fresh_submit_authorization_id="fresh-auth-1",
         now_ms=1,
     )
@@ -105,8 +109,8 @@ def test_blocks_when_readiness_is_not_ready():
 
 
 def test_real_gateway_handoff_uses_standing_authorization_without_chat_confirmation():
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         mode=RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION,
         owner_confirmed_for_real_submit_action=False,
@@ -126,8 +130,8 @@ def test_real_gateway_handoff_uses_standing_authorization_without_chat_confirmat
 
 
 def test_real_gateway_handoff_can_be_ready_with_confirmation():
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         mode=RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION,
         owner_confirmed_for_real_submit_action=True,
@@ -143,8 +147,8 @@ def test_real_gateway_handoff_can_be_ready_with_confirmation():
 
 
 def test_rejects_execution_metadata():
-    handoff = build_runtime_official_submit_handoff_packet(
-        readiness_packet=_readiness(),
+    handoff = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         now_ms=1,
     )
@@ -152,4 +156,4 @@ def test_rejects_execution_metadata():
     payload["metadata"] = {"submit_order": True}
 
     with pytest.raises(ValidationError, match="forbidden execution field"):
-        RuntimeOfficialSubmitHandoffPacket.model_validate(payload)
+        RuntimeOfficialSubmitHandoffArtifact.model_validate(payload)

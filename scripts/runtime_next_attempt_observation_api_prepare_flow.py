@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge runtime next-attempt observation API to the official prepare flow.
+"""Adapt runtime next-attempt observation API to the official prepare flow.
 
 Default mode calls the Trading Console observation API and, when a signal is
 ready, writes the embedded signal input JSON for operator review. It creates
@@ -117,10 +117,10 @@ def _write_signal_input(
     args: argparse.Namespace,
     observation_payload: dict[str, Any],
 ) -> str | None:
-    signal_packet = observation_payload.get("signal_packet")
-    if not isinstance(signal_packet, dict):
+    signal_artifact = observation_payload.get("signal_artifact")
+    if not isinstance(signal_artifact, dict):
         return None
-    signal_input = signal_packet.get("signal_input")
+    signal_input = signal_artifact.get("signal_input")
     if not isinstance(signal_input, dict):
         return None
     output_path = _signal_output_path(args)
@@ -172,10 +172,10 @@ def _run_prepare_flow(
     return prepare_script._summarize_prepare_report(report)
 
 
-def _safety(*, allow_prepare_records: bool, prepare_packet: dict[str, Any] | None) -> dict[str, Any]:
+def _safety(*, allow_prepare_records: bool, prepare_artifact: dict[str, Any] | None) -> dict[str, Any]:
     created = (
-        prepare_packet.get("created_records")
-        if isinstance(prepare_packet, dict)
+        prepare_artifact.get("created_records")
+        if isinstance(prepare_artifact, dict)
         else None
     )
     if not isinstance(created, dict):
@@ -184,8 +184,8 @@ def _safety(*, allow_prepare_records: bool, prepare_packet: dict[str, Any] | Non
         "uses_official_trading_console_api": True,
         "allow_prepare_records": allow_prepare_records,
         "prepare_records_created": bool(
-            prepare_packet
-            and prepare_packet.get("status") == "ready_for_final_gate_preflight"
+            prepare_artifact
+            and prepare_artifact.get("status") == "ready_for_final_gate_preflight"
         ),
         "shadow_candidate_created": bool(created.get("shadow_candidate_created")),
         "runtime_execution_intent_draft_created": bool(
@@ -213,7 +213,7 @@ def _safety(*, allow_prepare_records: bool, prepare_packet: dict[str, Any] | Non
     }
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -242,10 +242,10 @@ def _build_packet(
             "observation_http_status": http_status,
             "observation_payload": observation_payload,
             "signal_input_json": signal_input_json,
-            "prepare_packet": None,
+            "prepare_artifact": None,
             "blockers": [f"observation_api_http_{http_status}"],
             "warnings": [],
-            "operator_command_plan": {
+            "api_prepare_plan": {
                 "next_step": "resolve_observation_api_error",
                 "not_executed": True,
                 "places_order": False,
@@ -253,7 +253,7 @@ def _build_packet(
             },
             "safety_invariants": _safety(
                 allow_prepare_records=args.allow_prepare_records,
-                prepare_packet=None,
+                prepare_artifact=None,
             ),
         }
 
@@ -268,12 +268,12 @@ def _build_packet(
             "observation_http_status": http_status,
             "observation_payload": observation_payload,
             "signal_input_json": signal_input_json,
-            "prepare_packet": None,
+            "prepare_artifact": None,
             "blockers": list(observation_payload.get("blockers") or []),
             "warnings": list(observation_payload.get("warnings") or []),
-            "operator_command_plan": {
+            "api_prepare_plan": {
                 "next_step": (
-                    (observation_payload.get("operator_command_plan") or {}).get(
+                    (observation_payload.get("observation_cycle_plan") or {}).get(
                         "next_step"
                     )
                     or "wait_for_ready_signal"
@@ -287,7 +287,7 @@ def _build_packet(
             },
             "safety_invariants": _safety(
                 allow_prepare_records=args.allow_prepare_records,
-                prepare_packet=None,
+                prepare_artifact=None,
             ),
         }
 
@@ -300,10 +300,10 @@ def _build_packet(
             "observation_http_status": http_status,
             "observation_payload": observation_payload,
             "signal_input_json": None,
-            "prepare_packet": None,
+            "prepare_artifact": None,
             "blockers": ["ready_observation_signal_input_missing"],
             "warnings": [],
-            "operator_command_plan": {
+            "api_prepare_plan": {
                 "next_step": "rerun_observation_until_signal_input_embedded",
                 "not_executed": True,
                 "places_order": False,
@@ -311,7 +311,7 @@ def _build_packet(
             },
             "safety_invariants": _safety(
                 allow_prepare_records=args.allow_prepare_records,
-                prepare_packet=None,
+                prepare_artifact=None,
             ),
         }
 
@@ -323,10 +323,10 @@ def _build_packet(
             "observation_http_status": http_status,
             "observation_payload": observation_payload,
             "signal_input_json": signal_input_json,
-            "prepare_packet": None,
+            "prepare_artifact": None,
             "blockers": [],
             "warnings": list(observation_payload.get("warnings") or []),
-            "operator_command_plan": {
+            "api_prepare_plan": {
                 "next_step": (
                     "rerun_with_allow_prepare_records_under_standing_authorization"
                 ),
@@ -342,35 +342,36 @@ def _build_packet(
             },
             "safety_invariants": _safety(
                 allow_prepare_records=False,
-                prepare_packet=None,
+                prepare_artifact=None,
             ),
         }
 
     if prepare_runner is not None:
-        prepare_packet = prepare_runner(args, signal_input_json)
+        prepare_artifact = prepare_runner(args, signal_input_json)
     else:
-        prepare_packet = _run_prepare_flow(args, signal_input_json=signal_input_json)
+        prepare_artifact = _run_prepare_flow(args, signal_input_json=signal_input_json)
     return {
         "scope": "runtime_next_attempt_observation_api_prepare_flow",
-        "status": prepare_packet.get("status") or "blocked",
+        "status": prepare_artifact.get("status") or "blocked",
         "runtime_instance_id": args.runtime_instance_id,
         "observation_http_status": http_status,
         "observation_payload": observation_payload,
         "signal_input_json": signal_input_json,
-        "prepare_packet": prepare_packet,
-        "blockers": list(prepare_packet.get("blockers") or []),
-        "warnings": list(prepare_packet.get("warnings") or []),
-        "operator_command_plan": {
+        "prepare_artifact": prepare_artifact,
+        "blockers": list(prepare_artifact.get("blockers") or []),
+        "warnings": list(prepare_artifact.get("warnings") or []),
+        "api_prepare_plan": {
             "next_step": (
                 "run_official_final_gate_preflight"
-                if prepare_packet.get("status") == "ready_for_final_gate_preflight"
+                if prepare_artifact.get("status") == "ready_for_final_gate_preflight"
                 else "resolve_prepare_blockers"
             ),
             "signal_input_json": signal_input_json,
             "prepared_authorization_id": (
-                (prepare_packet.get("operator_command_plan") or {}).get(
+                (prepare_artifact.get("prepare_artifact_plan") or {}).get(
                     "prepared_authorization_id"
                 )
+                or (prepare_artifact.get("ids") or {}).get("authorization_id")
             ),
             "not_executed": True,
             "places_order": False,
@@ -382,7 +383,7 @@ def _build_packet(
         },
         "safety_invariants": _safety(
             allow_prepare_records=True,
-            prepare_packet=prepare_packet,
+            prepare_artifact=prepare_artifact,
         ),
     }
 
@@ -444,7 +445,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        payload = _build_packet(args)
+        payload = _build_artifact(args)
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if payload["status"] in {
         "waiting_for_signal",

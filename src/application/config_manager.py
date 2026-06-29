@@ -664,7 +664,7 @@ class ConfigManager:
         Task A-5: Also initializes exchange config defaults.
 
         This method inserts minimal required configurations for system startup.
-        NOTE: These are hardcoded defaults. User should modify via Config UI.
+        NOTE: These are hardcoded defaults. User should modify via the config surface.
         """
         # R4.2: Track which defaults were applied for startup warning
         applied_defaults = []

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Select a runtime-compatible live strategy signal input.
 
-RTF-034 bridges the broad read-only strategy shelf back into the runtime
+RTF-034 adapts the broad read-only strategy shelf back into the runtime
 next-attempt loop. It scans current strategy-group observations, selects only a
 ``would_enter`` signal that exactly matches the target runtime profile, and can
 write the matching ``StrategyFamilySignalInput`` JSON for the existing
@@ -26,13 +26,13 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.build_runtime_strategy_signal_input_packet import (  # noqa: E402
+from scripts.build_runtime_strategy_signal_input_artifact import (  # noqa: E402
     _load_env_file,
     _load_runtime,
 )
 from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
     SourceName,
-    build_preview_packet,
+    build_preview_artifact,
 )
 
 
@@ -62,8 +62,8 @@ def _runtime_profile(runtime: Any) -> dict[str, Any]:
     }
 
 
-def _current_signal_rows(preview_packet: dict[str, Any]) -> list[dict[str, Any]]:
-    preview = preview_packet.get("preview") or {}
+def _current_signal_rows(preview_artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    preview = preview_artifact.get("preview") or {}
     rows = preview.get("current_signals") or []
     return [row for row in rows if isinstance(row, dict)]
 
@@ -201,14 +201,14 @@ def _operator_next_step(status: str) -> str:
     return "continue_strategy_shelf_scan_or_wait_for_next_closed_bar"
 
 
-def _build_packet_from_preview(
+def _build_artifact_from_preview(
     *,
     runtime: Any,
-    preview_packet: dict[str, Any],
+    preview_artifact: dict[str, Any],
     output_signal_input_json: str | None = None,
 ) -> dict[str, Any]:
     runtime_profile = _runtime_profile(runtime)
-    rows = _current_signal_rows(preview_packet)
+    rows = _current_signal_rows(preview_artifact)
     selected, inspected, runtime_current_signal = _select_row(
         rows=rows,
         runtime_profile=runtime_profile,
@@ -238,9 +238,9 @@ def _build_packet_from_preview(
         "status": status,
         "runtime_instance_id": runtime_profile["runtime_instance_id"],
         "runtime_profile": runtime_profile,
-        "source_requested": preview_packet.get("source_requested"),
-        "market_source": preview_packet.get("market_source"),
-        "preview_checks": preview_packet.get("checks") or {},
+        "source_requested": preview_artifact.get("source_requested"),
+        "market_source": preview_artifact.get("market_source"),
+        "preview_checks": preview_artifact.get("checks") or {},
         "selected_signal": _signal_summary(selected) if selected is not None else None,
         "runtime_current_signal": runtime_current_signal,
         "non_runtime_would_enter_signals": non_runtime_would_enter,
@@ -251,7 +251,7 @@ def _build_packet_from_preview(
             "selector_does_not_change_runtime_profile",
             "strategy_alpha_not_proven_warning_not_execution_blocker",
         ],
-        "operator_command_plan": {
+        "live_signal_selector_plan": {
             "next_step": _operator_next_step(status),
             "signal_input_json": output_path,
             "records_observation": False,
@@ -267,17 +267,17 @@ def _build_packet_from_preview(
     }
 
 
-async def _build_packet(
+async def _build_artifact(
     args: argparse.Namespace,
     *,
-    preview_builder: PreviewBuilder = build_preview_packet,
+    preview_builder: PreviewBuilder = build_preview_artifact,
 ) -> dict[str, Any]:
     _load_env_file(args.env_file)
     runtime = await _load_runtime(args.runtime_instance_id)
-    preview_packet = preview_builder(source_name=args.source)
-    return _build_packet_from_preview(
+    preview_artifact = preview_builder(source_name=args.source)
+    return _build_artifact_from_preview(
         runtime=runtime,
-        preview_packet=preview_packet,
+        preview_artifact=preview_artifact,
         output_signal_input_json=args.output_signal_input_json,
     )
 
@@ -290,7 +290,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env-file")
     parser.add_argument(
         "--source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
+        choices=["sample", "local_sqlite_read_only", "live_market"],
         default="live_market",
     )
     parser.add_argument("--output-signal-input-json")
@@ -300,14 +300,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = asyncio.run(_build_packet(args))
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    artifact = asyncio.run(_build_artifact(args))
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] == "runtime_compatible_would_enter_selected" else 2
+    return 0 if artifact["status"] == "runtime_compatible_would_enter_selected" else 2
 
 
 if __name__ == "__main__":

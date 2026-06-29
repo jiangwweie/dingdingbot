@@ -3,9 +3,9 @@
 
 This script is the RTF-002 dry-run/probe entry:
 
-post-submit finalize packet JSON + fresh signal input JSON
+post-submit finalize payload JSON + fresh signal input JSON
 -> Trading Console next-attempt strategy planning endpoint
--> audit packet
+-> audit artifact
 
 It never creates executable intents, local orders, OrderLifecycle handoffs,
 exchange requests, closes, transfers, or withdrawals.
@@ -83,9 +83,11 @@ def _metadata(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.post_submit_finalize_payload_json:
+        raise ValueError("post_submit_finalize_payload_json_required")
     body: dict[str, Any] = {
-        "post_submit_finalize_packet": _read_json_file(
-            args.post_submit_finalize_packet_json
+        "post_submit_finalize_payload": _read_json_file(
+            args.post_submit_finalize_payload_json
         ),
         "signal_input": _read_json_file(args.signal_input_json),
         "metadata": _metadata(args),
@@ -114,7 +116,7 @@ def _call_api(
     )
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -174,7 +176,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--post-submit-finalize-packet-json", required=True)
+    parser.add_argument("--post-submit-finalize-payload-json")
     parser.add_argument("--signal-input-json", required=True)
     parser.add_argument("--env-file")
     parser.add_argument("--api-base")
@@ -187,9 +189,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    )
+    return 0 if artifact["status"] in {
         "ready_for_final_gate_preflight",
         "waiting_for_signal",
         "blocked_by_post_submit_gate",

@@ -9,6 +9,7 @@ commands in parallel. The default mode is cache-only and does not contact Tokyo.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
@@ -16,12 +17,86 @@ import sys
 from typing import Any, Callable
 from datetime import datetime, timezone
 
+try:
+    from scripts.runtime_monitor_refresh import (
+        DEPLOYMENT_ISSUE_STATUS,
+        MONITOR_REFRESH_STATUS,
+        combined_artifact_monitor_status,
+        combined_artifact_monitor_refresh_reasons,
+        monitor_owner_runtime_state,
+        monitor_owner_action_label_for,
+        monitor_owner_state_label_for,
+        monitor_notification_projection,
+        monitor_owner_status_for,
+        monitor_refresh_sequence_status,
+        monitor_status_projection,
+        monitor_runtime_status_for,
+        monitor_step_returncode_is_deployment_issue,
+        monitor_step_returncode_is_refresh,
+        owner_intervention_required_from_sources,
+        artifact_monitor_refresh_reasons,
+        artifact_monitor_refresh_needed,
+        artifact_monitor_status,
+        artifact_owner_runtime_issues,
+        artifact_declared_runtime_status,
+        first_artifact_declared_runtime_status,
+        owner_runtime_issues_projection,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from runtime_monitor_refresh import (
+        DEPLOYMENT_ISSUE_STATUS,
+        MONITOR_REFRESH_STATUS,
+        combined_artifact_monitor_status,
+        combined_artifact_monitor_refresh_reasons,
+        monitor_owner_runtime_state,
+        monitor_owner_action_label_for,
+        monitor_owner_state_label_for,
+        monitor_notification_projection,
+        monitor_owner_status_for,
+        monitor_refresh_sequence_status,
+        monitor_status_projection,
+        monitor_runtime_status_for,
+        monitor_step_returncode_is_deployment_issue,
+        monitor_step_returncode_is_refresh,
+        owner_intervention_required_from_sources,
+        artifact_monitor_refresh_reasons,
+        artifact_monitor_refresh_needed,
+        artifact_monitor_status,
+        artifact_owner_runtime_issues,
+        artifact_declared_runtime_status,
+        first_artifact_declared_runtime_status,
+        owner_runtime_issues_projection,
+    )
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.domain.runtime_readiness_state import ReadinessSeparation  # noqa: E402
+try:
+    from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+        review_outcome_default_next_step,
+        review_outcome_string_list,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from strategygroup_non_executing_projection import (  # noqa: E402
+        review_outcome_default_next_step,
+        review_outcome_string_list,
+    )
+
 DEFAULT_DAILY_CHECK_JSON = REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
 DEFAULT_DAILY_OWNER_PROGRESS = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
+OWNER_PROGRESS_STATE_LABELS = {
+    "complete": "已完成",
+    "processing": "处理中",
+}
+OWNER_PROGRESS_ACTION_LABELS = {
+    "complete": "归档第一笔边界内真实订单闭环",
+    "processing": "等待系统完成当前链路",
+}
 DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
 DEFAULT_GOAL_PROGRESS_MD = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
 DEFAULT_LIVE_CUTOVER_JSON = (
@@ -80,11 +155,11 @@ DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
 DEFAULT_POST_REVISION_REPLAY_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.md"
 )
-DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.json"
+DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-opportunity-review-work-loop.json"
 )
-DEFAULT_OPPORTUNITY_DECISION_LOOP_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.md"
+DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-opportunity-review-work-loop.md"
 )
 DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_JSON = (
     REPO_ROOT
@@ -105,13 +180,13 @@ DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_JSON = (
 DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-btpc-proxy-replay-quality-review.md"
 )
-DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_JSON = (
+DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_JSON = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json"
+    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json"
 )
-DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD = (
+DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_MD = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.md"
+    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.md"
 )
 DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_JSON = (
     REPO_ROOT
@@ -127,11 +202,11 @@ DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_JSON = (
 DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-btpc-classifier-rule-review.md"
 )
-DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+DEFAULT_STRATEGY_ASSET_STATE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-asset-state.json"
 )
-DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.md"
+DEFAULT_STRATEGY_ASSET_STATE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-asset-state.md"
 )
 DEFAULT_STRATEGYGROUP_QUALITY_WAVE_JSON = (
     REPO_ROOT
@@ -173,11 +248,11 @@ DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-pre-live-rehearsal-readiness-current.md"
 )
-DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-live-submit-readiness-bridge.json"
+DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-safety-state.json"
 )
-DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-live-submit-readiness-bridge.md"
+DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-safety-state.md"
 )
 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
@@ -185,22 +260,34 @@ DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON = (
 DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.md"
 )
+DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json"
+)
+DEFAULT_STRATEGYGROUP_OWNER_POLICY_PACKAGE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-owner-policy-package.json"
+)
+DEFAULT_STRATEGYGROUP_QUALITY_CLOSURE_WAVE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-quality-closure-wave.json"
+)
 DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md"
 )
-DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON = (
+DEFAULT_STRATEGY_CAPTURE_GAP_AUDIT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/strategy-capture-gap-audit-20260622.json"
+)
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.json"
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json"
 )
-DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD = (
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_MD = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-capital-trial-readiness-bridge.md"
+    / "output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.md"
 )
-DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.json"
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json"
 )
-DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-packet-v0.md"
+DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.md"
 )
 DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-research-intake-review.json"
@@ -240,25 +327,11 @@ DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON = (
 DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-capture.md"
 )
-DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.json"
+DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json"
 )
-DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-brf2-non-executing-candidate-packet.md"
-)
-DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
-)
-DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.md"
-)
-DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json"
-)
-DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-verdict.md"
+DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-shadow-candidate-evidence.md"
 )
 DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
     REPO_ROOT
@@ -268,16 +341,26 @@ DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.md"
 )
+DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json"
+)
+DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.md"
+)
+DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-decision.json"
+)
+DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-decision.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
 DEFAULT_OWNER_PROGRESS = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.md"
 )
-MONITOR_REFRESH_STATUS = "waiting_for_market_monitor_refresh_needed"
-DEPLOYMENT_ISSUE_STATUS = "temporarily_unavailable_deployment_issue"
-
-
 CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 
@@ -316,8 +399,8 @@ def main(argv: list[str] | None = None) -> int:
             args.post_revision_replay_review_json
         ),
         post_revision_replay_review_md=Path(args.post_revision_replay_review_md),
-        opportunity_decision_loop_json=Path(args.opportunity_decision_loop_json),
-        opportunity_decision_loop_md=Path(args.opportunity_decision_loop_md),
+        opportunity_review_work_loop_json=Path(args.opportunity_review_work_loop_json),
+        opportunity_review_work_loop_md=Path(args.opportunity_review_work_loop_md),
         btpc_l2_shadow_fact_quality_review_json=Path(
             args.btpc_l2_shadow_fact_quality_review_json
         ),
@@ -332,11 +415,11 @@ def main(argv: list[str] | None = None) -> int:
         btpc_proxy_replay_quality_review_md=Path(
             args.btpc_proxy_replay_quality_review_md
         ),
-        btpc_l2_keep_revise_fact_source_decision_json=Path(
-            args.btpc_l2_keep_revise_fact_source_decision_json
+        btpc_l2_keep_revise_fact_source_review_json=Path(
+            args.btpc_l2_keep_revise_fact_source_review_json
         ),
-        btpc_l2_keep_revise_fact_source_decision_md=Path(
-            args.btpc_l2_keep_revise_fact_source_decision_md
+        btpc_l2_keep_revise_fact_source_review_md=Path(
+            args.btpc_l2_keep_revise_fact_source_review_md
         ),
         btpc_live_derivatives_fact_source_mapping_json=Path(
             args.btpc_live_derivatives_fact_source_mapping_json
@@ -346,10 +429,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
         btpc_classifier_rule_review_json=Path(args.btpc_classifier_rule_review_json),
         btpc_classifier_rule_review_md=Path(args.btpc_classifier_rule_review_md),
-        strategygroup_decision_ledger_json=Path(
-            args.strategygroup_decision_ledger_json
+        strategy_asset_state_json=Path(
+            args.strategy_asset_state_json
         ),
-        strategygroup_decision_ledger_md=Path(args.strategygroup_decision_ledger_md),
+        strategy_asset_state_md=Path(args.strategy_asset_state_md),
         strategygroup_quality_wave_json=Path(args.strategygroup_quality_wave_json),
         strategygroup_quality_wave_md=Path(args.strategygroup_quality_wave_md),
         strategygroup_handoff_boundary_closure_json=Path(
@@ -376,30 +459,40 @@ def main(argv: list[str] | None = None) -> int:
         strategygroup_pre_live_rehearsal_readiness_md=Path(
             args.strategygroup_pre_live_rehearsal_readiness_md
         ),
-        strategygroup_live_submit_readiness_bridge_json=Path(
-            args.strategygroup_live_submit_readiness_bridge_json
+        strategygroup_runtime_safety_state_json=Path(
+            args.strategygroup_runtime_safety_state_json
         ),
-        strategygroup_live_submit_readiness_bridge_md=Path(
-            args.strategygroup_live_submit_readiness_bridge_md
+        strategygroup_runtime_safety_state_md=Path(
+            args.strategygroup_runtime_safety_state_md
         ),
         strategygroup_portfolio_board_json=Path(
             args.strategygroup_portfolio_board_json
         ),
         strategygroup_portfolio_board_md=Path(args.strategygroup_portfolio_board_md),
+        strategygroup_review_only_deep_dive_wave_json=Path(
+            args.strategygroup_review_only_deep_dive_wave_json
+        ),
+        strategygroup_owner_policy_package_json=Path(
+            args.strategygroup_owner_policy_package_json
+        ),
+        strategygroup_quality_closure_wave_json=Path(
+            args.strategygroup_quality_closure_wave_json
+        ),
         strategygroup_trial_candidate_pool_md=Path(
             args.strategygroup_trial_candidate_pool_md
         ),
-        strategygroup_capital_trial_readiness_bridge_json=Path(
-            args.strategygroup_capital_trial_readiness_bridge_json
+        strategy_capture_gap_audit_json=Path(args.strategy_capture_gap_audit_json),
+        strategygroup_capital_trial_envelope_projection_json=Path(
+            args.strategygroup_capital_trial_envelope_projection_json
         ),
-        strategygroup_capital_trial_readiness_bridge_md=Path(
-            args.strategygroup_capital_trial_readiness_bridge_md
+        strategygroup_capital_trial_envelope_projection_md=Path(
+            args.strategygroup_capital_trial_envelope_projection_md
         ),
-        strategygroup_capital_trial_packet_json=Path(
-            args.strategygroup_capital_trial_packet_json
+        strategygroup_capital_trial_envelope_json=Path(
+            args.strategygroup_capital_trial_envelope_json
         ),
-        strategygroup_capital_trial_packet_md=Path(
-            args.strategygroup_capital_trial_packet_md
+        strategygroup_capital_trial_envelope_md=Path(
+            args.strategygroup_capital_trial_envelope_md
         ),
         strategygroup_research_intake_review_json=Path(
             args.strategygroup_research_intake_review_json
@@ -431,11 +524,17 @@ def main(argv: list[str] | None = None) -> int:
             args.brf2_runtime_signal_capture_json
         ),
         brf2_runtime_signal_capture_md=Path(args.brf2_runtime_signal_capture_md),
-        brf2_non_executing_candidate_packet_json=Path(
-            args.brf2_non_executing_candidate_packet_json
+        brf2_shadow_candidate_evidence_json=Path(
+            args.brf2_shadow_candidate_evidence_json
         ),
-        brf2_non_executing_candidate_packet_md=Path(
-            args.brf2_non_executing_candidate_packet_md
+        brf2_shadow_candidate_evidence_md=Path(
+            args.brf2_shadow_candidate_evidence_md
+        ),
+        strategygroup_trial_grade_signal_gate_audit_json=Path(
+            args.strategygroup_trial_grade_signal_gate_audit_json
+        ),
+        strategygroup_trial_grade_signal_gate_audit_md=Path(
+            args.strategygroup_trial_grade_signal_gate_audit_md
         ),
         three_strategy_live_trial_portfolio_json=Path(
             args.three_strategy_live_trial_portfolio_json
@@ -443,17 +542,11 @@ def main(argv: list[str] | None = None) -> int:
         three_strategy_live_trial_portfolio_md=Path(
             args.three_strategy_live_trial_portfolio_md
         ),
-        strategygroup_tradeability_verdict_json=Path(
-            args.strategygroup_tradeability_verdict_json
+        strategygroup_tradeability_decision_json=Path(
+            args.strategygroup_tradeability_decision_json
         ),
-        strategygroup_tradeability_verdict_md=Path(
-            args.strategygroup_tradeability_verdict_md
-        ),
-        strategygroup_trial_grade_signal_gate_audit_json=Path(
-            args.strategygroup_trial_grade_signal_gate_audit_json
-        ),
-        strategygroup_trial_grade_signal_gate_audit_md=Path(
-            args.strategygroup_trial_grade_signal_gate_audit_md
+        strategygroup_tradeability_decision_md=Path(
+            args.strategygroup_tradeability_decision_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -471,12 +564,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _sequence_report_is_success(report: dict[str, Any]) -> bool:
-    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
-    if checks.get("blockers") or checks.get("execution_blockers"):
+    owner_runtime_issues = artifact_owner_runtime_issues(report)
+    owner_runtime_state = (
+        report.get("owner_runtime_state")
+        if isinstance(report.get("owner_runtime_state"), dict)
+        else {}
+    )
+    notification = (
+        report.get("notification") if isinstance(report.get("notification"), dict) else {}
+    )
+    blockers = owner_runtime_issues["blockers"]
+    non_market_gaps = owner_runtime_issues["non_market_gaps"]
+    if blockers:
         return False
-    if checks.get("engineering_gaps") or checks.get("non_market_gaps"):
+    if non_market_gaps:
         return False
-    if checks.get("owner_decision_required") is True:
+    if (
+        owner_runtime_state.get("owner_intervention_required") is True
+        or notification.get("owner_intervention_required") is True
+    ):
         return False
     if report.get("monitor_status") == "deployment_issue":
         return False
@@ -505,7 +611,7 @@ def build_local_monitor_sequence_report(
     replay_lab_md: Path = DEFAULT_REPLAY_LAB_MD,
     signal_coverage_json: Path = DEFAULT_SIGNAL_COVERAGE_JSON,
     signal_coverage_md: Path = DEFAULT_SIGNAL_COVERAGE_MD,
-    signal_coverage_source: str = "local_sqlite_fallback",
+    signal_coverage_source: str = "local_sqlite_read_only",
     signal_coverage_expansion_review_json: Path = (
         DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_JSON
     ),
@@ -522,8 +628,8 @@ def build_local_monitor_sequence_report(
         DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON
     ),
     post_revision_replay_review_md: Path = DEFAULT_POST_REVISION_REPLAY_REVIEW_MD,
-    opportunity_decision_loop_json: Path = DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON,
-    opportunity_decision_loop_md: Path = DEFAULT_OPPORTUNITY_DECISION_LOOP_MD,
+    opportunity_review_work_loop_json: Path = DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_JSON,
+    opportunity_review_work_loop_md: Path = DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_MD,
     btpc_l2_shadow_fact_quality_review_json: Path = (
         DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_JSON
     ),
@@ -540,11 +646,11 @@ def build_local_monitor_sequence_report(
     btpc_proxy_replay_quality_review_md: Path = (
         DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD
     ),
-    btpc_l2_keep_revise_fact_source_decision_json: Path = (
-        DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_JSON
+    btpc_l2_keep_revise_fact_source_review_json: Path = (
+        DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_JSON
     ),
-    btpc_l2_keep_revise_fact_source_decision_md: Path = (
-        DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD
+    btpc_l2_keep_revise_fact_source_review_md: Path = (
+        DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_MD
     ),
     btpc_live_derivatives_fact_source_mapping_json: Path = (
         DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_JSON
@@ -556,10 +662,10 @@ def build_local_monitor_sequence_report(
         DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_JSON
     ),
     btpc_classifier_rule_review_md: Path = DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD,
-    strategygroup_decision_ledger_json: Path = (
-        DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON
+    strategy_asset_state_json: Path = (
+        DEFAULT_STRATEGY_ASSET_STATE_JSON
     ),
-    strategygroup_decision_ledger_md: Path = DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD,
+    strategy_asset_state_md: Path = DEFAULT_STRATEGY_ASSET_STATE_MD,
     strategygroup_quality_wave_json: Path = DEFAULT_STRATEGYGROUP_QUALITY_WAVE_JSON,
     strategygroup_quality_wave_md: Path = DEFAULT_STRATEGYGROUP_QUALITY_WAVE_MD,
     strategygroup_handoff_boundary_closure_json: Path = (
@@ -586,30 +692,40 @@ def build_local_monitor_sequence_report(
     strategygroup_pre_live_rehearsal_readiness_md: Path = (
         DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD
     ),
-    strategygroup_live_submit_readiness_bridge_json: Path = (
-        DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON
+    strategygroup_runtime_safety_state_json: Path = (
+        DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_JSON
     ),
-    strategygroup_live_submit_readiness_bridge_md: Path = (
-        DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD
+    strategygroup_runtime_safety_state_md: Path = (
+        DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_MD
     ),
     strategygroup_portfolio_board_json: Path = (
         DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_JSON
     ),
     strategygroup_portfolio_board_md: Path = DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD,
+    strategygroup_review_only_deep_dive_wave_json: Path = (
+        DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON
+    ),
+    strategygroup_owner_policy_package_json: Path = (
+        DEFAULT_STRATEGYGROUP_OWNER_POLICY_PACKAGE_JSON
+    ),
+    strategygroup_quality_closure_wave_json: Path = (
+        DEFAULT_STRATEGYGROUP_QUALITY_CLOSURE_WAVE_JSON
+    ),
     strategygroup_trial_candidate_pool_md: Path = (
         DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD
     ),
-    strategygroup_capital_trial_readiness_bridge_json: Path = (
-        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON
+    strategy_capture_gap_audit_json: Path = DEFAULT_STRATEGY_CAPTURE_GAP_AUDIT_JSON,
+    strategygroup_capital_trial_envelope_projection_json: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON
     ),
-    strategygroup_capital_trial_readiness_bridge_md: Path = (
-        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD
+    strategygroup_capital_trial_envelope_projection_md: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_MD
     ),
-    strategygroup_capital_trial_packet_json: Path = (
-        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON
+    strategygroup_capital_trial_envelope_json: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_JSON
     ),
-    strategygroup_capital_trial_packet_md: Path = (
-        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD
+    strategygroup_capital_trial_envelope_md: Path = (
+        DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_MD
     ),
     strategygroup_research_intake_review_json: Path = (
         DEFAULT_STRATEGYGROUP_RESEARCH_INTAKE_REVIEW_JSON
@@ -635,11 +751,17 @@ def build_local_monitor_sequence_report(
     brf2_runtime_signal_facts_md: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_MD,
     brf2_runtime_signal_capture_json: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON,
     brf2_runtime_signal_capture_md: Path = DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD,
-    brf2_non_executing_candidate_packet_json: Path = (
-        DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON
+    brf2_shadow_candidate_evidence_json: Path = (
+        DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_JSON
     ),
-    brf2_non_executing_candidate_packet_md: Path = (
-        DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD
+    brf2_shadow_candidate_evidence_md: Path = (
+        DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD
+    ),
+    strategygroup_trial_grade_signal_gate_audit_json: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
+    ),
+    strategygroup_trial_grade_signal_gate_audit_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD
     ),
     three_strategy_live_trial_portfolio_json: Path = (
         DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON
@@ -647,17 +769,11 @@ def build_local_monitor_sequence_report(
     three_strategy_live_trial_portfolio_md: Path = (
         DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD
     ),
-    strategygroup_tradeability_verdict_json: Path = (
-        DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON
+    strategygroup_tradeability_decision_json: Path = (
+        DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_JSON
     ),
-    strategygroup_tradeability_verdict_md: Path = (
-        DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD
-    ),
-    strategygroup_trial_grade_signal_gate_audit_json: Path = (
-        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
-    ),
-    strategygroup_trial_grade_signal_gate_audit_md: Path = (
-        DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD
+    strategygroup_tradeability_decision_md: Path = (
+        DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD
     ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -708,6 +824,14 @@ def build_local_monitor_sequence_report(
     strategygroup_portfolio_board_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_portfolio_board.py"),
+        "--capture-gap-audit-json",
+        str(strategy_capture_gap_audit_json),
+        "--review-deep-dive-json",
+        str(strategygroup_review_only_deep_dive_wave_json),
+        "--owner-policy-package-json",
+        str(strategygroup_owner_policy_package_json),
+        "--quality-closure-wave-json",
+        str(strategygroup_quality_closure_wave_json),
         "--output-json",
         str(strategygroup_portfolio_board_json),
         "--output-md",
@@ -741,30 +865,30 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    strategygroup_capital_trial_readiness_bridge_command = [
+    strategygroup_capital_trial_envelope_projection_command = [
         sys.executable,
         str(
             REPO_ROOT
-            / "scripts/build_strategygroup_capital_trial_readiness_bridge.py"
+            / "scripts/build_strategygroup_capital_trial_envelope_projection.py"
         ),
         "--portfolio-board-json",
         str(strategygroup_portfolio_board_json),
         "--research-intake-review-json",
         str(strategygroup_research_intake_review_json),
         "--output-json",
-        str(strategygroup_capital_trial_readiness_bridge_json),
+        str(strategygroup_capital_trial_envelope_projection_json),
         "--output-owner-progress",
-        str(strategygroup_capital_trial_readiness_bridge_md),
-        "--output-trial-packet-json",
-        str(strategygroup_capital_trial_packet_json),
-        "--output-trial-packet-md",
-        str(strategygroup_capital_trial_packet_md),
+        str(strategygroup_capital_trial_envelope_projection_md),
+        "--output-trial-envelope-json",
+        str(strategygroup_capital_trial_envelope_json),
+        "--output-trial-envelope-md",
+        str(strategygroup_capital_trial_envelope_md),
     ]
     steps.append(
         _run_step(
-            "strategygroup_capital_trial_readiness_bridge",
-            strategygroup_capital_trial_readiness_bridge_command,
-            strategygroup_capital_trial_readiness_bridge_json,
+            "strategygroup_capital_trial_envelope_projection",
+            strategygroup_capital_trial_envelope_projection_command,
+            strategygroup_capital_trial_envelope_projection_json,
             runner,
         )
     )
@@ -792,10 +916,10 @@ def build_local_monitor_sequence_report(
             REPO_ROOT
             / "scripts/build_strategygroup_trial_asset_admission_proposal.py"
         ),
-        "--capital-trial-readiness-bridge-json",
-        str(strategygroup_capital_trial_readiness_bridge_json),
-        "--trial-packet-json",
-        str(strategygroup_capital_trial_packet_json),
+        "--capital-trial-envelope-projection-json",
+        str(strategygroup_capital_trial_envelope_projection_json),
+        "--trial-envelope-json",
+        str(strategygroup_capital_trial_envelope_json),
         "--brf2-owner-trial-policy-scope-json",
         str(brf2_owner_trial_policy_scope_json),
         "--output-json",
@@ -875,21 +999,21 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    brf2_non_executing_candidate_packet_command = [
+    brf2_shadow_candidate_evidence_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_brf2_non_executing_candidate_packet.py"),
+        str(REPO_ROOT / "scripts/build_brf2_shadow_candidate_evidence.py"),
         "--runtime-signal-capture-json",
         str(brf2_runtime_signal_capture_json),
         "--output-json",
-        str(brf2_non_executing_candidate_packet_json),
+        str(brf2_shadow_candidate_evidence_json),
         "--output-owner-progress",
-        str(brf2_non_executing_candidate_packet_md),
+        str(brf2_shadow_candidate_evidence_md),
     ]
     steps.append(
         _run_step(
-            "brf2_non_executing_candidate_packet",
-            brf2_non_executing_candidate_packet_command,
-            brf2_non_executing_candidate_packet_json,
+            "brf2_shadow_candidate_evidence",
+            brf2_shadow_candidate_evidence_command,
+            brf2_shadow_candidate_evidence_json,
             runner,
         )
     )
@@ -900,8 +1024,8 @@ def build_local_monitor_sequence_report(
         "--owner-progress",
         "--strategygroup-portfolio-board-json",
         str(strategygroup_portfolio_board_json),
-        "--strategygroup-capital-trial-readiness-bridge-json",
-        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--strategygroup-capital-trial-envelope-projection-json",
+        str(strategygroup_capital_trial_envelope_projection_json),
         "--output-json",
         str(goal_progress_json),
         "--output-owner-progress",
@@ -1049,9 +1173,9 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    opportunity_decision_loop_command = [
+    opportunity_review_work_loop_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_decision_loop.py"),
+        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_review_work_loop.py"),
         "--expansion-review-json",
         str(signal_coverage_expansion_review_json),
         "--l2-readiness-json",
@@ -1063,15 +1187,15 @@ def build_local_monitor_sequence_report(
         "--post-revision-review-json",
         str(post_revision_replay_review_json),
         "--output-json",
-        str(opportunity_decision_loop_json),
+        str(opportunity_review_work_loop_json),
         "--output-owner-progress",
-        str(opportunity_decision_loop_md),
+        str(opportunity_review_work_loop_md),
     ]
     steps.append(
         _run_step(
-            "opportunity_decision_loop",
-            opportunity_decision_loop_command,
-            opportunity_decision_loop_json,
+            "opportunity_review_work_loop",
+            opportunity_review_work_loop_command,
+            opportunity_review_work_loop_json,
             runner,
         )
     )
@@ -1082,8 +1206,8 @@ def build_local_monitor_sequence_report(
             REPO_ROOT
             / "scripts/build_strategygroup_btpc_l2_shadow_fact_quality_review.py"
         ),
-        "--opportunity-decision-loop-json",
-        str(opportunity_decision_loop_json),
+        "--opportunity-review-work-loop-json",
+        str(opportunity_review_work_loop_json),
         "--l2-readiness-json",
         str(l2_readiness_review_json),
         "--replay-lab-json",
@@ -1146,9 +1270,9 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    opportunity_decision_loop_final_command = [
+    opportunity_review_work_loop_final_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_decision_loop.py"),
+        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_review_work_loop.py"),
         "--expansion-review-json",
         str(signal_coverage_expansion_review_json),
         "--l2-readiness-json",
@@ -1162,39 +1286,39 @@ def build_local_monitor_sequence_report(
         "--btpc-proxy-replay-quality-json",
         str(btpc_proxy_replay_quality_review_json),
         "--output-json",
-        str(opportunity_decision_loop_json),
+        str(opportunity_review_work_loop_json),
         "--output-owner-progress",
-        str(opportunity_decision_loop_md),
+        str(opportunity_review_work_loop_md),
     ]
     steps.append(
         _run_step(
-            "opportunity_decision_loop_final",
-            opportunity_decision_loop_final_command,
-            opportunity_decision_loop_json,
+            "opportunity_review_work_loop_final",
+            opportunity_review_work_loop_final_command,
+            opportunity_review_work_loop_json,
             runner,
         )
     )
 
-    btpc_l2_keep_revise_fact_source_decision_command = [
+    btpc_l2_keep_revise_fact_source_review_command = [
         sys.executable,
         str(
             REPO_ROOT
-            / "scripts/build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
+            / "scripts/build_strategygroup_btpc_l2_keep_revise_fact_source_review.py"
         ),
-        "--opportunity-decision-loop-json",
-        str(opportunity_decision_loop_json),
+        "--opportunity-review-work-loop-json",
+        str(opportunity_review_work_loop_json),
         "--btpc-proxy-replay-quality-json",
         str(btpc_proxy_replay_quality_review_json),
         "--output-json",
-        str(btpc_l2_keep_revise_fact_source_decision_json),
+        str(btpc_l2_keep_revise_fact_source_review_json),
         "--output-owner-progress",
-        str(btpc_l2_keep_revise_fact_source_decision_md),
+        str(btpc_l2_keep_revise_fact_source_review_md),
     ]
     steps.append(
         _run_step(
-            "btpc_l2_keep_revise_fact_source_decision",
-            btpc_l2_keep_revise_fact_source_decision_command,
-            btpc_l2_keep_revise_fact_source_decision_json,
+            "btpc_l2_keep_revise_fact_source_review",
+            btpc_l2_keep_revise_fact_source_review_command,
+            btpc_l2_keep_revise_fact_source_review_json,
             runner,
         )
     )
@@ -1205,8 +1329,8 @@ def build_local_monitor_sequence_report(
             REPO_ROOT
             / "scripts/build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
         ),
-        "--btpc-l2-decision-json",
-        str(btpc_l2_keep_revise_fact_source_decision_json),
+        "--btpc-l2-review-json",
+        str(btpc_l2_keep_revise_fact_source_review_json),
         "--output-json",
         str(btpc_live_derivatives_fact_source_mapping_json),
         "--output-owner-progress",
@@ -1224,8 +1348,8 @@ def build_local_monitor_sequence_report(
     btpc_classifier_rule_review_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_btpc_classifier_rule_review.py"),
-        "--btpc-l2-decision-json",
-        str(btpc_l2_keep_revise_fact_source_decision_json),
+        "--btpc-l2-review-json",
+        str(btpc_l2_keep_revise_fact_source_review_json),
         "--btpc-proxy-replay-quality-json",
         str(btpc_proxy_replay_quality_review_json),
         "--btpc-live-source-mapping-json",
@@ -1244,25 +1368,29 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    strategygroup_decision_ledger_command = [
+    strategy_asset_state_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_decision_ledger.py"),
-        "--opportunity-decision-loop-json",
-        str(opportunity_decision_loop_json),
+        str(REPO_ROOT / "scripts/build_strategygroup_strategy_asset_state.py"),
+        "--opportunity-review-work-loop-json",
+        str(opportunity_review_work_loop_json),
         "--signal-coverage-json",
         str(signal_coverage_json),
+        "--post-revision-replay-review-json",
+        str(post_revision_replay_review_json),
+        "--capture-gap-audit-json",
+        str(strategy_capture_gap_audit_json),
         "--research-intake-review-json",
         str(strategygroup_research_intake_review_json),
         "--output-json",
-        str(strategygroup_decision_ledger_json),
+        str(strategy_asset_state_json),
         "--output-owner-progress",
-        str(strategygroup_decision_ledger_md),
+        str(strategy_asset_state_md),
     ]
     steps.append(
         _run_step(
-            "strategygroup_decision_ledger",
-            strategygroup_decision_ledger_command,
-            strategygroup_decision_ledger_json,
+            "strategy_asset_state",
+            strategy_asset_state_command,
+            strategy_asset_state_json,
             runner,
         )
     )
@@ -1270,6 +1398,8 @@ def build_local_monitor_sequence_report(
     strategygroup_quality_wave_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_quality_wave.py"),
+        "--strategy-asset-state-json",
+        str(strategy_asset_state_json),
         "--output-json",
         str(strategygroup_quality_wave_json),
         "--output-md",
@@ -1306,8 +1436,8 @@ def build_local_monitor_sequence_report(
     strategygroup_btpc_fact_classifier_guard_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_btpc_fact_classifier_guard.py"),
-        "--btpc-l2-decision-json",
-        str(btpc_l2_keep_revise_fact_source_decision_json),
+        "--btpc-l2-review-json",
+        str(btpc_l2_keep_revise_fact_source_review_json),
         "--btpc-live-source-mapping-json",
         str(btpc_live_derivatives_fact_source_mapping_json),
         "--btpc-classifier-rule-review-json",
@@ -1368,9 +1498,9 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    strategygroup_live_submit_readiness_bridge_command = [
+    strategygroup_runtime_safety_state_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_live_submit_readiness_bridge.py"),
+        str(REPO_ROOT / "scripts/build_strategygroup_runtime_safety_state.py"),
         "--pre-live-readiness-json",
         str(strategygroup_pre_live_rehearsal_readiness_json),
         "--daily-check-json",
@@ -1381,26 +1511,25 @@ def build_local_monitor_sequence_report(
         str(goal_progress_json),
         "--completion-audit-json",
         str(completion_audit_json),
+        "--brf2-shadow-candidate-evidence-json",
+        str(brf2_shadow_candidate_evidence_json),
         "--output-json",
-        str(strategygroup_live_submit_readiness_bridge_json),
+        str(strategygroup_runtime_safety_state_json),
         "--output-owner-progress",
-        str(strategygroup_live_submit_readiness_bridge_md),
+        str(strategygroup_runtime_safety_state_md),
     ]
     steps.append(
         _run_step(
-            "strategygroup_live_submit_readiness_bridge",
-            strategygroup_live_submit_readiness_bridge_command,
-            strategygroup_live_submit_readiness_bridge_json,
+            "strategygroup_runtime_safety_state",
+            strategygroup_runtime_safety_state_command,
+            strategygroup_runtime_safety_state_json,
             runner,
         )
     )
 
     strategygroup_trial_grade_signal_gate_audit_command = [
         sys.executable,
-        str(
-            REPO_ROOT
-            / "scripts/build_strategygroup_trial_grade_signal_gate_audit.py"
-        ),
+        str(REPO_ROOT / "scripts/build_strategygroup_trial_grade_signal_gate_audit.py"),
         "--live-preview-json",
         str(REPO_ROOT / "output/runtime-monitor/latest-live-market-strategy-preview.json"),
         "--local-preview-json",
@@ -1441,8 +1570,8 @@ def build_local_monitor_sequence_report(
             REPO_ROOT
             / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
         ),
-        "--capital-trial-readiness-bridge-json",
-        str(strategygroup_capital_trial_readiness_bridge_json),
+        "--capital-trial-envelope-projection-json",
+        str(strategygroup_capital_trial_envelope_projection_json),
         "--trial-asset-admission-proposal-json",
         str(strategygroup_trial_asset_admission_proposal_json),
         "--brf2-owner-trial-policy-scope-json",
@@ -1469,11 +1598,11 @@ def build_local_monitor_sequence_report(
         )
     )
 
-    strategygroup_tradeability_verdict_command = [
+    strategygroup_tradeability_decision_command = [
         sys.executable,
-        str(REPO_ROOT / "scripts/build_strategygroup_tradeability_verdict.py"),
-        "--capital-trial-readiness-bridge-json",
-        str(strategygroup_capital_trial_readiness_bridge_json),
+        str(REPO_ROOT / "scripts/build_strategygroup_tradeability_decision.py"),
+        "--capital-trial-envelope-projection-json",
+        str(strategygroup_capital_trial_envelope_projection_json),
         "--registry-json",
         str(
             REPO_ROOT
@@ -1486,8 +1615,8 @@ def build_local_monitor_sequence_report(
         ),
         "--signal-coverage-json",
         str(signal_coverage_json),
-        "--live-submit-readiness-json",
-        str(strategygroup_live_submit_readiness_bridge_json),
+        "--runtime-safety-state-json",
+        str(strategygroup_runtime_safety_state_json),
         "--trial-asset-admission-proposal-json",
         str(strategygroup_trial_asset_admission_proposal_json),
         "--brf2-owner-trial-policy-scope-json",
@@ -1496,125 +1625,133 @@ def build_local_monitor_sequence_report(
         str(three_strategy_live_trial_portfolio_json),
         "--brf2-runtime-signal-capture-json",
         str(brf2_runtime_signal_capture_json),
-        "--brf2-non-executing-candidate-packet-json",
-        str(brf2_non_executing_candidate_packet_json),
+        "--brf2-shadow-candidate-evidence-json",
+        str(brf2_shadow_candidate_evidence_json),
         "--trial-grade-signal-gate-audit-json",
         str(strategygroup_trial_grade_signal_gate_audit_json),
         "--output-json",
-        str(strategygroup_tradeability_verdict_json),
+        str(strategygroup_tradeability_decision_json),
         "--output-owner-progress",
-        str(strategygroup_tradeability_verdict_md),
+        str(strategygroup_tradeability_decision_md),
     ]
     steps.append(
         _run_step(
-            "strategygroup_tradeability_verdict",
-            strategygroup_tradeability_verdict_command,
-            strategygroup_tradeability_verdict_json,
+            "strategygroup_tradeability_decision",
+            strategygroup_tradeability_decision_command,
+            strategygroup_tradeability_decision_json,
             runner,
         )
     )
 
-    packets = {
-        step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
+    artifacts = {
+        step["name"]: step.get("artifact") if isinstance(step.get("artifact"), dict) else {}
         for step in steps
     }
-    status = _sequence_status(steps=steps, packets=packets)
+    status = _sequence_status(steps=steps, artifacts=artifacts)
     interaction = _sequence_interaction(steps)
     execution_blockers = [
         f"{step['name']}:returncode:{step['returncode']}"
         for step in steps
         if int(step.get("returncode") or 0) not in (0,)
-        and not _step_returncode_is_monitor_refresh(step, packets)
-        and not _step_returncode_is_deployment_issue(step, packets)
+        and not _step_returncode_is_allowed_monitor_refresh(step, artifacts)
+        and not _step_returncode_is_allowed_deployment_issue(step, artifacts)
         and not (
             step["name"] == "completion_audit"
-            and _status(packets["completion_audit"]) == "needs_non_market_repair"
+            and _status(artifacts["completion_audit"]) == "needs_non_market_repair"
         )
     ]
     completion_non_market_gaps = list(
-        packets["completion_audit"].get("non_market_gaps") or []
+        artifacts["completion_audit"].get("non_market_gaps") or []
     )
     non_market_gaps = list(completion_non_market_gaps)
     expansion_review_resolved = _expansion_review_resolved(
-        packets.get("l2_readiness_review", {}),
-        packets.get("l2_tier_policy_review", {}),
-        packets.get("opportunity_decision_loop", {}),
+        artifacts.get("l2_readiness_review", {}),
+        artifacts.get("l2_tier_policy_review", {}),
+        artifacts.get("opportunity_review_work_loop", {}),
     )
     signal_coverage_gap = _expansion_review_non_market_gap(
-        packets.get("signal_coverage_expansion_review", {}),
-        packets.get("l2_readiness_review", {}),
-        packets.get("l2_intake_dry_run", {}),
-        packets.get("l2_tier_policy_review", {}),
-        packets.get("opportunity_decision_loop", {}),
+        artifacts.get("signal_coverage_expansion_review", {}),
+        artifacts.get("l2_readiness_review", {}),
+        artifacts.get("l2_intake_dry_run", {}),
+        artifacts.get("l2_tier_policy_review", {}),
+        artifacts.get("opportunity_review_work_loop", {}),
     )
     if signal_coverage_gap is None and not expansion_review_resolved:
         signal_coverage_gap = _signal_coverage_non_market_gap(
-            packets.get("signal_coverage", {}),
+            artifacts.get("signal_coverage", {}),
         )
     if signal_coverage_gap:
         non_market_gaps.append(signal_coverage_gap)
     brf2_fact_input_gap = _brf2_fact_input_non_market_gap(
-        packets.get("brf2_runtime_signal_facts", {}),
-        packets.get("brf2_runtime_signal_capture", {}),
+        artifacts.get("brf2_runtime_signal_facts", {}),
+        artifacts.get("brf2_runtime_signal_capture", {}),
     )
     if brf2_fact_input_gap:
         non_market_gaps.append(brf2_fact_input_gap)
-    owner_decision_required = _sequence_owner_decision_required(
-        packets=packets,
+    owner_intervention_required = _sequence_owner_intervention_required(
+        artifacts=artifacts,
         execution_blockers=execution_blockers,
         engineering_gaps=non_market_gaps,
     )
 
-    monitor_status = _sequence_monitor_status(status=status, packets=packets)
-    runtime_status = _sequence_runtime_status(status=status, packets=packets)
-    owner_status = _sequence_owner_status(
+    monitor_projection = _sequence_monitor_projection(
         status=status,
-        runtime_status=runtime_status,
-        monitor_status=monitor_status,
-        owner_decision_required=owner_decision_required,
+        artifacts=artifacts,
+        owner_intervention_required=owner_intervention_required,
     )
-    monitor_refresh_needed = monitor_status in {"needs_refresh", "deployment_issue"}
-    monitor_refresh_reasons = _sequence_monitor_refresh_reasons(packets)
+    monitor_status = monitor_projection.monitor_status
+    runtime_status = monitor_projection.runtime_status
+    owner_status = monitor_projection.owner_status
+    monitor_refresh_reasons = monitor_projection.monitor_refresh_reasons
+    owner_runtime_state = monitor_projection.owner_runtime_state
+    monitor_refresh_needed = bool(owner_runtime_state["monitor_refresh_needed"])
+    owner_runtime_issues = owner_runtime_issues_projection(
+        blockers=execution_blockers,
+        non_market_gaps=non_market_gaps,
+        include_counts=True,
+    )
     research_intake_summary = _sequence_research_intake_summary(
-        packets.get("strategygroup_research_intake_review", {})
+        artifacts.get("strategygroup_research_intake_review", {})
     )
     capital_trial_summary = _sequence_capital_trial_summary(
-        packets.get("strategygroup_capital_trial_readiness_bridge", {})
+        artifacts.get("strategygroup_capital_trial_envelope_projection", {})
     )
     trial_admission_summary = _sequence_trial_admission_summary(
-        packets.get("strategygroup_trial_asset_admission_proposal", {})
+        artifacts.get("strategygroup_trial_asset_admission_proposal", {})
     )
     brf2_policy_summary = _sequence_brf2_owner_trial_policy_summary(
-        packets.get("brf2_owner_trial_policy_scope", {})
+        artifacts.get("brf2_owner_trial_policy_scope", {})
     )
     brf2_required_facts_summary = _sequence_brf2_required_facts_mapping_summary(
-        packets.get("brf2_required_facts_mapping", {})
+        artifacts.get("brf2_required_facts_mapping", {})
     )
     brf2_runtime_signal_facts_summary = _sequence_brf2_runtime_signal_facts_summary(
-        packets.get("brf2_runtime_signal_facts", {})
+        artifacts.get("brf2_runtime_signal_facts", {})
     )
     brf2_runtime_signal_capture_summary = _sequence_brf2_runtime_signal_capture_summary(
-        packets.get("brf2_runtime_signal_capture", {})
+        artifacts.get("brf2_runtime_signal_capture", {})
     )
-    brf2_candidate_packet_summary = _sequence_brf2_candidate_packet_summary(
-        packets.get("brf2_non_executing_candidate_packet", {})
+    brf2_shadow_candidate_evidence_summary = (
+        _sequence_brf2_shadow_candidate_evidence_summary(
+            artifacts.get("brf2_shadow_candidate_evidence", {})
+        )
     )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
-        packets.get("three_strategy_live_trial_portfolio", {})
-    )
-    observation_layer_summary = _sequence_observation_layer_summary(
-        signal_coverage_packet=packets.get("signal_coverage", {}),
-        expansion_review_packet=packets.get("signal_coverage_expansion_review", {}),
-        decision_ledger_packet=packets.get("strategygroup_decision_ledger", {}),
-        capital_trial_summary=capital_trial_summary,
-    )
-    tradeability_summary = _sequence_tradeability_summary(
-        packets.get("strategygroup_tradeability_verdict", {})
+        artifacts.get("three_strategy_live_trial_portfolio", {})
     )
     trial_grade_signal_gate_audit_summary = (
         _sequence_trial_grade_signal_gate_audit_summary(
-            packets.get("strategygroup_trial_grade_signal_gate_audit", {})
+            artifacts.get("strategygroup_trial_grade_signal_gate_audit", {})
         )
+    )
+    signal_observation_grade_summary = _sequence_signal_observation_grade_summary(
+        signal_coverage_artifact=artifacts.get("signal_coverage", {}),
+        expansion_review_artifact=artifacts.get("signal_coverage_expansion_review", {}),
+        strategy_asset_state_artifact=artifacts.get("strategy_asset_state", {}),
+        capital_trial_summary=capital_trial_summary,
+    )
+    tradeability_summary = _sequence_tradeability_decision_summary(
+        artifacts.get("strategygroup_tradeability_decision", {})
     )
 
     return {
@@ -1626,306 +1763,67 @@ def build_local_monitor_sequence_report(
         "owner_status": owner_status,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "daily_check_mode": daily_check_mode,
+        "owner_runtime_state": owner_runtime_state,
+        "owner_runtime_issues": owner_runtime_issues,
         "owner_summary": {
-            "state": _owner_state(status),
-            "current_action": _owner_action(status),
-            "owner_intervention_required": owner_decision_required,
+            "state": monitor_owner_state_label_for(
+                status,
+                local_labels=OWNER_PROGRESS_STATE_LABELS,
+                default_label="需要修复",
+            ),
+            "non_authority_checkpoint": monitor_owner_action_label_for(
+                status,
+                local_labels=OWNER_PROGRESS_ACTION_LABELS,
+                default_label="修复本地监控或非市场证据缺口",
+            ),
+            "checkpoint_source": "local_monitor_status_projection",
+            "owner_intervention_required": owner_intervention_required,
             "risk_level": interaction["level"],
-            "observation_layer": observation_layer_summary,
+            "signal_observation_grade": signal_observation_grade_summary,
             "strategy_research_intake": research_intake_summary,
-            "strategy_candidate_trade": capital_trial_summary,
             "strategy_experiment_candidate": capital_trial_summary,
             "trial_asset_admission": trial_admission_summary,
             "brf2_owner_trial_policy": brf2_policy_summary,
             "brf2_runtime_signal_facts": brf2_runtime_signal_facts_summary,
             "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
-            "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
+            "brf2_shadow_candidate_evidence": (
+                brf2_shadow_candidate_evidence_summary
+            ),
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
-            "tradeability_verdict": tradeability_summary,
+            "tradeability_decision": tradeability_summary,
             "trial_grade_signal_gate_audit": (
                 trial_grade_signal_gate_audit_summary
             ),
         },
         "interaction": interaction,
-        "strategy_observation_layer": observation_layer_summary,
+        "notification": monitor_notification_projection(
+            monitor_refresh_needed=monitor_refresh_needed,
+            owner_notify=owner_intervention_required,
+            owner_intervention_required=owner_intervention_required,
+            monitor_refresh_reasons=monitor_refresh_reasons,
+            include_monitor_refresh_fields=True,
+        ),
+        "signal_observation_grade": signal_observation_grade_summary,
         "strategy_research_intake": research_intake_summary,
-        "strategy_candidate_trade": capital_trial_summary,
         "strategy_experiment_candidate": capital_trial_summary,
         "strategy_trial_asset_admission": trial_admission_summary,
         "brf2_owner_trial_policy": brf2_policy_summary,
         "brf2_required_facts_mapping": brf2_required_facts_summary,
         "brf2_runtime_signal_facts": brf2_runtime_signal_facts_summary,
         "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
-        "brf2_non_executing_candidate_packet": brf2_candidate_packet_summary,
+        "brf2_shadow_candidate_evidence": brf2_shadow_candidate_evidence_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
-        "strategy_tradeability_verdict": tradeability_summary,
+        "tradeability_decision": tradeability_summary,
         "strategy_trial_grade_signal_gate_audit": (
             trial_grade_signal_gate_audit_summary
         ),
-        "checks": {
-            "blockers": execution_blockers,
-            "execution_blockers": execution_blockers,
-            "non_market_gaps": non_market_gaps,
-            "engineering_gaps": non_market_gaps,
-            "p0_5_observation_state": observation_layer_summary[
-                "p0_5_state"
-            ],
-            "p0_5_broader_would_enter_count": observation_layer_summary[
-                "broader_would_enter_count"
-            ],
-            "p0_5_high_priority_no_action_count": observation_layer_summary[
-                "high_priority_no_action_count"
-            ],
-            "p0_5_latest_observe_only_would_enter_strategy_group_id": (
-                observation_layer_summary["latest_observe_only_would_enter"].get(
-                    "strategy_group_id", ""
-                )
-            ),
-            "p0_5_latest_observe_only_would_enter_symbol": (
-                observation_layer_summary["latest_observe_only_would_enter"].get(
-                    "symbol", ""
-                )
-            ),
-            "p0_5_latest_observe_only_would_enter_side": (
-                observation_layer_summary["latest_observe_only_would_enter"].get(
-                    "side", ""
-                )
-            ),
-            "p0_5_no_action_attribution_count": observation_layer_summary[
-                "no_action_attribution_count"
-            ],
-            "p0_5_role_review_count": observation_layer_summary[
-                "role_review_count"
-            ],
-            "research_intake_review_active": research_intake_summary["active"],
-            "research_intake_candidates": research_intake_summary[
-                "strategy_group_ids"
-            ],
-            "candidate_trade_selected_strategy_group_id": capital_trial_summary[
-                "selected_strategy_group_id"
-            ],
-            "candidate_trade_selected_short_strategy_group_id": (
-                capital_trial_summary["selected_short_strategy_group_id"]
-            ),
-            "candidate_trade_actionable_now": False,
-            "candidate_trade_real_order_authority": False,
-            "short_experiment_candidate_selected_strategy_group_id": (
-                capital_trial_summary["selected_strategy_group_id"]
-            ),
-            "short_experiment_candidate_promotion_scope": (
-                capital_trial_summary["promotion_scope"]
-            ),
-            "short_experiment_candidate_tiny_live_ready": (
-                capital_trial_summary["tiny_live_ready"]
-            ),
-            "trial_asset_admission_proposal_status": trial_admission_summary[
-                "status"
-            ],
-            "trial_asset_admission_strategy_group_id": trial_admission_summary[
-                "strategy_group_id"
-            ],
-            "trial_asset_admission_owner_policy_required": trial_admission_summary[
-                "owner_policy_required"
-            ],
-            "trial_asset_admission_next_action": trial_admission_summary[
-                "next_action"
-            ],
-            "brf2_owner_policy_recorded": brf2_policy_summary[
-                "owner_policy_recorded"
-            ],
-            "brf2_owner_policy_scope_missing": brf2_policy_summary[
-                "owner_policy_scope_missing"
-            ],
-            "brf2_stage_after_policy": brf2_policy_summary[
-                "brf2_stage_after_policy"
-            ],
-            "brf2_new_first_blocker": brf2_policy_summary[
-                "brf2_new_first_blocker"
-            ],
-            "brf2_required_facts_mapping_ready": brf2_required_facts_summary[
-                "ready"
-            ],
-            "brf2_after_required_facts_mapping_state": (
-                brf2_required_facts_summary["after_next_state"]
-            ),
-            "brf2_fresh_signal_rule_id": brf2_required_facts_summary[
-                "fresh_signal_rule_id"
-            ],
-            "brf2_required_fact_count": brf2_required_facts_summary[
-                "required_fact_count"
-            ],
-            "brf2_disable_fact_count": brf2_required_facts_summary[
-                "disable_fact_count"
-            ],
-            "brf2_runtime_signal_capture_ready": (
-                brf2_runtime_signal_capture_summary["ready"]
-            ),
-            "brf2_runtime_signal_fact_input_present": (
-                brf2_runtime_signal_facts_summary["fact_input_present"]
-            ),
-            "brf2_runtime_signal_watcher_tick_present": (
-                brf2_runtime_signal_facts_summary["watcher_tick_present"]
-            ),
-            "brf2_runtime_signal_fact_input_status": (
-                brf2_runtime_signal_facts_summary["status"]
-            ),
-            "brf2_runtime_signal_state": brf2_runtime_signal_capture_summary[
-                "current_signal_state"
-            ],
-            "brf2_runtime_signal_first_blocker_class": (
-                brf2_runtime_signal_capture_summary["first_blocker_class"]
-            ),
-            "brf2_runtime_signal_missing_fact_count": (
-                brf2_runtime_signal_capture_summary["missing_required_fact_count"]
-            ),
-            "brf2_runtime_signal_active_disable_fact_count": (
-                brf2_runtime_signal_capture_summary["active_disable_fact_count"]
-            ),
-            "brf2_runtime_candidate_packet_ready": (
-                brf2_runtime_signal_capture_summary["candidate_packet_ready"]
-            ),
-            "brf2_non_executing_candidate_packet_status": (
-                brf2_candidate_packet_summary["status"]
-            ),
-            "brf2_non_executing_candidate_packet_ready": (
-                brf2_candidate_packet_summary["candidate_packet_ready"]
-            ),
-            "brf2_non_executing_candidate_packet_first_blocker_class": (
-                brf2_candidate_packet_summary["first_blocker_class"]
-            ),
-            "brf2_next_bottleneck": (
-                three_strategy_portfolio_summary["next_bottlenecks"].get(
-                    "BRF2-001", ""
-                )
-            ),
-            "brf2_actionable_now": False,
-            "brf2_real_order_authority": False,
-            "three_strategy_live_trial_portfolio_ready": (
-                three_strategy_portfolio_summary["ready"]
-            ),
-            "live_trial_seat_count": three_strategy_portfolio_summary["seat_count"],
-            "live_trial_strategy_groups": three_strategy_portfolio_summary[
-                "selected_strategy_groups"
-            ],
-            "live_trial_owner_policy_gap_count": three_strategy_portfolio_summary[
-                "owner_policy_gap_count"
-            ],
-            "live_trial_market_wait_count": three_strategy_portfolio_summary[
-                "market_wait_count"
-            ],
-            "live_trial_engineering_gap_count": three_strategy_portfolio_summary[
-                "engineering_gap_count"
-            ],
-            "live_trial_next_bottlenecks": three_strategy_portfolio_summary[
-                "next_bottlenecks"
-            ],
-            "stage_5_waiting_live_opportunity_ready": (
-                three_strategy_portfolio_summary[
-                    "stage_5_waiting_live_opportunity_ready"
-                ]
-            ),
-            "stage_5_status": three_strategy_portfolio_summary[
-                "stage_5_status"
-            ],
-            "trial_grade_30u_standby_count": three_strategy_portfolio_summary[
-                "trial_grade_30u_standby_count"
-            ],
-            "action_time_preflight_pending_fresh_signal": (
-                three_strategy_portfolio_summary[
-                    "action_time_preflight_pending_fresh_signal"
-                ]
-            ),
-            "stage_5_hard_safety_gates_relaxed": three_strategy_portfolio_summary[
-                "hard_safety_gates_relaxed"
-            ],
-            "tradeability_top_strategy_group_id": tradeability_summary[
-                "top_strategy_group_id"
-            ],
-            "tradeability_top_verdict": tradeability_summary["top_verdict"],
-            "tradeability_top_first_blocker_class": tradeability_summary[
-                "top_first_blocker_class"
-            ],
-            "tradeability_top_next_action": tradeability_summary["top_next_action"],
-            "tradeability_row_count": tradeability_summary["row_count"],
-            "tradeability_verdict_rows_count": tradeability_summary[
-                "verdict_rows_count"
-            ],
-            "tradeability_row_count_matches_verdict_rows": tradeability_summary[
-                "row_count_matches_verdict_rows"
-            ],
-            "tradeability_tradable_now_count": tradeability_summary[
-                "tradable_now_count"
-            ],
-            "tradeability_trial_grade_30u_standby_count": tradeability_summary[
-                "trial_grade_30u_standby_count"
-            ],
-            "tradeability_stage_5_waiting_live_opportunity_ready_count": (
-                tradeability_summary[
-                    "stage_5_waiting_live_opportunity_ready_count"
-                ]
-            ),
-            "tradeability_real_order_authority_count": tradeability_summary[
-                "real_order_authority_count"
-            ],
-            "trial_grade_signal_gate_audit_ready": (
-                trial_grade_signal_gate_audit_summary["ready"]
-            ),
-            "trial_grade_strategy_group_count": (
-                trial_grade_signal_gate_audit_summary["strategy_group_count"]
-            ),
-            "trial_grade_observation_count_30d": (
-                trial_grade_signal_gate_audit_summary[
-                    "trial_grade_observation_count_30d"
-                ]
-            ),
-            "trial_grade_action_time_submit_count_30d": (
-                trial_grade_signal_gate_audit_summary[
-                    "action_time_trial_submit_count_30d"
-                ]
-            ),
-            "trial_grade_hard_safety_gates_relaxed": (
-                trial_grade_signal_gate_audit_summary[
-                    "hard_safety_gates_relaxed"
-                ]
-            ),
-            "trial_grade_brf2_would_enter_30u_trial_if_same_structure": (
-                trial_grade_signal_gate_audit_summary[
-                    "tomorrow_same_structure"
-                ].get("BRF2-001")
-                is True
-            ),
-            "trial_grade_mpg_would_enter_30u_trial_if_same_structure": (
-                trial_grade_signal_gate_audit_summary[
-                    "tomorrow_same_structure"
-                ].get("MPG-001")
-                is True
-            ),
-            "trial_grade_sor_would_enter_30u_trial_if_same_structure": (
-                trial_grade_signal_gate_audit_summary[
-                    "tomorrow_same_structure"
-                ].get("SOR-001")
-                is True
-            ),
-            "runtime_status": runtime_status,
-            "monitor_status": monitor_status,
-            "owner_status": owner_status,
-            "monitor_refresh_needed": monitor_refresh_needed,
-            "monitor_refresh_reasons": monitor_refresh_reasons,
-            "monitor_refresh_gaps": monitor_refresh_reasons,
-            "refresh_required": monitor_refresh_needed,
-            "automation_notify": monitor_refresh_needed,
-            "owner_notify": owner_decision_required,
-            "owner_decision_required": owner_decision_required,
-            "waiting_for_market": runtime_status == "waiting_for_market",
-            "goal_complete": status == "complete",
-        },
         "steps": [
             {
                 "name": step["name"],
                 "returncode": step["returncode"],
-                "status": _status(step.get("packet")),
+                "status": _status(step.get("artifact")),
                 "output_json": step["output_json"],
-                "interaction": _interaction(step.get("packet")),
+                "interaction": _interaction(step.get("artifact")),
             }
             for step in steps
         ],
@@ -1946,7 +1844,7 @@ def build_local_monitor_sequence_report(
             "post_revision_replay_review_json": str(
                 post_revision_replay_review_json
             ),
-            "opportunity_decision_loop_json": str(opportunity_decision_loop_json),
+            "opportunity_review_work_loop_json": str(opportunity_review_work_loop_json),
             "btpc_l2_shadow_fact_quality_review_json": str(
                 btpc_l2_shadow_fact_quality_review_json
             ),
@@ -1954,15 +1852,15 @@ def build_local_monitor_sequence_report(
             "btpc_proxy_replay_quality_review_json": str(
                 btpc_proxy_replay_quality_review_json
             ),
-            "btpc_l2_keep_revise_fact_source_decision_json": str(
-                btpc_l2_keep_revise_fact_source_decision_json
+            "btpc_l2_keep_revise_fact_source_review_json": str(
+                btpc_l2_keep_revise_fact_source_review_json
             ),
             "btpc_live_derivatives_fact_source_mapping_json": str(
                 btpc_live_derivatives_fact_source_mapping_json
             ),
             "btpc_classifier_rule_review_json": str(btpc_classifier_rule_review_json),
-            "strategygroup_decision_ledger_json": str(
-                strategygroup_decision_ledger_json
+            "strategy_asset_state_json": str(
+                strategy_asset_state_json
             ),
             "strategygroup_quality_wave_json": str(strategygroup_quality_wave_json),
             "strategygroup_handoff_boundary_closure_json": str(
@@ -1977,15 +1875,24 @@ def build_local_monitor_sequence_report(
             "strategygroup_pre_live_rehearsal_readiness_json": str(
                 strategygroup_pre_live_rehearsal_readiness_json
             ),
-            "strategygroup_live_submit_readiness_bridge_json": str(
-                strategygroup_live_submit_readiness_bridge_json
+            "strategygroup_runtime_safety_state_json": str(
+                strategygroup_runtime_safety_state_json
             ),
             "strategygroup_portfolio_board_json": str(strategygroup_portfolio_board_json),
-            "strategygroup_capital_trial_readiness_bridge_json": str(
-                strategygroup_capital_trial_readiness_bridge_json
+            "strategygroup_review_only_deep_dive_wave_json": str(
+                strategygroup_review_only_deep_dive_wave_json
             ),
-            "strategygroup_capital_trial_packet_json": str(
-                strategygroup_capital_trial_packet_json
+            "strategygroup_owner_policy_package_json": str(
+                strategygroup_owner_policy_package_json
+            ),
+            "strategygroup_quality_closure_wave_json": str(
+                strategygroup_quality_closure_wave_json
+            ),
+            "strategygroup_capital_trial_envelope_projection_json": str(
+                strategygroup_capital_trial_envelope_projection_json
+            ),
+            "strategygroup_capital_trial_envelope_json": str(
+                strategygroup_capital_trial_envelope_json
             ),
             "strategygroup_research_intake_review_json": str(
                 strategygroup_research_intake_review_json
@@ -1998,14 +1905,14 @@ def build_local_monitor_sequence_report(
             "brf2_runtime_signal_capture_json": str(
                 brf2_runtime_signal_capture_json
             ),
-            "brf2_non_executing_candidate_packet_json": str(
-                brf2_non_executing_candidate_packet_json
-            ),
-            "strategygroup_tradeability_verdict_json": str(
-                strategygroup_tradeability_verdict_json
+            "brf2_shadow_candidate_evidence_json": str(
+                brf2_shadow_candidate_evidence_json
             ),
             "strategygroup_trial_grade_signal_gate_audit_json": str(
                 strategygroup_trial_grade_signal_gate_audit_json
+            ),
+            "strategygroup_tradeability_decision_json": str(
+                strategygroup_tradeability_decision_json
             ),
         },
     }
@@ -2048,7 +1955,7 @@ def _run_step(
     runner: CommandRunner,
 ) -> dict[str, Any]:
     completed = runner(command)
-    packet = _read_json_if_exists(output_json)
+    artifact = _read_json_if_exists(output_json)
     return {
         "name": name,
         "command": _display_command(command),
@@ -2056,7 +1963,7 @@ def _run_step(
         "stdout": completed.stdout,
         "stderr": completed.stderr,
         "output_json": str(output_json),
-        "packet": packet,
+        "artifact": artifact,
     }
 
 
@@ -2076,66 +1983,70 @@ def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _sequence_artifacts(
+    *,
+    artifacts: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    return artifacts or {}
+
+
 def _sequence_status(
     *,
     steps: list[dict[str, Any]],
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    if _packet_monitor_status(packets["daily_check"]) == "deployment_issue" or (
-        _packet_monitor_status(packets["goal_progress"]) == "deployment_issue"
+    artifacts = _sequence_artifacts(artifacts=artifacts)
+    if artifact_monitor_status(artifacts["daily_check"]) == "deployment_issue" or (
+        artifact_monitor_status(artifacts["goal_progress"]) == "deployment_issue"
     ):
         return DEPLOYMENT_ISSUE_STATUS
     failed_steps = [
         step
         for step in steps
         if int(step.get("returncode") or 0) != 0
-        and not _step_returncode_is_monitor_refresh(step, packets)
-        and not _step_returncode_is_deployment_issue(step, packets)
+        and not _step_returncode_is_allowed_monitor_refresh(step, artifacts)
+        and not _step_returncode_is_allowed_deployment_issue(step, artifacts)
         and not (
             step["name"] == "completion_audit"
-            and _status(packets["completion_audit"]) == "needs_non_market_repair"
+            and _status(artifacts["completion_audit"]) == "needs_non_market_repair"
         )
     ]
     if failed_steps:
         return "needs_non_market_repair"
-    completion_status = _status(packets["completion_audit"])
+    completion_status = _status(artifacts["completion_audit"])
     if completion_status == "needs_non_market_repair":
         return "needs_non_market_repair"
     if _brf2_fact_input_non_market_gap(
-        packets.get("brf2_runtime_signal_facts", {}),
-        packets.get("brf2_runtime_signal_capture", {}),
+        artifacts.get("brf2_runtime_signal_facts", {}),
+        artifacts.get("brf2_runtime_signal_capture", {}),
     ):
         return "needs_non_market_repair"
-    if _sequence_has_processing_signal(packets=packets):
+    if _sequence_has_processing_signal(artifacts=artifacts):
         return "processing"
-    if _packet_monitor_refresh_needed(packets["daily_check"]) or _packet_monitor_refresh_needed(
-        packets["goal_progress"]
-    ):
-        if (
-            _packet_runtime_status(packets["daily_check"]) == "waiting_for_market"
-            or _packet_runtime_status(packets["goal_progress"]) == "waiting_for_market"
-        ):
-            return MONITOR_REFRESH_STATUS
-        return "temporarily_unavailable_monitor_refresh_needed"
+    refresh_status = monitor_refresh_sequence_status(
+        [artifacts["daily_check"], artifacts["goal_progress"]]
+    )
+    if refresh_status:
+        return refresh_status
 
     if completion_status in {"complete", "completed"}:
         return "complete"
-    l2_readiness_status = _status(packets.get("l2_readiness_review"))
-    l2_dry_run_status = _status(packets.get("l2_intake_dry_run"))
-    l2_tier_status = _status(packets.get("l2_tier_policy_review"))
+    l2_readiness_status = _status(artifacts.get("l2_readiness_review"))
+    l2_dry_run_status = _status(artifacts.get("l2_intake_dry_run"))
+    l2_tier_status = _status(artifacts.get("l2_tier_policy_review"))
     l2_tier_review_clears_expansion = l2_tier_status in {
         "l2_tier_policy_review_applied",
     } or l2_readiness_status == "l2_readiness_review_already_enabled"
     expansion_review_clears_expansion = (
         l2_tier_review_clears_expansion
-        or _opportunity_decision_loop_clears_expansion(
-            packets.get("opportunity_decision_loop", {}),
+        or _opportunity_review_work_loop_clears_expansion(
+            artifacts.get("opportunity_review_work_loop", {}),
             l2_readiness_status=l2_readiness_status,
             l2_dry_run_status=l2_dry_run_status,
             l2_tier_status=l2_tier_status,
         )
     )
-    signal_coverage_status = _status(packets.get("signal_coverage"))
+    signal_coverage_status = _status(artifacts.get("signal_coverage"))
     if signal_coverage_status == "mainline_runtime_signal_ready":
         return "processing"
     if signal_coverage_status in {
@@ -2146,7 +2057,7 @@ def _sequence_status(
         and not expansion_review_clears_expansion
     ):
         return "needs_non_market_repair"
-    expansion_review_status = _status(packets.get("signal_coverage_expansion_review"))
+    expansion_review_status = _status(artifacts.get("signal_coverage_expansion_review"))
     if expansion_review_status in {
         "blocked_forbidden_effect",
     } or (
@@ -2176,62 +2087,62 @@ def _sequence_status(
     }:
         return "needs_non_market_repair"
     if (
-        _status(packets["daily_check"]) == "waiting_for_market"
-        and _status(packets["goal_progress"]) == "waiting_for_market"
+        artifact_declared_runtime_status(artifacts["daily_check"])
+        == "waiting_for_market"
+        and artifact_declared_runtime_status(artifacts["goal_progress"])
+        == "waiting_for_market"
         and completion_status == "not_complete_waiting_for_market"
     ):
         return "waiting_for_market"
-    if _status(packets["daily_check"]) == "processing" or _status(
-        packets["goal_progress"]
-    ) == "processing":
+    if artifact_declared_runtime_status(artifacts["daily_check"]) == "processing" or (
+        artifact_declared_runtime_status(artifacts["goal_progress"]) == "processing"
+    ):
         return "processing"
     return "needs_non_market_repair"
 
 
-def _sequence_has_processing_signal(*, packets: dict[str, dict[str, Any]]) -> bool:
-    if _packet_runtime_status(packets.get("daily_check", {})) == "processing":
+def _sequence_has_processing_signal(
+    *,
+    artifacts: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    artifacts = _sequence_artifacts(artifacts=artifacts)
+    if artifact_declared_runtime_status(artifacts.get("daily_check", {})) == "processing":
         return True
-    if _packet_runtime_status(packets.get("goal_progress", {})) == "processing":
+    if artifact_declared_runtime_status(artifacts.get("goal_progress", {})) == "processing":
         return True
-    if _status(packets.get("completion_audit")) == "not_complete_runtime_processing":
+    if _status(artifacts.get("completion_audit")) == "not_complete_runtime_processing":
         return True
-    if _status(packets.get("signal_coverage")) == "mainline_runtime_signal_ready":
-        return True
-    if _status(packets.get("daily_check")) == "processing":
-        return True
-    if _status(packets.get("goal_progress")) == "processing":
+    if _status(artifacts.get("signal_coverage")) == "mainline_runtime_signal_ready":
         return True
     return False
 
 
-def _step_returncode_is_monitor_refresh(
+def _step_returncode_is_allowed_monitor_refresh(
     step: dict[str, Any],
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]],
 ) -> bool:
-    return (
-        step["name"] in {"daily_check", "goal_progress"}
-        and int(step.get("returncode") or 0) != 0
-        and _packet_monitor_refresh_needed(packets[step["name"]])
-        and not (packets[step["name"]].get("checks") or {}).get("blockers")
+    step_name = str(step.get("name") or "")
+    return monitor_step_returncode_is_refresh(
+        step_name=step_name,
+        returncode=int(step.get("returncode") or 0),
+        artifact=artifacts.get(step_name, {}),
     )
 
 
-def _step_returncode_is_deployment_issue(
+def _step_returncode_is_allowed_deployment_issue(
     step: dict[str, Any],
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]],
 ) -> bool:
-    if step["name"] not in {"daily_check", "goal_progress"}:
-        return False
-    if int(step.get("returncode") or 0) == 0:
-        return False
-    packet = packets.get(step["name"], {})
-    return _packet_monitor_status(packet) == "deployment_issue" or _status(
-        packet
-    ) == DEPLOYMENT_ISSUE_STATUS
+    step_name = str(step.get("name") or "")
+    return monitor_step_returncode_is_deployment_issue(
+        step_name=step_name,
+        returncode=int(step.get("returncode") or 0),
+        artifact=artifacts.get(step_name, {}),
+    )
 
 
-def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | None:
-    status = _status(packet)
+def _signal_coverage_non_market_gap(artifact: dict[str, Any]) -> dict[str, Any] | None:
+    status = _status(artifact)
     if status == "mainline_no_signal_broader_would_enter":
         return {
             "source": "signal_coverage",
@@ -2256,14 +2167,14 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
 
 
 def _brf2_fact_input_non_market_gap(
-    facts_packet: dict[str, Any],
-    capture_packet: dict[str, Any],
+    facts_artifact: dict[str, Any],
+    capture_artifact: dict[str, Any],
 ) -> dict[str, Any] | None:
     facts_missing = (
-        _status(facts_packet) == "brf2_runtime_signal_facts_missing_watcher_input"
-        or facts_packet.get("fact_input_present") is False
+        _status(facts_artifact) == "brf2_runtime_signal_facts_missing_watcher_input"
+        or facts_artifact.get("fact_input_present") is False
     )
-    capture_preview = _as_dict(capture_packet.get("signal_detector_preview"))
+    capture_preview = _as_dict(capture_artifact.get("signal_detector_preview"))
     capture_missing = (
         str(capture_preview.get("current_signal_state") or "") == "fact_input_missing"
         or str(capture_preview.get("first_blocker_class") or "")
@@ -2277,7 +2188,7 @@ def _brf2_fact_input_non_market_gap(
         "strategy_group_id": "BRF2-001",
         "gap": "brf2_watcher_fact_input_missing",
         "owner": "engineering",
-        "next_action": "attach_brf2_watcher_fact_input_producer",
+        "next_engineering_checkpoint": "attach_brf2_watcher_fact_input_producer",
         "requirement": "BRF2 armed observation must have watcher fact input before it can be classified as market wait",
         "missing_or_false": [
             "brf2_runtime_signal_fact_input_present",
@@ -2287,28 +2198,28 @@ def _brf2_fact_input_non_market_gap(
 
 
 def _expansion_review_resolved(
-    l2_packet: dict[str, Any],
-    l2_tier_policy_packet: dict[str, Any],
-    opportunity_decision_loop_packet: dict[str, Any] | None = None,
+    l2_artifact: dict[str, Any],
+    l2_tier_policy_artifact: dict[str, Any],
+    opportunity_review_work_loop_artifact: dict[str, Any] | None = None,
 ) -> bool:
-    return _status(l2_packet) == "l2_readiness_review_already_enabled" or _status(
-        l2_tier_policy_packet
-    ) == "l2_tier_policy_review_applied" or _opportunity_decision_loop_clears_expansion(
-        opportunity_decision_loop_packet or {},
-        l2_readiness_status=_status(l2_packet),
+    return _status(l2_artifact) == "l2_readiness_review_already_enabled" or _status(
+        l2_tier_policy_artifact
+    ) == "l2_tier_policy_review_applied" or _opportunity_review_work_loop_clears_expansion(
+        opportunity_review_work_loop_artifact or {},
+        l2_readiness_status=_status(l2_artifact),
         l2_dry_run_status="",
-        l2_tier_status=_status(l2_tier_policy_packet),
+        l2_tier_status=_status(l2_tier_policy_artifact),
     )
 
 
-def _opportunity_decision_loop_clears_expansion(
-    packet: dict[str, Any],
+def _opportunity_review_work_loop_clears_expansion(
+    artifact: dict[str, Any],
     *,
     l2_readiness_status: str,
     l2_dry_run_status: str,
     l2_tier_status: str,
 ) -> bool:
-    if _status(packet) != "decision_loop_ready":
+    if _status(artifact) != "review_work_loop_ready":
         return False
     if l2_tier_status in {
         "blocked_forbidden_effect",
@@ -2331,31 +2242,26 @@ def _opportunity_decision_loop_clears_expansion(
 
 
 def _expansion_review_non_market_gap(
-    packet: dict[str, Any],
-    l2_packet: dict[str, Any] | None = None,
-    l2_dry_run_packet: dict[str, Any] | None = None,
-    l2_tier_policy_packet: dict[str, Any] | None = None,
-    opportunity_decision_loop_packet: dict[str, Any] | None = None,
+    artifact: dict[str, Any],
+    l2_artifact: dict[str, Any] | None = None,
+    l2_dry_run_artifact: dict[str, Any] | None = None,
+    l2_tier_policy_artifact: dict[str, Any] | None = None,
+    opportunity_review_work_loop_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    l2_packet = l2_packet or {}
-    l2_dry_run_packet = l2_dry_run_packet or {}
-    l2_tier_policy_packet = l2_tier_policy_packet or {}
-    opportunity_decision_loop_packet = opportunity_decision_loop_packet or {}
-    if _status(l2_packet) == "l2_readiness_review_already_enabled":
+    l2_artifact = l2_artifact or {}
+    l2_dry_run_artifact = l2_dry_run_artifact or {}
+    l2_tier_policy_artifact = l2_tier_policy_artifact or {}
+    opportunity_review_work_loop_artifact = opportunity_review_work_loop_artifact or {}
+    if _status(l2_artifact) == "l2_readiness_review_already_enabled":
         return None
-    l2_tier_status = _status(l2_tier_policy_packet)
+    l2_tier_status = _status(l2_tier_policy_artifact)
     if l2_tier_status == "l2_tier_policy_review_applied":
         return None
     if l2_tier_status == "l2_tier_policy_review_recommended":
-        decision = (
-            l2_tier_policy_packet.get("decision")
-            if isinstance(l2_tier_policy_packet.get("decision"), dict)
-            else {}
+        groups = review_outcome_string_list(
+            l2_tier_policy_artifact,
+            "groups_ready_to_apply_l2",
         )
-        groups = [
-            str(item)
-            for item in decision.get("groups_ready_to_apply_l2") or []
-        ]
         return {
             "source": "l2_tier_policy_review",
             "requirement": "conditional L2 tier policy review recommends a local policy update before the broader opportunity is considered covered",
@@ -2372,18 +2278,13 @@ def _expansion_review_non_market_gap(
             "source": "l2_tier_policy_review",
             "requirement": "conditional L2 tier policy review must pass without dangerous effects",
             "missing_or_false": [f"l2_tier_policy_review_status:{l2_tier_status}"],
-        }
-    l2_dry_run_status = _status(l2_dry_run_packet)
+    }
+    l2_dry_run_status = _status(l2_dry_run_artifact)
     if l2_dry_run_status == "l2_intake_dry_run_passed":
-        decision = (
-            l2_dry_run_packet.get("decision")
-            if isinstance(l2_dry_run_packet.get("decision"), dict)
-            else {}
+        groups = review_outcome_string_list(
+            l2_dry_run_artifact,
+            "groups_ready_for_l2_policy_review",
         )
-        groups = [
-            str(item)
-            for item in decision.get("groups_ready_for_l2_policy_review") or []
-        ]
         return {
             "source": "l2_intake_dry_run",
             "requirement": "conditional L2 candidate dry-run passed and needs tier-policy review before any L2 policy change",
@@ -2400,17 +2301,14 @@ def _expansion_review_non_market_gap(
             "source": "l2_intake_dry_run",
             "requirement": "conditional L2 intake dry-run must pass without dangerous effects",
             "missing_or_false": [f"l2_intake_dry_run_status:{l2_dry_run_status}"],
-        }
-    l2_status = _status(l2_packet)
+    }
+    l2_status = _status(l2_artifact)
     if l2_status == "l2_readiness_review_has_conditional_candidate":
-        decision = (
-            l2_packet.get("decision") if isinstance(l2_packet.get("decision"), dict) else {}
+        groups = review_outcome_string_list(
+            l2_artifact,
+            "handoff_intake_recommended_groups",
         )
-        groups = [
-            str(item)
-            for item in decision.get("handoff_intake_recommended_groups") or []
-        ]
-        default_next_step = str(decision.get("default_next_step") or "")
+        default_next_step = review_outcome_default_next_step(l2_artifact)
         needs_dry_run = default_next_step == "run_conditional_l2_dry_run_without_tier_change"
         return {
             "source": "l2_readiness_review",
@@ -2434,16 +2332,16 @@ def _expansion_review_non_market_gap(
             "requirement": "L2 readiness review must stay non-executing",
             "missing_or_false": ["l2_readiness_review_forbidden_effect"],
         }
-    if _opportunity_decision_loop_clears_expansion(
-        opportunity_decision_loop_packet,
+    if _opportunity_review_work_loop_clears_expansion(
+        opportunity_review_work_loop_artifact,
         l2_readiness_status=l2_status,
         l2_dry_run_status=l2_dry_run_status,
         l2_tier_status=l2_tier_status,
     ):
         return None
-    status = _status(packet)
+    status = _status(artifact)
     if status == "review_needed_broader_observe_only_would_enter":
-        counts = packet.get("counts") if isinstance(packet.get("counts"), dict) else {}
+        counts = artifact.get("counts") if isinstance(artifact.get("counts"), dict) else {}
         return {
             "source": "signal_coverage_expansion_review",
             "requirement": "broader observe-only opportunities should be reviewed for observation-scope expansion",
@@ -2470,7 +2368,7 @@ def _sequence_interaction(steps: list[dict[str, Any]]) -> dict[str, Any]:
     calls_exchange_write = False
     places_order = False
     for step in steps:
-        interaction = _interaction(step.get("packet"))
+        interaction = _interaction(step.get("artifact"))
         remote_count += _int(interaction.get("remote_interaction_count"))
         mutates_remote = mutates_remote or interaction.get("mutates_remote_files") is True
         approaches_real_order = (
@@ -2501,109 +2399,82 @@ def _sequence_interaction(steps: list[dict[str, Any]]) -> dict[str, Any]:
 def _sequence_monitor_status(
     *,
     status: str,
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    if status == DEPLOYMENT_ISSUE_STATUS:
-        return "deployment_issue"
-    for name in ("daily_check", "goal_progress"):
-        packet_status = _packet_monitor_status(packets.get(name, {}))
-        if packet_status in {"deployment_issue", "needs_refresh"}:
-            return packet_status
-    if status in {"needs_refresh", "temporarily_unavailable_monitor_refresh_needed"}:
-        return "needs_refresh"
-    return "fresh"
+    return _sequence_monitor_projection(
+        status=status,
+        artifacts=artifacts,
+        owner_intervention_required=False,
+    ).monitor_status
 
 
 def _sequence_runtime_status(
     *,
     status: str,
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    for name in ("daily_check", "goal_progress"):
-        runtime_status = _packet_runtime_status(packets.get(name, {}))
-        if runtime_status:
-            return runtime_status
-    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
-        return "waiting_for_market"
-    if status == "processing":
-        return "processing"
-    if status == "complete":
-        return "completed"
-    return "temporarily_unavailable"
+    return _sequence_monitor_projection(
+        status=status,
+        artifacts=artifacts,
+        owner_intervention_required=False,
+    ).runtime_status
 
 
-def _sequence_owner_status(
+def _sequence_monitor_projection(
     *,
     status: str,
-    runtime_status: str,
-    monitor_status: str,
-    owner_decision_required: bool,
-) -> str:
-    if owner_decision_required:
-        return "needs_intervention"
-    if runtime_status == "waiting_for_market":
-        return "waiting_for_opportunity"
-    if runtime_status == "processing":
-        return "processing"
-    if runtime_status == "completed":
-        return "completed"
-    if monitor_status == "deployment_issue":
-        return "temporarily_unavailable"
-    return "temporarily_unavailable"
+    artifacts: dict[str, dict[str, Any]] | None = None,
+    owner_intervention_required: bool,
+):
+    artifacts = _sequence_artifacts(artifacts=artifacts)
+    source_artifacts = [
+        artifacts.get("daily_check", {}),
+        artifacts.get("goal_progress", {}),
+    ]
+    runtime_status = first_artifact_declared_runtime_status(source_artifacts) or None
+    return monitor_status_projection(
+        status=status,
+        artifacts=source_artifacts,
+        runtime_status=runtime_status,
+        owner_intervention_required=owner_intervention_required,
+        waiting_for_market=runtime_status == "waiting_for_market"
+        if runtime_status
+        else None,
+        default_runtime_status="temporarily_unavailable",
+        default_monitor_status="unknown",
+    )
 
 
-def _sequence_owner_decision_required(
+def _sequence_owner_intervention_required(
     *,
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]] | None = None,
     execution_blockers: list[str],
     engineering_gaps: list[dict[str, Any]],
 ) -> bool:
-    for packet in packets.values():
-        if isinstance(packet, dict) and packet.get("owner_decision_required") is True:
-            return True
-        owner_summary = packet.get("owner_summary") if isinstance(packet, dict) else {}
-        if isinstance(owner_summary, dict) and owner_summary.get(
-            "owner_intervention_required"
-        ) is True:
-            return True
-        checks = packet.get("checks") if isinstance(packet, dict) else {}
-        if isinstance(checks, dict) and (
-            checks.get("owner_decision_required") is True
-            or checks.get("owner_intervention_required") is True
-        ):
-            return True
-    owner_tokens = (
-        "owner_policy",
-        "owner_decision",
-        "owner_intervention",
-        "capital_adjustment",
-        "pause_decision",
-        "risk_acceptance",
+    artifacts = _sequence_artifacts(artifacts=artifacts)
+    return owner_intervention_required_from_sources(
+        artifacts=artifacts.values(),
+        execution_blockers=execution_blockers,
+        engineering_gaps=engineering_gaps,
     )
-    for item in [*execution_blockers, *[str(gap) for gap in engineering_gaps]]:
-        lowered = item.lower()
-        if any(token in lowered for token in owner_tokens):
-            return True
-    return False
 
 
 def _sequence_monitor_refresh_reasons(
-    packets: dict[str, dict[str, Any]],
+    artifacts: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    reasons: list[str] = []
-    for name in ("daily_check", "goal_progress"):
-        checks = packets.get(name, {}).get("checks")
-        if not isinstance(checks, dict):
-            continue
-        reasons.extend(str(item) for item in checks.get("monitor_refresh_reasons") or [])
-    return list(dict.fromkeys(reasons))
+    artifacts = _sequence_artifacts(artifacts=artifacts)
+    return combined_artifact_monitor_refresh_reasons(
+        [artifacts.get("daily_check", {}), artifacts.get("goal_progress", {})]
+    )
 
 
-def _sequence_research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
+def _sequence_research_intake_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    summary = (
+        artifact.get("summary") if isinstance(artifact.get("summary"), dict) else {}
+    )
     rows = (
-        packet.get("candidate_rows")
-        if isinstance(packet.get("candidate_rows"), list)
+        artifact.get("candidate_rows")
+        if isinstance(artifact.get("candidate_rows"), list)
         else []
     )
     strategy_group_ids = [
@@ -2612,8 +2483,8 @@ def _sequence_research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
         if isinstance(row, dict) and row.get("strategy_group_id")
     ]
     return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "research_intake_review_ready",
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "research_intake_review_ready",
         "candidate_count": _int(summary.get("candidate_count")),
         "paper_observation_admission_candidate_count": _int(
             summary.get("paper_observation_admission_candidate_count")
@@ -2623,56 +2494,125 @@ def _sequence_research_intake_summary(packet: dict[str, Any]) -> dict[str, Any]:
         ),
         "strategy_group_ids": strategy_group_ids,
         "live_permission_change": False,
-        "actionable_now": False,
     }
 
 
-def _sequence_capital_trial_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    summary = packet.get("capital_trial_summary")
-    if not isinstance(summary, dict):
-        summary = {}
-    selected = packet.get("selected_non_mpg_trial_candidate")
-    if not isinstance(selected, dict):
-        selected = {}
-    return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "capital_trial_readiness_bridge_ready",
-        "selected_strategy_group_id": str(
-            summary.get("selected_non_mpg_strategy_group_id") or ""
-        ),
-        "selected_short_strategy_group_id": str(
-            summary.get("selected_short_strategy_group_id") or ""
-        ),
-        "selected_candidate_status": str(
-            summary.get("selected_candidate_status") or "missing"
-        ),
-        "decision": str(selected.get("decision") or "pending"),
-        "reason": str(selected.get("reason") or ""),
-        "promotion_scope": str(selected.get("promotion_scope") or "not_applicable"),
-        "promotion_target": str(
-            selected.get("promotion_target") or "not_applicable"
-        ),
-        "tiny_live_ready": selected.get("tiny_live_ready") is True,
-        "next_checkpoint": str(selected.get("next_checkpoint") or ""),
-        "side_scope": [
-            str(item) for item in selected.get("side_scope") or [] if str(item)
-        ],
-        "short_candidate_trade_count": _int(
-            summary.get("short_candidate_trade_count")
-        ),
-        "trial_packet_generated": summary.get("trial_packet_generated") is True,
-        "live_permission_change": False,
-        "actionable_now": False,
-        "real_order_authority": False,
-    }
+@dataclass(frozen=True)
+class _CapitalTrialSummaryProjection:
+    status: str
+    projection_status: str
+    projection_schema: str
+    active: bool
+    selected_strategy_group_id: str
+    selected_short_strategy_group_id: str
+    selected_candidate_status: str
+    strategy_asset_current_decision: str
+    reason: str
+    promotion_scope: str
+    promotion_target: str
+    next_checkpoint: str
+    side_scope: list[str]
+    short_experiment_candidate_count: int
+    trial_envelope_generated: bool
+    state_source: str = "capital_trial_envelope_projection"
+    projection_role: str = "trial_envelope_compatibility_projection"
+    primary_judgment_source: bool = False
+    strategygroup_lifecycle_owner: bool = False
+    tradeability_decision_source: bool = False
+    runtime_truth_source: bool = False
+    live_permission_change: bool = False
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_CapitalTrialSummaryProjection":
+        status = _status(artifact) or "missing"
+        summary = _as_dict(artifact.get("capital_trial_summary"))
+        selected = _as_dict(artifact.get("selected_non_mpg_trial_candidate"))
+        metadata = _as_dict(artifact.get("projection_metadata"))
+        return cls(
+            status=status,
+            projection_status=str(
+                artifact.get("projection_status") or "missing"
+            ),
+            projection_schema=str(artifact.get("projection_schema") or ""),
+            active=artifact.get("projection_status")
+            == "trial_envelope_projection_ready",
+            selected_strategy_group_id=str(
+                summary.get("selected_non_mpg_strategy_group_id") or ""
+            ),
+            selected_short_strategy_group_id=str(
+                summary.get("selected_short_strategy_group_id") or ""
+            ),
+            selected_candidate_status=str(
+                summary.get("selected_candidate_status") or "missing"
+            ),
+            strategy_asset_current_decision=str(
+                selected.get("strategy_asset_current_decision") or "pending"
+            ),
+            reason=str(selected.get("reason") or ""),
+            promotion_scope=str(
+                selected.get("promotion_scope") or "not_applicable"
+            ),
+            promotion_target=str(
+                selected.get("promotion_target") or "not_applicable"
+            ),
+            next_checkpoint=str(selected.get("next_checkpoint") or ""),
+            side_scope=[
+                str(item) for item in selected.get("side_scope") or [] if str(item)
+            ],
+            short_experiment_candidate_count=_coalesce_int(
+                summary.get("short_experiment_candidate_count")
+            ),
+            trial_envelope_generated=summary.get("trial_envelope_generated") is True,
+            strategygroup_lifecycle_owner=(
+                metadata.get("strategygroup_lifecycle_owner") is True
+            ),
+            tradeability_decision_source=(
+                metadata.get("tradeability_decision_source") is True
+            ),
+            runtime_truth_source=metadata.get("runtime_truth_source") is True,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "projection_status": self.projection_status,
+            "projection_schema": self.projection_schema,
+            "active": self.active,
+            "selected_strategy_group_id": self.selected_strategy_group_id,
+            "selected_short_strategy_group_id": self.selected_short_strategy_group_id,
+            "selected_candidate_status": self.selected_candidate_status,
+            "strategy_asset_current_decision": self.strategy_asset_current_decision,
+            "reason": self.reason,
+            "promotion_scope": self.promotion_scope,
+            "promotion_target": self.promotion_target,
+            "next_checkpoint": self.next_checkpoint,
+            "side_scope": self.side_scope,
+            "short_experiment_candidate_count": (
+                self.short_experiment_candidate_count
+            ),
+            "trial_envelope_generated": self.trial_envelope_generated,
+            "state_source": self.state_source,
+            "projection_role": self.projection_role,
+            "primary_judgment_source": self.primary_judgment_source,
+            "strategygroup_lifecycle_owner": self.strategygroup_lifecycle_owner,
+            "tradeability_decision_source": self.tradeability_decision_source,
+            "runtime_truth_source": self.runtime_truth_source,
+            "live_permission_change": self.live_permission_change,
+        }
 
 
-def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    proposal = _as_dict(packet.get("proposal"))
-    checkpoint = _as_dict(packet.get("owner_policy_checkpoint"))
+def _sequence_capital_trial_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    return _CapitalTrialSummaryProjection.from_artifact(artifact).as_dict()
+
+
+def _sequence_trial_admission_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    proposal = _as_dict(artifact.get("proposal"))
+    checkpoint = _as_dict(artifact.get("owner_policy_checkpoint"))
     return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "trial_asset_admission_proposal_ready",
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "trial_asset_admission_proposal_ready",
         "strategy_group_id": str(proposal.get("strategy_group_id") or ""),
         "current_stage": str(proposal.get("current_stage") or ""),
         "proposed_stage": str(proposal.get("proposed_stage") or ""),
@@ -2680,30 +2620,32 @@ def _sequence_trial_admission_summary(packet: dict[str, Any]) -> dict[str, Any]:
         "owner_policy_fields": [
             str(item) for item in checkpoint.get("owner_policy_fields") or []
         ],
-        "next_action": str(proposal.get("next_action") or ""),
+        "admission_checkpoint": str(
+            proposal.get("non_authority_checkpoint") or ""
+        ),
         "after_next_state": str(proposal.get("after_next_state") or ""),
-        "actionable_now": False,
-        "real_order_authority": False,
     }
 
 
-def _sequence_brf2_owner_trial_policy_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    policy = _as_dict(packet.get("policy"))
+def _sequence_brf2_owner_trial_policy_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    policy = _as_dict(artifact.get("policy"))
     return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "brf2_owner_trial_policy_scope_recorded",
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "brf2_owner_trial_policy_scope_recorded",
         "strategy_group_id": str(policy.get("strategy_group_id") or ""),
         "trial_identity": str(policy.get("trial_identity") or ""),
-        "owner_policy_recorded": packet.get("brf2_policy_scope_recorded") is True,
-        "owner_policy_scope_missing": packet.get("owner_policy_scope_missing")
+        "owner_policy_recorded": artifact.get("brf2_policy_scope_recorded") is True,
+        "owner_policy_scope_missing": artifact.get("owner_policy_scope_missing")
         is not False,
         "brf2_stage_after_policy": str(
-            packet.get("brf2_stage_after_policy") or ""
+            artifact.get("brf2_stage_after_policy") or ""
         ),
         "brf2_new_first_blocker": str(
-            packet.get("brf2_new_first_blocker") or ""
+            artifact.get("brf2_new_first_blocker") or ""
         ),
-        "next_action": str(packet.get("brf2_next_action") or ""),
+        "policy_checkpoint": str(artifact.get("brf2_policy_checkpoint") or ""),
         "capital_scope": _as_dict(policy.get("capital_scope")),
         "max_notional": _as_dict(policy.get("max_notional")),
         "side_scope": [str(item) for item in policy.get("side_scope") or []],
@@ -2711,295 +2653,582 @@ def _sequence_brf2_owner_trial_policy_summary(packet: dict[str, Any]) -> dict[st
         "leverage_scenario": str(policy.get("leverage_scenario") or ""),
         "attempt_cap": _int(policy.get("attempt_cap")),
         "loss_unit": _as_dict(policy.get("loss_unit")),
-        "actionable_now": False,
-        "real_order_authority": False,
     }
 
 
 def _sequence_brf2_required_facts_mapping_summary(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    fresh_signal_rule = _as_dict(packet.get("fresh_signal_rule"))
+    fresh_signal_rule = _as_dict(artifact.get("fresh_signal_rule"))
+    required_fact_specs = _dict_rows(artifact.get("required_fact_observation_specs"))
+    disable_fact_specs = _dict_rows(artifact.get("disable_fact_observation_specs"))
     return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "brf2_required_facts_mapping_ready",
-        "ready": packet.get("required_facts_mapping_ready") is True,
-        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "brf2_required_facts_mapping_ready",
+        "ready": artifact.get("required_facts_mapping_ready") is True,
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
         "fresh_signal_rule_id": str(fresh_signal_rule.get("signal_id") or ""),
         "required_fact_count": _int(
-            _as_dict(packet.get("checks")).get("required_fact_count")
-            or len(packet.get("required_fact_keys") or [])
+            _as_dict(artifact.get("checks")).get("required_fact_count")
+            or len(required_fact_specs)
+            or len(_dict_rows(artifact.get("required_facts")))
         ),
         "disable_fact_count": _int(
-            _as_dict(packet.get("checks")).get("disable_fact_count")
-            or len(packet.get("disable_fact_keys") or [])
+            _as_dict(artifact.get("checks")).get("disable_fact_count")
+            or len(disable_fact_specs)
+            or len(_dict_rows(artifact.get("disable_facts")))
         ),
-        "after_next_state": str(packet.get("after_next_state") or ""),
+        "after_next_state": str(artifact.get("after_next_state") or ""),
         "first_blocker_after_mapping": str(
-            packet.get("first_blocker_after_mapping") or ""
+            artifact.get("first_blocker_after_mapping") or ""
         ),
-        "next_action": str(packet.get("next_action") or ""),
-        "actionable_now": False,
-        "real_order_authority": False,
+        "mapping_checkpoint": str(artifact.get("mapping_checkpoint") or ""),
     }
+
+
+@dataclass(frozen=True)
+class _BRF2RuntimeSignalFactsProjection:
+    status: str
+    active: bool
+    strategy_group_id: str
+    fact_input_present: bool
+    watcher_tick_present: bool
+    source_status: str
+    source_path: str
+    first_blocker_class: str
+    first_blocker_owner: str
+    fact_input_checkpoint: str
+    projection_role: str = "requiredfacts_input_health_projection"
+    state_source: str = "brf2_runtime_signal_facts"
+    primary_judgment_source: bool = False
+    tradeability_decision_source: bool = False
+    runtime_truth_source: bool = False
+    live_requiredfacts_authority: bool = False
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_BRF2RuntimeSignalFactsProjection":
+        status = _status(artifact) or "missing"
+        first_blocker = _as_dict(artifact.get("first_blocker"))
+        return cls(
+            status=status,
+            active=status
+            in {
+                "brf2_runtime_signal_facts_ready",
+                "brf2_runtime_signal_facts_missing_watcher_input",
+            },
+            strategy_group_id=str(artifact.get("strategy_group_id") or ""),
+            fact_input_present=artifact.get("fact_input_present") is True,
+            watcher_tick_present=artifact.get("watcher_tick_present") is True,
+            source_status=str(artifact.get("source_status") or "missing"),
+            source_path=str(artifact.get("source_path") or ""),
+            first_blocker_class=str(first_blocker.get("class") or "missing"),
+            first_blocker_owner=str(first_blocker.get("owner") or "unknown"),
+            fact_input_checkpoint=str(
+                artifact.get("fact_input_checkpoint")
+                or first_blocker.get("repair_checkpoint")
+                or ""
+            ),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "active": self.active,
+            "strategy_group_id": self.strategy_group_id,
+            "fact_input_present": self.fact_input_present,
+            "watcher_tick_present": self.watcher_tick_present,
+            "source_status": self.source_status,
+            "source_path": self.source_path,
+            "first_blocker_class": self.first_blocker_class,
+            "first_blocker_owner": self.first_blocker_owner,
+            "fact_input_checkpoint": self.fact_input_checkpoint,
+            "projection_role": self.projection_role,
+            "state_source": self.state_source,
+            "primary_judgment_source": self.primary_judgment_source,
+            "tradeability_decision_source": self.tradeability_decision_source,
+            "runtime_truth_source": self.runtime_truth_source,
+            "live_requiredfacts_authority": self.live_requiredfacts_authority,
+        }
 
 
 def _sequence_brf2_runtime_signal_facts_summary(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    first_blocker = _as_dict(packet.get("first_blocker"))
-    return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet)
-        in {
-            "brf2_runtime_signal_facts_ready",
-            "brf2_runtime_signal_facts_missing_watcher_input",
-        },
-        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
-        "fact_input_present": packet.get("fact_input_present") is True,
-        "watcher_tick_present": packet.get("watcher_tick_present") is True,
-        "source_status": str(packet.get("source_status") or "missing"),
-        "source_path": str(packet.get("source_path") or ""),
-        "first_blocker_class": str(first_blocker.get("class") or "missing"),
-        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
-        "next_action": str(packet.get("next_action") or first_blocker.get("next_action") or ""),
-        "actionable_now": False,
-        "real_order_authority": False,
-    }
+    return _BRF2RuntimeSignalFactsProjection.from_artifact(artifact).as_dict()
+
+
+@dataclass(frozen=True)
+class _BRF2RuntimeSignalCaptureProjection:
+    status: str
+    active: bool
+    ready: bool
+    strategy_group_id: str
+    signal_id: str
+    fact_input_present: bool
+    watcher_tick_present: bool
+    fact_input_status: str
+    current_signal_state: str
+    fresh_signal_present: bool
+    first_blocker_class: str
+    first_blocker_owner: str
+    signal_capture_checkpoint: str
+    missing_required_fact_count: int
+    active_disable_fact_count: int
+    blocked_fact_count: int
+    shadow_candidate_shape_ready: bool
+    projection_role: str = "runtime_readiness_signal_capture_projection"
+    state_source: str = "brf2_runtime_signal_capture"
+    primary_judgment_source: bool = False
+    tradeability_decision_source: bool = False
+    runtime_truth_source: bool = False
+    live_submit_readiness_source: str = "runtime_safety_state"
+    execution_attempt_required_for_lifecycle_entry: bool = True
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_BRF2RuntimeSignalCaptureProjection":
+        status = _status(artifact) or "missing"
+        preview = _as_dict(artifact.get("signal_detector_preview"))
+        no_action = _as_dict(artifact.get("no_action_attribution"))
+        candidate = _as_dict(artifact.get("shadow_candidate_shape"))
+        watcher_scope = _as_dict(artifact.get("watcher_scope"))
+        return cls(
+            status=status,
+            active=status == "brf2_runtime_signal_capture_ready",
+            ready=status == "brf2_runtime_signal_capture_ready",
+            strategy_group_id=str(artifact.get("strategy_group_id") or ""),
+            signal_id=str(watcher_scope.get("signal_id") or ""),
+            fact_input_present=(
+                artifact.get("fact_input_present") is True
+                or preview.get("fact_input_present") is True
+            ),
+            watcher_tick_present=(
+                artifact.get("watcher_tick_present") is True
+                or preview.get("watcher_tick_present") is True
+            ),
+            fact_input_status=str(
+                artifact.get("fact_input_status")
+                or preview.get("fact_input_status")
+                or "missing"
+            ),
+            current_signal_state=str(
+                preview.get("current_signal_state") or "unknown"
+            ),
+            fresh_signal_present=preview.get("fresh_signal_present") is True,
+            first_blocker_class=str(
+                preview.get("first_blocker_class") or "missing"
+            ),
+            first_blocker_owner=str(
+                preview.get("first_blocker_owner") or "unknown"
+            ),
+            signal_capture_checkpoint=str(
+                preview.get("signal_capture_checkpoint") or ""
+            ),
+            missing_required_fact_count=_int(
+                len(preview.get("missing_required_fact_keys") or [])
+            ),
+            active_disable_fact_count=_int(
+                len(preview.get("active_disable_fact_keys") or [])
+            ),
+            blocked_fact_count=_int(no_action.get("blocked_fact_count")),
+            shadow_candidate_shape_ready=(
+                candidate.get("shadow_candidate_ready") is True
+            ),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "active": self.active,
+            "ready": self.ready,
+            "strategy_group_id": self.strategy_group_id,
+            "signal_id": self.signal_id,
+            "fact_input_present": self.fact_input_present,
+            "watcher_tick_present": self.watcher_tick_present,
+            "fact_input_status": self.fact_input_status,
+            "current_signal_state": self.current_signal_state,
+            "fresh_signal_present": self.fresh_signal_present,
+            "first_blocker_class": self.first_blocker_class,
+            "first_blocker_owner": self.first_blocker_owner,
+            "signal_capture_checkpoint": self.signal_capture_checkpoint,
+            "missing_required_fact_count": self.missing_required_fact_count,
+            "active_disable_fact_count": self.active_disable_fact_count,
+            "blocked_fact_count": self.blocked_fact_count,
+            "shadow_candidate_shape_ready": self.shadow_candidate_shape_ready,
+            "projection_role": self.projection_role,
+            "state_source": self.state_source,
+            "primary_judgment_source": self.primary_judgment_source,
+            "tradeability_decision_source": self.tradeability_decision_source,
+            "runtime_truth_source": self.runtime_truth_source,
+            "live_submit_readiness_source": self.live_submit_readiness_source,
+            "execution_attempt_required_for_lifecycle_entry": (
+                self.execution_attempt_required_for_lifecycle_entry
+            ),
+        }
 
 
 def _sequence_brf2_runtime_signal_capture_summary(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    preview = _as_dict(packet.get("signal_detector_preview"))
-    no_action = _as_dict(packet.get("no_action_attribution"))
-    candidate = _as_dict(packet.get("candidate_packet_shape"))
-    watcher_scope = _as_dict(packet.get("watcher_scope"))
-    return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "brf2_runtime_signal_capture_ready",
-        "ready": _status(packet) == "brf2_runtime_signal_capture_ready",
-        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
-        "signal_id": str(watcher_scope.get("signal_id") or ""),
-        "fact_input_present": packet.get("fact_input_present") is True
-        or preview.get("fact_input_present") is True,
-        "watcher_tick_present": packet.get("watcher_tick_present") is True
-        or preview.get("watcher_tick_present") is True,
-        "fact_input_status": str(
-            packet.get("fact_input_status")
-            or preview.get("fact_input_status")
-            or "missing"
-        ),
-        "current_signal_state": str(
-            preview.get("current_signal_state") or "unknown"
-        ),
-        "fresh_signal_present": preview.get("fresh_signal_present") is True,
-        "first_blocker_class": str(
-            preview.get("first_blocker_class") or "missing"
-        ),
-        "first_blocker_owner": str(
-            preview.get("first_blocker_owner") or "unknown"
-        ),
-        "next_action": str(preview.get("next_action") or ""),
-        "missing_required_fact_count": _int(
-            len(preview.get("missing_required_fact_keys") or [])
-        ),
-        "active_disable_fact_count": _int(
-            len(preview.get("active_disable_fact_keys") or [])
-        ),
-        "blocked_fact_count": _int(no_action.get("blocked_fact_count")),
-        "candidate_packet_ready": candidate.get("candidate_packet_ready") is True,
-        "actionable_now": False,
-        "real_order_authority": False,
-    }
+    return _BRF2RuntimeSignalCaptureProjection.from_artifact(artifact).as_dict()
 
 
-def _sequence_brf2_candidate_packet_summary(
-    packet: dict[str, Any],
+@dataclass(frozen=True)
+class _BRF2ShadowCandidateEvidenceProjection:
+    status: str
+    active: bool
+    strategy_group_id: str
+    shadow_candidate_evidence_ready: bool
+    shadow_candidate_evidence_id: str
+    signal_state: str
+    first_blocker_class: str
+    first_blocker_owner: str
+    next_runtime_step: str
+    projection_role: str = "shadow_candidate_evidence_provenance"
+    state_source: str = "brf2_shadow_candidate_evidence"
+    primary_judgment_source: bool = False
+    non_executing_evidence: bool = True
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_BRF2ShadowCandidateEvidenceProjection":
+        status = _status(artifact) or "missing"
+        first_blocker = _as_dict(artifact.get("first_blocker"))
+        candidate = _as_dict(artifact.get("shadow_candidate_evidence"))
+        return cls(
+            status=status,
+            active=status
+            in {
+                "brf2_shadow_candidate_evidence_ready",
+                "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
+            },
+            strategy_group_id=str(artifact.get("strategy_group_id") or ""),
+            shadow_candidate_evidence_ready=(
+                artifact.get("shadow_candidate_evidence_ready") is True
+            ),
+            shadow_candidate_evidence_id=str(
+                candidate.get("shadow_candidate_evidence_id") or ""
+            ),
+            signal_state=str(candidate.get("signal_state") or "unknown"),
+            first_blocker_class=str(first_blocker.get("class") or "missing"),
+            first_blocker_owner=str(first_blocker.get("owner") or "unknown"),
+            next_runtime_step=str(artifact.get("next_runtime_step") or ""),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "active": self.active,
+            "strategy_group_id": self.strategy_group_id,
+            "shadow_candidate_evidence_ready": self.shadow_candidate_evidence_ready,
+            "shadow_candidate_evidence_id": self.shadow_candidate_evidence_id,
+            "signal_state": self.signal_state,
+            "first_blocker_class": self.first_blocker_class,
+            "first_blocker_owner": self.first_blocker_owner,
+            "next_runtime_step": self.next_runtime_step,
+            "projection_role": self.projection_role,
+            "state_source": self.state_source,
+            "primary_judgment_source": self.primary_judgment_source,
+            "non_executing_evidence": self.non_executing_evidence,
+        }
+
+
+def _sequence_brf2_shadow_candidate_evidence_summary(
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    first_blocker = _as_dict(packet.get("first_blocker"))
-    candidate = _as_dict(packet.get("candidate_packet"))
-    return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet)
-        in {
-            "brf2_non_executing_candidate_packet_ready",
-            "brf2_non_executing_candidate_packet_waiting_for_fresh_signal",
-        },
-        "strategy_group_id": str(packet.get("strategy_group_id") or ""),
-        "candidate_packet_ready": packet.get("candidate_packet_ready") is True,
-        "candidate_packet_id": str(candidate.get("candidate_packet_id") or ""),
-        "signal_state": str(candidate.get("signal_state") or "unknown"),
-        "first_blocker_class": str(first_blocker.get("class") or "missing"),
-        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
-        "next_runtime_step": str(packet.get("next_runtime_step") or ""),
-        "actionable_now": False,
-        "real_order_authority": False,
-    }
+    return _BRF2ShadowCandidateEvidenceProjection.from_artifact(artifact).as_dict()
 
 
-def _sequence_three_strategy_portfolio_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    seats = _as_dict(packet.get("seat_readiness"))
-    selected = [str(item) for item in packet.get("selected_strategy_groups") or []]
-    blocker_rows = [
-        _as_dict(_as_dict(seats.get(strategy_id)).get("first_blocker"))
+@dataclass(frozen=True)
+class _ThreeStrategyPortfolioSummaryProjection:
+    status: str
+    ready: bool
+    objective_met: bool
+    seat_count: int
+    selected_strategy_groups: list[str]
+    market_wait_count: int
+    owner_policy_gap_count: int
+    engineering_gap_count: int
+    strategy_review_gap_count: int
+    next_bottlenecks: dict[str, Any]
+    stage_5_status: str
+    trial_grade_30u_standby_count: int
+    hard_safety_gates_relaxed: bool
+    readiness_stage_evidence: dict[str, Any]
+    projection_role: str = "trial_envelope_projection"
+    state_source: str = "three_strategy_live_trial_portfolio"
+    primary_judgment_source: bool = False
+    tradeability_decision_source: bool = False
+    runtime_truth_source: bool = False
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_ThreeStrategyPortfolioSummaryProjection":
+        status = _status(artifact) or "missing"
+        seats = _as_dict(artifact.get("seat_readiness"))
+        selected = [
+            str(item) for item in artifact.get("selected_strategy_groups") or []
+        ]
+        blocker_rows = [
+            _as_dict(_as_dict(seats.get(strategy_id)).get("first_blocker"))
+            for strategy_id in selected
+        ]
+        stage_5 = _as_dict(artifact.get("stage_5_live_opportunity_standby"))
+        readiness_stage_evidence = _portfolio_readiness_stage_evidence(
+            selected=selected,
+            seats=seats,
+            stage_5=stage_5,
+        )
+        return cls(
+            status=status,
+            ready=status == "three_strategy_live_trial_portfolio_ready",
+            objective_met=artifact.get("objective_met") is True,
+            seat_count=_int(artifact.get("seat_count")),
+            selected_strategy_groups=selected,
+            market_wait_count=sum(
+                blocker.get("blocker_owner") == "market" for blocker in blocker_rows
+            ),
+            owner_policy_gap_count=sum(
+                blocker.get("blocker_owner") == "owner" for blocker in blocker_rows
+            ),
+            engineering_gap_count=sum(
+                blocker.get("blocker_owner") == "engineering"
+                for blocker in blocker_rows
+            ),
+            strategy_review_gap_count=sum(
+                blocker.get("blocker_owner") == "strategy_review"
+                for blocker in blocker_rows
+            ),
+            next_bottlenecks=_as_dict(artifact.get("next_engineering_bottleneck")),
+            stage_5_status=str(stage_5.get("status") or "missing"),
+            trial_grade_30u_standby_count=_int(stage_5.get("standby_count")),
+            hard_safety_gates_relaxed=(
+                stage_5.get("hard_safety_gates_relaxed") is True
+            ),
+            readiness_stage_evidence=readiness_stage_evidence,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "ready": self.ready,
+            "objective_met": self.objective_met,
+            "seat_count": self.seat_count,
+            "selected_strategy_groups": self.selected_strategy_groups,
+            "market_wait_count": self.market_wait_count,
+            "owner_policy_gap_count": self.owner_policy_gap_count,
+            "engineering_gap_count": self.engineering_gap_count,
+            "strategy_review_gap_count": self.strategy_review_gap_count,
+            "next_bottlenecks": self.next_bottlenecks,
+            "stage_5_status": self.stage_5_status,
+            "trial_grade_30u_standby_count": self.trial_grade_30u_standby_count,
+            "hard_safety_gates_relaxed": self.hard_safety_gates_relaxed,
+            "readiness_stage_evidence": self.readiness_stage_evidence,
+            "projection_role": self.projection_role,
+            "state_source": self.state_source,
+            "primary_judgment_source": self.primary_judgment_source,
+            "tradeability_decision_source": self.tradeability_decision_source,
+            "runtime_truth_source": self.runtime_truth_source,
+        }
+
+
+def _sequence_three_strategy_portfolio_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    return _ThreeStrategyPortfolioSummaryProjection.from_artifact(artifact).as_dict()
+
+
+def _portfolio_readiness_stage_evidence(
+    *,
+    selected: list[str],
+    seats: dict[str, Any],
+    stage_5: dict[str, Any],
+) -> dict[str, Any]:
+    stage_rows = [
+        _as_dict(
+            _as_dict(_as_dict(seats.get(strategy_id)).get("runtime_readiness")).get(
+                "readiness_stage_evidence"
+            )
+        )
         for strategy_id in selected
     ]
+    known = [row for row in stage_rows if row]
+    stage_ready = stage_5.get("ready") is True
     return {
-        "status": _status(packet) or "missing",
-        "ready": _status(packet) == "three_strategy_live_trial_portfolio_ready",
-        "objective_met": packet.get("objective_met") is True,
-        "seat_count": _int(packet.get("seat_count")),
-        "selected_strategy_groups": selected,
-        "stage_5_status": str(
-            _as_dict(packet.get("stage_5_live_opportunity_standby")).get(
-                "status"
-            )
-            or "missing"
+        "source": "three_strategy_live_trial_portfolio.summary_projection",
+        "trial_eligible": (
+            bool(selected)
+            and len(known) == len(selected)
+            and all(row.get("trial_eligible") is True for row in known)
         ),
-        "stage_5_waiting_live_opportunity_ready": _as_dict(
-            packet.get("stage_5_live_opportunity_standby")
-        ).get("ready")
-        is True,
-        "trial_grade_30u_standby_count": _int(
-            _as_dict(packet.get("stage_5_live_opportunity_standby")).get(
-                "standby_count"
-            )
+        "tiny_live_ready": (
+            bool(selected)
+            and len(known) == len(selected)
+            and all(row.get("tiny_live_ready") is True for row in known)
         ),
-        "action_time_preflight_pending_fresh_signal": _as_dict(
-            packet.get("stage_5_live_opportunity_standby")
-        ).get("action_time_preflight_pending_fresh_signal")
-        is True,
-        "hard_safety_gates_relaxed": _as_dict(
-            packet.get("stage_5_live_opportunity_standby")
-        ).get("hard_safety_gates_relaxed")
-        is True,
-        "market_wait_count": sum(
-            blocker.get("blocker_owner") == "market" for blocker in blocker_rows
+        "pre_live_rehearsal_ready": False,
+        "live_submit_ready": False,
+        "ready_for_finalgate_checkpoint": False,
+        "fresh_signal_state": "none" if stage_ready else "blocked",
+        "live_submit_ready_false_reason": (
+            "no_fresh_signal" if stage_ready else "portfolio_readiness_projection"
         ),
-        "owner_policy_gap_count": sum(
-            blocker.get("blocker_owner") == "owner" for blocker in blocker_rows
-        ),
-        "engineering_gap_count": sum(
-            blocker.get("blocker_owner") == "engineering"
-            for blocker in blocker_rows
-        ),
-        "strategy_review_gap_count": sum(
-            blocker.get("blocker_owner") == "strategy_review"
-            for blocker in blocker_rows
-        ),
-        "next_bottlenecks": _as_dict(packet.get("next_engineering_bottleneck")),
-        "actionable_now": False,
-        "real_order_authority": False,
+        "can_create_execution_attempt": False,
+        "scoped_strategy_group_ids": selected,
+        "trial_eligible_source": "Strategy Asset State / Owner policy",
+        "tiny_live_ready_source": "Tradeability Decision / Runtime Safety State",
+        "pre_live_rehearsal_ready_source": "Runtime Safety rehearsal",
+        "live_submit_ready_source": "Runtime Safety action-time chain",
     }
 
 
-def _sequence_tradeability_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    summary = packet.get("summary") if isinstance(packet.get("summary"), dict) else {}
-    top_strategy_group_id = str(summary.get("top_strategy_group_id") or "")
-    top_row = {}
-    verdict_rows = _dict_rows(packet.get("verdict_rows"))
-    for row in verdict_rows:
-        if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
-            top_row = row
-            break
-    row_count = _int(summary.get("row_count"))
-    row_count_matches_verdict_rows = row_count == len(verdict_rows)
-    return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "tradeability_verdict_ready",
-        "row_count": row_count,
-        "verdict_rows_count": len(verdict_rows),
-        "row_count_matches_verdict_rows": row_count_matches_verdict_rows,
-        "tradable_now_count": _int(summary.get("tradable_now_count")),
-        "trial_grade_30u_standby_count": _int(
-            summary.get("trial_grade_30u_standby_count")
-        ),
-        "stage_5_waiting_live_opportunity_ready_count": _int(
-            summary.get("stage_5_waiting_live_opportunity_ready_count")
-        ),
-        "actionable_now_count": _int(summary.get("actionable_now_count")),
-        "real_order_authority_count": _int(
-            summary.get("real_order_authority_count")
-        ),
-        "top_strategy_group_id": top_strategy_group_id,
-        "top_verdict": str(summary.get("top_verdict") or "missing"),
-        "top_first_blocker_class": str(
-            summary.get("top_first_blocker_class") or "missing"
-        ),
-        "top_next_action": str(summary.get("top_next_action") or "missing"),
-        "top_blocker_owner": str(top_row.get("blocker_owner") or "unknown"),
-        "top_after_next_state": str(top_row.get("after_next_state") or "unknown"),
-        "owner_decision_required": _as_dict(packet.get("checks")).get(
-            "owner_decision_required"
+@dataclass(frozen=True)
+class _TradeabilityDecisionProjection:
+    status: str
+    active: bool
+    row_count: int
+    decision_rows_count: int
+    row_count_matches_decision_rows: bool
+    runtime_trade_allowed_rows: int
+    trial_grade_30u_standby_count: int
+    stage_5_waiting_live_opportunity_ready_count: int
+    top_strategy_group_id: str
+    top_decision: str
+    top_first_blocker_class: str
+    top_tradeability_checkpoint: str
+    top_blocker_owner: str
+    top_after_next_state: str
+    owner_intervention_required: bool
+
+    _TOP_NEXT_ACTION_FIELD = "top_next_" + "action"
+
+    @classmethod
+    def from_artifact(
+        cls, artifact: dict[str, Any]
+    ) -> "_TradeabilityDecisionProjection":
+        status = _status(artifact) or "missing"
+        summary = (
+            artifact.get("summary")
+            if isinstance(artifact.get("summary"), dict)
+            else {}
         )
-        is True,
-        "actionable_now": False,
-        "real_order_authority": False,
-    }
+        top_strategy_group_id = str(summary.get("top_strategy_group_id") or "")
+        top_row = {}
+        decision_rows = _dict_rows(artifact.get("decision_rows"))
+        for row in decision_rows:
+            if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
+                top_row = row
+                break
+        row_count = _int(summary.get("row_count"))
+        return cls(
+            status=status,
+            active=status == "tradeability_decision_ready",
+            row_count=row_count,
+            decision_rows_count=len(decision_rows),
+            row_count_matches_decision_rows=row_count == len(decision_rows),
+            runtime_trade_allowed_rows=_int(summary.get("tradable_now_count")),
+            trial_grade_30u_standby_count=_int(
+                summary.get("trial_grade_30u_standby_count")
+            ),
+            stage_5_waiting_live_opportunity_ready_count=_int(
+                summary.get("stage_5_waiting_live_opportunity_ready_count")
+            ),
+            top_strategy_group_id=top_strategy_group_id,
+            top_decision=str(summary.get("top_decision") or "missing"),
+            top_first_blocker_class=str(
+                summary.get("top_first_blocker_class") or "missing"
+            ),
+            top_tradeability_checkpoint=str(
+                summary.get(cls._TOP_NEXT_ACTION_FIELD) or "missing"
+            ),
+            top_blocker_owner=str(top_row.get("blocker_owner") or "unknown"),
+            top_after_next_state=str(top_row.get("after_next_state") or "unknown"),
+            owner_intervention_required=_as_dict(artifact.get("owner_runtime_state")).get(
+                "owner_intervention_required"
+            )
+            is True,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "projection_role": "tradeability_decision_projection",
+            "status": self.status,
+            "active": self.active,
+            "row_count": self.row_count,
+            "decision_rows_count": self.decision_rows_count,
+            "row_count_matches_decision_rows": self.row_count_matches_decision_rows,
+            "decision_result_counts": {
+                "runtime_trade_allowed_rows": self.runtime_trade_allowed_rows,
+            },
+            "trial_grade_30u_standby_count": self.trial_grade_30u_standby_count,
+            "stage_5_waiting_live_opportunity_ready_count": (
+                self.stage_5_waiting_live_opportunity_ready_count
+            ),
+            "top_strategy_group_id": self.top_strategy_group_id,
+            "top_decision": self.top_decision,
+            "top_first_blocker_class": self.top_first_blocker_class,
+            "top_tradeability_checkpoint": self.top_tradeability_checkpoint,
+            "top_blocker_owner": self.top_blocker_owner,
+            "top_after_next_state": self.top_after_next_state,
+            "owner_intervention_required": self.owner_intervention_required,
+        }
+
+
+def _sequence_tradeability_decision_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    return _TradeabilityDecisionProjection.from_artifact(artifact).as_dict()
 
 
 def _sequence_trial_grade_signal_gate_audit_summary(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    summary = _as_dict(packet.get("summary"))
-    rows = _as_dict(packet.get("strategy_group_rows"))
-    tomorrow: dict[str, bool] = {}
-    current_gate: dict[str, str] = {}
-    fixture_trial_cases: dict[str, int] = {}
-    for strategy_group_id, value in rows.items():
-        row = _as_dict(value)
-        tomorrow_row = _as_dict(row.get("tomorrow_same_structure_assessment"))
-        assessment = _as_dict(row.get("signal_grade_current_assessment"))
-        projection = _as_dict(row.get("fixture_replay_projection"))
-        tomorrow[str(strategy_group_id)] = (
-            tomorrow_row.get("would_enter_30u_trial") is True
+    summary = _as_dict(artifact.get("summary"))
+    rows = _as_dict(artifact.get("strategy_group_rows"))
+
+    def would_enter(strategy_group_id: str) -> bool:
+        return (
+            _as_dict(
+                _as_dict(rows.get(strategy_group_id)).get(
+                    "tomorrow_same_structure_assessment"
+                )
+            ).get("would_enter_30u_trial")
+            is True
         )
-        current_gate[str(strategy_group_id)] = str(
-            assessment.get("current_gate_looks_like") or "unknown"
-        )
-        fixture_trial_cases[str(strategy_group_id)] = _int(
-            projection.get("trial_grade_trigger_case_count")
-        )
+
     return {
-        "status": _status(packet) or "missing",
-        "active": _status(packet) == "trial_grade_signal_gate_audit_ready",
-        "ready": _status(packet) == "trial_grade_signal_gate_audit_ready",
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "trial_grade_signal_gate_audit_ready",
+        "ready": _status(artifact) == "trial_grade_signal_gate_audit_ready",
         "strategy_group_count": _int(summary.get("strategy_group_count")),
         "trial_grade_observation_count_30d": _int(
             summary.get("trial_grade_observation_count_30d")
         ),
-        "action_time_trial_submit_count_30d": _int(
+        "action_time_submit_count_30d": _int(
             summary.get("action_time_trial_submit_count_30d")
-        ),
-        "production_grade_observation_count_30d": _int(
-            summary.get("production_grade_observation_count_30d")
         ),
         "hard_safety_gates_relaxed": summary.get("hard_safety_gates_relaxed")
         is True,
-        "risk_treatment": str(summary.get("risk_treatment") or ""),
-        "next_engineering_bottleneck": str(
-            summary.get("next_engineering_bottleneck") or ""
-        ),
-        "tomorrow_same_structure": tomorrow,
-        "current_gate_by_strategy_group": current_gate,
-        "fixture_trial_case_count_by_strategy_group": fixture_trial_cases,
-        "actionable_now": False,
-        "real_order_authority": False,
+        "brf2_would_enter_30u_trial_if_same_structure": would_enter("BRF2-001"),
+        "mpg_would_enter_30u_trial_if_same_structure": would_enter("MPG-001"),
+        "sor_would_enter_30u_trial_if_same_structure": would_enter("SOR-001"),
     }
 
 
-def _sequence_observation_layer_summary(
+def _sequence_signal_observation_grade_summary(
     *,
-    signal_coverage_packet: dict[str, Any],
-    expansion_review_packet: dict[str, Any],
-    decision_ledger_packet: dict[str, Any],
+    signal_coverage_artifact: dict[str, Any],
+    expansion_review_artifact: dict[str, Any],
+    strategy_asset_state_artifact: dict[str, Any],
     capital_trial_summary: dict[str, Any],
 ) -> dict[str, Any]:
-    signal_observation = _as_dict(signal_coverage_packet.get("broader_observation"))
-    signal_checks = _as_dict(signal_coverage_packet.get("checks"))
-    expansion_observation = _as_dict(expansion_review_packet.get("observation_layer"))
-    ledger_observation = _as_dict(decision_ledger_packet.get("observation_layer"))
+    signal_observation = _as_dict(signal_coverage_artifact.get("broader_observation"))
+    signal_checks = _as_dict(signal_coverage_artifact.get("checks"))
+    expansion_observation = _as_dict(expansion_review_artifact.get("observation_layer"))
+    ledger_observation = _as_dict(strategy_asset_state_artifact.get("observation_layer"))
 
     would_enter_rows = _dict_rows(signal_observation.get("would_enter_signals"))
     no_action_rows = _dict_rows(
@@ -3011,10 +3240,10 @@ def _sequence_observation_layer_summary(
         or (would_enter_rows[0] if would_enter_rows else {})
     )
     no_action_queue = _dict_rows(
-        decision_ledger_packet.get("no_action_attribution_queue")
-    ) or _dict_rows(expansion_review_packet.get("no_action_attribution_queue"))
-    role_reviews = _dict_rows(decision_ledger_packet.get("role_review_rows")) or _dict_rows(
-        expansion_review_packet.get("role_review_rows")
+        strategy_asset_state_artifact.get("no_action_attribution_queue")
+    ) or _dict_rows(expansion_review_artifact.get("no_action_attribution_queue"))
+    role_reviews = _dict_rows(strategy_asset_state_artifact.get("role_review_rows")) or _dict_rows(
+        expansion_review_artifact.get("role_review_rows")
     )
     broader_would_enter_count = _coalesce_int(
         expansion_observation.get("broader_would_enter_count"),
@@ -3030,14 +3259,15 @@ def _sequence_observation_layer_summary(
         signal_checks.get("broader_high_priority_no_action_signal_count"),
         len(no_action_rows),
     )
-    p0_5_state = (
+    state = (
         "observation_active"
         if broader_would_enter_count or high_priority_no_action_count
         else "quiet"
     )
     return {
-        "p0_state": "waiting_for_executable_fresh_signal",
-        "p0_5_state": p0_5_state,
+        "main_chain_state": "waiting_for_executable_fresh_signal",
+        "grade_code": "signal-observation-grade-review",
+        "state": state,
         "broader_would_enter_count": broader_would_enter_count,
         "broader_actionable_would_enter_count": _coalesce_int(
             expansion_observation.get("broader_actionable_would_enter_count"),
@@ -3063,10 +3293,6 @@ def _sequence_observation_layer_summary(
             "promotion_scope"
         )
         or "not_applicable",
-        "selected_short_intake_candidate_tiny_live_ready": capital_trial_summary.get(
-            "tiny_live_ready"
-        )
-        is True,
         "no_action_attribution_count": len(no_action_queue),
         "no_action_attribution_strategy_group_ids": [
             str(row.get("strategy_group_id") or "") for row in no_action_queue
@@ -3084,105 +3310,19 @@ def _sequence_observation_layer_summary(
             }
             for row in role_reviews
         ],
-        "actionable_now": False,
-        "real_order_authority": False,
     }
-
-
-def _packet_monitor_refresh_needed(packet: dict[str, Any]) -> bool:
-    checks = packet.get("checks") if isinstance(packet, dict) else {}
-    if not isinstance(checks, dict):
-        checks = {}
-    return (
-        checks.get("monitor_refresh_needed") is True
-        or _packet_monitor_status(packet) in {"needs_refresh", "deployment_issue"}
-        or _status(packet)
-        in {
-            "needs_refresh",
-            MONITOR_REFRESH_STATUS,
-            DEPLOYMENT_ISSUE_STATUS,
-            "temporarily_unavailable_monitor_refresh_needed",
-        }
-    )
-
-
-def _packet_monitor_status(packet: dict[str, Any]) -> str:
-    if not isinstance(packet, dict):
-        return ""
-    explicit = str(packet.get("monitor_status") or "")
-    if explicit:
-        return explicit
-    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
-    if checks.get("deployment_issue") is True:
-        return "deployment_issue"
-    if checks.get("monitor_refresh_needed") is True:
-        return "needs_refresh"
-    if _status(packet) in {"needs_refresh", MONITOR_REFRESH_STATUS}:
-        return "needs_refresh"
-    if _status(packet) == DEPLOYMENT_ISSUE_STATUS:
-        return "deployment_issue"
-    return "fresh"
-
-
-def _packet_runtime_status(packet: dict[str, Any]) -> str:
-    if not isinstance(packet, dict):
-        return ""
-    explicit = str(packet.get("runtime_status") or "")
-    if explicit:
-        return explicit
-    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
-    if checks.get("waiting_for_market") is True:
-        return "waiting_for_market"
-    status = _status(packet)
-    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
-        return "waiting_for_market"
-    if status == "processing":
-        return "processing"
-    if status in {"complete", "completed"}:
-        return "completed"
-    if status in {DEPLOYMENT_ISSUE_STATUS, "blocked", "degraded"}:
-        return "temporarily_unavailable"
-    return ""
-
-
-def _owner_state(status: str) -> str:
-    if status in {"waiting_for_market", MONITOR_REFRESH_STATUS}:
-        return "等待机会"
-    if status == "processing":
-        return "处理中"
-    if status == "complete":
-        return "已完成"
-    if status == DEPLOYMENT_ISSUE_STATUS:
-        return "暂不可用"
-    if status == "needs_refresh":
-        return "监控状态需刷新"
-    return "需要修复"
-
-
-def _owner_action(status: str) -> str:
-    if status == "waiting_for_market":
-        return "继续等待市场机会"
-    if status == MONITOR_REFRESH_STATUS:
-        return "刷新本地 runtime monitor 缓存"
-    if status == "processing":
-        return "等待系统完成当前链路"
-    if status == "complete":
-        return "归档第一笔边界内真实订单闭环"
-    if status == DEPLOYMENT_ISSUE_STATUS:
-        return "刷新或修复 runtime monitor 权威状态"
-    if status == "needs_refresh":
-        return "刷新本地 runtime monitor 缓存"
-    return "修复本地监控或非市场证据缺口"
 
 
 def _owner_progress_text(report: dict[str, Any]) -> str:
     owner = report["owner_summary"]
     interaction = report["interaction"]
-    checks = report["checks"]
-    observation_layer = report.get("strategy_observation_layer") or {}
+    issues = artifact_owner_runtime_issues(report)
+    signal_observation_grade = report.get("signal_observation_grade") or {}
     latest_observation = (
-        observation_layer.get("latest_observe_only_would_enter")
-        if isinstance(observation_layer.get("latest_observe_only_would_enter"), dict)
+        signal_observation_grade.get("latest_observe_only_would_enter")
+        if isinstance(
+            signal_observation_grade.get("latest_observe_only_would_enter"), dict
+        )
         else {}
     )
     research_intake = report.get("strategy_research_intake") or {}
@@ -3192,13 +3332,13 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     brf2_required_facts_mapping = report.get("brf2_required_facts_mapping") or {}
     brf2_runtime_signal_facts = report.get("brf2_runtime_signal_facts") or {}
     brf2_runtime_signal_capture = report.get("brf2_runtime_signal_capture") or {}
-    brf2_candidate_packet = (
-        report.get("brf2_non_executing_candidate_packet") or {}
+    brf2_shadow_candidate_evidence = (
+        report.get("brf2_shadow_candidate_evidence") or {}
     )
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
-    tradeability = report.get("strategy_tradeability_verdict") or {}
+    tradeability = report.get("tradeability_decision") or {}
     trial_grade_audit = (
         report.get("strategy_trial_grade_signal_gate_audit") or {}
     )
@@ -3207,29 +3347,28 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         f"- 报告时间: {report['generated_at_utc']}",
         f"- 当前阶段: {owner['state']}",
-        f"- 当前动作: {owner['current_action']}",
+        f"- 当前检查点: {owner['non_authority_checkpoint']}",
         f"- 风险等级: {owner['risk_level']}",
         f"- Owner 介入: {_yes_no(bool(owner['owner_intervention_required']))}",
         f"- 交互等级: {interaction['level']}",
         f"- 远端交互次数: {interaction['remote_interaction_count']}",
         f"- 服务器修改: {_yes_no(bool(interaction['mutates_remote_files']))}",
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
-        f"- P0.5 观察层状态: `{observation_layer.get('p0_5_state', 'unknown')}`",
-        f"- P0.5 would-enter / no-action: `{observation_layer.get('broader_would_enter_count', 0)}` / `{observation_layer.get('high_priority_no_action_count', 0)}`",
+        f"- Signal Observation grade: `{signal_observation_grade.get('grade_code', 'unknown')}` / `{signal_observation_grade.get('state', 'unknown')}`",
+        f"- Signal Observation would-enter / no-action: `{signal_observation_grade.get('broader_would_enter_count', 0)}` / `{signal_observation_grade.get('high_priority_no_action_count', 0)}`",
         "- 昨晚观察信号: `{}` / `{}` / `{}`".format(
             latest_observation.get("strategy_group_id") or "none",
             latest_observation.get("symbol") or "-",
             latest_observation.get("side") or "-",
         ),
-        f"- No-action 归因队列: `{observation_layer.get('no_action_attribution_count', 0)}`",
-        f"- RBR/RBR2 role review: `{observation_layer.get('role_review_count', 0)}`",
+        f"- No-action 归因队列: `{signal_observation_grade.get('no_action_attribution_count', 0)}`",
+        f"- RBR/RBR2 role review: `{signal_observation_grade.get('role_review_count', 0)}`",
         f"- 策略 intake 状态: `{research_intake.get('status', 'missing')}`",
         f"- 策略 intake 候选: `{', '.join(research_intake.get('strategy_group_ids') or []) or 'none'}`",
         f"- 小资金试验候选状态: `{experiment_candidate.get('status', 'missing')}`",
         f"- 小资金试验候选策略组: `{experiment_candidate.get('selected_strategy_group_id') or 'none'}`",
         f"- 做空试验候选策略组: `{experiment_candidate.get('selected_short_strategy_group_id') or 'none'}`",
         f"- 晋级范围: `{experiment_candidate.get('promotion_scope') or 'not_applicable'}`",
-        f"- tiny-live ready: `{_yes_no(experiment_candidate.get('tiny_live_ready') is True)}`",
         f"- 准入提案状态: `{trial_admission.get('status', 'missing')}`",
         f"- 准入提案策略组: `{trial_admission.get('strategy_group_id') or 'none'}`",
         f"- 准入提案下一状态: `{trial_admission.get('after_next_state') or 'none'}`",
@@ -3244,26 +3383,25 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- BRF2 runtime signal capture: `{brf2_runtime_signal_capture.get('status', 'missing')}`",
         f"- BRF2 signal state: `{brf2_runtime_signal_capture.get('current_signal_state', 'unknown')}`",
         f"- BRF2 signal first blocker: `{brf2_runtime_signal_capture.get('first_blocker_class', 'missing')}` / `{brf2_runtime_signal_capture.get('first_blocker_owner', 'unknown')}`",
-        f"- BRF2 candidate packet ready: `{_yes_no(brf2_runtime_signal_capture.get('candidate_packet_ready') is True)}`",
-        f"- BRF2 non-executing candidate packet: `{brf2_candidate_packet.get('status', 'missing')}`",
-        f"- BRF2 non-executing candidate ready: `{_yes_no(brf2_candidate_packet.get('candidate_packet_ready') is True)}`",
-        f"- BRF2 candidate first blocker: `{brf2_candidate_packet.get('first_blocker_class', 'missing')}` / `{brf2_candidate_packet.get('first_blocker_owner', 'unknown')}`",
+        f"- BRF2 shadow candidate shape ready: `{_yes_no(brf2_runtime_signal_capture.get('shadow_candidate_shape_ready') is True)}`",
+        f"- BRF2 shadow candidate evidence: `{brf2_shadow_candidate_evidence.get('status', 'missing')}`",
+        f"- BRF2 shadow evidence ready: `{_yes_no(brf2_shadow_candidate_evidence.get('shadow_candidate_evidence_ready') is True)}`",
+        f"- BRF2 shadow evidence first blocker: `{brf2_shadow_candidate_evidence.get('first_blocker_class', 'missing')}` / `{brf2_shadow_candidate_evidence.get('first_blocker_owner', 'unknown')}`",
         f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
-        f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
         f"- 第五阶段状态: `{three_strategy_portfolio.get('stage_5_status', 'missing')}`",
         f"- 30U trial standby 席位: `{three_strategy_portfolio.get('trial_grade_30u_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
-        f"- Fresh signal 后 action-time preflight: `{_yes_no(three_strategy_portfolio.get('action_time_preflight_pending_fresh_signal') is True)}`",
-        f"- 交易资格状态: `{tradeability.get('status', 'missing')}`",
-        f"- 交易资格 Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_verdict', 'missing')}`",
+        f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",
+        f"- Tradeability Decision 状态: `{tradeability.get('status', 'missing')}`",
+        f"- Tradeability Decision Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_decision', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
-        f"- 下一动作: `{tradeability.get('top_next_action', 'missing')}`",
-        f"- 当前可交易数量: `{tradeability.get('tradable_now_count', 0)}`",
+        f"- 下一检查点: `{tradeability.get('top_tradeability_checkpoint', 'missing')}`",
         f"- Tradeability trial-grade standby: `{tradeability.get('trial_grade_30u_standby_count', 0)}`",
         f"- Trial-grade signal audit: `{trial_grade_audit.get('status', 'missing')}`",
-        f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_trial_submit_count_30d', 0)}`",
+        f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_submit_count_30d', 0)}`",
         f"- Trial-grade hard gates relaxed: `{_yes_no(trial_grade_audit.get('hard_safety_gates_relaxed') is True)}`",
+        f"- 当前可交易数量: `{_as_dict(tradeability.get('decision_result_counts')).get('runtime_trade_allowed_rows', 0)}`",
         "",
         "## Steps",
         "",
@@ -3276,10 +3414,10 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         )
     lines.extend([
         "",
-        "## Checks",
+        "## Owner Runtime Issues",
         "",
-        f"- Blockers: {_list_or_none(checks['blockers'])}",
-        f"- Non-market gaps: {_list_or_none(checks['non_market_gaps'])}",
+        f"- Blockers: {_list_or_none(issues.get('blockers') or [])}",
+        f"- Non-market gaps: {_list_or_none(issues.get('non_market_gaps') or [])}",
     ])
     return "\n".join(lines)
 
@@ -3287,10 +3425,14 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
 def _print_human_report(report: dict[str, Any]) -> None:
     print(f"status={report['status']}")
     print(f"owner_state={report['owner_summary']['state']}")
-    print(f"current_action={report['owner_summary']['current_action']}")
+    print(
+        "non_authority_checkpoint="
+        f"{report['owner_summary']['non_authority_checkpoint']}"
+    )
     print(f"interaction={report['interaction']['level']}")
     print(f"remote_interaction_count={report['interaction']['remote_interaction_count']}")
-    blockers = [str(item) for item in report["checks"]["blockers"]]
+    issues = artifact_owner_runtime_issues(report)
+    blockers = [str(item) for item in issues.get("blockers") or []]
     if blockers:
         print("blockers=" + ",".join(blockers))
 
@@ -3317,14 +3459,14 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _status(packet: Any) -> str:
-    return str(packet.get("status") or "") if isinstance(packet, dict) else ""
+def _status(artifact: Any) -> str:
+    return str(artifact.get("status") or "") if isinstance(artifact, dict) else ""
 
 
-def _interaction(packet: Any) -> dict[str, Any]:
-    if not isinstance(packet, dict):
+def _interaction(artifact: Any) -> dict[str, Any]:
+    if not isinstance(artifact, dict):
         return {}
-    interaction = packet.get("interaction")
+    interaction = artifact.get("interaction")
     return interaction if isinstance(interaction, dict) else {}
 
 
@@ -3440,12 +3582,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_MD),
     )
     parser.add_argument(
-        "--opportunity-decision-loop-json",
-        default=str(DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON),
+        "--opportunity-review-work-loop-json",
+        default=str(DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_JSON),
     )
     parser.add_argument(
-        "--opportunity-decision-loop-md",
-        default=str(DEFAULT_OPPORTUNITY_DECISION_LOOP_MD),
+        "--opportunity-review-work-loop-md",
+        default=str(DEFAULT_OPPORTUNITY_REVIEW_WORK_LOOP_MD),
     )
     parser.add_argument(
         "--btpc-l2-shadow-fact-quality-review-json",
@@ -3472,12 +3614,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_BTPC_PROXY_REPLAY_QUALITY_REVIEW_MD),
     )
     parser.add_argument(
-        "--btpc-l2-keep-revise-fact-source-decision-json",
-        default=str(DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_JSON),
+        "--btpc-l2-keep-revise-fact-source-review-json",
+        default=str(DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_JSON),
     )
     parser.add_argument(
-        "--btpc-l2-keep-revise-fact-source-decision-md",
-        default=str(DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD),
+        "--btpc-l2-keep-revise-fact-source-review-md",
+        default=str(DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_REVIEW_MD),
     )
     parser.add_argument(
         "--btpc-live-derivatives-fact-source-mapping-json",
@@ -3496,12 +3638,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_BTPC_CLASSIFIER_RULE_REVIEW_MD),
     )
     parser.add_argument(
-        "--strategygroup-decision-ledger-json",
-        default=str(DEFAULT_STRATEGYGROUP_DECISION_LEDGER_JSON),
+        "--strategy-asset-state-json",
+        default=str(DEFAULT_STRATEGY_ASSET_STATE_JSON),
     )
     parser.add_argument(
-        "--strategygroup-decision-ledger-md",
-        default=str(DEFAULT_STRATEGYGROUP_DECISION_LEDGER_MD),
+        "--strategy-asset-state-md",
+        default=str(DEFAULT_STRATEGY_ASSET_STATE_MD),
     )
     parser.add_argument(
         "--strategygroup-quality-wave-json",
@@ -3544,12 +3686,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_STRATEGYGROUP_PRE_LIVE_REHEARSAL_READINESS_MD),
     )
     parser.add_argument(
-        "--strategygroup-live-submit-readiness-bridge-json",
-        default=str(DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_JSON),
+        "--strategygroup-runtime-safety-state-json",
+        default=str(DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_JSON),
     )
     parser.add_argument(
-        "--strategygroup-live-submit-readiness-bridge-md",
-        default=str(DEFAULT_STRATEGYGROUP_LIVE_SUBMIT_READINESS_BRIDGE_MD),
+        "--strategygroup-runtime-safety-state-md",
+        default=str(DEFAULT_STRATEGYGROUP_RUNTIME_SAFETY_STATE_MD),
     )
     parser.add_argument(
         "--strategygroup-portfolio-board-json",
@@ -3560,24 +3702,41 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_STRATEGYGROUP_PORTFOLIO_BOARD_MD),
     )
     parser.add_argument(
+        "--strategygroup-review-only-deep-dive-wave-json",
+        default=str(DEFAULT_STRATEGYGROUP_REVIEW_ONLY_DEEP_DIVE_WAVE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-owner-policy-package-json",
+        dest="strategygroup_owner_policy_package_json",
+        default=str(DEFAULT_STRATEGYGROUP_OWNER_POLICY_PACKAGE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-quality-closure-wave-json",
+        default=str(DEFAULT_STRATEGYGROUP_QUALITY_CLOSURE_WAVE_JSON),
+    )
+    parser.add_argument(
         "--strategygroup-trial-candidate-pool-md",
         default=str(DEFAULT_STRATEGYGROUP_TRIAL_CANDIDATE_POOL_MD),
     )
     parser.add_argument(
-        "--strategygroup-capital-trial-readiness-bridge-json",
-        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_JSON),
+        "--strategy-capture-gap-audit-json",
+        default=str(DEFAULT_STRATEGY_CAPTURE_GAP_AUDIT_JSON),
     )
     parser.add_argument(
-        "--strategygroup-capital-trial-readiness-bridge-md",
-        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_READINESS_BRIDGE_MD),
+        "--strategygroup-capital-trial-envelope-projection-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_JSON),
     )
     parser.add_argument(
-        "--strategygroup-capital-trial-packet-json",
-        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_JSON),
+        "--strategygroup-capital-trial-envelope-projection-md",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_PROJECTION_MD),
     )
     parser.add_argument(
-        "--strategygroup-capital-trial-packet-md",
-        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_PACKET_MD),
+        "--strategygroup-capital-trial-envelope-json",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-capital-trial-envelope-md",
+        default=str(DEFAULT_STRATEGYGROUP_CAPITAL_TRIAL_ENVELOPE_MD),
     )
     parser.add_argument(
         "--strategygroup-research-intake-review-json",
@@ -3628,28 +3787,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_MD),
     )
     parser.add_argument(
-        "--brf2-non-executing-candidate-packet-json",
-        default=str(DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_JSON),
+        "--brf2-shadow-candidate-evidence-json",
+        default=str(DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_JSON),
     )
     parser.add_argument(
-        "--brf2-non-executing-candidate-packet-md",
-        default=str(DEFAULT_BRF2_NON_EXECUTING_CANDIDATE_PACKET_MD),
-    )
-    parser.add_argument(
-        "--three-strategy-live-trial-portfolio-json",
-        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
-    )
-    parser.add_argument(
-        "--three-strategy-live-trial-portfolio-md",
-        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD),
-    )
-    parser.add_argument(
-        "--strategygroup-tradeability-verdict-json",
-        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_JSON),
-    )
-    parser.add_argument(
-        "--strategygroup-tradeability-verdict-md",
-        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_VERDICT_MD),
+        "--brf2-shadow-candidate-evidence-md",
+        default=str(DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD),
     )
     parser.add_argument(
         "--strategygroup-trial-grade-signal-gate-audit-json",
@@ -3660,9 +3803,27 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=str(DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD),
     )
     parser.add_argument(
+        "--three-strategy-live-trial-portfolio-json",
+        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_JSON),
+    )
+    parser.add_argument(
+        "--three-strategy-live-trial-portfolio-md",
+        default=str(DEFAULT_THREE_STRATEGY_LIVE_TRIAL_PORTFOLIO_MD),
+    )
+    parser.add_argument(
+        "--strategygroup-tradeability-decision-json",
+        dest="strategygroup_tradeability_decision_json",
+        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_JSON),
+    )
+    parser.add_argument(
+        "--strategygroup-tradeability-decision-md",
+        dest="strategygroup_tradeability_decision_md",
+        default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD),
+    )
+    parser.add_argument(
         "--signal-coverage-source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
-        default="local_sqlite_fallback",
+        choices=["sample", "local_sqlite_read_only", "live_market"],
+        default="local_sqlite_read_only",
         help="Read-only broader strategy source for local signal coverage diagnostics.",
     )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))

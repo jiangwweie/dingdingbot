@@ -32,6 +32,16 @@ def test_official_fresh_candidate_runtime_cycle_handoff_passes(tmp_path):
     assert report["post_submit_budget_settlement_id"].startswith(
         "runtime-post-submit-budget-settlement-"
     )
+    assert "operator_command_plan" not in report
+    assert report["fresh_candidate_runtime_cycle_handoff_plan"] == {
+        "next_step": "prove_repeatable_runtime_cycle_with_flat_next_attempt_gate",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "controlled_execution_mode": "in_memory_simulation",
+        "calls_live_exchange": False,
+        "next_attempt_requires_fresh_signal": True,
+        "next_attempt_requires_fresh_authorization": True,
+    }
 
     checks = report["checks"]
     assert checks["rtf090_prerequisite_passed"] is True
@@ -62,7 +72,7 @@ def test_official_fresh_candidate_runtime_cycle_handoff_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_fresh_candidate_runtime_cycle_handoff_outputs_packet(tmp_path):
+def test_official_fresh_candidate_runtime_cycle_handoff_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf091"
 
     report = script.build_proof_report(output_dir)
@@ -71,7 +81,7 @@ def test_official_fresh_candidate_runtime_cycle_handoff_outputs_packet(tmp_path)
         "contract-report.json",
         "rtf090-prerequisite-report.json",
         "rtf088-post-submit-finalize-report.json",
-        "fresh-candidate-runtime-cycle-packet.json",
+        "fresh-candidate-runtime-cycle-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -79,37 +89,37 @@ def test_official_fresh_candidate_runtime_cycle_handoff_outputs_packet(tmp_path)
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "fresh-candidate-runtime-cycle-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "fresh-candidate-runtime-cycle-artifact.json").read_text()
     )
-    assert packet["status"] == "fresh_candidate_cycle_handoff_completed"
-    assert packet["candidate_handoff"]["candidate_ids_match"] is True
-    assert packet["pre_submit_side"]["fresh_preflight_status"] == (
+    assert artifact["status"] == "fresh_candidate_cycle_handoff_completed"
+    assert artifact["candidate_handoff"]["candidate_ids_match"] is True
+    assert artifact["pre_submit_side"]["fresh_preflight_status"] == (
         "fresh_candidate_ready_for_controlled_submit_adapter"
     )
-    assert packet["pre_submit_side"]["final_gate_verdict"] == "PASS"
-    assert packet["pre_submit_side"]["controlled_submit_preflight_status"] == (
+    assert artifact["pre_submit_side"]["final_gate_verdict"] == "PASS"
+    assert artifact["pre_submit_side"]["controlled_submit_preflight_status"] == (
         "ready_for_controlled_submit_adapter"
     )
-    assert packet["controlled_action_side"][
+    assert artifact["controlled_action_side"][
         "exchange_submit_execution_result_status"
     ] == "exchange_submit_orders_submitted"
-    assert packet["controlled_action_side"]["execution_mode"] == (
+    assert artifact["controlled_action_side"]["execution_mode"] == (
         "in_memory_simulation"
     )
-    assert packet["post_submit_side"]["finalize_status"] == (
+    assert artifact["post_submit_side"]["finalize_status"] == (
         "finalized_next_attempt_blocked"
     )
-    assert packet["post_submit_side"]["next_attempt_gate_status"] == "blocked"
-    assert "runtime_active_position_slot_in_use" in packet["post_submit_side"][
+    assert artifact["post_submit_side"]["next_attempt_gate_status"] == "blocked"
+    assert "runtime_active_position_slot_in_use" in artifact["post_submit_side"][
         "next_attempt_gate_blockers"
     ]
-    assert packet["safety_invariants"][
+    assert artifact["safety_invariants"][
         "controlled_in_memory_execution_result_recorded"
     ] is True
-    assert packet["safety_invariants"]["live_exchange_called"] is False
-    assert packet["safety_invariants"]["pg_written"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["live_exchange_called"] is False
+    assert artifact["safety_invariants"]["pg_written"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_official_fresh_candidate_runtime_cycle_handoff_cli_stdout_is_json_only(

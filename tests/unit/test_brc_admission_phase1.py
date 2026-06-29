@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -18,8 +18,10 @@ from src.application.brc_admission_service import (
     PendingRiskCapitalAdapter,
 )
 from src.domain.brc_admission import (
+    AdmissionAuditEventType,
     AdmissionDecisionValue,
     AdmissionExecutionMode,
+    AdmissionRuleConfig,
     AdmissionTrialBindingStatus,
     RiskCapitalAdapterResult,
     TrialConstraintSnapshotStatus,
@@ -30,7 +32,7 @@ from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionReposit
 from src.infrastructure.pg_models import (
     PGBrcAdmissionAuditLogORM,
     PGBrcAdmissionDecisionORM,
-    PGBrcAdmissionEvidencePacketORM,
+    PGBrcAdmissionEvidenceORM,
     PGBrcAdmissionRequestORM,
     PGBrcAdmissionRuleConfigORM,
     PGBrcAdmissionTrialBindingORM,
@@ -47,7 +49,7 @@ ADMISSION_TABLES = [
     PGBrcStrategyFamilyORM.__table__,
     PGBrcStrategyFamilyVersionORM.__table__,
     PGBrcAdmissionRuleConfigORM.__table__,
-    PGBrcAdmissionEvidencePacketORM.__table__,
+    PGBrcAdmissionEvidenceORM.__table__,
     PGBrcOwnerMarketRegimeInputORM.__table__,
     PGBrcAdmissionRequestORM.__table__,
     PGBrcTrialConstraintSnapshotORM.__table__,
@@ -88,6 +90,7 @@ async def _seed_request(
     account_facts_snapshot_ref: str | None = "acct-facts-1",
     account_facts_snapshot_json: dict | None = None,
     requested_execution_mode: AdmissionExecutionMode | None = None,
+    admission_rule_config_id: str | None = None,
 ):
     family = await service.create_strategy_family(
         family_key="ema60-branches",
@@ -102,7 +105,7 @@ async def _seed_request(
         playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
         playbook_catalog_snapshot_json={"id": "PB-004-BRC-CONTROLLED-TESTNET"},
     )
-    evidence = await service.create_evidence_packet(
+    evidence = await service.create_admission_evidence(
         strategy_family_version_id=version.strategy_family_version_id,
         payload_json={"backtest": "available"},
         mandatory_complete=mandatory_complete,
@@ -113,11 +116,12 @@ async def _seed_request(
     )
     request = await service.create_admission_request(
         strategy_family_version_id=version.strategy_family_version_id,
-        evidence_packet_id=evidence.evidence_packet_id,
+        admission_evidence_id=evidence.admission_evidence_id,
         owner_market_regime_input_id=regime.owner_market_regime_input_id,
         trial_env=trial_env,
         trial_stage=trial_stage,
         requested_execution_mode=requested_execution_mode,
+        admission_rule_config_id=admission_rule_config_id,
         requested_risk_profile="micro",
         account_facts_snapshot_ref=account_facts_snapshot_ref,
         account_facts_snapshot_json=account_facts_snapshot_json
@@ -266,8 +270,28 @@ async def test_repository_create_get_list_and_version_pinning(admission_service)
     assert evidence.strategy_family_version_id == version.strategy_family_version_id
     assert regime.current_regime == "range"
     assert loaded_request.strategy_family_version_id == version.strategy_family_version_id
-    assert loaded_request.evidence_packet_id == evidence.evidence_packet_id
+    assert loaded_request.admission_evidence_id == evidence.admission_evidence_id
     assert loaded_request.owner_market_regime_input_id == regime.owner_market_regime_input_id
+
+
+@pytest.mark.asyncio
+async def test_admission_evidence_audit_uses_current_evidence_event(
+    admission_service,
+):
+    _, _, evidence, _, _ = await _seed_request(admission_service)
+
+    async with admission_service._repo._session_maker() as session:
+        result = await session.execute(
+            select(PGBrcAdmissionAuditLogORM).where(
+                PGBrcAdmissionAuditLogORM.ref_id == evidence.admission_evidence_id
+            )
+        )
+        audit_log = result.scalar_one()
+
+    assert audit_log.event_type == AdmissionAuditEventType.ADMISSION_EVIDENCE_CREATED
+    assert audit_log.message == "Admission evidence created."
+    assert "packet" not in audit_log.event_type
+    assert "packet" not in audit_log.message
 
 
 @pytest.mark.asyncio
@@ -377,13 +401,136 @@ async def test_testnet_development_validation_returns_installable_constraints(ad
     assert decision.trial_constraint_snapshot_id
     assert decision.constraints_snapshot_json["status"] == "installable"
     constraints = decision.constraints_snapshot_json["constraints_json"]
-    assert constraints["source"] == "fallback_policy"
+    assert constraints["source"] == "non_live_policy_defaults"
     assert constraints["trial_env"] == "testnet"
     assert constraints["trial_stage"] == "development_validation"
     assert constraints["allowed_symbols"] == ["ETH/USDT:USDT"]
     assert constraints["max_leverage"] == 1
+    assert any(
+        "non-live policy defaults are for non-live admission only"
+        in item
+        for item in constraints["limitations"]
+    )
+    assert decision.constraints_snapshot_json["risk_policy_snapshot_json"][
+        "source"
+    ] == "non_live_policy_defaults"
+    assert decision.constraints_snapshot_json["risk_policy_snapshot_json"][
+        "live_usable"
+    ] is False
+    assert decision.constraints_snapshot_json["adapter_result_json"][
+        "resolution"
+    ] == "installable_non_live_policy_defaults"
+    assert decision.constraints_snapshot_json["adapter_result_json"][
+        "live_usable"
+    ] is False
     assert any("mandatory evidence incomplete" in item for item in decision.warnings_json)
     assert decision.risk_disclosure_json["sizing_computed_by_admission"] is False
+
+
+@pytest.mark.asyncio
+async def test_non_live_policy_defaults_take_precedence_over_legacy_fallback_key(
+    admission_service,
+):
+    rule_config = await admission_service._repo.create_rule_config(
+        AdmissionRuleConfig(
+            admission_rule_config_id="rule-non-live-policy-defaults",
+            config_key="non_live_policy_defaults",
+            version=2,
+            status="active",
+            rule_details_json={
+                "non_live_policy_defaults": {
+                    "risk_policy_version": "non-live-defaults-v2",
+                    "max_loss_budget": "7",
+                    "max_notional": "31",
+                    "max_leverage": 2,
+                    "max_attempts": 3,
+                },
+                "non_live_fallback_policy": {
+                    "risk_policy_version": "legacy-fallback-should-not-win",
+                    "max_loss_budget": "99",
+                    "max_notional": "999",
+                    "max_leverage": 9,
+                    "max_attempts": 9,
+                },
+            },
+            created_at_ms=1,
+            created_by="test",
+        )
+    )
+    _, _, _, _, request = await _seed_request(
+        admission_service,
+        trial_env=TrialEnv.TESTNET,
+        trial_stage=TrialStage.DEVELOPMENT_VALIDATION,
+        mandatory_complete=False,
+        account_facts_snapshot_ref=None,
+        account_facts_snapshot_json={},
+        admission_rule_config_id=rule_config.admission_rule_config_id,
+    )
+
+    decision = await admission_service.evaluate(request.admission_request_id)
+
+    constraints = decision.constraints_snapshot_json["constraints_json"]
+    assert constraints["source"] == "non_live_policy_defaults"
+    assert constraints["max_loss_budget"] == "7"
+    assert constraints["max_notional"] == "31"
+    assert constraints["max_leverage"] == 2
+    assert constraints["max_attempts"] == 3
+    assert decision.constraints_snapshot_json["risk_policy_snapshot_json"] == {
+        "source": "non_live_policy_defaults",
+        "risk_policy_version": "non-live-defaults-v2",
+        "live_usable": False,
+    }
+    assert decision.constraints_snapshot_json["adapter_result_json"][
+        "resolution"
+    ] == "installable_non_live_policy_defaults"
+
+
+@pytest.mark.asyncio
+async def test_legacy_non_live_fallback_policy_no_longer_drives_admission_defaults(
+    admission_service,
+):
+    rule_config = await admission_service._repo.create_rule_config(
+        AdmissionRuleConfig(
+            admission_rule_config_id="rule-legacy-non-live-fallback-only",
+            config_key="legacy_non_live_fallback_only",
+            version=3,
+            status="active",
+            rule_details_json={
+                "non_live_fallback_policy": {
+                    "risk_policy_version": "legacy-fallback-should-not-apply",
+                    "max_loss_budget": "99",
+                    "max_notional": "999",
+                    "max_leverage": 9,
+                    "max_attempts": 9,
+                },
+            },
+            created_at_ms=1,
+            created_by="test",
+        )
+    )
+    _, _, _, _, request = await _seed_request(
+        admission_service,
+        trial_env=TrialEnv.TESTNET,
+        trial_stage=TrialStage.DEVELOPMENT_VALIDATION,
+        mandatory_complete=False,
+        account_facts_snapshot_ref=None,
+        account_facts_snapshot_json={},
+        admission_rule_config_id=rule_config.admission_rule_config_id,
+    )
+
+    decision = await admission_service.evaluate(request.admission_request_id)
+
+    constraints = decision.constraints_snapshot_json["constraints_json"]
+    assert constraints["source"] == "non_live_policy_defaults"
+    assert constraints["max_loss_budget"] == "5"
+    assert constraints["max_notional"] == "25"
+    assert constraints["max_leverage"] == 1
+    assert constraints["max_attempts"] == 1
+    assert decision.constraints_snapshot_json["risk_policy_snapshot_json"] == {
+        "source": "non_live_policy_defaults",
+        "risk_policy_version": "brc-admission-non-live-defaults-v1",
+        "live_usable": False,
+    }
 
 
 @pytest.mark.asyncio

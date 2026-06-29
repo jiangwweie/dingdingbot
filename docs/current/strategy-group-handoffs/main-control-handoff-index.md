@@ -30,14 +30,15 @@ Use the global authority split:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
 StrategyGroup handoffs and registry rows may support `trial_eligible`, tier
-review, and Owner policy decisions. They do not set `actionable_now=true` and
-must not turn the Owner into the manual operator of RequiredFacts, fresh signal,
-candidate/auth, FinalGate, Operation Layer, replay rows, or no-action rows.
+review, and Owner policy decisions. They do not grant runtime trade/order
+authority and must not turn the Owner into the manual operator of RequiredFacts,
+fresh signal, candidate/auth, FinalGate, Operation Layer, replay rows, or
+no-action rows.
 
 Runtime eligibility tiers are defined in:
 
@@ -105,6 +106,7 @@ order authority, FinalGate pass evidence, Operation Layer evidence, deploy
 authority, credential changes, live profile changes, or order-sizing defaults.
 
 High-priority no-action, would-enter, stale, missing-fact, and
-classifier-conflict observations from these handoffs should enter the minimal
-StrategyGroup Decision Ledger only when they influence keep, revise, promote,
-park, kill, go-live, do-not-go-live, or safety-block decisions.
+classifier-conflict observations from these handoffs should enter Strategy
+Asset State pre-live evidence only when they influence keep, revise, promote,
+park, kill, go-live, do-not-go-live, or safety-block decisions. The old
+Strategy Asset State path is compatibility/provenance only.

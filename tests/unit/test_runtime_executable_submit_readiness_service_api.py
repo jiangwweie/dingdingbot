@@ -12,7 +12,7 @@ from src.domain.runtime_executable_submit_readiness import (
 )
 from tests.unit.test_runtime_next_attempt_strategy_planning import (
     _Planner,
-    _ready_release_packet,
+    _ready_release_evidence,
     _runtime,
     _signal_input,
 )
@@ -48,7 +48,7 @@ def _evidence(**overrides):
     return RuntimeExecutableSubmitReadinessEvidence(**values)
 
 
-async def _ready_strategy_packet():
+async def _ready_strategy_artifact():
     planner = _Planner(
         planning_status=(
             RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
@@ -58,7 +58,7 @@ async def _ready_strategy_packet():
         strategy_signal_planner=planner,
     )
     return await service.plan_from_release_gate(
-        next_attempt_release_packet=_ready_release_packet(),
+        next_attempt_release_evidence=_ready_release_evidence(),
         signal_input=_signal_input(),
         runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
     )
@@ -66,11 +66,11 @@ async def _ready_strategy_packet():
 
 @pytest.mark.asyncio
 async def test_service_builds_ready_executable_submit_preview():
-    strategy_packet = await _ready_strategy_packet()
+    strategy_artifact = await _ready_strategy_artifact()
     service = RuntimeExecutableSubmitReadinessService()
 
-    packet = await service.preview_from_strategy_planning_packet(
-        strategy_planning_packet=strategy_packet,
+    packet = await service.preview_from_strategy_planning_artifact(
+        strategy_planning_artifact=strategy_artifact,
         evidence=_evidence(),
     )
 
@@ -78,19 +78,19 @@ async def test_service_builds_ready_executable_submit_preview():
         RuntimeExecutableSubmitReadinessStatus.READY_FOR_EXECUTABLE_SUBMIT
     )
     assert packet.executable_submit_ready is True
-    assert packet.order_candidate_id == strategy_packet.order_candidate_id
+    assert packet.order_candidate_id == strategy_artifact.order_candidate_id
     assert packet.order_lifecycle_called is False
     assert packet.exchange_called is False
 
 
 @pytest.mark.asyncio
 async def test_service_carries_strategy_planning_blockers():
-    strategy_packet = await _ready_strategy_packet()
-    strategy_packet.blockers.append("unit_blocker")
+    strategy_artifact = await _ready_strategy_artifact()
+    strategy_artifact.blockers.append("unit_blocker")
     service = RuntimeExecutableSubmitReadinessService()
 
-    packet = await service.preview_from_strategy_planning_packet(
-        strategy_planning_packet=strategy_packet,
+    packet = await service.preview_from_strategy_planning_artifact(
+        strategy_planning_artifact=strategy_artifact,
         evidence=_evidence(),
     )
 
@@ -105,11 +105,11 @@ async def test_trading_console_executable_submit_readiness_endpoint():
         runtime_executable_submit_readiness_preview,
     )
 
-    strategy_packet = await _ready_strategy_packet()
+    strategy_artifact = await _ready_strategy_artifact()
     response = await runtime_executable_submit_readiness_preview(
-        strategy_packet.runtime_instance_id,
+        strategy_artifact.runtime_instance_id,
         RuntimeExecutableSubmitReadinessPreviewRequest(
-            strategy_planning_packet=strategy_packet,
+            strategy_planning_artifact=strategy_artifact,
             evidence=_evidence(),
             additional_warnings=["unit_endpoint"],
         ),
@@ -130,15 +130,39 @@ async def test_trading_console_executable_submit_readiness_endpoint_blocks_runti
         runtime_executable_submit_readiness_preview,
     )
 
-    strategy_packet = await _ready_strategy_packet()
+    strategy_artifact = await _ready_strategy_artifact()
     with pytest.raises(HTTPException) as exc_info:
         await runtime_executable_submit_readiness_preview(
             "different-runtime",
             RuntimeExecutableSubmitReadinessPreviewRequest(
-                strategy_planning_packet=strategy_packet,
+                strategy_planning_artifact=strategy_artifact,
                 evidence=_evidence(),
             ),
         )
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "strategy_planning_packet_runtime_mismatch"
+    assert exc_info.value.detail == "strategy_planning_artifact_runtime_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_trading_console_executable_submit_readiness_endpoint_accepts_legacy_packet_alias():
+    from src.interfaces.api_trading_console import (
+        RuntimeExecutableSubmitReadinessPreviewRequest,
+        runtime_executable_submit_readiness_preview,
+    )
+
+    strategy_artifact = await _ready_strategy_artifact()
+    request = RuntimeExecutableSubmitReadinessPreviewRequest(
+        strategy_planning_artifact=strategy_artifact,
+        evidence=_evidence(),
+    )
+
+    response = await runtime_executable_submit_readiness_preview(
+        strategy_artifact.runtime_instance_id,
+        request,
+    )
+
+    assert response.status == (
+        RuntimeExecutableSubmitReadinessStatus.READY_FOR_EXECUTABLE_SUBMIT
+    )
+    assert response.source_strategy_planning_artifact_id == strategy_artifact.artifact_id

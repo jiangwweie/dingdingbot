@@ -27,9 +27,9 @@ from src.domain.runtime_execution_intent_local_order_binding import (
     RuntimeExecutionIntentLocalOrderBindingStatus,
     build_runtime_execution_intent_local_order_binding,
 )
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreviewStatus,
-    build_runtime_execution_exchange_submit_packet_preview,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreviewStatus,
+    build_runtime_execution_exchange_submit_preview,
 )
 from src.domain.runtime_execution_exchange_submit_enablement import (
     RuntimeExecutionExchangeSubmitGateStatus,
@@ -924,13 +924,13 @@ def _ready_exchange_submit_enablement_decision(preview):
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
     return build_runtime_execution_exchange_submit_enablement_decision(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -1921,7 +1921,7 @@ def test_intent_local_order_binding_blocks_failed_adapter_result():
     assert binding.exchange_called is False
 
 
-def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
+def test_exchange_submit_preview_maps_local_orders_without_submit():
     preview = _registration_preview()
     orders = build_runtime_execution_orders_for_registration(
         registration_preview=preview
@@ -1940,7 +1940,7 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
         now_ms=NOW_MS + 1,
     )
 
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
@@ -1948,7 +1948,7 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
 
     assert (
         packet.status
-        == RuntimeExecutionExchangeSubmitPacketPreviewStatus
+        == RuntimeExecutionExchangeSubmitPreviewStatus
         .READY_FOR_EXCHANGE_SUBMIT_ADAPTER_DESIGN
     )
     assert packet.blockers == []
@@ -1996,7 +1996,7 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
         adapter_result=short_adapter_result,
         now_ms=NOW_MS + 1,
     )
-    short_packet = build_runtime_execution_exchange_submit_packet_preview(
+    short_packet = build_runtime_execution_exchange_submit_preview(
         binding=short_binding,
         local_orders=short_orders,
         now_ms=NOW_MS + 2,
@@ -2017,7 +2017,7 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
     assert packet.not_exchange_submit_authority is True
 
 
-def test_exchange_submit_packet_preview_blocks_unresolved_or_submitted_orders():
+def test_exchange_submit_preview_blocks_unresolved_or_submitted_orders():
     preview = _registration_preview()
     orders = build_runtime_execution_orders_for_registration(
         registration_preview=preview
@@ -2037,20 +2037,20 @@ def test_exchange_submit_packet_preview_blocks_unresolved_or_submitted_orders():
         now_ms=NOW_MS + 1,
     )
 
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders[:1],
         now_ms=NOW_MS + 2,
     )
 
-    assert packet.status == RuntimeExecutionExchangeSubmitPacketPreviewStatus.BLOCKED
+    assert packet.status == RuntimeExecutionExchangeSubmitPreviewStatus.BLOCKED
     assert "local_order_ids_unresolved" in packet.blockers
     assert "local_order_status_not_created" in packet.blockers
     assert packet.exchange_called is False
     assert packet.order_lifecycle_submit_called is False
 
 
-def test_exchange_submit_packet_preview_preserves_source_symbol_without_local_orders():
+def test_exchange_submit_preview_preserves_source_symbol_without_local_orders():
     preview = _registration_preview()
     adapter_result = build_runtime_execution_order_lifecycle_adapter_result(
         registration_preview=preview,
@@ -2062,13 +2062,13 @@ def test_exchange_submit_packet_preview_preserves_source_symbol_without_local_or
         now_ms=NOW_MS + 1,
     )
 
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=[],
         now_ms=NOW_MS + 2,
     )
 
-    assert packet.status == RuntimeExecutionExchangeSubmitPacketPreviewStatus.BLOCKED
+    assert packet.status == RuntimeExecutionExchangeSubmitPreviewStatus.BLOCKED
     assert packet.symbol == preview.symbol
     assert "local_orders_not_registered" in packet.blockers
     assert "symbol_missing_from_local_orders" not in packet.blockers
@@ -2094,14 +2094,14 @@ def test_exchange_submit_enablement_blocks_missing_evidence_ids():
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
 
     decision = build_runtime_execution_exchange_submit_enablement_decision(
-        packet_preview=packet,
+        submit_preview=packet,
         now_ms=NOW_MS + 3,
     )
 
@@ -2135,14 +2135,14 @@ def test_exchange_submit_enablement_ready_is_still_not_submit_authority():
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
 
     decision = build_runtime_execution_exchange_submit_enablement_decision(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -2190,14 +2190,14 @@ def test_exchange_submit_action_authorization_is_scope_bound_evidence():
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
 
     authorization = build_runtime_execution_exchange_submit_action_authorization(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -2253,14 +2253,14 @@ def test_exchange_submit_action_authorization_blocks_without_owner_confirmation(
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
 
     authorization = build_runtime_execution_exchange_submit_action_authorization(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -2375,7 +2375,7 @@ async def test_service_returns_intent_local_order_binding_without_saving_intent(
 
 
 @pytest.mark.asyncio
-async def test_service_returns_exchange_submit_packet_preview_without_submit():
+async def test_service_returns_exchange_submit_preview_without_submit():
     preview = _registration_preview()
     lifecycle = _Lifecycle()
     adapter_result_repo = _AdapterResultRepo()
@@ -2394,11 +2394,11 @@ async def test_service_returns_exchange_submit_packet_preview_without_submit():
         local_registration_enablement_decision=decision,
     )
 
-    packet = await service.exchange_submit_packet_preview_for_authorization("auth-1")
+    packet = await service.exchange_submit_preview_for_authorization("auth-1")
 
     assert (
         packet.status
-        == RuntimeExecutionExchangeSubmitPacketPreviewStatus
+        == RuntimeExecutionExchangeSubmitPreviewStatus
         .READY_FOR_EXCHANGE_SUBMIT_ADAPTER_DESIGN
     )
     assert packet.entry_order_id == "runtime-order-draft-auth-1-entry"
@@ -3025,12 +3025,12 @@ async def test_service_duplicate_submit_replay_proof_blocks_existing_execution_r
             deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
         )
     )
-    packet_preview = await service.exchange_submit_packet_preview_for_authorization(
+    submit_preview = await service.exchange_submit_preview_for_authorization(
         "auth-1"
     )
     execution_result_repo.stored = build_runtime_exchange_submit_execution_lock_result(
         enablement_decision=exchange_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         now_ms=NOW_MS + 4,
         execution_mode="in_memory_simulation",
     )
@@ -3099,12 +3099,12 @@ async def test_service_duplicate_submit_replay_proof_allows_retryable_entry_fail
             deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
         )
     )
-    packet_preview = await service.exchange_submit_packet_preview_for_authorization(
+    submit_preview = await service.exchange_submit_preview_for_authorization(
         "auth-1"
     )
     execution_result_repo.stored = build_runtime_exchange_submit_execution_failed_result(
         enablement_decision=exchange_decision,
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         submitted_orders=[],
         failed_local_order_id="runtime-order-draft-auth-1-entry",
         failed_order_role="ENTRY",
@@ -4411,13 +4411,13 @@ async def test_pg_exchange_submit_execution_repository_replays_by_authorization(
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
     decision = build_runtime_execution_exchange_submit_enablement_decision(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -4433,7 +4433,7 @@ async def test_pg_exchange_submit_execution_repository_replays_by_authorization(
     )
     lock_result = build_runtime_exchange_submit_execution_lock_result(
         enablement_decision=decision,
-        packet_preview=packet,
+        submit_preview=packet,
         now_ms=NOW_MS + 4,
         execution_mode="in_memory_simulation",
     )
@@ -4486,7 +4486,7 @@ async def test_pg_exchange_submit_execution_repository_replays_by_authorization(
     )
     final_result = build_runtime_exchange_submit_execution_submitted_result(
         enablement_decision=decision,
-        packet_preview=packet,
+        submit_preview=packet,
         submitted_orders=[entry_submit, protection_submit],
         exchange_call_count=2,
         now_ms=NOW_MS + 5,
@@ -4590,13 +4590,13 @@ async def test_pg_exchange_submit_action_authorization_repository_round_trips():
         adapter_result=adapter_result,
         now_ms=NOW_MS + 1,
     )
-    packet = build_runtime_execution_exchange_submit_packet_preview(
+    packet = build_runtime_execution_exchange_submit_preview(
         binding=binding,
         local_orders=orders,
         now_ms=NOW_MS + 2,
     )
     authorization = build_runtime_execution_exchange_submit_action_authorization(
-        packet_preview=packet,
+        submit_preview=packet,
         trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
         submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
@@ -4895,7 +4895,7 @@ async def test_exchange_submit_execution_result_migration_creates_replay_table()
                     INSERT INTO runtime_execution_exchange_submit_execution_results (
                         execution_result_id,
                         enablement_decision_id,
-                        packet_preview_id,
+                        submit_preview_id,
                         binding_id,
                         authorization_id,
                         execution_intent_id,
@@ -5229,7 +5229,7 @@ async def test_exchange_submit_adapter_result_migration_creates_lock_table():
                         adapter_result_id,
                         enablement_decision_id,
                         gate_id,
-                        packet_preview_id,
+                        submit_preview_id,
                         binding_id,
                         local_registration_adapter_result_id,
                         authorization_id,
@@ -5482,7 +5482,7 @@ async def test_exchange_submit_action_authorization_migration_creates_evidence_t
                         order_lifecycle_submit_enablement_id,
                         exchange_submit_adapter_enablement_id,
                         deployment_readiness_evidence_id,
-                        packet_preview_id,
+                        submit_preview_id,
                         binding_id,
                         local_registration_adapter_result_id,
                         entry_order_id,
@@ -5526,7 +5526,7 @@ async def test_exchange_submit_action_authorization_migration_creates_evidence_t
                         'order-lifecycle-submit-enable-1',
                         'exchange-submit-adapter-enable-1',
                         NULL,
-                        'packet-preview-auth-1',
+                        'submit-preview-auth-1',
                         'binding-auth-1',
                         'local-registration-result-auth-1',
                         'runtime-order-draft-auth-1-entry',

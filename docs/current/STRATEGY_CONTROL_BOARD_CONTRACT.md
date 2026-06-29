@@ -18,7 +18,7 @@ The board must express this authority split in product language:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
@@ -36,14 +36,16 @@ The board may combine:
 | --- | --- |
 | StrategyGroup Registry | Explain what the strategy is, what it eats, and what risk gap matters |
 | Runtime state | Decide whether the strategy is running, waiting, processing, unavailable, or needs intervention |
-| Decision Ledger | Summarize keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block state |
-| Tradeability Verdict | Summarize whether a strategy can trade now, and if not, the first Owner-relevant blocker |
+| Strategy Asset State evidence | Summarize keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block state |
+| Tradeability Decision | Summarize whether a strategy can trade now, and if not, the first Owner-relevant blocker |
+| Runtime Safety State | Summarize whether the official live-submit path is currently safe enough to proceed |
 | Review Ledger | Summarize live outcome review after real action |
 
 The board must not manually compute live order authority from documents. It
-must consume runtime state for `actionable_now`.
+must consume Tradeability Decision for can-trade and Runtime Safety State for
+live-submit safety.
 
-The board may consume the Tradeability Verdict to avoid misleading compression.
+The board may consume the Tradeability Decision to avoid misleading compression.
 For example, a promising short candidate that is not yet a final-owned trial
 asset should show as pending admission or policy, not simply as waiting for
 market. The board must still hide internal gate names from the primary Owner
@@ -67,8 +69,9 @@ surface.
 
 ## Strategy Learning Surface
 
-The main control board may summarize StrategyGroup Decision Ledger state,
-but it must not become a raw diagnostic table.
+The main control board may summarize Strategy Asset State and any remaining
+Strategy Asset State evidence, but it must not become a raw diagnostic
+table.
 
 | Internal source | Main Owner meaning |
 | --- | --- |
@@ -99,10 +102,10 @@ Backend/internal English values map to Owner-facing Chinese labels:
 | `pending` | `待复盘` |
 | `keep_observing` | `待复盘` |
 
-Backend/internal English values are not primary Owner UI labels. The Owner
+Backend/internal English values are not primary Owner labels. The Owner
 surface displays the Chinese vocabulary defined above.
 
-## Main UI Language
+## Main Owner Language
 
 Main Owner screens should use only small, plain product vocabulary:
 
@@ -124,7 +127,7 @@ Main Owner screens should use only small, plain product vocabulary:
 
 Internal gate names such as `FinalGate`, `Operation Layer`, `RequiredFacts`,
 `candidate`, `authorization`, `preflight`, `proof`, `route`, `refId`, and
-`blocker code` are not allowed as primary Owner table columns, cards, or
+`blocker code` are not allowed as primary Owner table columns, policy_items, or
 actions. They belong in details, audit, or developer drawers.
 
 ## Internal Lifecycle Mapping

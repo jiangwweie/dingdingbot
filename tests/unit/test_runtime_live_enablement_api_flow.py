@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from scripts.runtime_live_enablement_api_flow import (
     APPLY_CONFIRMATION_PHRASE,
-    build_runtime_live_enablement_api_packet,
+    build_runtime_live_enablement_api_flow_artifact,
     _clean_query,
 )
 
@@ -68,17 +68,17 @@ def test_live_enablement_api_flow_inspects_ready_preview_without_mutation():
         preview_status="ready_for_live_runtime_enablement_mutation_design",
     )
 
-    packet = build_runtime_live_enablement_api_packet(
+    artifact = build_runtime_live_enablement_api_flow_artifact(
         client=client,
         runtime_instance_id="runtime-1",
         query={"current_head_deployed": True},
     )
 
-    assert packet["status"] == "ready_for_live_runtime_enablement_mutation_review"
-    assert packet["checks"]["preview_ready"] is True
-    assert packet["checks"]["mutation_applied"] is False
-    assert packet["safety_invariants"]["runtime_state_mutated"] is False
-    assert packet["safety_invariants"]["order_created"] is False
+    assert artifact["status"] == "ready_for_live_runtime_enablement_mutation_review"
+    assert artifact["checks"]["preview_ready"] is True
+    assert artifact["checks"]["mutation_applied"] is False
+    assert artifact["safety_invariants"]["runtime_state_mutated"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
     assert [call["method"] for call in client.calls] == ["GET", "GET"]
 
 
@@ -87,7 +87,7 @@ def test_live_enablement_api_flow_blocks_apply_without_confirmation_phrase():
         preview_status="ready_for_live_runtime_enablement_mutation_design",
     )
 
-    packet = build_runtime_live_enablement_api_packet(
+    artifact = build_runtime_live_enablement_api_flow_artifact(
         client=client,
         runtime_instance_id="runtime-1",
         query={},
@@ -97,11 +97,11 @@ def test_live_enablement_api_flow_blocks_apply_without_confirmation_phrase():
         owner_real_submit_authorization_id="owner-submit-1",
     )
 
-    assert packet["status"] == "blocked_before_live_runtime_enablement_mutation"
+    assert artifact["status"] == "blocked_before_live_runtime_enablement_mutation"
     assert "apply_confirmation_phrase_missing_or_invalid" in (
-        packet["checks"]["blockers"]
+        artifact["checks"]["blockers"]
     )
-    assert packet["checks"]["mutation_applied"] is False
+    assert artifact["checks"]["mutation_applied"] is False
     assert [call["method"] for call in client.calls] == ["GET", "GET"]
 
 
@@ -110,7 +110,7 @@ def test_live_enablement_api_flow_applies_mutation_only_after_ready_confirmation
         preview_status="ready_for_live_runtime_enablement_mutation_design",
     )
 
-    packet = build_runtime_live_enablement_api_packet(
+    artifact = build_runtime_live_enablement_api_flow_artifact(
         client=client,
         runtime_instance_id="runtime-1",
         query={},
@@ -120,11 +120,11 @@ def test_live_enablement_api_flow_applies_mutation_only_after_ready_confirmation
         owner_real_submit_authorization_id="owner-submit-1",
     )
 
-    assert packet["status"] == "live_runtime_enablement_mutation_applied"
-    assert packet["checks"]["mutation_applied"] is True
-    assert packet["safety_invariants"]["runtime_state_mutated"] is True
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["exchange_called"] is False
+    assert artifact["status"] == "live_runtime_enablement_mutation_applied"
+    assert artifact["checks"]["mutation_applied"] is True
+    assert artifact["safety_invariants"]["runtime_state_mutated"] is True
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["exchange_called"] is False
     assert [call["method"] for call in client.calls] == ["GET", "GET", "POST"]
     mutation_body = client.calls[-1]["body"]
     assert mutation_body["owner_live_runtime_enablement_authorization_id"] == (
@@ -139,7 +139,7 @@ def test_live_enablement_api_flow_keeps_blocked_preview_non_mutating():
         preview_blockers=["current_head_not_deployed_to_tokyo"],
     )
 
-    packet = build_runtime_live_enablement_api_packet(
+    artifact = build_runtime_live_enablement_api_flow_artifact(
         client=client,
         runtime_instance_id="runtime-1",
         query={},
@@ -149,11 +149,11 @@ def test_live_enablement_api_flow_keeps_blocked_preview_non_mutating():
         owner_real_submit_authorization_id="owner-submit-1",
     )
 
-    assert packet["status"] == "blocked_before_live_runtime_enablement_mutation"
+    assert artifact["status"] == "blocked_before_live_runtime_enablement_mutation"
     assert "preview_current_head_not_deployed_to_tokyo" in (
-        packet["checks"]["blockers"]
+        artifact["checks"]["blockers"]
     )
-    assert "preview_not_ready_for_apply" in packet["checks"]["blockers"]
+    assert "preview_not_ready_for_apply" in artifact["checks"]["blockers"]
     assert [call["method"] for call in client.calls] == ["GET", "GET"]
 
 

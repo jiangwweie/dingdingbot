@@ -25,7 +25,7 @@ architecture window
 -> Goal Packet
 -> main runtime window execution
 -> Evidence Packet
--> architecture verdict
+-> architecture outcome
 ```
 
 | Role | Responsibility |
@@ -33,7 +33,7 @@ architecture window
 | Architecture window | Define direction, scope, boundary, acceptance, and no-go rules |
 | Main runtime window | Execute one bounded Goal Packet to checkpoint |
 | Evidence Packet | Report facts, changed files, generated artifacts, tests, deploy state, and blockers |
-| Architecture verdict | Accept, revise, park, split, or escalate the next stage |
+| Architecture outcome | Accept, revise, park, split, or escalate the next stage |
 
 ## Goal Packet Required Shape
 
@@ -50,7 +50,7 @@ A Goal Packet must include:
 | `Scope` | Included work and explicit non-goals |
 | `Allowed files` | Files or directories the worker may touch |
 | `Forbidden files` | Files or directories the worker must not touch |
-| `Required inputs` | Current docs, generated packets, or code sources to read first |
+| `Required inputs` | Current docs, generated artifacts or evidence, or code sources to read first |
 | `Implementation requirements` | Behavioral requirements and integration rules |
 | `Global authority model` | Owner-policy versus system-process rules the worker must preserve |
 | `Rehearsal / simulation boundary` | Which branches can be closed without live signal and which remain live-only |
@@ -145,8 +145,8 @@ closed by dry-run/simulation and which remain live-calibration only.
 ## Required Authority Model Text
 
 Every Goal Packet that touches StrategyGroup governance, runtime readiness,
-Owner-facing state, Decision Ledger, tier review, or execution flow must include
-this section:
+Owner-facing state, Strategy Asset State evidence
+compatibility paths, tier review, or execution flow must include this section:
 
 ```text
 Global Authority Model:
@@ -159,8 +159,8 @@ observation -> RequiredFacts mapping -> fresh signal detection -> candidate/auth
 -> FinalGate -> Operation Layer -> protection -> reconciliation -> review.
 
 Owner scoped risk acceptance may advance trial eligibility or tier eligibility.
-It must not set actionable_now=true and must not bypass execution safety or
-authority hard stops.
+It must not grant runtime trade/order authority and must not bypass execution
+safety or authority hard stops.
 
 Do not convert StrategyGroup governance into Owner manual operation.
 Do not ask Owner to manually judge RequiredFacts, fresh signal, candidate/auth,
@@ -178,7 +178,7 @@ promote/downshift/park/kill, production transition, or abnormal intervention.
 | Work type | Accepted when |
 | --- | --- |
 | `P0 live-path work` | It advances fresh-signal closure, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, reconciliation, settlement, or review |
-| `P0.5 strategy-learning work` | It changes the StrategyGroup Decision Ledger, replay-to-review bridge, no-action attribution, or monitor sequence |
+| `Signal Observation grade strategy-learning work` | It changes Strategy Asset State pre-live evidence, replay-to-review evidence, no-action attribution, or monitor sequence |
 | `P1 governance work` | It clarifies tier movement, StrategyGroup registry state, Owner policy, or promotion/downshift/park/kill decisions |
 | `docs work` | It changes a real decision, source authority, task boundary, or Owner interpretation burden |
 

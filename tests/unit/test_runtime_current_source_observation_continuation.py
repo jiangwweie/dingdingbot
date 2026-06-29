@@ -12,28 +12,32 @@ def test_continuation_waits_without_running_pipeline(tmp_path):
 
     def loop_builder(args):
         calls["loop"] += 1
-        return _loop_packet("waiting_for_signal")
+        return _fresh_loop_artifact("waiting_for_signal")
 
     def pipeline_builder(args):
         calls["pipeline"] += 1
         raise AssertionError("pipeline must not run while waiting for signal")
 
-    packet = script._build_packet(
+    artifact = script._build_continuation_artifact(
         _args(tmp_path),
         fresh_loop_builder=loop_builder,
         current_pipeline_builder=pipeline_builder,
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "waiting_for_signal"
+    assert "operator_command_plan" not in artifact
+    assert artifact["current_source_continuation_plan"]["next_step"] == (
         "continue_observation_until_genuine_would_enter"
     )
     assert calls == {"loop": 1, "pipeline": 0}
-    assert packet["current_source_pipeline"] is None
-    assert packet["safety_invariants"]["uses_historical_rtf015_sample_handoff"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["current_source_pipeline"] is None
+    assert "fresh_loop_packet" not in artifact
+    assert "current_pipeline_packet" not in artifact
+    assert not hasattr(script, "_build_packet")
+    assert artifact["safety_invariants"]["uses_historical_rtf015_sample_handoff"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_continuation_requires_evidence_before_current_source_pipeline(tmp_path):
@@ -43,18 +47,21 @@ def test_continuation_requires_evidence_before_current_source_pipeline(tmp_path)
         calls["pipeline"] += 1
         raise AssertionError("pipeline must not run without readiness evidence")
 
-    packet = script._build_packet(
+    artifact = script._build_continuation_artifact(
         _args(tmp_path),
-        fresh_loop_builder=lambda args: _loop_packet("ready_for_final_gate_preflight"),
+        fresh_loop_builder=lambda args: _fresh_loop_artifact(
+            "ready_for_final_gate_preflight"
+        ),
         current_pipeline_builder=pipeline_builder,
     )
 
-    assert packet["status"] == "ready_for_current_source_pipeline_evidence"
-    assert packet["signal_input_json"] == "/tmp/ready-signal.json"
-    assert packet["operator_command_plan"]["requires_readiness_evidence"] is True
+    assert artifact["status"] == "ready_for_current_source_pipeline_evidence"
+    assert artifact["signal_input_json"] == "/tmp/ready-signal.json"
+    assert "operator_command_plan" not in artifact
+    assert artifact["current_source_continuation_plan"]["requires_readiness_evidence"] is True
     assert calls["pipeline"] == 0
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["runtime_budget_mutated"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["runtime_budget_mutated"] is False
 
 
 def test_continuation_runs_current_source_pipeline_after_evidence(tmp_path):
@@ -63,34 +70,39 @@ def test_continuation_runs_current_source_pipeline_after_evidence(tmp_path):
     def pipeline_builder(args):
         seen["signal_input_json"] = args.signal_input_json
         seen["readiness_evidence_json"] = args.readiness_evidence_json
-        return _pipeline_ready_packet()
+        return _current_pipeline_ready_artifact()
 
-    packet = script._build_packet(
+    artifact = script._build_continuation_artifact(
         _args(tmp_path, readiness_evidence_json="/tmp/evidence.json"),
-        fresh_loop_builder=lambda args: _loop_packet("ready_for_final_gate_preflight"),
+        fresh_loop_builder=lambda args: _fresh_loop_artifact(
+            "ready_for_final_gate_preflight"
+        ),
         current_pipeline_builder=pipeline_builder,
     )
 
-    assert packet["status"] == "ready_current_persisted_source_disabled_smoke"
+    assert artifact["status"] == "ready_current_persisted_source_disabled_smoke"
     assert seen == {
         "signal_input_json": "/tmp/ready-signal.json",
         "readiness_evidence_json": "/tmp/evidence.json",
     }
-    assert packet["operator_command_plan"]["requires_real_submit_gate"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
-    assert packet["safety_invariants"]["submit_authorization_created"] is True
-    assert packet["safety_invariants"]["calls_official_submit_endpoint"] is True
-    assert packet["safety_invariants"]["exchange_submit_execution_enabled"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["current_source_continuation_plan"]["requires_real_submit_gate"] is True
+    assert artifact["current_source_continuation_plan"]["places_order"] is False
+    assert artifact["current_source_continuation_plan"]["calls_order_lifecycle"] is False
+    assert artifact["safety_invariants"]["submit_authorization_created"] is True
+    assert artifact["safety_invariants"]["calls_official_submit_endpoint"] is True
+    assert artifact["safety_invariants"]["exchange_submit_execution_enabled"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_continuation_propagates_current_source_blocker(tmp_path):
-    packet = script._build_packet(
+    artifact = script._build_continuation_artifact(
         _args(tmp_path, auto_readiness_evidence=True),
-        fresh_loop_builder=lambda args: _loop_packet("ready_for_final_gate_preflight"),
+        fresh_loop_builder=lambda args: _fresh_loop_artifact(
+            "ready_for_final_gate_preflight"
+        ),
         current_pipeline_builder=lambda args: {
             "status": "blocked_at_strategy_signal_intent_draft_source",
             "blocked_stage": "strategy_signal_intent_draft_source",
@@ -104,12 +116,12 @@ def test_continuation_propagates_current_source_blocker(tmp_path):
         },
     )
 
-    assert packet["status"] == "blocked_at_strategy_signal_intent_draft_source"
-    assert packet["blocked_stage"] == "strategy_signal_intent_draft_source"
+    assert artifact["status"] == "blocked_at_strategy_signal_intent_draft_source"
+    assert artifact["blocked_stage"] == "strategy_signal_intent_draft_source"
     assert "current_source_pipeline:intent_draft_source:strategy_signal_not_would_enter" in (
-        packet["blockers"]
+        artifact["blockers"]
     )
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_continuation_cli_stdout_is_json_only(monkeypatch, capsys):
@@ -117,7 +129,7 @@ def test_continuation_cli_stdout_is_json_only(monkeypatch, capsys):
         print("inner noisy continuation")
         return {"status": "waiting_for_signal", "ok": True}
 
-    monkeypatch.setattr(script, "_build_packet", fake_build)
+    monkeypatch.setattr(script, "_build_continuation_artifact", fake_build)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -145,7 +157,7 @@ def test_continuation_cli_writes_output_json(monkeypatch, capsys, tmp_path):
             "runtime_instance_id": args.runtime_instance_id,
         }
 
-    monkeypatch.setattr(script, "_build_packet", fake_build)
+    monkeypatch.setattr(script, "_build_continuation_artifact", fake_build)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -166,7 +178,7 @@ def test_continuation_cli_writes_output_json(monkeypatch, capsys, tmp_path):
     assert file_payload["status"] == "ready_for_current_source_pipeline_evidence"
 
 
-def _loop_packet(status):
+def _fresh_loop_artifact(status):
     return {
         "status": status,
         "blockers": []
@@ -189,7 +201,7 @@ def _loop_packet(status):
     }
 
 
-def _pipeline_ready_packet():
+def _current_pipeline_ready_artifact():
     return {
         "status": "ready_current_persisted_source_disabled_smoke",
         "blocked_stage": None,

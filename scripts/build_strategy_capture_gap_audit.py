@@ -128,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-md", default="output/runtime-monitor/strategy-capture-gap-audit-20260622.md")
     args = parser.parse_args(argv)
 
-    packet = build_audit_packet(
+    report = build_audit_report(
         lookback_hours=args.lookback_hours,
         step_hours=args.step_hours,
     )
@@ -136,13 +136,13 @@ def main(argv: list[str] | None = None) -> int:
     output_md = Path(args.output_md)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
-    output_json.write_text(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    output_md.write_text(_markdown(packet, output_json=output_json, output_md=output_md), encoding="utf-8")
-    print(json.dumps({"status": packet["status"], "wrote": [str(output_json), str(output_md)]}, ensure_ascii=False))
+    output_json.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_md.write_text(_markdown(report, output_json=output_json, output_md=output_md), encoding="utf-8")
+    print(json.dumps({"status": report["status"], "wrote": [str(output_json), str(output_md)]}, ensure_ascii=False))
     return 0
 
 
-def build_audit_packet(*, lookback_hours: int, step_hours: int) -> dict[str, Any]:
+def build_audit_report(*, lookback_hours: int, step_hours: int) -> dict[str, Any]:
     server_time = _get_json("/fapi/v1/time")["serverTime"]
     candles = _load_market_candles()
     latest_open = min(rows["1h"][-1].open_time_ms for rows in candles.values())
@@ -174,13 +174,13 @@ def build_audit_packet(*, lookback_hours: int, step_hours: int) -> dict[str, Any
     market_rows = [_market_structure(symbol, candles[symbol]["1h"]) for symbol in DEFAULT_SYMBOLS]
     derivative_rows = _derivative_rows()
     by_strategy = _strategy_rows(events, would_enter_events, high_priority_no_action)
-    decisions = _decision_rows(by_strategy)
+    observation_recommendations = _observation_recommendation_rows(by_strategy)
     latest_local_monitor = _safe_json(Path("output/runtime-monitor/latest-local-monitor-sequence.json"))
     latest_coverage = _safe_json(Path("output/runtime-monitor/latest-live-market-signal-coverage-diagnostic.json"))
-    priority_closure = _priority_line_closure(by_strategy, decisions)
+    priority_closure = _priority_line_closure(by_strategy, observation_recommendations)
     visibility_state = _owner_visibility_state(
         local_monitor=latest_local_monitor,
-        decisions=decisions,
+        decisions=observation_recommendations,
         would_enter_events=would_enter_events,
         high_priority_no_action=high_priority_no_action,
     )
@@ -242,10 +242,10 @@ def build_audit_packet(*, lookback_hours: int, step_hours: int) -> dict[str, Any
         },
         "would_enter_events": would_enter_sample["events"],
         "high_priority_no_action_events": high_priority_no_action_sample["events"],
-        "decision_recommendations": decisions,
+        "observation_recommendations": observation_recommendations,
         "priority_line_closure": priority_closure,
         "owner_visibility_state": visibility_state,
-        "audit_conclusion": _audit_conclusion(decisions),
+        "audit_conclusion": _audit_conclusion(observation_recommendations),
         "safety_invariants": {
             "read_only_official_public_market_data": True,
             "uses_local_sqlite_for_recent_market": False,
@@ -258,7 +258,6 @@ def build_audit_packet(*, lookback_hours: int, step_hours: int) -> dict[str, Any
             "strategy_parameters_changed": False,
             "tier_policy_changed": False,
             "live_profile_changed": False,
-            "real_order_authority": False,
             "preview_or_replay_treated_as_live_signal": False,
         },
     }
@@ -445,43 +444,47 @@ def _strategy_rows(
     return rows
 
 
-def _decision_rows(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _observation_recommendation_rows(
+    strategy_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     rows = []
     for row in strategy_rows:
         group = row["strategy_group_id"]
-        decision = "keep_observing"
+        observation_recommendation = "keep_observing"
         reason = "no material would_enter or forward outcome evidence in this audit"
         if group == "BRF-001" and row["would_enter_count"] > 0:
-            decision = "promote_review"
+            observation_recommendation = "promote_review"
             reason = "official live_market windows produced BRF would_enter; review RequiredFacts and squeeze classifier before any tier change"
         elif group == "BTPC-001" and row["high_priority_no_action_count"] > 0:
-            decision = "revise"
-            reason = "BTPC remains blocked by stale/fact-source attribution despite P0.5 priority"
+            observation_recommendation = "revise"
+            reason = "BTPC remains blocked by stale/fact-source attribution despite Signal Observation priority"
         elif group == "VCB-001" and row["high_priority_no_action_count"] > 0:
-            decision = "keep_observing"
+            observation_recommendation = "keep_observing"
             reason = "current windows mostly fail compression breakout; keep classifier redesign as P1"
         elif group == "LSR-001" and row["high_priority_no_action_count"] > 0:
-            decision = "revise"
+            observation_recommendation = "revise"
             reason = "side-specific rewrite remains the dominant blocker"
         elif group == "RBR-001":
-            decision = "park"
+            observation_recommendation = "park"
             reason = "parked vocabulary lane unless materially new positive forward evidence appears"
         elif group == "MI-001" and row["would_enter_count"] > 0:
-            decision = "identity_review"
+            observation_recommendation = "identity_review"
             reason = "MI emits repeated would_enter events but is still treated like a smoke lane; classify as smoke, MPG sub-capability, or formal candidate"
         elif group == "CPM-RO-001" and row["would_enter_count"] > 0:
-            decision = "identity_review"
+            observation_recommendation = "identity_review"
             reason = "CPM emits repeated would_enter events but is not documented in the current expectation map"
         elif group in {"MPG-001", "SOR-001", "FBS-001"}:
-            decision = "coverage_visibility_review"
+            observation_recommendation = "coverage_visibility_review"
             reason = "mainline no_action reasons should stay visible when waiting_for_market is reported"
         rows.append(
             {
                 "strategy_group_id": group,
-                "decision": decision,
+                "observation_recommendation": observation_recommendation,
                 "reason": reason,
                 "authority_boundary": "decision_support_only; no FinalGate, Operation Layer, exchange write, tier change, or live profile change",
-                "next_checkpoint": _next_checkpoint(group, decision),
+                "next_checkpoint": _next_checkpoint(
+                    group, observation_recommendation
+                ),
             }
         )
     return rows
@@ -502,13 +505,18 @@ def _next_checkpoint(group: str, decision: str) -> str:
 
 
 def _audit_conclusion(decisions: list[dict[str, Any]]) -> dict[str, Any]:
-    priority = [row for row in decisions if row["decision"] in {"promote_review", "revise", "identity_review"}]
+    priority = [
+        row
+        for row in decisions
+        if row["observation_recommendation"]
+        in {"promote_review", "revise", "identity_review"}
+    ]
     return {
         "strategy_capture_gap_supported": bool(priority),
         "not_a_p0_execution_blocker": True,
         "summary": "official public market replay shows review-worthy capture gaps while P0 execution path remains waiting_for_market",
         "highest_priority_rows": priority,
-        "recommended_mainline_action": "keep P0 standby; route BRF/BTPC/LSR evidence into P0.5 decision-ledger review before any live scope change",
+        "recommended_mainline_action": "keep P0 standby; route BRF/BTPC/LSR evidence into Signal Observation review before any live scope change",
     }
 
 
@@ -554,13 +562,15 @@ def _closure_row(
     decision = decision_by_group.get(group, {})
     return {
         "strategy_group_id": group,
-        "decision": decision.get("decision", "not_in_audit"),
+        "observation_recommendation": decision.get(
+            "observation_recommendation", "not_in_audit"
+        ),
         "would_enter_count": row.get("would_enter_count", 0),
         "high_priority_no_action_count": row.get("high_priority_no_action_count", 0),
         "would_enter_forward_positive_count": row.get("would_enter_forward_positive_count", 0),
         "missed_no_action_forward_positive_count": row.get("missed_no_action_forward_positive_count", 0),
         "next_checkpoint": decision.get("next_checkpoint"),
-        "owner_decision_required_now": False,
+        "owner_policy_confirmation_required_now": False,
         "live_permission_change_recommended_now": False,
     }
 
@@ -575,18 +585,19 @@ def _owner_visibility_state(
     review_groups = [
         row["strategy_group_id"]
         for row in decisions
-        if row["decision"] in {"promote_review", "revise", "identity_review"}
+        if row["observation_recommendation"]
+        in {"promote_review", "revise", "identity_review"}
     ]
     p0_state = local_monitor.get("runtime_status") or local_monitor.get("status") or "waiting_for_market"
     return {
         "p0_state": "waiting_for_market" if "waiting_for_market" in str(p0_state) else str(p0_state),
-        "p0_5_observation_state": "review_needed" if review_groups else "observation_active",
+        "signal_observation_state": "review_needed" if review_groups else "observation_active",
         "observation_active": bool(would_enter_events or high_priority_no_action),
         "review_needed_strategy_groups": review_groups,
         "no_live_permission": True,
         "owner_intervention_required": False,
         "owner_summary": (
-            "P0 waiting_for_market; P0.5 observed StrategyGroup capture issues; no live permission change."
+            "P0 waiting_for_market; Signal Observation captured StrategyGroup review evidence; no live permission change."
         ),
     }
 
@@ -744,7 +755,7 @@ def _iso(ms: int | None) -> str | None:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> str:
+def _markdown(report: dict[str, Any], *, output_json: Path, output_md: Path) -> str:
     lines = [
         "# Strategy Capture Gap Audit",
         "",
@@ -752,25 +763,25 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
         "",
         "- **结论**: 当前不能只归因为没有 fresh signal；官方公开行情滑窗审计支持 **Strategy Capture Gap**。",
         "- **P0 状态**: 主链路保持 `waiting_for_market`，不是执行链故障。",
-        "- **P0.5 状态**: 至少有一个 StrategyGroup 需要进入捕获质量与 forward outcome 复核。",
+        "- **Signal Observation 状态**: 至少有一个 StrategyGroup 需要进入捕获质量与 forward outcome 复核。",
         "- **权限边界**: 本产物只读官方公开行情，不调参、不改 tier、不改 live profile、不调用 FinalGate / Operation Layer。",
         "",
         "## 已知客观事实",
         "",
-        f"- **官方时间**: `{packet['official_server_time_utc']}`。",
-        f"- **审计窗口**: 最近 `{packet['lookback_hours']}` 小时，步长 `{packet['step_hours']}` 小时。",
-        f"- **评估窗口数**: `{packet['system_observation_summary']['evaluated_window_count']}`。",
-        f"- **would_enter 总数**: `{packet['system_observation_summary']['would_enter_count']}`。",
-        f"- **would_enter 样本**: `{packet['system_observation_summary']['would_enter_sampled_count']}` sampled / `{packet['system_observation_summary']['would_enter_omitted_count']}` omitted。",
-        f"- **high-priority no_action 总数**: `{packet['system_observation_summary']['high_priority_no_action_count']}`。",
-        f"- **high-priority no_action 样本**: `{packet['system_observation_summary']['high_priority_no_action_sampled_count']}` sampled / `{packet['system_observation_summary']['high_priority_no_action_omitted_count']}` omitted。",
+        f"- **官方时间**: `{report['official_server_time_utc']}`。",
+        f"- **审计窗口**: 最近 `{report['lookback_hours']}` 小时，步长 `{report['step_hours']}` 小时。",
+        f"- **评估窗口数**: `{report['system_observation_summary']['evaluated_window_count']}`。",
+        f"- **would_enter 总数**: `{report['system_observation_summary']['would_enter_count']}`。",
+        f"- **would_enter 样本**: `{report['system_observation_summary']['would_enter_sampled_count']}` sampled / `{report['system_observation_summary']['would_enter_omitted_count']}` omitted。",
+        f"- **high-priority no_action 总数**: `{report['system_observation_summary']['high_priority_no_action_count']}`。",
+        f"- **high-priority no_action 样本**: `{report['system_observation_summary']['high_priority_no_action_sampled_count']}` sampled / `{report['system_observation_summary']['high_priority_no_action_omitted_count']}` omitted。",
         "",
         "### Audit Contract",
         "",
         "| Event class | Total | Sampled | Omitted | Sample limit |",
         "| --- | ---: | ---: | ---: | ---: |",
-        f"| **would_enter** | {packet['event_samples']['would_enter']['total_count']} | {packet['event_samples']['would_enter']['sampled_count']} | {packet['event_samples']['would_enter']['omitted_count']} | {packet['event_samples']['would_enter']['sample_limit']} |",
-        f"| **high_priority_no_action** | {packet['event_samples']['high_priority_no_action']['total_count']} | {packet['event_samples']['high_priority_no_action']['sampled_count']} | {packet['event_samples']['high_priority_no_action']['omitted_count']} | {packet['event_samples']['high_priority_no_action']['sample_limit']} |",
+        f"| **would_enter** | {report['event_samples']['would_enter']['total_count']} | {report['event_samples']['would_enter']['sampled_count']} | {report['event_samples']['would_enter']['omitted_count']} | {report['event_samples']['would_enter']['sample_limit']} |",
+        f"| **high_priority_no_action** | {report['event_samples']['high_priority_no_action']['total_count']} | {report['event_samples']['high_priority_no_action']['sampled_count']} | {report['event_samples']['high_priority_no_action']['omitted_count']} | {report['event_samples']['high_priority_no_action']['sample_limit']} |",
         "",
         "### Forward Outcome Summary",
         "",
@@ -781,7 +792,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
         ("would_enter", "would_enter_forward_outcome_summary"),
         ("missed_no_action", "missed_no_action_forward_outcome_summary"),
     ):
-        for window, row in packet["system_observation_summary"][key]["by_window"].items():
+        for window, row in report["system_observation_summary"][key]["by_window"].items():
             lines.append(
                 f"| **{label}** | {window} | {row['completed']} | {row['pending']} | "
                 f"{row['unavailable']} | {row['not_applicable']} | {row['tradable_mfe_after_cost_count']} |"
@@ -795,10 +806,10 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "| --- | --- |",
         ]
     )
-    visibility = packet["owner_visibility_state"]
+    visibility = report["owner_visibility_state"]
     for key in (
         "p0_state",
-        "p0_5_observation_state",
+        "signal_observation_state",
         "observation_active",
         "review_needed_strategy_groups",
         "no_live_permission",
@@ -812,10 +823,10 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "",
             "| Phase | Status / Groups |",
             "| --- | --- |",
-            f"| **Phase 1 Audit Contract** | `{packet['priority_line_closure']['phase1_audit_contract_hardening']['status']}` |",
-            f"| **Phase 2 Priority Lines** | `{', '.join(row['strategy_group_id'] + ':' + row['decision'] for row in packet['priority_line_closure']['phase2_priority_strategy_lines'])}` |",
-            f"| **Phase 3 Identity Review** | `{', '.join(row['strategy_group_id'] + ':' + row['decision'] for row in packet['priority_line_closure']['phase3_registry_identity_review'])}` |",
-            f"| **Phase 4 Visibility Review** | `{', '.join(row['strategy_group_id'] + ':' + row['decision'] for row in packet['priority_line_closure']['phase4_visibility_review'])}` |",
+            f"| **Phase 1 Audit Contract** | `{report['priority_line_closure']['phase1_audit_contract_hardening']['status']}` |",
+            f"| **Phase 2 Priority Lines** | `{', '.join(row['strategy_group_id'] + ':' + row['observation_recommendation'] for row in report['priority_line_closure']['phase2_priority_strategy_lines'])}` |",
+            f"| **Phase 3 Identity Review** | `{', '.join(row['strategy_group_id'] + ':' + row['observation_recommendation'] for row in report['priority_line_closure']['phase3_registry_identity_review'])}` |",
+            f"| **Phase 4 Visibility Review** | `{', '.join(row['strategy_group_id'] + ':' + row['observation_recommendation'] for row in report['priority_line_closure']['phase4_visibility_review'])}` |",
             "",
         "### 官方市场结构",
         "",
@@ -823,7 +834,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
-    for row in packet["market_structure_rows"]:
+    for row in report["market_structure_rows"]:
         lines.append(
             f"| **{row['symbol']}** | {row['return_24h_pct']}% | {row['return_72h_pct']}% | "
             f"{row['return_7d_pct']}% | {row['range_72h_pct']}% | {row['range_7d_position']} | "
@@ -838,7 +849,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "| --- | ---: | ---: |",
         ]
     )
-    for row in packet["derivative_rows"]:
+    for row in report["derivative_rows"]:
         lines.append(f"| **{row['symbol']}** | {row['open_interest_72h_change_pct']} | {row['funding_72h_sum_pct']}% |")
     lines.extend(
         [
@@ -849,7 +860,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "| --- | --- | ---: | ---: | ---: | ---: | --- |",
         ]
     )
-    for row in packet["strategy_expectation_rows"]:
+    for row in report["strategy_expectation_rows"]:
         blockers = ", ".join(f"{item['key']}:{item['count']}" for item in row["dominant_blocker_classes"]) or "none"
         lines.append(
             f"| **{row['strategy_group_id']}** | {row['expected_behavior']} | {row['would_enter_count']} | "
@@ -865,7 +876,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "| --- | --- | --- | --- | ---: | ---: | ---: |",
         ]
     )
-    for event in packet["would_enter_events"][:12]:
+    for event in report["would_enter_events"][:12]:
         lines.append(
             f"| {event['event_time_utc']} | **{event['strategy_group_id']}** | {event['symbol']} | {event['side']} | "
             f"{_window_text(event, '4h')} | {_window_text(event, '12h')} | {_window_text(event, '24h')} |"
@@ -873,15 +884,15 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
     lines.extend(
         [
             "",
-            "## 决策建议",
+            "## 观察建议",
             "",
-            "| StrategyGroup | Decision | Reason | Next checkpoint |",
+            "| StrategyGroup | Observation Recommendation | Reason | Next checkpoint |",
             "| --- | --- | --- | --- |",
         ]
     )
-    for row in packet["decision_recommendations"]:
+    for row in report["observation_recommendations"]:
         lines.append(
-            f"| **{row['strategy_group_id']}** | `{row['decision']}` | {row['reason']} | `{row['next_checkpoint']}` |"
+            f"| **{row['strategy_group_id']}** | `{row['observation_recommendation']}` | {row['reason']} | `{row['next_checkpoint']}` |"
         )
     lines.extend(
         [
@@ -892,7 +903,7 @@ def _markdown(packet: dict[str, Any], *, output_json: Path, output_md: Path) -> 
             "| --- | --- |",
         ]
     )
-    for key, value in packet["safety_invariants"].items():
+    for key, value in report["safety_invariants"].items():
         lines.append(f"| **{key}** | `{str(value).lower()}` |")
     lines.extend(
         [

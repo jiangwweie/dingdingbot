@@ -95,7 +95,7 @@ def test_signal_watcher_goal_status_dropin_is_read_only_summary():
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
-    assert "refresh_strategygroup_runtime_product_state_packets.py" in text
+    assert "refresh_strategygroup_runtime_product_state_artifacts.py" in text
     assert "--collect-live-facts-before-refresh" in text
     assert "--live-facts-output" in text
     assert "strategy-group-live-facts-input.json" in text
@@ -154,11 +154,11 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
         expected_latest_migration=(
-            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+            "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
         ),
         target_migration_count=84,
         remote_migration_revision="081",
-        target_migration_revision="084",
+        target_migration_revision="085",
         migration_gap_revision_count=3,
         manifest_payload={"scope": "test"},
     )

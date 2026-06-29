@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bridge a ready next-attempt cycle into executable readiness and handoff.
+"""Project a ready next-attempt cycle artifact into executable readiness and handoff.
 
-RTF-031 starts from an RTF-030 cycle packet:
+RTF-031 starts from an RTF-030 cycle artifact:
 
 post-submit next-attempt cycle
 -> executable submit readiness preview
@@ -59,12 +59,12 @@ def _output_paths(args: argparse.Namespace) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     flow_id = args.flow_id or _safe_file_id(args.runtime_instance_id)
     return {
-        "strategy_planning_packet": output_dir
-        / f"{flow_id}-strategy-planning-packet.json",
+        "strategy_planning_artifact": output_dir
+        / f"{flow_id}-strategy-planning-artifact.json",
         "executable_readiness_flow": output_dir
         / f"{flow_id}-executable-readiness-flow.json",
-        "executable_readiness_packet": output_dir
-        / f"{flow_id}-executable-readiness-packet.json",
+        "executable_readiness_artifact": output_dir
+        / f"{flow_id}-executable-readiness-artifact.json",
         "official_submit_handoff_flow": output_dir
         / f"{flow_id}-official-submit-handoff-flow.json",
     }
@@ -78,31 +78,38 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _strategy_planning_flow(cycle_packet: dict[str, Any]) -> dict[str, Any]:
-    flow = cycle_packet.get("next_attempt_strategy_plan_flow")
+def _strategy_planning_flow(source_cycle_artifact: dict[str, Any]) -> dict[str, Any]:
+    flow = source_cycle_artifact.get("next_attempt_strategy_plan_flow")
     if isinstance(flow, dict):
         return flow
     return {}
 
 
-def _strategy_planning_packet(cycle_packet: dict[str, Any]) -> dict[str, Any]:
-    flow = _strategy_planning_flow(cycle_packet)
+def _strategy_planning_artifact(source_cycle_artifact: dict[str, Any]) -> dict[str, Any]:
+    flow = _strategy_planning_flow(source_cycle_artifact)
     payload = flow.get("api_payload")
     if isinstance(payload, dict):
         return payload
     return flow
 
 
+def _cycle_artifact_json_arg(args: argparse.Namespace) -> str:
+    path = getattr(args, "cycle_artifact_json", None)
+    if not path:
+        raise ValueError("cycle artifact JSON path is required")
+    return str(path)
+
+
 def _readiness_args(
     args: argparse.Namespace,
     *,
-    strategy_planning_packet_json: Path,
+    strategy_planning_artifact_json: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        strategy_planning_packet_json=str(strategy_planning_packet_json),
+        strategy_planning_artifact_json=str(strategy_planning_artifact_json),
         evidence_json=args.evidence_json,
-        first_real_submit_packet_json=args.first_real_submit_packet_json,
+        first_real_submit_evidence_json=args.first_real_submit_evidence_json,
         additional_warning=args.readiness_warning,
         additional_blocker=args.readiness_blocker,
         env_file=args.env_file,
@@ -160,21 +167,21 @@ def _blocked(
     blockers: list[str],
     warnings: list[str] | None = None,
     paths: dict[str, Path] | None = None,
-    cycle_packet: dict[str, Any] | None = None,
-    readiness_flow_packet: dict[str, Any] | None = None,
+    source_cycle_artifact: dict[str, Any] | None = None,
+    readiness_flow_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "scope": "runtime_cycle_executable_submit_handoff",
         "status": "blocked",
         "blocked_stage": stage,
         "runtime_instance_id": args.runtime_instance_id,
-        "cycle_packet": cycle_packet,
-        "executable_readiness_flow": readiness_flow_packet,
+        "source_cycle_artifact": source_cycle_artifact,
+        "executable_readiness_flow": readiness_flow_artifact,
         "official_submit_handoff_flow": None,
         "artifact_paths": {k: str(v) for k, v in (paths or {}).items()},
         "blockers": blockers,
         "warnings": warnings or [],
-        "operator_command_plan": {
+        "executable_handoff_plan": {
             "next_step": "resolve_cycle_readiness_or_handoff_blocker",
             "calls_official_submit_endpoint": False,
             "places_order": False,
@@ -184,67 +191,67 @@ def _blocked(
     }
 
 
-def _build_packet(
+def _build_handoff_artifact(
     args: argparse.Namespace,
     *,
     readiness_builder: ReadinessBuilder | None = None,
     handoff_builder: HandoffBuilder | None = None,
 ) -> dict[str, Any]:
     paths = _output_paths(args)
-    readiness_builder = readiness_builder or readiness_flow._build_packet
-    handoff_builder = handoff_builder or handoff_flow._build_packet
+    readiness_builder = readiness_builder or readiness_flow._build_artifact
+    handoff_builder = handoff_builder or handoff_flow._build_artifact
 
-    cycle_packet = _read_json_file(args.cycle_packet_json)
-    cycle_status = str(cycle_packet.get("status") or "")
+    source_cycle_artifact = _read_json_file(_cycle_artifact_json_arg(args))
+    cycle_status = str(source_cycle_artifact.get("status") or "")
     if cycle_status != READY_CYCLE_STATUS:
-        blockers = list(cycle_packet.get("blockers") or [])
+        blockers = list(source_cycle_artifact.get("blockers") or [])
         if not blockers:
             blockers.append("cycle_not_ready_for_final_gate_preflight")
         return _blocked(
             args=args,
             stage="post_submit_next_attempt_cycle",
             blockers=blockers,
-            warnings=list(cycle_packet.get("warnings") or []),
+            warnings=list(source_cycle_artifact.get("warnings") or []),
             paths=paths,
-            cycle_packet=cycle_packet,
+            source_cycle_artifact=source_cycle_artifact,
         )
 
-    strategy_packet = _strategy_planning_packet(cycle_packet)
-    if not strategy_packet:
+    strategy_artifact = _strategy_planning_artifact(source_cycle_artifact)
+    if not strategy_artifact:
         return _blocked(
             args=args,
-            stage="strategy_planning_packet",
-            blockers=["strategy_planning_packet_missing_from_cycle"],
+            stage="strategy_planning_artifact",
+            blockers=["strategy_planning_artifact_missing_from_cycle"],
             paths=paths,
-            cycle_packet=cycle_packet,
+            source_cycle_artifact=source_cycle_artifact,
         )
-    _write_json(paths["strategy_planning_packet"], strategy_packet)
+    _write_json(paths["strategy_planning_artifact"], strategy_artifact)
 
-    readiness_packet = readiness_builder(
+    readiness_flow_artifact = readiness_builder(
         _readiness_args(
             args,
-            strategy_planning_packet_json=paths["strategy_planning_packet"],
+            strategy_planning_artifact_json=paths["strategy_planning_artifact"],
         )
     )
-    _write_json(paths["executable_readiness_flow"], readiness_packet)
-    readiness_payload = readiness_packet.get("api_payload")
+    _write_json(paths["executable_readiness_flow"], readiness_flow_artifact)
+    readiness_payload = readiness_flow_artifact.get("api_payload")
     if not isinstance(readiness_payload, dict):
         readiness_payload = {}
-    _write_json(paths["executable_readiness_packet"], readiness_payload)
+    _write_json(paths["executable_readiness_artifact"], readiness_payload)
 
-    readiness_status = str(readiness_packet.get("status") or "")
+    readiness_status = str(readiness_flow_artifact.get("status") or "")
     if readiness_status != READY_READINESS_STATUS:
-        blockers = list(readiness_packet.get("blockers") or [])
+        blockers = list(readiness_flow_artifact.get("blockers") or [])
         if not blockers:
             blockers.append("executable_readiness_not_ready")
         return _blocked(
             args=args,
             stage="executable_submit_readiness",
             blockers=blockers,
-            warnings=list(readiness_packet.get("warnings") or []),
+            warnings=list(readiness_flow_artifact.get("warnings") or []),
             paths=paths,
-            cycle_packet=cycle_packet,
-            readiness_flow_packet=readiness_packet,
+            source_cycle_artifact=source_cycle_artifact,
+            readiness_flow_artifact=readiness_flow_artifact,
         )
 
     if not args.fresh_submit_authorization_id:
@@ -252,13 +259,13 @@ def _build_packet(
             "scope": "runtime_cycle_executable_submit_handoff",
             "status": "ready_for_fresh_submit_authorization",
             "runtime_instance_id": args.runtime_instance_id,
-            "cycle_packet": cycle_packet,
-            "executable_readiness_flow": readiness_packet,
+            "source_cycle_artifact": source_cycle_artifact,
+            "executable_readiness_flow": readiness_flow_artifact,
             "official_submit_handoff_flow": None,
             "artifact_paths": {k: str(v) for k, v in paths.items()},
             "blockers": [],
-            "warnings": list(readiness_packet.get("warnings") or []),
-            "operator_command_plan": {
+            "warnings": list(readiness_flow_artifact.get("warnings") or []),
+            "executable_handoff_plan": {
                 "next_step": "bind_or_resolve_fresh_submit_authorization",
                 "calls_official_submit_endpoint": False,
                 "places_order": False,
@@ -268,14 +275,14 @@ def _build_packet(
             "safety_invariants": _safety(),
         }
 
-    handoff_packet = handoff_builder(
+    handoff_artifact = handoff_builder(
         _handoff_args(
             args,
-            readiness_json=paths["executable_readiness_packet"],
+            readiness_json=paths["executable_readiness_artifact"],
         )
     )
-    _write_json(paths["official_submit_handoff_flow"], handoff_packet)
-    handoff_status = str(handoff_packet.get("status") or "")
+    _write_json(paths["official_submit_handoff_flow"], handoff_artifact)
+    handoff_status = str(handoff_artifact.get("status") or "")
     status = (
         READY_HANDOFF_STATUS
         if handoff_status == READY_HANDOFF_STATUS
@@ -286,15 +293,15 @@ def _build_packet(
         "status": status,
         "blocked_stage": None if status == READY_HANDOFF_STATUS else "official_submit_handoff",
         "runtime_instance_id": args.runtime_instance_id,
-        "cycle_packet": cycle_packet,
-        "executable_readiness_flow": readiness_packet,
-        "official_submit_handoff_flow": handoff_packet,
+        "source_cycle_artifact": source_cycle_artifact,
+        "executable_readiness_flow": readiness_flow_artifact,
+        "official_submit_handoff_flow": handoff_artifact,
         "artifact_paths": {k: str(v) for k, v in paths.items()},
-        "blockers": list(handoff_packet.get("blockers") or []),
-        "warnings": list(readiness_packet.get("warnings") or [])
-        + list(handoff_packet.get("warnings") or []),
-        "operator_action_preview": handoff_packet.get("operator_action_preview"),
-        "operator_command_plan": {
+        "blockers": list(handoff_artifact.get("blockers") or []),
+        "warnings": list(readiness_flow_artifact.get("warnings") or [])
+        + list(handoff_artifact.get("warnings") or []),
+        "operator_action_preview": handoff_artifact.get("operator_action_preview"),
+        "executable_handoff_plan": {
             "next_step": (
                 "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
                 if status == READY_HANDOFF_STATUS
@@ -314,17 +321,30 @@ def _build_packet(
     }
 
 
+def _build_artifact(
+    args: argparse.Namespace,
+    *,
+    readiness_builder: ReadinessBuilder | None = None,
+    handoff_builder: HandoffBuilder | None = None,
+) -> dict[str, Any]:
+    return _build_handoff_artifact(
+        args,
+        readiness_builder=readiness_builder,
+        handoff_builder=handoff_builder,
+    )
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Bridge a ready post-submit next-attempt cycle into executable "
+            "Project a ready post-submit next-attempt cycle into executable "
             "readiness and optional official submit handoff preview."
         ),
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--cycle-packet-json", required=True)
+    parser.add_argument("--cycle-artifact-json")
     parser.add_argument("--evidence-json", required=True)
-    parser.add_argument("--first-real-submit-packet-json")
+    parser.add_argument("--first-real-submit-evidence-json")
     parser.add_argument("--fresh-submit-authorization-id")
     parser.add_argument(
         "--mode",
@@ -351,15 +371,20 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default="output/runtime-cycle-executable-submit-handoff",
     )
     parser.add_argument("--flow-id")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.cycle_artifact_json:
+        parser.error("--cycle-artifact-json is required")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    )
+    return 0 if artifact["status"] in {
         READY_HANDOFF_STATUS,
         "ready_for_fresh_submit_authorization",
         "blocked",

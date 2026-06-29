@@ -17,7 +17,7 @@ from src.application.strategy_group_observation_case_queue import (
 )
 
 
-ReadinessVerdict = Literal[
+ReadinessStatus = Literal[
     "testnet_rehearsal_ready",
     "testnet_rehearsal_blocked_with_explicit_reasons",
     "testnet_rehearsal_completed",
@@ -91,10 +91,10 @@ class StrategyTrialReadinessResponse(BaseModel):
     observation_case: dict[str, str | int | list[str] | None]
     risk_cap_profile: RiskCapProfile
     preflight_result: StrategyTrialPreflightResult
-    owner_decision_state: dict[str, str | bool | list[str]]
+    owner_policy_state: dict[str, str | bool | list[str]]
     rehearsal_readiness_state: dict[str, str | bool | list[str]]
     fact_checks: dict[str, Any] = Field(default_factory=dict)
-    readiness_verdict: ReadinessVerdict
+    readiness_status: ReadinessStatus
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     evidence: dict[str, str | bool | int | None] = Field(default_factory=dict)
@@ -156,14 +156,14 @@ def build_bnb_strategy_trial_readiness(
     auth_status: OwnerAuthorizationStatus = "not_required_for_testnet"
     if preflight_input and preflight_input.owner_authorized_testnet_rehearsal:
         auth_status = "granted_metadata_only"
-    verdict: ReadinessVerdict = (
+    readiness_status: ReadinessStatus = (
         "testnet_rehearsal_ready"
         if preflight.status == "ready"
         else "testnet_rehearsal_blocked_with_explicit_reasons"
     )
     rehearsal_status: TestnetRehearsalStatus = (
         "ready"
-        if verdict == "testnet_rehearsal_ready"
+        if readiness_status == "testnet_rehearsal_ready"
         else "blocked"
     )
     return StrategyTrialReadinessResponse(
@@ -171,13 +171,13 @@ def build_bnb_strategy_trial_readiness(
         observation_case=_observation_case_summary(observation_case),
         risk_cap_profile=cap_profile,
         preflight_result=preflight,
-        owner_decision_state={
+        owner_policy_state={
             "owner_authorization_status": auth_status,
             "owner_authorization_required": False,
             "owner_authorization_boundary": "Owner granted blanket non-live/testnet authorization; live trading still requires separate explicit authorization.",
-            "testnet_rehearsal_can_proceed_if_runtime_gate_passes": verdict
+            "testnet_rehearsal_can_proceed_if_runtime_gate_passes": readiness_status
             == "testnet_rehearsal_ready",
-            "allowed_decisions": [
+            "allowed_policy_choices": [
                 "continue_observation_only",
                 "run_testnet_rehearsal_if_runtime_gates_pass",
                 "wait_for_forward_review",
@@ -193,7 +193,7 @@ def build_bnb_strategy_trial_readiness(
             "requires_runtime_testnet_gates": True,
         },
         fact_checks=dict(fact_checks or {}),
-        readiness_verdict=verdict,
+        readiness_status=readiness_status,
         blockers=blockers,
         warnings=warnings,
         evidence={

@@ -31,12 +31,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_cycle_executable_submit_handoff as handoff_bridge  # noqa: E402
+from scripts import runtime_cycle_executable_submit_handoff as handoff_projection  # noqa: E402
 from scripts import runtime_post_submit_next_attempt_cycle as next_attempt_cycle  # noqa: E402
 
 
 CycleBuilder = Callable[[argparse.Namespace], dict[str, Any]]
-HandoffBridgeBuilder = Callable[[argparse.Namespace], dict[str, Any]]
+HandoffProjectionBuilder = Callable[[argparse.Namespace], dict[str, Any]]
 
 
 READY_FOR_FINAL_GATE_PREFLIGHT = "ready_for_final_gate_preflight"
@@ -106,24 +106,28 @@ def _cycle_args(args: argparse.Namespace, *, output_dir: Path) -> argparse.Names
     )
 
 
-def _load_cycle_packet(path: str) -> dict[str, Any]:
+def _load_cycle_artifact(path: str) -> dict[str, Any]:
     value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
 
 
+def _cycle_artifact_json_arg(args: argparse.Namespace) -> str | None:
+    return getattr(args, "cycle_artifact_json", None)
+
+
 def _handoff_args(
     args: argparse.Namespace,
     *,
-    cycle_packet_json: Path,
+    cycle_artifact_json: Path,
     output_dir: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        cycle_packet_json=str(cycle_packet_json),
+        cycle_artifact_json=str(cycle_artifact_json),
         evidence_json=args.evidence_json,
-        first_real_submit_packet_json=args.first_real_submit_packet_json,
+        first_real_submit_evidence_json=args.first_real_submit_evidence_json,
         fresh_submit_authorization_id=args.fresh_submit_authorization_id,
         mode=args.mode,
         owner_confirmed_for_real_submit_action=(
@@ -175,40 +179,43 @@ def _operator_next_step(status: str) -> str:
     return "resolve_full_cycle_blocker"
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     cycle_builder: CycleBuilder | None = None,
-    handoff_bridge_builder: HandoffBridgeBuilder | None = None,
+    handoff_projection_builder: HandoffProjectionBuilder | None = None,
 ) -> dict[str, Any]:
     paths = _output_paths(args)
     cycle_output_dir = paths["post_submit_next_attempt_cycle"].parent / "cycle"
     handoff_output_dir = paths["cycle_executable_submit_handoff"].parent / "handoff"
-    cycle_builder = cycle_builder or next_attempt_cycle._build_cycle_packet
-    handoff_bridge_builder = handoff_bridge_builder or handoff_bridge._build_packet
+    cycle_builder = cycle_builder or next_attempt_cycle._build_cycle_artifact
+    handoff_projection_builder = (
+        handoff_projection_builder or handoff_projection._build_artifact
+    )
 
-    cycle_packet = (
-        _load_cycle_packet(args.cycle_packet_json)
-        if args.cycle_packet_json
+    cycle_artifact_json = _cycle_artifact_json_arg(args)
+    cycle_artifact = (
+        _load_cycle_artifact(cycle_artifact_json)
+        if cycle_artifact_json
         else cycle_builder(
             _cycle_args(args, output_dir=cycle_output_dir),
         )
     )
-    _write_json(paths["post_submit_next_attempt_cycle"], cycle_packet)
+    _write_json(paths["post_submit_next_attempt_cycle"], cycle_artifact)
 
-    cycle_status = str(cycle_packet.get("status") or "")
+    cycle_status = str(cycle_artifact.get("status") or "")
     if cycle_status != READY_FOR_FINAL_GATE_PREFLIGHT:
         return {
             "scope": "runtime_full_next_attempt_submit_cycle",
             "status": cycle_status if cycle_status else "blocked",
-            "blocked_stage": cycle_packet.get("blocked_stage"),
+            "blocked_stage": cycle_artifact.get("blocked_stage"),
             "runtime_instance_id": args.runtime_instance_id,
-            "post_submit_next_attempt_cycle": cycle_packet,
+            "post_submit_next_attempt_cycle": cycle_artifact,
             "cycle_executable_submit_handoff": None,
             "artifact_paths": {k: str(v) for k, v in paths.items()},
-            "blockers": list(cycle_packet.get("blockers") or []),
-            "warnings": list(cycle_packet.get("warnings") or []),
-            "operator_command_plan": {
+            "blockers": list(cycle_artifact.get("blockers") or []),
+            "warnings": list(cycle_artifact.get("warnings") or []),
+            "full_submit_cycle_plan": {
                 "next_step": _operator_next_step(cycle_status),
                 "runs_executable_readiness": False,
                 "calls_official_submit_endpoint": False,
@@ -223,12 +230,12 @@ def _build_packet(
             "scope": "runtime_full_next_attempt_submit_cycle",
             "status": READY_FOR_FINAL_GATE_PREFLIGHT,
             "runtime_instance_id": args.runtime_instance_id,
-            "post_submit_next_attempt_cycle": cycle_packet,
+            "post_submit_next_attempt_cycle": cycle_artifact,
             "cycle_executable_submit_handoff": None,
             "artifact_paths": {k: str(v) for k, v in paths.items()},
             "blockers": [],
             "warnings": ["executable_readiness_evidence_json_missing"],
-            "operator_command_plan": {
+            "full_submit_cycle_plan": {
                 "next_step": _operator_next_step(READY_FOR_FINAL_GATE_PREFLIGHT),
                 "runs_executable_readiness": False,
                 "calls_official_submit_endpoint": False,
@@ -239,27 +246,27 @@ def _build_packet(
             "safety_invariants": _safety(),
         }
 
-    handoff_packet = handoff_bridge_builder(
+    handoff_artifact = handoff_projection_builder(
         _handoff_args(
             args,
-            cycle_packet_json=paths["post_submit_next_attempt_cycle"],
+            cycle_artifact_json=paths["post_submit_next_attempt_cycle"],
             output_dir=handoff_output_dir,
         )
     )
-    _write_json(paths["cycle_executable_submit_handoff"], handoff_packet)
-    handoff_status = str(handoff_packet.get("status") or "")
+    _write_json(paths["cycle_executable_submit_handoff"], handoff_artifact)
+    handoff_status = str(handoff_artifact.get("status") or "")
     return {
         "scope": "runtime_full_next_attempt_submit_cycle",
         "status": handoff_status if handoff_status else "blocked",
-        "blocked_stage": handoff_packet.get("blocked_stage"),
+        "blocked_stage": handoff_artifact.get("blocked_stage"),
         "runtime_instance_id": args.runtime_instance_id,
-        "post_submit_next_attempt_cycle": cycle_packet,
-        "cycle_executable_submit_handoff": handoff_packet,
+        "post_submit_next_attempt_cycle": cycle_artifact,
+        "cycle_executable_submit_handoff": handoff_artifact,
         "artifact_paths": {k: str(v) for k, v in paths.items()},
-        "blockers": list(handoff_packet.get("blockers") or []),
-        "warnings": list(cycle_packet.get("warnings") or [])
-        + list(handoff_packet.get("warnings") or []),
-        "operator_command_plan": {
+        "blockers": list(handoff_artifact.get("blockers") or []),
+        "warnings": list(cycle_artifact.get("warnings") or [])
+        + list(handoff_artifact.get("warnings") or []),
+        "full_submit_cycle_plan": {
             "next_step": _operator_next_step(handoff_status),
             "runs_executable_readiness": True,
             "calls_official_submit_endpoint": False,
@@ -293,17 +300,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--reservation-id")
     parser.add_argument("--signal-input-json", required=True)
     parser.add_argument(
-        "--cycle-packet-json",
+        "--cycle-artifact-json",
         help=(
-            "Optional existing RTF-030 cycle packet. When supplied, reuse this "
-            "artifact instead of rerunning the post-submit next-attempt cycle."
+            "Optional existing RTF-030 cycle artifact. When supplied, reuse "
+            "this artifact instead of rerunning the post-submit next-attempt "
+            "cycle."
         ),
     )
     parser.add_argument("--authorization-id")
     parser.add_argument("--closed-review-required", action="store_true")
     parser.add_argument("--protection-blocker", action="append")
     parser.add_argument("--evidence-json")
-    parser.add_argument("--first-real-submit-packet-json")
+    parser.add_argument("--first-real-submit-evidence-json")
     parser.add_argument("--fresh-submit-authorization-id")
     parser.add_argument(
         "--mode",
@@ -339,9 +347,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(
+        json.dumps(
+            artifact,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+    )
+    return 0 if artifact["status"] in {
         READY_FOR_FINAL_GATE_PREFLIGHT,
         READY_FOR_FRESH_SUBMIT_AUTHORIZATION,
         READY_FOR_OFFICIAL_SUBMIT_CALL,

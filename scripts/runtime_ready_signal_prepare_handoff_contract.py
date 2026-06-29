@@ -39,13 +39,13 @@ def build_contract_report(output_dir: Path) -> dict[str, Any]:
         order_candidate_id=str(shadow_report.get("order_candidate_id") or ""),
         candidate=candidate,
     )
-    prepare_packet = prepare_flow._summarize_prepare_report(prepare_report)
-    _write_json(output_dir / "prepare-packet.json", prepare_packet)
+    prepare_artifact = prepare_flow._summarize_prepare_report(prepare_report)
+    _write_json(output_dir / "prepare-artifact.json", prepare_artifact)
 
     report = _report(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
-        prepare_packet=prepare_packet,
+        prepare_artifact=prepare_artifact,
     )
     _write_json(output_dir / "contract-report.json", report)
     return report
@@ -254,12 +254,12 @@ def _report(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> dict[str, Any]:
     checks = _checks(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
-        prepare_packet=prepare_packet,
+        prepare_artifact=prepare_artifact,
     )
     candidate = _candidate_snapshot(shadow_report)
     return {
@@ -273,33 +273,35 @@ def _report(
         "order_candidate_id": shadow_report.get("order_candidate_id"),
         "signal_evaluation_id": shadow_report.get("signal_evaluation_id"),
         "prepared_authorization_id": (
-            (prepare_packet.get("operator_command_plan") or {}).get(
+            (prepare_artifact.get("prepare_artifact_plan") or {}).get(
                 "prepared_authorization_id"
             )
         ),
         "runtime_execution_intent_draft_id": (
-            (prepare_packet.get("ids") or {}).get("runtime_execution_intent_draft_id")
+            (prepare_artifact.get("ids") or {}).get(
+                "runtime_execution_intent_draft_id"
+            )
         ),
-        "execution_intent_id": (prepare_packet.get("ids") or {}).get(
+        "execution_intent_id": (prepare_artifact.get("ids") or {}).get(
             "execution_intent_id"
         ),
-        "protection_plan_id": (prepare_packet.get("ids") or {}).get(
+        "protection_plan_id": (prepare_artifact.get("ids") or {}).get(
             "protection_plan_id"
         ),
         "proposal": shadow_report.get("proposal"),
         "shadow_contract": shadow_report,
-        "prepare_packet": prepare_packet,
+        "prepare_artifact": prepare_artifact,
         "first_real_submit_prepare_report": prepare_report,
         "checks": checks,
         "blockers": _dedupe(
             list(shadow_report.get("blockers") or [])
-            + list(prepare_packet.get("blockers") or [])
+            + list(prepare_artifact.get("blockers") or [])
         ),
         "warnings": _dedupe(
             list(shadow_report.get("warnings") or [])
-            + list(prepare_packet.get("warnings") or [])
+            + list(prepare_artifact.get("warnings") or [])
         ),
-        "operator_command_plan": {
+        "prepare_handoff_plan": {
             "next_step": (
                 "run_official_final_gate_preflight"
                 if _contract_passed(checks)
@@ -351,12 +353,12 @@ def _checks(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> dict[str, bool]:
     shadow_checks = shadow_report.get("checks") or {}
-    prepare_records = prepare_packet.get("created_records") or {}
-    prepare_safety = prepare_packet.get("safety_invariants") or {}
-    ids = prepare_packet.get("ids") or {}
+    prepare_records = prepare_artifact.get("created_records") or {}
+    prepare_safety = prepare_artifact.get("safety_invariants") or {}
+    ids = prepare_artifact.get("ids") or {}
     steps = [
         str(item.get("name") or "")
         for item in prepare_report.get("steps") or []
@@ -374,7 +376,7 @@ def _checks(
             shadow_checks.get("right_tail_runner_preserved")
         ),
         "prepare_ready_for_final_gate_preflight": (
-            prepare_packet.get("status") == "ready_for_final_gate_preflight"
+            prepare_artifact.get("status") == "ready_for_final_gate_preflight"
         ),
         "next_attempt_gate_checked": bool(
             prepare_safety.get("next_attempt_gate_checked")

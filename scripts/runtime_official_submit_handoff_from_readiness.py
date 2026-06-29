@@ -15,11 +15,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.domain.runtime_executable_submit_readiness import (  # noqa: E402
-    RuntimeExecutableSubmitReadinessPacket,
+    RuntimeExecutableSubmitReadinessArtifact,
 )
 from src.domain.runtime_official_submit_handoff import (  # noqa: E402
     RuntimeOfficialSubmitHandoffMode,
-    build_runtime_official_submit_handoff_packet,
+    build_runtime_official_submit_handoff_artifact,
 )
 
 
@@ -31,11 +31,11 @@ def build_report(
     owner_confirmed_for_real_submit_action: bool,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
-    readiness = RuntimeExecutableSubmitReadinessPacket.model_validate(
+    readiness = RuntimeExecutableSubmitReadinessArtifact.model_validate(
         _unwrap_readiness(readiness_payload)
     )
-    packet = build_runtime_official_submit_handoff_packet(
-        readiness_packet=readiness,
+    handoff_artifact = build_runtime_official_submit_handoff_artifact(
+        readiness_artifact=readiness,
         fresh_submit_authorization_id=fresh_submit_authorization_id,
         mode=mode,
         owner_confirmed_for_real_submit_action=(
@@ -45,13 +45,13 @@ def build_report(
     )
     return {
         "scope": "runtime_official_submit_handoff_report",
-        "packet": packet.model_dump(mode="json"),
+        "handoff_artifact": handoff_artifact.model_dump(mode="json"),
         "operator_action_preview": {
-            "method": packet.official_endpoint_method,
-            "path": packet.official_endpoint_path,
-            "query": packet.official_query,
-            "ready_for_call": packet.ready_for_official_submit_call,
-            "mode": packet.mode.value,
+            "method": handoff_artifact.official_endpoint_method,
+            "path": handoff_artifact.official_endpoint_path,
+            "query": handoff_artifact.official_query,
+            "ready_for_call": handoff_artifact.ready_for_official_submit_call,
+            "mode": handoff_artifact.mode.value,
         },
         "safety_invariants": {
             "calls_official_endpoint": False,
@@ -85,14 +85,14 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.output).write_text(encoded + "\n", encoding="utf-8")
     else:
         print(encoded)
-    return 0 if report["packet"]["status"] in {
+    return 0 if report["handoff_artifact"]["status"] in {
         "ready_for_official_submit_call",
         "blocked",
     } else 2
 
 
 def _unwrap_readiness(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("packet", "api_payload"):
+    for key in ("artifact", "api_payload"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -113,7 +113,7 @@ def _now_ms() -> int:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a non-executing official submit handoff packet.",
+        description="Build a non-executing official submit handoff artifact.",
     )
     parser.add_argument("--readiness-json", required=True)
     parser.add_argument("--fresh-submit-authorization-id")

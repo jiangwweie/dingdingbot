@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build the BTPC L2 proxy-aware replay quality review packet.
+"""Build the BTPC L2 proxy-aware replay quality review outcome.
 
-This command consumes the local BTPC fact-proxy review plus the BTPC L2 replay
-corpus and produces case-level quality decisions. It is a P0.5 review artifact:
-it can make would-enter/no-action/stale/conflict replay outcomes easier to
-compare, but it cannot satisfy live RequiredFacts, change tiers, call
-FinalGate, call Operation Layer, or place orders.
+This command consumes local BTPC fact-proxy review plus the BTPC L2 replay
+corpus and produces Review Outcome State provenance. It can make
+would-enter/no-action/stale/conflict replay outcomes easier to compare, but it
+cannot satisfy live RequiredFacts, change tiers, call FinalGate, call Operation
+Layer, or place orders.
 """
 
 from __future__ import annotations
@@ -13,13 +13,26 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BTPC_LOCAL_FACT_PROXY_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-btpc-local-fact-proxy-review.json"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    SOURCE_SAFETY_TRUE_KEYS,
+    artifact_source_forbidden_effects,
+    legacy_authority_mirror_effects_for_artifacts,
+    legacy_authority_mirror_present_errors,
+    non_executing_interaction,
+    non_executing_safety_boundary,
+    review_outcome_default_next_step,
+    review_outcome_flag,
+    review_outcome_state_boundary,
 )
+
 DEFAULT_BTPC_REPLAY_CORPUS_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json"
@@ -34,18 +47,18 @@ DEFAULT_OWNER_PROGRESS = (
 
 def build_btpc_proxy_replay_quality_review(
     *,
-    btpc_local_fact_proxy_packet: dict[str, Any],
+    btpc_local_fact_proxy_artifact: dict[str, Any],
     replay_corpus: dict[str, Any],
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
-        btpc_local_fact_proxy_packet,
+        btpc_local_fact_proxy_artifact,
         replay_corpus,
     )
-    proxy_ready = _proxy_ready(btpc_local_fact_proxy_packet)
+    proxy_ready = _proxy_ready(btpc_local_fact_proxy_artifact)
     replay_boundary_ok = _replay_boundary_ok(replay_corpus)
     case_rows = _case_rows(
         replay_corpus=replay_corpus,
-        btpc_local_fact_proxy_packet=btpc_local_fact_proxy_packet,
+        btpc_local_fact_proxy_artifact=btpc_local_fact_proxy_artifact,
         proxy_ready=proxy_ready,
     )
     if forbidden_effects:
@@ -57,29 +70,47 @@ def build_btpc_proxy_replay_quality_review(
     else:
         status = "btpc_proxy_replay_quality_review_no_cases"
 
-    decision_counts: dict[str, int] = {}
+    proxy_replay_quality_review_outcome_counts: dict[str, int] = {}
     for row in case_rows:
-        decision = str(row.get("proxy_replay_quality_decision") or "unknown")
-        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+        decision = str(row.get("proxy_replay_quality_review_outcome") or "unknown")
+        proxy_replay_quality_review_outcome_counts[decision] = (
+            proxy_replay_quality_review_outcome_counts.get(decision, 0) + 1
+        )
+
+    review_outcome_state = review_outcome_state_boundary(
+        source_role="btpc_proxy_replay_quality_review_provenance",
+        review_scope="proxy_replay_quality_review",
+        extra={
+            "strategy_group_id": "BTPC-001",
+            "proxy_replay_quality_review_ready": (
+                status == "btpc_proxy_replay_quality_review_ready"
+            ),
+            "btpc_l2_shadow_observation_can_continue": (
+                status == "btpc_proxy_replay_quality_review_ready"
+            ),
+            "proxy_replay_can_feed_l2_quality_review": (
+                status == "btpc_proxy_replay_quality_review_ready"
+            ),
+            "proxy_replay_satisfies_live_required_facts": False,
+            "tier_policy_change_recommended_now": False,
+            "l2_promotion_recommended_now": False,
+            "l4_scope_change_recommended": False,
+            "real_order_scope_change_recommended": False,
+            "default_next_step": _default_next_step(status),
+        },
+    )
 
     return {
         "schema": "brc.btpc_proxy_replay_quality_review.v1",
         "scope": "btpc_proxy_replay_quality_review",
         "status": status,
         "source_status": {
-            "btpc_local_fact_proxy_review": btpc_local_fact_proxy_packet.get("status"),
+            "btpc_local_fact_proxy_review": btpc_local_fact_proxy_artifact.get("status"),
             "replay_corpus": replay_corpus.get("schema_version"),
         },
-        "interaction": {
-            "level": "L0_local_btpc_proxy_replay_quality_review",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_btpc_proxy_replay_quality_review"
+        ),
         "counts": {
             "replay_case_count": len(case_rows),
             "would_enter_case_count": sum(
@@ -100,7 +131,7 @@ def build_btpc_proxy_replay_quality_review(
             "freshness_or_conflict_revision_count": sum(
                 1
                 for row in case_rows
-                if row.get("proxy_replay_quality_decision")
+                if row.get("proxy_replay_quality_review_outcome")
                 in {
                     "revise_freshness_or_classifier_before_l2_promotion",
                     "revise_conflict_disable_before_l2_promotion",
@@ -109,99 +140,72 @@ def build_btpc_proxy_replay_quality_review(
             "keep_observing_count": sum(
                 1
                 for row in case_rows
-                if row.get("proxy_replay_quality_decision")
+                if row.get("proxy_replay_quality_review_outcome")
                 in {
                     "keep_observing_l2_shadow_with_proxy_context",
                     "keep_waiting_for_market_no_action_baseline",
                 }
             ),
             "live_required_fact_satisfied_count": 0,
-            "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
             "forbidden_effect_count": len(forbidden_effects),
         },
-        "decision_counts": dict(sorted(decision_counts.items())),
+        "proxy_replay_quality_review_outcome_counts": dict(
+            sorted(proxy_replay_quality_review_outcome_counts.items())
+        ),
         "case_rows": case_rows,
-        "decision": {
-            "proxy_replay_quality_review_ready": (
-                status == "btpc_proxy_replay_quality_review_ready"
+        "review_outcome_state": review_outcome_state,
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=(
+                "local_btpc_proxy_replay_quality_review_only",
+                "proxy_replay_is_not_live_required_fact",
+                "input_is_not_execution_authority",
+                "does_not_lower_owner_selected_leverage",
+                "does_not_change_live_profile_or_sizing_defaults",
             ),
-            "btpc_l2_shadow_observation_can_continue": (
-                status == "btpc_proxy_replay_quality_review_ready"
+            false_keys=(
+                "server_interaction",
+                "server_files_mutated",
+                "runtime_started",
+                "strategy_parameters_changed",
+                "tier_policy_changed",
+                "l2_promotion_authorized",
+                "l4_real_order_scope_expanded",
+                "shadow_candidate_created",
+                "final_gate_called",
+                "operation_layer_called",
+                "order_created",
+                "order_lifecycle_called",
+                "exchange_write_called",
+                "withdrawal_or_transfer_created",
             ),
-            "proxy_replay_can_feed_l2_quality_review": (
-                status == "btpc_proxy_replay_quality_review_ready"
-            ),
-            "proxy_replay_satisfies_live_required_facts": False,
-            "tier_policy_change_recommended_now": False,
-            "l2_promotion_recommended_now": False,
-            "l4_scope_change_recommended": False,
-            "real_order_scope_change_recommended": False,
-            "default_next_step": _default_next_step(status),
-        },
-        "operator_command_plan": {
-            "not_executed": True,
-            "starts_runtime": False,
-            "changes_strategy_parameters": False,
-            "changes_tier_policy": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "calls_final_gate": False,
-            "calls_operation_layer": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
-        },
-        "safety_invariants": {
-            "local_btpc_proxy_replay_quality_review_only": True,
-            "proxy_replay_is_not_live_required_fact": True,
-            "input_is_not_execution_authority": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "runtime_started": False,
-            "strategy_parameters_changed": False,
-            "tier_policy_changed": False,
-            "l2_promotion_authorized": False,
-            "l4_real_order_scope_expanded": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-            "does_not_lower_owner_selected_leverage": True,
-            "does_not_change_live_profile_or_sizing_defaults": True,
-            "source_forbidden_effects": forbidden_effects,
-        },
+            source_forbidden_effects=forbidden_effects,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
-    counts = _as_dict(packet.get("counts"))
-    decision = _as_dict(packet.get("decision"))
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
+    counts = _as_dict(artifact.get("counts"))
     lines = [
         "# BTPC Proxy Replay Quality Review",
         "",
         "## Summary",
         "",
-        f"- Status: `{packet.get('status')}`",
+        f"- Status: `{artifact.get('status')}`",
         f"- Replay cases: `{counts.get('replay_case_count', 0)}`",
         f"- Proxy-reviewable would-enter: `{counts.get('proxy_reviewable_would_enter_count', 0)}`",
         f"- Missing-derivatives cases resolved for L2 review only: `{counts.get('proxy_resolved_missing_derivatives_context_count', 0)}`",
         "- Live RequiredFacts satisfied by proxy replay: `false`",
         "- L2 promotion authority: `false`",
         "- L4 scope change: `false`",
-        "- Real order authority: `false`",
         "",
         "## Case Rows",
         "",
-        _case_table(_dict_rows(packet.get("case_rows"))),
+        _case_table(_dict_rows(artifact.get("case_rows"))),
         "",
         "## Next",
         "",
-        f"- `{decision.get('default_next_step')}`",
+        f"- `{review_outcome_default_next_step(artifact)}`",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -209,19 +213,19 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
 def _case_rows(
     *,
     replay_corpus: dict[str, Any],
-    btpc_local_fact_proxy_packet: dict[str, Any],
+    btpc_local_fact_proxy_artifact: dict[str, Any],
     proxy_ready: bool,
 ) -> list[dict[str, Any]]:
     proxy_facts = [
         str(row.get("required_fact"))
-        for row in _dict_rows(btpc_local_fact_proxy_packet.get("proxy_rows"))
+        for row in _dict_rows(btpc_local_fact_proxy_artifact.get("proxy_rows"))
         if row.get("l2_quality_proxy_ready") is True
     ]
     rows: list[dict[str, Any]] = []
     for sample in _dict_rows(replay_corpus.get("replay_samples")):
         fixture_case = str(sample.get("fixture_case") or "unknown")
         signal_status = str(sample.get("signal_status") or "unknown")
-        decision, proxy_status, proxy_effect = _case_decision(
+        decision, proxy_status, proxy_effect = _case_review_outcome(
             fixture_case=fixture_case,
             signal_status=signal_status,
             blocker_class=str(sample.get("blocker_class") or ""),
@@ -243,12 +247,11 @@ def _case_rows(
                 "proxy_effect": proxy_effect,
                 "proxy_facts_used": proxy_facts,
                 "cost_review_present": isinstance(sample.get("cost_review"), dict),
-                "proxy_replay_quality_decision": decision,
+                "proxy_replay_quality_review_outcome": decision,
                 "l2_shadow_observation_can_continue": proxy_ready,
                 "l2_promotion_authority": False,
                 "l4_scope_change_recommended": False,
                 "live_required_facts_satisfied": False,
-                "real_order_authority": False,
                 "candidate_or_finalgate_authority": False,
                 "operation_layer_authority": False,
                 "exchange_write_authority": False,
@@ -257,7 +260,7 @@ def _case_rows(
     return rows
 
 
-def _case_decision(
+def _case_review_outcome(
     *,
     fixture_case: str,
     signal_status: str,
@@ -307,29 +310,29 @@ def _case_decision(
     )
 
 
-def _proxy_ready(packet: dict[str, Any]) -> bool:
-    counts = _as_dict(packet.get("counts"))
-    decision = _as_dict(packet.get("decision"))
+def _proxy_ready(artifact: dict[str, Any]) -> bool:
+    counts = _as_dict(artifact.get("counts"))
     expected = _int(counts.get("expected_proxy_fact_count"))
     attached = _int(counts.get("proxy_attached_count"))
     return (
-        packet.get("status") == "btpc_local_fact_proxy_review_ready"
+        artifact.get("status") == "btpc_local_fact_proxy_review_ready"
         and expected > 0
         and attached == expected
-        and decision.get("local_proxy_can_feed_replay_review") is True
-        and decision.get("local_proxy_satisfies_live_required_facts") is False
+        and review_outcome_flag(artifact, "local_proxy_can_feed_replay_review")
+        and review_outcome_flag(artifact, "local_proxy_satisfies_live_required_facts")
+        is False
     )
 
 
-def _replay_boundary_ok(packet: dict[str, Any]) -> bool:
+def _replay_boundary_ok(artifact: dict[str, Any]) -> bool:
     return (
-        packet.get("live_order_eligible") is not True
+        artifact.get("live_order_eligible") is not True
         and all(
             row.get("real_order_allowed") is not True
             and row.get("exchange_write_allowed") is not True
             and row.get("operation_layer_submit_allowed") is not True
             and row.get("not_execution_authority") is True
-            for row in _dict_rows(packet.get("replay_samples"))
+            for row in _dict_rows(artifact.get("replay_samples"))
         )
     )
 
@@ -341,36 +344,21 @@ def _default_next_step(status: str) -> str:
         return "repair_btpc_proxy_or_replay_quality_inputs"
     if status == "btpc_proxy_replay_quality_review_no_cases":
         return "add_btpc_l2_replay_cases_before_proxy_quality_review"
-    return "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+    return "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_review"
 
 
-def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
-    effects: list[str] = []
-    for index, packet in enumerate(packets):
-        safety = _as_dict(packet.get("safety_invariants"))
-        for item in safety.get("source_forbidden_effects") or []:
-            effects.append(f"packet_{index}.{item}")
-        for key in (
-            "server_files_mutated",
-            "runtime_started",
-            "strategy_parameters_changed",
-            "tier_policy_changed",
-            "shadow_candidate_created",
-            "execution_intent_created",
-            "final_gate_called",
-            "operation_layer_called",
-            "order_created",
-            "order_lifecycle_called",
-            "exchange_write_called",
-            "withdrawal_or_transfer_created",
-        ):
-            if safety.get(key) is True:
-                effects.append(f"packet_{index}.safety.{key}")
-    proxy_packet = packets[0] if packets else {}
-    proxy_decision = _as_dict(proxy_packet.get("decision"))
-    if proxy_decision.get("local_proxy_satisfies_live_required_facts") is True:
-        effects.append("btpc_local_fact_proxy.local_proxy_satisfies_live_required_facts")
-    replay = packets[1] if len(packets) > 1 else {}
+def _forbidden_effects(*artifacts: dict[str, Any]) -> list[str]:
+    effects = artifact_source_forbidden_effects(
+        artifacts,
+        true_keys=SOURCE_SAFETY_TRUE_KEYS,
+    )
+    proxy_artifact = artifacts[0] if artifacts else {}
+    if review_outcome_flag(proxy_artifact, "local_proxy_satisfies_live_required_facts"):
+        effects.append(
+            "btpc_local_fact_proxy."
+            "review_outcome_state.local_proxy_satisfies_live_required_facts"
+        )
+    replay = artifacts[1] if len(artifacts) > 1 else {}
     if replay.get("live_order_eligible") is True:
         effects.append("btpc_replay_corpus.live_order_eligible")
     for row in _dict_rows(replay.get("replay_samples")):
@@ -383,14 +371,42 @@ def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
             effects.append(
                 f"btpc_replay_corpus.{fixture}.operation_layer_submit_allowed"
             )
+    effects.extend(_legacy_authority_mirror_effects(proxy_artifact, replay))
     return sorted(set(effects))
+
+
+def _legacy_authority_mirror_effects(
+    proxy_artifact: dict[str, Any],
+    replay_corpus: dict[str, Any],
+) -> list[str]:
+    effects = legacy_authority_mirror_effects_for_artifacts(
+        (("btpc_local_fact_proxy", proxy_artifact),),
+        section_names=("safety_invariants", "review_outcome_state", "btpc_state"),
+        row_names=("proxy_rows", "action_rows", "source_rows"),
+        row_id_keys=("required_fact", "action", "strategy_group_id"),
+    )
+    effects.extend(
+        legacy_authority_mirror_present_errors(
+            replay_corpus,
+            label_prefix="btpc_replay_corpus.",
+        )
+    )
+    effects.extend(
+        legacy_authority_mirror_effects_for_artifacts(
+            (("btpc_replay_corpus", replay_corpus),),
+            row_names=("replay_samples",),
+            row_id_keys=("fixture_case",),
+            include_row_name_in_label=False,
+        )
+    )
+    return effects
 
 
 def _case_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| Case | Signal | Proxy status | Decision | Real order |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+        return "| Case | Signal | Proxy status | Decision | Exchange write |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
     output = [
-        "| Case | Signal | Proxy status | Decision | Real order |",
+        "| Case | Signal | Proxy status | Decision | Exchange write |",
         "| --- | --- | --- | --- | --- |",
     ]
     for row in rows:
@@ -399,8 +415,8 @@ def _case_table(rows: list[dict[str, Any]]) -> str:
                 row.get("fixture_case"),
                 row.get("signal_status"),
                 row.get("proxy_review_status"),
-                row.get("proxy_replay_quality_decision"),
-                row.get("real_order_authority"),
+                row.get("proxy_replay_quality_review_outcome"),
+                row.get("exchange_write_authority"),
             )
         )
     return "\n".join(output)
@@ -411,6 +427,12 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError(f"JSON object required: {path}")
     return payload
+
+
+def _load_optional_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    return _load_json_object(path)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -430,10 +452,7 @@ def _int(value: Any) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--btpc-local-fact-proxy-json",
-        default=str(DEFAULT_BTPC_LOCAL_FACT_PROXY_JSON),
-    )
+    parser.add_argument("--btpc-local-fact-proxy-json")
     parser.add_argument(
         "--btpc-replay-corpus-json", default=str(DEFAULT_BTPC_REPLAY_CORPUS_JSON)
     )
@@ -441,13 +460,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
 
-    packet = build_btpc_proxy_replay_quality_review(
-        btpc_local_fact_proxy_packet=_load_json_object(
+    artifact = build_btpc_proxy_replay_quality_review(
+        btpc_local_fact_proxy_artifact=_load_optional_json_object(
             Path(args.btpc_local_fact_proxy_json).expanduser()
-        ),
+        )
+        if args.btpc_local_fact_proxy_json
+        else {},
         replay_corpus=_load_json_object(Path(args.btpc_replay_corpus_json).expanduser()),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,9 +476,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] != "blocked_forbidden_effect" else 2
+    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
 
 
 if __name__ == "__main__":

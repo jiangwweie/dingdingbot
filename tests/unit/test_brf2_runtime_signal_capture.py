@@ -36,22 +36,75 @@ def _mapping() -> dict:
             "timeframes": ["1h_closed", "5m_closed"],
             "freshness_window_ms": 300000,
         },
-        "required_fact_keys": [
-            "closed_1h_ohlcv",
-            "closed_5m_ohlcv",
-            "rally_context",
-            "rally_failure_trigger_state",
-            "short_squeeze_risk_state",
-            "strong_reclaim_disable_state",
-            "liquidity_downshift_state",
-            "spread_liquidity_state",
+        "required_fact_observation_specs": [
+            {
+                "fact_key": "closed_1h_ohlcv",
+                "accepted_statuses": ["fresh", "present", "ready"],
+            },
+            {
+                "fact_key": "closed_5m_ohlcv",
+                "accepted_statuses": ["fresh", "present", "ready"],
+            },
+            {
+                "fact_key": "rally_context",
+                "accepted_statuses": [
+                    "bear_or_weak_reclaim",
+                    "ready",
+                    "weak_rally",
+                ],
+            },
+            {
+                "fact_key": "rally_failure_trigger_state",
+                "accepted_statuses": ["active", "confirmed", "ready"],
+            },
+            {
+                "fact_key": "short_squeeze_risk_state",
+                "accepted_statuses": ["bounded", "clear", "clear_or_bounded"],
+            },
+            {
+                "fact_key": "strong_reclaim_disable_state",
+                "accepted_statuses": ["clear", "false", "inactive"],
+            },
+            {
+                "fact_key": "liquidity_downshift_state",
+                "accepted_statuses": ["clear", "false", "inactive"],
+            },
+            {
+                "fact_key": "spread_liquidity_state",
+                "accepted_statuses": ["acceptable", "normal", "ready"],
+            },
         ],
-        "disable_fact_keys": [
-            "short_squeeze_risk_state",
-            "strong_reclaim_disable_state",
-            "rally_extension_invalidates_failure_state",
-            "liquidity_downshift_state",
-            "spread_liquidity_state",
+        "disable_fact_observation_specs": [
+            {
+                "fact_key": "short_squeeze_risk_state",
+                "active_statuses": ["red", "unbounded", "unknown"],
+                "blocker": "squeeze_risk_not_clear",
+            },
+            {
+                "fact_key": "strong_reclaim_disable_state",
+                "active_statuses": ["active", "true"],
+                "blocker": "strong_reclaim_disable_active",
+            },
+            {
+                "fact_key": "rally_extension_invalidates_failure_state",
+                "active_statuses": ["active", "true"],
+                "blocker": "rally_extension_invalidates_failure",
+            },
+            {
+                "fact_key": "liquidity_downshift_state",
+                "active_statuses": ["active", "true"],
+                "blocker": "liquidity_downshift_active",
+            },
+            {
+                "fact_key": "spread_liquidity_state",
+                "active_statuses": [
+                    "missing",
+                    "thin_volume",
+                    "unknown",
+                    "wide_spread",
+                ],
+                "blocker": "spread_liquidity_not_acceptable",
+            },
         ],
     }
 
@@ -69,7 +122,7 @@ def _owner_policy() -> dict:
 def _fresh_facts() -> dict:
     return {
         "signal_context": {
-            "signal_packet_id": "brf2-signal-001",
+            "signal_observation_id": "brf2-signal-001",
             "runtime_instance_id": "runtime-brf2-001",
             "symbol": "ADA/USDT:USDT",
             "timeframe": "5m_closed",
@@ -102,7 +155,7 @@ def _derived_source_signal_context_facts() -> dict:
             "usable_for_operation_layer": False,
         },
         "source_signal_context": {
-            "signal_packet_id": "BRF-001-BTC-SHORT:brf-signal:1782097200000",
+            "signal_observation_id": "BRF-001-BTC-SHORT:brf-signal:1782097200000",
             "runtime_instance_id": "",
             "symbol": "BTC/USDT:USDT",
             "exchange_symbol": "BTC/USDT:USDT",
@@ -134,93 +187,125 @@ def _derived_source_signal_context_facts() -> dict:
     }
 
 
+def _assert_checks_do_not_mirror_execution_authority(artifact: dict) -> None:
+    for key in (
+        "actionable_now",
+        "real_order_authority",
+        "action_time_required_facts_satisfied",
+        "calls_finalgate",
+        "calls_operation_layer",
+        "calls_exchange_write",
+        "places_order",
+    ):
+        assert key not in artifact["checks"]
+
+
 def test_brf2_runtime_signal_capture_exposes_missing_fact_input():
     module = _load_module()
 
-    packet = module.build_brf2_runtime_signal_capture(
+    artifact = module.build_brf2_runtime_signal_capture(
         required_facts_mapping=_mapping(),
         owner_policy=_owner_policy(),
         fact_input={},
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    assert packet["schema"] == module.SCHEMA
-    assert packet["status"] == "brf2_runtime_signal_capture_ready"
-    preview = packet["signal_detector_preview"]
-    assert packet["fact_input_present"] is False
-    assert packet["watcher_tick_present"] is False
+    assert artifact["schema"] == module.SCHEMA
+    assert artifact["status"] == "brf2_runtime_signal_capture_ready"
+    preview = artifact["signal_detector_preview"]
+    assert artifact["fact_input_present"] is False
+    assert artifact["watcher_tick_present"] is False
     assert preview["current_signal_state"] == "fact_input_missing"
     assert preview["first_blocker_class"] == "brf2_watcher_fact_input_missing"
     assert preview["first_blocker_owner"] == "engineering"
-    assert preview["next_action"] == "attach_brf2_watcher_fact_input_producer"
+    assert "next_action" not in preview
+    assert preview["signal_capture_checkpoint"] == (
+        "attach_brf2_watcher_fact_input_producer"
+    )
     assert preview["fresh_signal_present"] is False
     assert len(preview["missing_required_fact_keys"]) == 8
-    assert packet["candidate_packet_shape"]["candidate_packet_ready"] is False
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
-    assert packet["safety_invariants"]["calls_finalgate"] is False
-    assert packet["safety_invariants"]["calls_operation_layer"] is False
-    assert packet["safety_invariants"]["calls_exchange_write"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["shadow_candidate_shape"]["shadow_candidate_ready"] is False
+    _assert_checks_do_not_mirror_execution_authority(artifact)
+    assert artifact["safety_invariants"]["calls_finalgate"] is False
+    assert artifact["safety_invariants"]["calls_operation_layer"] is False
+    assert artifact["safety_invariants"]["calls_exchange_write"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["candidate_created"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]
 
 
-def test_brf2_runtime_signal_capture_builds_non_executing_candidate_shape():
+def test_brf2_runtime_signal_capture_builds_non_executing_shadow_candidate_shape():
     module = _load_module()
 
-    packet = module.build_brf2_runtime_signal_capture(
+    artifact = module.build_brf2_runtime_signal_capture(
         required_facts_mapping=_mapping(),
         owner_policy=_owner_policy(),
         fact_input=_fresh_facts(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    preview = packet["signal_detector_preview"]
-    candidate = packet["candidate_packet_shape"]
+    preview = artifact["signal_detector_preview"]
+    candidate = artifact["shadow_candidate_shape"]
     assert preview["current_signal_state"] == "fresh_signal_present"
     assert preview["fresh_signal_present"] is True
+    assert "next_action" not in preview
+    assert preview["signal_capture_checkpoint"] == (
+        "build_brf2_shadow_candidate_evidence"
+    )
     assert preview["missing_required_fact_keys"] == []
     assert preview["active_disable_fact_keys"] == []
-    assert candidate["candidate_packet_ready"] is True
-    assert candidate["candidate_packet_type"] == (
-        "brf2_non_executing_short_signal_candidate"
+    assert candidate["shadow_candidate_ready"] is True
+    assert candidate["shadow_candidate_type"] == (
+        "brf2_non_executing_short_signal_candidate_evidence"
     )
-    assert "action_time_finalgate_packet_id" in candidate["required_next_chain"]
-    assert "operation_layer_submit_authorization_id" in candidate["required_next_chain"]
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
+    assert "required_next_chain" not in candidate
+    assert "forbidden_until_action_time" not in candidate
+    assert "would_bind_required_facts" not in candidate
+    assert "would_bind_disable_facts" not in candidate
+    for removed_check in (
+        "fact_input_status_ready",
+        "watcher_scope_ready",
+        "signal_detector_preview_ready",
+        "no_action_attribution_ready",
+        "shadow_candidate_shape_ready",
+    ):
+        assert removed_check not in artifact["checks"]
+    _assert_checks_do_not_mirror_execution_authority(artifact)
+    assert artifact["safety_invariants"]["candidate_created"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]
 
 
 def test_brf2_runtime_signal_capture_preserves_source_signal_context():
     module = _load_module()
 
-    packet = module.build_brf2_runtime_signal_capture(
+    artifact = module.build_brf2_runtime_signal_capture(
         required_facts_mapping=_mapping(),
         owner_policy=_owner_policy(),
         fact_input=_derived_source_signal_context_facts(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    context = packet["source_signal_context"]
-    preview = packet["signal_detector_preview"]
-    candidate = packet["candidate_packet_shape"]
-    assert packet["fact_input_present"] is True
-    assert packet["watcher_tick_present"] is True
+    context = artifact["source_signal_context"]
+    preview = artifact["signal_detector_preview"]
+    candidate = artifact["shadow_candidate_shape"]
+    assert artifact["fact_input_present"] is True
+    assert artifact["watcher_tick_present"] is True
     assert preview["current_signal_state"] == "fresh_signal_absent"
     assert preview["first_blocker_class"] == "fresh_brf2_short_signal_absent"
     assert context["symbol"] == "BTC/USDT:USDT"
     assert context["exchange_symbol"] == "BTC/USDT:USDT"
-    assert context["signal_packet_id"] == (
+    assert context["signal_observation_id"] == (
         "BRF-001-BTC-SHORT:brf-signal:1782097200000"
     )
     assert context["source_strategy_group_id"] == "BRF-001"
     assert context["source_candidate_id"] == "BRF-001-BTC-SHORT"
     assert context["source_signal_type"] == "no_action"
-    assert packet["fact_authority"] == "readonly_proxy_not_action_time_required_fact"
-    assert packet["fact_authority_boundary"][
+    assert artifact["fact_authority"] == "readonly_proxy_not_action_time_required_fact"
+    assert artifact["fact_authority_boundary"][
         "action_time_required_facts_satisfied"
     ] is False
-    assert candidate["fact_authority"] == packet["fact_authority"]
-    assert packet["checks"]["action_time_required_facts_satisfied"] is False
+    assert candidate["fact_authority"] == artifact["fact_authority"]
+    _assert_checks_do_not_mirror_execution_authority(artifact)
 
 
 def test_brf2_runtime_signal_capture_cli_writes_artifacts(tmp_path: Path):
@@ -250,11 +335,17 @@ def test_brf2_runtime_signal_capture_cli_writes_artifacts(tmp_path: Path):
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert packet["status"] == "brf2_runtime_signal_capture_ready"
-    assert packet["signal_detector_preview"]["current_signal_state"] == (
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "brf2_runtime_signal_capture_ready"
+    assert artifact["signal_detector_preview"]["current_signal_state"] == (
         "fresh_signal_present"
     )
-    assert packet["source_signal_context"]["signal_packet_id"] == "brf2-signal-001"
-    assert packet["source_signal_context"]["symbol"] == "ADA/USDT:USDT"
-    assert "BRF2 Runtime Signal Capture" in output_md.read_text(encoding="utf-8")
+    assert "next_action" not in artifact["signal_detector_preview"]
+    assert artifact["source_signal_context"]["signal_observation_id"] == "brf2-signal-001"
+    assert artifact["source_signal_context"]["symbol"] == "ADA/USDT:USDT"
+    markdown = output_md.read_text(encoding="utf-8")
+    assert "BRF2 Runtime Signal Capture" in markdown
+    assert "This packet" not in markdown
+    assert "candidate packet shape" not in markdown
+    assert "This artifact" in markdown
+    assert "shadow-candidate evidence shape" in markdown

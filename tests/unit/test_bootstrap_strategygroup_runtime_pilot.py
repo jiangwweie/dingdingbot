@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from scripts.bootstrap_strategygroup_runtime_pilot import (
     RuntimePilotBootstrapConfig,
+    _active_inventory_counts,
     _runtime_rows_from_payload,
     _runtime_symbol,
-    build_packet,
+    build_artifact,
 )
 
 
@@ -59,7 +60,7 @@ class _FakeClient:
                 "body": {
                     "admission_decision_id": "decision-1",
                     "trial_constraint_snapshot_id": "constraint-1",
-                    "decision": "admit_with_constraints",
+                    "admission_result": "admit_with_constraints",
                 },
             }
         if path.endswith("/admissions/risk-acceptances"):
@@ -74,7 +75,7 @@ class _FakeClient:
                     "operation_id": "operation-1",
                     "preflight_id": "preflight-1",
                     "idempotency_key": "idem-1",
-                    "decision": "allow",
+                    "preflight_result": "allow",
                     "risk_summary": {"blockers": []},
                 },
             }
@@ -189,7 +190,7 @@ def test_runtime_symbol_normalizes_binance_usdt_to_runtime_symbol():
     assert _runtime_symbol("COIN/USDT:USDT") == "COIN/USDT:USDT"
 
 
-def test_runtime_rows_from_payload_accepts_watcher_status_packet_shape():
+def test_runtime_rows_from_payload_accepts_current_runtime_signal_summary_shape():
     rows = _runtime_rows_from_payload(
         {
             "active_runtime_count": 2,
@@ -214,14 +215,53 @@ def test_runtime_rows_from_payload_accepts_watcher_status_packet_shape():
     ]
 
 
+def test_runtime_rows_from_payload_ignores_legacy_status_packet_wrapper():
+    rows = _runtime_rows_from_payload(
+        {
+            "status_packet": {
+                "runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "legacy-runtime-must-not-win",
+                        "strategy_family_id": "MPG-001",
+                    }
+                ],
+            }
+        }
+    )
+
+    assert rows == []
+
+
+def test_active_inventory_counts_ignores_legacy_status_packet_wrapper():
+    counts = _active_inventory_counts(
+        {
+            "status_packet": {
+                "active_runtime_count": 9,
+                "monitored_runtime_count": 7,
+            },
+            "data": {
+                "watcher": {
+                    "active_runtime_count": 2,
+                    "monitored_runtime_count": 1,
+                }
+            },
+        }
+    )
+
+    assert counts == {
+        "active_runtime_count": 2,
+        "monitored_runtime_count": 1,
+    }
+
+
 def test_plan_skips_existing_group_and_observe_only_by_default():
-    packet = build_packet(
+    artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
             execute=False,
             max_symbols_per_group=1,
             max_total_new_runtimes=4,
         ),
-        intake_packet=_intake(),
+        intake_artifact=_intake(),
         live_facts_readiness=_readiness(),
         active_runtimes=[
             {
@@ -235,25 +275,25 @@ def test_plan_skips_existing_group_and_observe_only_by_default():
         ],
     )
 
-    assert packet["status"] == "planned_runtime_bootstrap"
-    assert [item["strategy_group_id"] for item in packet["targets"]] == [
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert [item["strategy_group_id"] for item in artifact["targets"]] == [
         "TEQ-001",
         "FBS-001",
         "SOR-001",
     ]
-    assert packet["targets"][0]["symbol"] == "INTC/USDT:USDT"
-    assert packet["targets"][2]["symbol"] == "XAG/USDT:USDT"
-    assert packet["targets"][2]["side"] == "short"
-    skipped = {item["strategy_group_id"]: item for item in packet["skipped"]}
+    assert artifact["targets"][0]["symbol"] == "INTC/USDT:USDT"
+    assert artifact["targets"][2]["symbol"] == "XAG/USDT:USDT"
+    assert artifact["targets"][2]["side"] == "short"
+    skipped = {item["strategy_group_id"]: item for item in artifact["skipped"]}
     assert skipped["MPG-001"]["reason"] == "strategy_group_already_has_active_runtime"
     assert skipped["PMR-001"]["reason"].startswith("mode_not_bootstrappable")
-    assert packet["safety_invariants"]["plan_only"] is True
-    assert packet["safety_invariants"]["creates_runtime_records"] is False
-    assert packet["safety_invariants"]["creates_order"] is False
+    assert artifact["safety_invariants"]["plan_only"] is True
+    assert artifact["safety_invariants"]["creates_runtime_records"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
 
 
 def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization():
-    packet = build_packet(
+    artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
             execute=False,
             strategy_group_ids=("TEQ-001",),
@@ -261,7 +301,7 @@ def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization(
             max_symbols_per_group=1,
             max_total_new_runtimes=1,
         ),
-        intake_packet={"strategy_picker": [_group("TEQ-001", rank=1)]},
+        intake_artifact={"strategy_picker": [_group("TEQ-001", rank=1)]},
         live_facts_readiness={
             "readiness": [
                 {
@@ -285,29 +325,29 @@ def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization(
         ],
     )
 
-    assert packet["status"] == "planned_runtime_bootstrap"
-    assert len(packet["targets"]) == 1
-    target = packet["targets"][0]
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert len(artifact["targets"]) == 1
+    target = artifact["targets"][0]
     assert target["strategy_group_id"] == "TEQ-001"
     assert target["reason"] == (
         "runtime_attempts_exhausted_renewal_ready_for_runtime_bootstrap"
     )
     assert target["renewal_of_runtime_instance_id"] == "runtime-teq-exhausted"
-    assert packet["safety_invariants"]["creates_candidate"] is False
-    assert packet["safety_invariants"]["creates_execution_intent"] is False
-    assert packet["safety_invariants"]["creates_order"] is False
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
 
 
 def test_execute_creates_shadow_runtime_without_submit_paths():
     client = _FakeClient()
-    packet = build_packet(
+    artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
             api_base="http://unit",
             execute=True,
             strategy_group_ids=("TEQ-001",),
             account_facts_source="static",
         ),
-        intake_packet={"strategy_picker": [_group("TEQ-001", rank=1)]},
+        intake_artifact={"strategy_picker": [_group("TEQ-001", rank=1)]},
         live_facts_readiness={
             "readiness": [
                 {
@@ -322,27 +362,32 @@ def test_execute_creates_shadow_runtime_without_submit_paths():
         client=client,
     )
 
-    assert packet["status"] == "executed_runtime_bootstrap"
-    assert packet["runtime_scope"]["new_runtime_instance_ids"] == ["runtime-teq-1"]
-    assert packet["safety_invariants"]["mutates_pg_only_for_runtime_admission"] is True
-    assert packet["safety_invariants"]["creates_candidate"] is False
-    assert packet["safety_invariants"]["creates_execution_intent"] is False
-    assert packet["safety_invariants"]["creates_order"] is False
+    assert artifact["status"] == "executed_runtime_bootstrap"
+    assert artifact["runtime_scope"]["new_runtime_instance_ids"] == ["runtime-teq-1"]
+    assert artifact["safety_invariants"]["mutates_pg_only_for_runtime_admission"] is True
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
     paths = [call["path"] for call in client.calls]
     assert not any("first-real-submit-actions" in path for path in paths)
     assert not any("exchange-submit" in path for path in paths)
     assert not any("order-candidates" in path for path in paths)
+    assert all(
+        "decision" not in step
+        for execution in artifact["executions"]
+        for step in execution["report"]["steps"]
+    )
 
 
 def test_execute_blocks_when_active_inventory_is_unavailable():
-    packet = build_packet(
+    artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(execute=True),
-        intake_packet=_intake(),
+        intake_artifact=_intake(),
         live_facts_readiness=_readiness(),
         active_runtimes=[],
         active_inventory_blockers=["active_runtime_inventory_unavailable:URLError"],
     )
 
-    assert packet["status"] == "blocked_active_runtime_inventory_unavailable"
-    assert packet["executions"] == []
-    assert "active_runtime_inventory_unavailable:URLError" in packet["blockers"]
+    assert artifact["status"] == "blocked_active_runtime_inventory_unavailable"
+    assert artifact["executions"] == []
+    assert "active_runtime_inventory_unavailable:URLError" in artifact["blockers"]

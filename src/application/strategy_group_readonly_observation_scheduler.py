@@ -33,7 +33,7 @@ from src.infrastructure.local_sqlite_observation_market_source import LocalSqlit
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 
 
-ObservationSourceName = Literal["live_market", "local_sqlite_fallback"]
+ObservationSourceName = Literal["live_market", "local_sqlite_read_only"]
 ObservationWriteAction = Literal["inserted", "skipped_duplicate", "failed"]
 ShadowPlanningAction = Literal[
     "not_requested",
@@ -353,41 +353,31 @@ async def _with_shadow_planning_result(
             }
         )
 
-    try:
-        signal_input = StrategyFamilySignalInput.model_validate(
-            record.signal_input_snapshot
-        )
-        runtime = await _resolve_runtime(runtime_resolver, signal_input, record)
-        if runtime is None:
-            return result.model_copy(
-                update={
-                    "shadow_planning_action": "runtime_not_resolved",
-                    "shadow_planning_blockers": ["runtime_not_resolved"],
-                }
-            )
-        planning = await runtime_signal_planning_service.plan_signal_input_if_ready(
-            signal_input,
-            runtime=runtime,
-            candidate_id=record.candidate_id,
-            allow_shadow_candidate_creation=allow_shadow_candidate_creation,
-            context_id=f"scheduled-observation:{record.record_id}",
-            metadata={
-                "scheduled_readonly_observation": True,
-                "observation_id": record.record_id,
-                "candidate_id": record.candidate_id,
-                "market_bar_timestamp_ms": record.market_bar_timestamp_ms,
-                "allow_shadow_candidate_creation": allow_shadow_candidate_creation,
-            },
-        )
-    except Exception as exc:
+    signal_input = StrategyFamilySignalInput.model_validate(
+        record.signal_input_snapshot
+    )
+    runtime = await _resolve_runtime(runtime_resolver, signal_input, record)
+    if runtime is None:
         return result.model_copy(
             update={
-                "shadow_planning_action": "failed",
-                "shadow_planning_blockers": [
-                    f"{type(exc).__name__}: {str(exc)[:240]}"
-                ],
+                "shadow_planning_action": "runtime_not_resolved",
+                "shadow_planning_blockers": ["runtime_not_resolved"],
             }
         )
+    planning = await runtime_signal_planning_service.plan_signal_input_if_ready(
+        signal_input,
+        runtime=runtime,
+        candidate_id=record.candidate_id,
+        allow_shadow_candidate_creation=allow_shadow_candidate_creation,
+        context_id=f"scheduled-observation:{record.record_id}",
+        metadata={
+            "scheduled_readonly_observation": True,
+            "observation_id": record.record_id,
+            "candidate_id": record.candidate_id,
+            "market_bar_timestamp_ms": record.market_bar_timestamp_ms,
+            "allow_shadow_candidate_creation": allow_shadow_candidate_creation,
+        },
+    )
 
     action = _planning_action(planning)
     return result.model_copy(

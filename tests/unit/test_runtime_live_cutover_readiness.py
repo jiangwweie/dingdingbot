@@ -9,20 +9,20 @@ from scripts import runtime_dry_run_audit_chain as dry_run_audit
 def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blockers(
     tmp_path,
 ) -> None:
-    packet = script.build_cutover_readiness_packet(
+    artifact = script.build_cutover_readiness_artifact(
         output_dir=tmp_path,
         generated_at_ms=1781753000000,
     )
 
-    assert packet["schema"] == "brc.runtime_live_cutover_readiness.v1"
-    assert packet["scope"] == "runtime_live_cutover_readiness"
-    assert packet["status"] == "live_cutover_waiting_for_fresh_signal"
-    assert packet["owner_state"] == "等待机会"
-    assert packet["next_safe_action"] == (
+    assert artifact["schema"] == "brc.runtime_live_cutover_readiness.v1"
+    assert artifact["scope"] == "runtime_live_cutover_readiness"
+    assert artifact["status"] == "live_cutover_waiting_for_fresh_signal"
+    assert artifact["owner_state"] == "等待机会"
+    assert artifact["next_safe_action"] == (
         "continue_low_noise_watcher_until_fresh_selected_signal"
     )
-    assert packet["non_market_blockers"] == []
-    assert packet["market_dependent_waiting_keys"] == [
+    assert artifact["non_market_blockers"] == []
+    assert artifact["market_dependent_waiting_keys"] == [
         "fresh_signal",
         "candidate_authorization",
         "action_time_finalgate",
@@ -30,9 +30,14 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "real_exchange_acceptance",
         "post_submit_real_reconciliation",
     ]
-    assert packet["next_fresh_signal_cutover_ready"] is True
-    assert packet["current_real_submit_allowed"] is False
-    assert packet["safety_invariants"] == {
+    assert artifact["next_fresh_signal_cutover_ready"] is True
+    assert artifact["current_real_submit_allowed"] is False
+    assert artifact["current_real_submit_blocker"] == (
+        "no_live_fresh_signal_in_this_local_artifact"
+    )
+    assert "source_packets" not in artifact
+    assert artifact["source_artifacts"]["dry_run_audit_status"] == "passed"
+    assert artifact["safety_invariants"] == {
         "calls_tokyo_api": False,
         "mutates_server_files": False,
         "calls_live_finalgate": False,
@@ -46,13 +51,13 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "modifies_order_sizing_defaults": False,
         "replay_or_synthetic_signal_used_as_live_signal": False,
     }
-    assert packet["legacy_confirmation_regression_checks"] == {
+    assert artifact["legacy_confirmation_regression_checks"] == {
         "disabled_smoke_not_real_execution_proof": True,
         "legacy_local_registration_probe_tolerated_without_blocking_cutover": True,
         "post_submit_outcomes_do_not_require_owner_chat_confirmation": True,
         "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation": True,
     }
-    contract = packet["live_closure_cutover_contract"]
+    contract = artifact["live_closure_cutover_contract"]
     assert contract["scope"] == "first_bounded_live_order_closure_cutover_contract"
     assert contract["status"] == "ready"
     assert contract["stage_count"] == 9
@@ -67,9 +72,12 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "post_submit_finalize",
         "reconciliation_settlement_review",
     ]
+    for stage in contract["stages"]:
+        assert "next_action" not in stage
+        assert stage["next_lifecycle_checkpoint"]
     assert contract["required_evidence_keys"] == [
         "live_watcher_signal_packet_id",
-        "required_facts_readiness_packet_id",
+        "required_facts_readiness_artifact_id",
         "candidate_id",
         "runtime_grant_id",
         "fresh_submit_authorization_id",
@@ -77,7 +85,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "operation_layer_submit_authorization_id",
         "exchange_submit_execution_result_id",
         "exchange_native_hard_stop_order_id",
-        "runtime_post_submit_finalize_packet_id",
+        "runtime_post_submit_finalize_payload_id",
         "post_submit_reconciliation_evidence_id",
         "post_submit_budget_settlement_id",
         "submit_outcome_review_id",
@@ -97,7 +105,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "live_closure_contract_requires_post_submit_result_binding": True,
         "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
     }
-    visibility = packet["same_tick_product_state_visibility_contract"]
+    visibility = artifact["same_tick_product_state_visibility_contract"]
     assert visibility["status"] == "ready"
     assert visibility["events"] == [
         "dry_run",
@@ -115,8 +123,8 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "product_state_refresh_has_no_dangerous_effects": True,
     }
 
-    sections = {item["name"]: item for item in packet["sections"]}
-    assert set(sections) == {
+    check_groups = {item["name"]: item for item in artifact["check_groups"]}
+    assert set(check_groups) == {
         "strategy_scope",
         "entry_fast_chain",
         "operation_layer_relay",
@@ -128,33 +136,35 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "same_tick_product_state_visibility",
         "dry_run_safety",
     }
-    for section in sections.values():
-        assert section["status"] == "ready"
-        assert section["missing_checks"] == []
+    for check_group in check_groups.values():
+        assert check_group["status"] == "ready"
+        assert check_group["missing_checks"] == []
 
 
 def test_live_cutover_readiness_blocks_non_market_gap(tmp_path) -> None:
-    audit_packet = dry_run_audit.build_audit_chain(tmp_path / "audit")
-    audit_packet["checks"]["operation_layer_evidence_relay_checked"] = False
+    audit_artifact = dry_run_audit.build_audit_artifact(tmp_path / "audit")
+    audit_artifact["checks"]["operation_layer_evidence_relay_checked"] = False
 
-    packet = script.build_cutover_readiness_packet(
+    artifact = script.build_cutover_readiness_artifact(
         output_dir=tmp_path,
-        dry_run_packet=audit_packet,
+        dry_run_artifact=audit_artifact,
         generated_at_ms=1781753000000,
     )
 
-    assert packet["status"] == "blocked_non_market_cutover_gap"
-    assert packet["owner_state"] == "需要介入"
-    assert packet["next_fresh_signal_cutover_ready"] is False
-    assert packet["current_real_submit_allowed"] is False
-    assert packet["non_market_blockers"] == [
+    assert artifact["status"] == "blocked_non_market_cutover_gap"
+    assert artifact["owner_state"] == "需要介入"
+    assert artifact["next_fresh_signal_cutover_ready"] is False
+    assert artifact["current_real_submit_allowed"] is False
+    assert artifact["non_market_blockers"] == [
         "operation_layer_relay:operation_layer_evidence_relay_checked"
     ]
-    section = next(
-        item for item in packet["sections"] if item["name"] == "operation_layer_relay"
+    check_group = next(
+        item
+        for item in artifact["check_groups"]
+        if item["name"] == "operation_layer_relay"
     )
-    assert section["status"] == "blocked"
-    assert section["missing_checks"] == ["operation_layer_evidence_relay_checked"]
+    assert check_group["status"] == "blocked"
+    assert check_group["missing_checks"] == ["operation_layer_evidence_relay_checked"]
 
 
 def test_live_cutover_cli_writes_owner_summary(tmp_path) -> None:
@@ -173,9 +183,9 @@ def test_live_cutover_cli_writes_owner_summary(tmp_path) -> None:
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
     owner_text = owner_progress.read_text(encoding="utf-8")
-    assert packet["status"] == "live_cutover_waiting_for_fresh_signal"
+    assert artifact["status"] == "live_cutover_waiting_for_fresh_signal"
     assert "- 当前状态: 等待真实 fresh signal" in owner_text
     assert "- 非市场阻断: 无" in owner_text
     assert "- 服务器修改: 否" in owner_text

@@ -2,7 +2,7 @@
 """Call the runtime post-submit finalize API.
 
 This script resolves post-submit evidence through the Trading Console API and
-returns a RuntimePostSubmitFinalizePacket. It never calls exchange, creates
+returns a non-executing post-submit finalize artifact. It never calls exchange, creates
 orders, submits through OrderLifecycle, closes positions, transfers, or
 withdraws funds.
 """
@@ -95,13 +95,13 @@ def _call_api(
         "POST",
         (
             "/api/trading-console/strategy-runtimes/"
-            f"{args.runtime_instance_id}/post-submit-finalize-packets"
+            f"{args.runtime_instance_id}/post-submit-finalize-payloads"
         ),
         body=_request_body(args),
     )
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -132,7 +132,7 @@ def _build_packet(
         "authorization_id": body.get("authorization_id") or args.authorization_id,
         "http_status": http_status,
         "api_payload": body,
-        "post_submit_finalize_packet": body,
+        "post_submit_finalize_payload": body,
         "blockers": list(body.get("blockers") or []),
         "next_attempt_blockers": list(
             (body.get("next_attempt_gate") or {}).get("blockers") or []
@@ -162,7 +162,7 @@ def _safety() -> dict[str, bool]:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Call the runtime post-submit finalize packet API.",
+        description="Call the runtime post-submit finalize payload API.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument("--reservation-id")
@@ -178,9 +178,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    )
+    return 0 if artifact["status"] in {
         "finalized_ready_for_next_attempt",
         "finalized_next_attempt_blocked",
         "blocked",

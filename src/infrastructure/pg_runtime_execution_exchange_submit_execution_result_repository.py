@@ -134,7 +134,7 @@ class PgRuntimeExecutionExchangeSubmitExecutionResultRepository:
         return PGRuntimeExecutionExchangeSubmitExecutionResultORM(
             execution_result_id=result.execution_result_id,
             enablement_decision_id=result.enablement_decision_id,
-            packet_preview_id=result.packet_preview_id,
+            submit_preview_id=result.submit_preview_id,
             binding_id=result.binding_id,
             authorization_id=result.authorization_id,
             execution_intent_id=result.execution_intent_id,

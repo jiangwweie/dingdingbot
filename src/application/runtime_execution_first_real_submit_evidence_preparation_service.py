@@ -1,12 +1,12 @@
-"""Prepare machine evidence for first-real-submit Owner review packets."""
+"""Prepare machine evidence for first-real-submit Owner review evidence."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
-    RuntimeExecutionFirstRealSubmitEnablementPacketService,
+from src.application.runtime_execution_first_real_submit_enablement_evidence_service import (
+    RuntimeExecutionFirstRealSubmitEnablementEvidenceService,
 )
 from src.application.runtime_execution_trusted_submit_facts_service import (
     RuntimeExecutionTrustedSubmitFactsAssemblyService,
@@ -37,17 +37,17 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
         trusted_submit_facts_assembly_service: (
             RuntimeExecutionTrustedSubmitFactsAssemblyService | object | None
         ) = None,
-        enablement_packet_service: (
-            RuntimeExecutionFirstRealSubmitEnablementPacketService | None
+        enablement_evidence_service: (
+            RuntimeExecutionFirstRealSubmitEnablementEvidenceService | None
         ) = None,
     ) -> None:
         self._adapter_service = runtime_execution_intent_adapter_service
         self._trusted_submit_facts_assembly_service = (
             trusted_submit_facts_assembly_service
         )
-        self._packet_service = (
-            enablement_packet_service
-            or RuntimeExecutionFirstRealSubmitEnablementPacketService(
+        self._evidence_service = (
+            enablement_evidence_service
+            or RuntimeExecutionFirstRealSubmitEnablementEvidenceService(
                 runtime_execution_intent_adapter_service=(
                     runtime_execution_intent_adapter_service
                 )
@@ -123,10 +123,11 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
         available_evidence_ids.update(resolved_evidence_ids)
         available_evidence_ids.update(prepared_evidence_ids)
 
-        packet = None
+        enablement_evidence = None
         if plan is not None:
             try:
-                packet = await self._packet_service.preview_for_authorization(
+                enablement_evidence = (
+                    await self._evidence_service.preview_for_authorization(
                     authorization_id,
                     trusted_submit_fact_snapshot_id=available_evidence_ids.get(
                         "trusted_submit_fact_snapshot_id"
@@ -149,10 +150,11 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
                     ),
                     semantic_confirmations=semantic_confirmations,
                     runtime_confirmations=runtime_confirmations,
+                    )
                 )
             except Exception as exc:
                 blockers.append(
-                    _error_code("first_real_submit_packet_unavailable", exc)
+                    _error_code("first_real_submit_evidence_unavailable", exc)
                 )
 
         return build_runtime_execution_first_real_submit_evidence_preparation(
@@ -162,7 +164,7 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
             skipped_evidence=skipped_evidence,
             blockers=blockers,
             warnings=warnings,
-            packet=packet,
+            enablement_evidence=enablement_evidence,
             now_ms=_now_ms(),
         )
 

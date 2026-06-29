@@ -12,10 +12,19 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_DOCS_JSON = (
     REPO_ROOT
@@ -69,8 +78,8 @@ OWNER_POLICY = {
         "missing_required_path_or_liquidation_buffer_evidence",
     ],
     "authority_boundary": (
-        "owner_policy_only; actionable_now=false; real_order_authority=false; "
-        "finalgate_required; operation_layer_required"
+        "owner_policy_only; finalgate_required; operation_layer_required; "
+        "no_exchange_write"
     ),
 }
 
@@ -92,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    packet = (
+    artifact = (
         build_brf2_owner_trial_policy_scope()
         if args.write_docs
         else build_brf2_owner_trial_policy_scope_view(Path(args.policy_json))
@@ -101,21 +110,21 @@ def main(argv: list[str] | None = None) -> int:
     output_md = Path(args.output_owner_progress)
     docs_json = Path(args.docs_json)
     docs_md = Path(args.docs_md)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, artifact)
+    _write_text(output_md, _markdown(artifact, output_json))
     if args.write_docs:
-        _write_json(docs_json, packet)
-        _write_text(docs_md, _markdown(packet, docs_json))
+        _write_json(docs_json, artifact)
+        _write_text(docs_md, _markdown(artifact, docs_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_id": packet["policy"]["strategy_group_id"],
-                "trial_identity": packet["policy"]["trial_identity"],
-                "brf2_policy_scope_recorded": packet[
+                "status": artifact["status"],
+                "strategy_group_id": artifact["policy"]["strategy_group_id"],
+                "trial_identity": artifact["policy"]["trial_identity"],
+                "brf2_policy_scope_recorded": artifact[
                     "brf2_policy_scope_recorded"
                 ],
-                "owner_policy_scope_missing": packet[
+                "owner_policy_scope_missing": artifact[
                     "owner_policy_scope_missing"
                 ],
                 "output_json": str(output_json),
@@ -127,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if packet["status"] == "brf2_owner_trial_policy_scope_recorded" else 2
+    return 0 if artifact["status"] == "brf2_owner_trial_policy_scope_recorded" else 2
 
 
 def build_brf2_owner_trial_policy_scope(
@@ -145,7 +154,7 @@ def build_brf2_owner_trial_policy_scope(
         "owner_policy_scope_missing": False,
         "brf2_stage_after_policy": "admitted_trial_asset",
         "brf2_new_first_blocker": "required_facts_mapping_gap",
-        "brf2_next_action": "close_brf2_required_facts_mapping_for_armed_observation",
+        "brf2_policy_checkpoint": "close_brf2_required_facts_mapping_for_armed_observation",
         "checks": {
             "owner_policy_recorded": True,
             "owner_policy_scope_missing": False,
@@ -157,14 +166,8 @@ def build_brf2_owner_trial_policy_scope(
             "leverage_scenario_is_not_authority": True,
             "attempt_cap": 3,
             "loss_unit_amount": "10",
-            "actionable_now": False,
-            "real_order_authority": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
         },
-        "final_evidence_packet": {
+        "final_policy_evidence": {
             "closed_engineering_problem": (
                 "BRF2 Owner trial policy is now recorded as a final-owned "
                 "machine-readable policy scope instead of remaining a chat-only "
@@ -179,8 +182,8 @@ def build_brf2_owner_trial_policy_scope(
             "brf2_new_first_blocker": "required_facts_mapping_gap",
             "three_strategy_portfolio_status": "pending_downstream_regeneration",
             "tests_run": [
-                "python3 -m py_compile scripts/build_brf2_owner_trial_policy_scope.py scripts/build_strategygroup_trial_asset_admission_proposal.py scripts/build_strategygroup_three_strategy_live_trial_portfolio.py scripts/build_strategygroup_tradeability_verdict.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-                "python3 -m pytest tests/unit/test_brf2_owner_trial_policy_scope.py tests/unit/test_strategygroup_trial_asset_admission_proposal.py tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py tests/unit/test_strategygroup_tradeability_verdict.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py tests/unit/test_strategygroup_current_artifact_contract.py -q",
+                "python3 -m py_compile scripts/build_brf2_owner_trial_policy_scope.py scripts/build_strategygroup_trial_asset_admission_proposal.py scripts/build_strategygroup_three_strategy_live_trial_portfolio.py scripts/build_strategygroup_tradeability_decision.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+                "python3 -m pytest tests/unit/test_brf2_owner_trial_policy_scope.py tests/unit/test_strategygroup_trial_asset_admission_proposal.py tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py tests/unit/test_strategygroup_tradeability_decision.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py tests/unit/test_strategygroup_current_artifact_contract.py -q",
                 "python3 -m pytest tests/unit/test_strategygroup_* -q",
                 "python3 -m compileall scripts tests",
                 "python3 -m pytest tests/unit -q",
@@ -190,12 +193,12 @@ def build_brf2_owner_trial_policy_scope(
                 "scripts/build_brf2_owner_trial_policy_scope.py",
                 "scripts/build_strategygroup_trial_asset_admission_proposal.py",
                 "scripts/build_strategygroup_three_strategy_live_trial_portfolio.py",
-                "scripts/build_strategygroup_tradeability_verdict.py",
+                "scripts/build_strategygroup_tradeability_decision.py",
                 "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
                 "tests/unit/test_brf2_owner_trial_policy_scope.py",
                 "tests/unit/test_strategygroup_trial_asset_admission_proposal.py",
                 "tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py",
-                "tests/unit/test_strategygroup_tradeability_verdict.py",
+                "tests/unit/test_strategygroup_tradeability_decision.py",
                 "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
                 "tests/unit/test_strategygroup_current_artifact_contract.py",
                 "docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.json",
@@ -204,7 +207,7 @@ def build_brf2_owner_trial_policy_scope(
                 "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.md",
                 "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
                 "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
-                "output/runtime-monitor/latest-strategygroup-tradeability-verdict.json",
+                "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
                 "output/runtime-monitor/latest-local-monitor-sequence.json",
             ],
             "deploy_status": "not_deployed",
@@ -222,34 +225,32 @@ def build_brf2_owner_trial_policy_scope_view(
     """Build a monitor view from the stable docs/current authority record."""
 
     if policy_json.exists():
-        packet = _read_json(policy_json)
+        artifact = _read_json(policy_json)
     else:
-        packet = build_brf2_owner_trial_policy_scope()
+        artifact = build_brf2_owner_trial_policy_scope()
     view_generated = view_generated_at_utc or datetime.now(timezone.utc).isoformat()
-    view_packet = dict(packet)
-    view_packet["source_policy_json"] = str(policy_json)
-    view_packet["view_generated_at_utc"] = view_generated
-    view_packet["view_mode"] = "monitor_view_from_final_owned_policy"
-    return view_packet
+    view_artifact = dict(artifact)
+    view_artifact["source_policy_json"] = str(policy_json)
+    view_artifact["view_generated_at_utc"] = view_generated
+    view_artifact["view_mode"] = "monitor_view_from_final_owned_policy"
+    return view_artifact
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
-    policy = packet["policy"]
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
+    policy = artifact["policy"]
     capital = policy["capital_scope"]
     max_notional = policy["max_notional"]
     loss_unit = policy["loss_unit"]
     lines = [
         "## BRF2 Owner Trial Policy Scope V0",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Generated: `{artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
         f"- StrategyGroup: `{policy['strategy_group_id']}`",
         f"- Trial identity: `{policy['trial_identity']}`",
-        f"- Policy recorded: `{_yes_no(packet['brf2_policy_scope_recorded'])}`",
-        f"- Owner policy scope missing: `{_yes_no(packet['owner_policy_scope_missing'])}`",
-        f"- Actionable now: `{_yes_no(False)}`",
-        f"- Real order authority: `{_yes_no(False)}`",
+        f"- Policy recorded: `{_yes_no(artifact['brf2_policy_scope_recorded'])}`",
+        f"- Owner policy scope missing: `{_yes_no(artifact['owner_policy_scope_missing'])}`",
         "",
         "## Scope",
         "",
@@ -279,40 +280,25 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         "## Boundary",
         "",
         "- This record is Owner policy only.",
-        "- It does not set actionable_now or real_order_authority.",
-        "- FinalGate and Operation Layer remain required at action time.",
+        "- It does not call FinalGate, Operation Layer, exchange write, or order placement.",
+        "- Tradeability Decision and Runtime Safety State remain required before action time.",
         "- The 5x value is a scenario, not unconditional order authority.",
     ]
     return "\n".join(lines) + "\n"
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_brf2_owner_trial_policy_scope",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_brf2_owner_trial_policy_scope")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "registry_authority_changed": False,
-        "tier_policy_changed": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "withdrawal_or_transfer_created": False,
-    }
+    return non_executing_safety_invariants(
+        (
+            "registry_authority_changed",
+            "tier_policy_changed",
+        ),
+        include_authority_mirrors=False,
+    )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

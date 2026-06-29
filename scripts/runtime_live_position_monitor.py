@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a read-only runtime live-position monitor packet."""
+"""Build a read-only runtime live-position monitor artifact."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
+async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
 
     from src.application.reconciliation import ReconciliationService
@@ -101,13 +101,13 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             exchange_gateway=gateway,
             reconciliation_service=reconciliation_service,
         )
-        packet = await service.build_monitor_packet(
+        artifact = await service.build_monitor_artifact(
             runtime_instance_id=args.runtime_instance_id,
         )
         return {
             "scope": "runtime_live_position_monitor",
-            "status": packet.status.value,
-            "packet": _json_value(packet),
+            "status": artifact.status.value,
+            "artifact": _json_value(artifact),
             "safety_invariants": {
                 "exchange_read_only": gateway is not None,
                 "exchange_write_called": False,
@@ -127,7 +127,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a read-only runtime live-position monitor packet.",
+        description="Build a read-only runtime live-position monitor artifact.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument(
@@ -137,7 +137,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-exchange",
         action="store_true",
-        help="Use only local PG facts; packet will block on missing exchange facts.",
+        help="Use only local PG facts; artifact will block on missing exchange facts.",
     )
     parser.add_argument(
         "--skip-reconciliation",
@@ -146,7 +146,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     with redirect_stdout(sys.stderr):
-        payload = asyncio.run(_build_packet(args))
+        payload = asyncio.run(_build_artifact(args))
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     return 0
 

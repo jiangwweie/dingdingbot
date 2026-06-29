@@ -57,7 +57,7 @@ def _read_json_file(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("api_payload", "packet", "body"):
+    for key in ("api_payload", "artifact", "body"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -66,7 +66,7 @@ def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "intent_draft_source_packet": _read_json_file(
+        "intent_draft_source_artifact": _read_json_file(
             args.intent_draft_source_json
         ),
         "evidence": _read_json_file(args.evidence_json),
@@ -76,9 +76,9 @@ def _request_body(args: argparse.Namespace) -> dict[str, Any]:
         },
         "non_executing": True,
     }
-    if args.first_real_submit_packet_json:
-        body["first_real_submit_packet"] = _read_json_file(
-            args.first_real_submit_packet_json
+    if args.first_real_submit_evidence_json:
+        body["first_real_submit_evidence"] = _read_json_file(
+            args.first_real_submit_evidence_json
         )
     if args.additional_warning:
         body["additional_warnings"] = list(args.additional_warning)
@@ -103,7 +103,7 @@ def _call_api(
     )
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -137,9 +137,9 @@ def _build_packet(
         "blockers": list(body.get("blockers") or []),
         "warnings": list(body.get("warnings") or []),
         "operator_action_preview": {
-            "readiness_packet_id": body.get("packet_id"),
-            "source_strategy_planning_packet_id": (
-                body.get("source_strategy_planning_packet_id")
+            "readiness_artifact_id": body.get("artifact_id"),
+            "source_strategy_planning_artifact_id": (
+                body.get("source_strategy_planning_artifact_id")
             ),
             "source_authorization_id": body.get("source_authorization_id"),
             "order_candidate_id": body.get("order_candidate_id"),
@@ -180,7 +180,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument("--intent-draft-source-json", required=True)
     parser.add_argument("--evidence-json", required=True)
-    parser.add_argument("--first-real-submit-packet-json")
+    parser.add_argument("--first-real-submit-evidence-json")
     parser.add_argument("--additional-warning", action="append")
     parser.add_argument("--additional-blocker", action="append")
     parser.add_argument("--env-file")
@@ -191,9 +191,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    )
+    return 0 if artifact["status"] in {
         "ready_for_executable_submit",
         "blocked",
     } else 2

@@ -129,7 +129,7 @@ def _type_specific_lines(
     language: str,
 ) -> list[str]:
     if card_type == LlmFeishuCardType.TRADE_CLOSED_REVIEW:
-        review = dict(event.context_packet.review or {})
+        review = dict(event.context_artifact.review or {})
         right_tail = dict(review.get("right_tail_review") or {})
         if language == "zh_cn":
             return [

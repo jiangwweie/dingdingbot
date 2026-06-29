@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
+import pytest
+
+from scripts import runtime_active_position_resolution_from_reports
 from src.domain.runtime_active_position_resolution import (
+    RuntimeActivePositionResolutionArtifact,
     RuntimeActivePositionResolutionStatus,
-    build_runtime_active_position_resolution_packet,
+    build_runtime_active_position_resolution_artifact,
 )
 from src.domain.runtime_live_position_monitor import (
-    RuntimeLivePositionMonitorPacket,
+    RuntimeLivePositionMonitorArtifact,
     RuntimeLivePositionMonitorStatus,
     RuntimeLiveProtectionStatus,
 )
@@ -16,7 +21,7 @@ from src.domain.runtime_position_exit_plan import (
     RuntimePositionExitPlanStatus,
 )
 from src.domain.runtime_post_close_followup import (
-    RuntimePostCloseFollowupPacket,
+    RuntimePostCloseFollowupArtifact,
     RuntimePostCloseFollowupStatus,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstanceStatus
@@ -25,7 +30,7 @@ from src.domain.strategy_runtime import StrategyRuntimeInstanceStatus
 NOW_MS = 1781256000000
 
 
-def _monitor(**overrides) -> RuntimeLivePositionMonitorPacket:
+def _monitor(**overrides) -> RuntimeLivePositionMonitorArtifact:
     values = {
         "monitor_id": "monitor-1",
         "runtime_instance_id": "runtime-1",
@@ -69,7 +74,7 @@ def _monitor(**overrides) -> RuntimeLivePositionMonitorPacket:
         "created_at_ms": NOW_MS,
     }
     values.update(overrides)
-    return RuntimeLivePositionMonitorPacket(**values)
+    return RuntimeLivePositionMonitorArtifact(**values)
 
 
 def _exit_plan(**overrides) -> RuntimePositionExitPlan:
@@ -99,7 +104,7 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
         "market_min_qty": Decimal("0.01"),
         "market_qty_step": Decimal("0.01"),
         "tp1_quantity_feasible": False,
-        "recommended_owner_decision": (
+        "recommended_recovery_action": (
             "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
         ),
         "blockers": [],
@@ -110,15 +115,15 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
     return RuntimePositionExitPlan(**values)
 
 
-def _followup(**overrides) -> RuntimePostCloseFollowupPacket:
+def _followup(**overrides) -> RuntimePostCloseFollowupArtifact:
     values = {
-        "packet_id": "followup-1",
+        "artifact_id": "followup-1",
         "status": RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY,
         "runtime_instance_id": "runtime-1",
         "symbol": "BNB/USDT:USDT",
         "active_position_present": True,
         "source_monitor_id": "monitor-1",
-        "owner_close_packet_status": "ready_for_standing_recovery_authorization",
+        "owner_close_evidence_status": "ready_for_standing_recovery_authorization",
         "owner_close_approval_env": None,
         "owner_close_approval_value": None,
         "standing_recovery_authorization_scope": (
@@ -134,36 +139,39 @@ def _followup(**overrides) -> RuntimePostCloseFollowupPacket:
             "record_runtime_closed_trade_review",
             "verify_next_attempt_gate",
         ],
-        "completed_steps": ["fresh_monitor_read", "owner_close_packet_built"],
-        "recommended_next_action": "prepare_official_reduce_only_recovery_or_continue_holding",
+        "completed_steps": ["fresh_monitor_read", "owner_close_artifact_built"],
+        "recommended_review_checkpoint": "prepare_official_reduce_only_recovery_or_continue_holding",
         "blockers": [],
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
         "created_at_ms": NOW_MS,
     }
     values.update(overrides)
-    return RuntimePostCloseFollowupPacket(**values)
+    return RuntimePostCloseFollowupArtifact(**values)
 
 
 def test_resolution_holds_protected_position_and_blocks_new_attempts():
-    packet = build_runtime_active_position_resolution_packet(
+    artifact = build_runtime_active_position_resolution_artifact(
         monitor=_monitor(),
         exit_plan=_exit_plan(),
         post_close_followup=_followup(),
         now_ms=NOW_MS,
     )
 
-    assert packet.status == RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP
-    assert packet.can_continue_holding is True
-    assert packet.next_attempt_blocked_by_active_position is True
-    assert packet.full_reduce_only_close_feasible is True
-    assert packet.owner_close_approval_value is None
-    assert packet.standing_recovery_authorization_scope == (
+    assert artifact.status == RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP
+    assert artifact.can_continue_holding is True
+    assert artifact.next_attempt_blocked_by_active_position is True
+    assert artifact.full_reduce_only_close_feasible is True
+    assert artifact.owner_close_approval_value is None
+    assert artifact.standing_recovery_authorization_scope == (
         "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
     )
-    assert "optional_prepare_official_reduce_only_recovery" in packet.required_steps
-    assert packet.exchange_order_submitted is False
-    assert packet.order_lifecycle_called is False
-    assert packet.position_closed is False
+    assert "optional_prepare_official_reduce_only_recovery" in artifact.required_steps
+    assert artifact.exchange_order_submitted is False
+    assert artifact.order_lifecycle_called is False
+    assert artifact.position_closed is False
+    payload = artifact.model_dump(mode="json")
+    assert payload["active_position_resolution_evidence_only"] is True
+    assert "packet_only" not in payload
 
 
 def test_resolution_blocks_unprotected_active_position():
@@ -177,16 +185,16 @@ def test_resolution_blocks_unprotected_active_position():
         blockers=["active_position_missing_hard_stop"],
     )
 
-    packet = build_runtime_active_position_resolution_packet(
+    artifact = build_runtime_active_position_resolution_artifact(
         monitor=monitor,
         exit_plan=None,
         post_close_followup=None,
         now_ms=NOW_MS,
     )
 
-    assert packet.status == RuntimeActivePositionResolutionStatus.BLOCKED
-    assert "active_position_missing_hard_stop" in packet.blockers
-    assert packet.next_attempt_blocked_by_active_position is True
+    assert artifact.status == RuntimeActivePositionResolutionStatus.BLOCKED
+    assert "active_position_missing_hard_stop" in artifact.blockers
+    assert artifact.next_attempt_blocked_by_active_position is True
 
 
 def test_resolution_routes_flat_runtime_to_closed_review():
@@ -215,7 +223,7 @@ def test_resolution_routes_flat_runtime_to_closed_review():
     followup = _followup(
         status=RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW,
         active_position_present=False,
-        owner_close_packet_status=None,
+        owner_close_evidence_status=None,
         owner_close_approval_env=None,
         owner_close_approval_value=None,
         closed_review_facts_status="ready_for_closed_review",
@@ -225,17 +233,77 @@ def test_resolution_routes_flat_runtime_to_closed_review():
             "verify_next_attempt_gate",
         ],
         completed_steps=["runtime_flat_observed", "closed_review_facts_resolved"],
-        recommended_next_action="run_closed_trade_review_from_resolved_order_facts",
+        recommended_review_checkpoint="run_closed_trade_review_from_resolved_order_facts",
     )
 
-    packet = build_runtime_active_position_resolution_packet(
+    artifact = build_runtime_active_position_resolution_artifact(
         monitor=monitor,
         exit_plan=None,
         post_close_followup=followup,
         now_ms=NOW_MS,
     )
 
-    assert packet.status == RuntimeActivePositionResolutionStatus.READY_FOR_CLOSED_REVIEW
-    assert packet.active_position_present is False
-    assert packet.next_attempt_blocked_by_active_position is False
-    assert "record_runtime_closed_trade_review" in packet.required_steps
+    assert artifact.status == RuntimeActivePositionResolutionStatus.READY_FOR_CLOSED_REVIEW
+    assert artifact.active_position_present is False
+    assert artifact.next_attempt_blocked_by_active_position is False
+    assert "record_runtime_closed_trade_review" in artifact.required_steps
+
+
+def test_resolution_rejects_legacy_packet_only_input():
+    artifact = build_runtime_active_position_resolution_artifact(
+        monitor=_monitor(),
+        exit_plan=_exit_plan(),
+        post_close_followup=_followup(),
+        now_ms=NOW_MS,
+    )
+    legacy_payload = artifact.model_dump(mode="json")
+    legacy_payload["packet_only"] = legacy_payload.pop(
+        "active_position_resolution_evidence_only",
+    )
+
+    with pytest.raises(ValueError):
+        RuntimeActivePositionResolutionArtifact.model_validate(legacy_payload)
+
+
+def test_resolution_from_reports_output_is_projection_only(tmp_path, capsys):
+    monitor_path = tmp_path / "monitor.json"
+    exit_path = tmp_path / "exit-plan.json"
+    followup_path = tmp_path / "followup.json"
+
+    monitor_path.write_text(
+        json.dumps({"artifact": _monitor().model_dump(mode="json")}),
+        encoding="utf-8",
+    )
+    exit_path.write_text(
+        json.dumps({"plan": _exit_plan().model_dump(mode="json")}),
+        encoding="utf-8",
+    )
+    followup_path.write_text(
+        json.dumps({"artifact": _followup().model_dump(mode="json")}),
+        encoding="utf-8",
+    )
+
+    assert runtime_active_position_resolution_from_reports.main(
+        [
+            "--live-position-monitor-json",
+            str(monitor_path),
+            "--position-exit-plan-json",
+            str(exit_path),
+            "--post-close-followup-json",
+            str(followup_path),
+            "--now-ms",
+            str(NOW_MS),
+        ]
+    ) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "hold_with_hard_stop"
+    assert "artifact" in output
+    assert "packet" not in output
+    assert (
+        output["safety_invariants"]["active_position_resolution_projection_only"]
+        is True
+    )
+    assert "packet_only" not in output["safety_invariants"]
+    assert output["safety_invariants"]["exchange_write_called"] is False
+    assert output["safety_invariants"]["order_lifecycle_called"] is False

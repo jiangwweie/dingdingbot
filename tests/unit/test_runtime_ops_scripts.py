@@ -28,15 +28,15 @@ def test_runtime_monitor_env_loader_fills_empty_existing_env(monkeypatch, tmp_pa
 
 
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
-    async def fake_build_packet(args):
+    async def fake_build_artifact(args):
         print("noisy exchange close log")
         return {
             "scope": "runtime_live_position_monitor",
             "status": "active_protection_warning",
-            "packet": {"runtime_instance_id": args.runtime_instance_id},
+            "artifact": {"runtime_instance_id": args.runtime_instance_id},
         }
 
-    monkeypatch.setattr(runtime_live_position_monitor, "_build_packet", fake_build_packet)
+    monkeypatch.setattr(runtime_live_position_monitor, "_build_artifact", fake_build_artifact)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -102,17 +102,17 @@ def test_runtime_monitor_loads_env_before_infrastructure_imports(monkeypatch, tm
         def __init__(self, **kwargs):
             pass
 
-        async def build_monitor_packet(self, *, runtime_instance_id):
+        async def build_monitor_artifact(self, *, runtime_instance_id):
             class Status:
                 value = "ok"
 
-            class Packet:
+            class Artifact:
                 status = Status()
 
                 def model_dump(self, mode="python"):
                     return {"runtime_instance_id": runtime_instance_id}
 
-            return Packet()
+            return Artifact()
 
     async def fake_close_all_connections():
         return None
@@ -161,7 +161,7 @@ def test_runtime_monitor_loads_env_before_infrastructure_imports(monkeypatch, tm
     import asyncio
 
     asyncio.run(
-        runtime_live_position_monitor._build_packet(
+        runtime_live_position_monitor._build_artifact(
             Namespace(
                 env_file=str(env_file),
                 runtime_instance_id="runtime-1",

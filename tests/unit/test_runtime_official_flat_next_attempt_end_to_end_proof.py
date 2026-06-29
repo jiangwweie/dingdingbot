@@ -20,6 +20,8 @@ def test_official_flat_next_attempt_end_to_end_passes(tmp_path):
     assert report["controlled_submit_preflight_id"].startswith(
         "runtime-controlled-submit-preflight-"
     )
+    assert "operator_command_plan" not in report
+    assert report["flat_next_attempt_plan"]["executes_submit"] is False
 
     checks = report["checks"]
     assert checks["ready_post_submit_gate_flat"] is True
@@ -55,7 +57,7 @@ def test_official_flat_next_attempt_end_to_end_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_flat_next_attempt_end_to_end_outputs_packet(tmp_path):
+def test_official_flat_next_attempt_end_to_end_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf092"
 
     report = script.build_proof_report(output_dir)
@@ -70,7 +72,7 @@ def test_official_flat_next_attempt_end_to_end_outputs_packet(tmp_path):
         "final-gate-preview.json",
         "controlled-submit-plan.json",
         "controlled-submit-preflight.json",
-        "flat-next-attempt-end-to-end-packet.json",
+        "flat-next-attempt-end-to-end-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -78,30 +80,50 @@ def test_official_flat_next_attempt_end_to_end_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "flat-next-attempt-end-to-end-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "flat-next-attempt-end-to-end-artifact.json").read_text()
     )
-    assert packet["status"] == "flat_next_attempt_ready_for_controlled_submit_adapter"
-    assert packet["ready_post_submit_gate"]["next_attempt_gate_status"] == (
+    assert artifact["status"] == "flat_next_attempt_ready_for_controlled_submit_adapter"
+    assert artifact["ready_post_submit_gate"]["next_attempt_gate_status"] == (
         "ready_for_fresh_signal"
     )
-    assert packet["ready_post_submit_gate"]["active_positions_count"] == 0
-    assert packet["strategy_plan"]["status"] == "ready_for_final_gate_preflight"
-    assert packet["strategy_plan"]["order_candidate_id"] == (
+    assert artifact["ready_post_submit_gate"]["active_positions_count"] == 0
+    assert artifact["strategy_plan"]["status"] == "ready_for_final_gate_preflight"
+    assert artifact["strategy_plan"]["order_candidate_id"] == (
         "order-candidate-rtf075-contract"
     )
-    assert packet["final_gate"]["verdict"] == "PASS"
-    assert packet["controlled_submit_preflight"]["status"] == (
+    assert artifact["strategy_plan"]["strategy_planning_plan"][
+        "requires_official_final_gate"
+    ] is True
+    assert artifact["final_gate"]["verdict"] == "PASS"
+    assert artifact["controlled_submit_preflight"]["status"] == (
         "ready_for_controlled_submit_adapter"
     )
-    assert packet["controlled_submit_preflight"]["preview_only"] is True
-    assert packet["safety_invariants"]["execution_intent_created_for_audit"] is True
-    assert packet["safety_invariants"]["executable_submit_executed"] is False
-    assert packet["safety_invariants"]["local_order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["exchange_called"] is False
-    assert packet["safety_invariants"]["runtime_state_mutated"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["controlled_submit_preflight"]["preview_only"] is True
+    assert artifact["safety_invariants"]["execution_intent_created_for_audit"] is True
+    assert artifact["safety_invariants"]["executable_submit_executed"] is False
+    assert artifact["safety_invariants"]["local_order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["exchange_called"] is False
+    assert artifact["safety_invariants"]["runtime_state_mutated"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    classification = report["official_runtime_artifact_boundary_classification"]
+    assert classification["evidence_only_outputs"] == [
+        "runtime_official_flat_next_attempt_end_to_end_artifact"
+    ]
+    assert classification["protected_lifecycle_payload_contracts"] == [
+        "post_submit_finalize_payload"
+    ]
+    assert "RuntimeOfficialSubmitHandoffArtifact" in (
+        classification["typed_submit_handoff_contracts"]
+    )
+    assert classification["judgment_authorities"] == [
+        "Strategy Asset State",
+        "Tradeability Decision",
+        "Runtime Safety State",
+        "Review Outcome State",
+        "Execution Attempt",
+    ]
 
 
 def test_official_flat_next_attempt_end_to_end_cli_stdout_is_json_only(

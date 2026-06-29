@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the BTPC live derivatives fact-source mapping packet.
+"""Build the BTPC live derivatives fact-source mapping artifact.
 
 This command converts the BTPC L2 keep/revise decision into a local source-map
 artifact for future live eligibility review. It maps the live derivatives and
@@ -13,13 +13,28 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    EXTENDED_SOURCE_SAFETY_TRUE_KEYS,
+    artifact_source_forbidden_effects,
+    legacy_authority_mirror_effects_for_artifacts,
+    non_executing_interaction,
+    non_executing_safety_boundary,
+    review_outcome_default_next_step,
+    review_outcome_flag,
+    review_outcome_state_boundary,
+)
+
 DEFAULT_BTPC_L2_DECISION_JSON = (
     REPO_ROOT
-    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json"
+    / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json"
 )
 DEFAULT_BTPC_HANDOFF_JSON = (
     REPO_ROOT / "docs/current/strategy-group-handoffs/BTPC-001/handoff.json"
@@ -104,11 +119,11 @@ EXPECTED_LIVE_FACT_SOURCES = {
 
 def build_btpc_live_derivatives_fact_source_mapping(
     *,
-    btpc_l2_decision_packet: dict[str, Any],
+    btpc_l2_review_artifact: dict[str, Any],
     btpc_handoff: dict[str, Any],
 ) -> dict[str, Any]:
-    forbidden_effects = _forbidden_effects(btpc_l2_decision_packet, btpc_handoff)
-    action_present = _live_fact_source_action_present(btpc_l2_decision_packet)
+    forbidden_effects = _forbidden_effects(btpc_l2_review_artifact, btpc_handoff)
+    action_present = _live_fact_source_action_present(btpc_l2_review_artifact)
     handoff_boundary_ok = _btpc_boundary_ok(btpc_handoff)
     required_facts = _required_fact_set(btpc_handoff)
     source_rows = _source_rows(required_facts)
@@ -124,7 +139,7 @@ def build_btpc_live_derivatives_fact_source_mapping(
     if forbidden_effects:
         status = "blocked_forbidden_effect"
     elif not action_present:
-        status = "btpc_live_derivatives_mapping_waiting_for_l2_decision_action"
+        status = "btpc_live_derivatives_mapping_waiting_for_l2_review_work_action"
     elif not handoff_boundary_ok or missing_handoff_facts:
         status = "btpc_live_derivatives_mapping_incomplete"
     else:
@@ -135,21 +150,14 @@ def build_btpc_live_derivatives_fact_source_mapping(
         "scope": "btpc_live_derivatives_fact_source_mapping",
         "status": status,
         "source_status": {
-            "btpc_l2_keep_revise_fact_source_decision": btpc_l2_decision_packet.get(
+            "btpc_l2_keep_revise_fact_source_review": btpc_l2_review_artifact.get(
                 "status"
             ),
             "btpc_handoff": btpc_handoff.get("status"),
         },
-        "interaction": {
-            "level": "L0_local_btpc_live_derivatives_fact_source_mapping",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_btpc_live_derivatives_fact_source_mapping"
+        ),
         "counts": {
             "expected_live_fact_source_count": len(EXPECTED_LIVE_FACT_SOURCES),
             "mapping_ready_count": sum(
@@ -167,7 +175,6 @@ def build_btpc_live_derivatives_fact_source_mapping(
             "risk_fact_source_count": sum(
                 1 for row in source_rows if row["fact_class"] == "risk"
             ),
-            "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
             "forbidden_effect_count": len(forbidden_effects),
         },
@@ -179,87 +186,59 @@ def build_btpc_live_derivatives_fact_source_mapping(
             "l2_shadow_observation_can_continue": mapping_ready,
             "l2_promotion_authority": False,
             "l4_scope_change_recommended": False,
-            "real_order_authority": False,
         },
         "source_rows": source_rows,
         "missing_handoff_facts": missing_handoff_facts,
-        "decision": {
-            "live_derivatives_fact_source_mapping_ready": mapping_ready,
-            "attach_live_sources_before_btpc_live_eligibility": True,
-            "mapping_satisfies_live_required_facts": False,
-            "source_attachment_required_before_live_eligibility": True,
-            "tier_policy_change_recommended_now": False,
-            "l2_promotion_recommended_now": False,
-            "l4_scope_change_recommended": False,
-            "real_order_scope_change_recommended": False,
-            "default_next_step": _default_next_step(status),
-        },
-        "operator_command_plan": {
-            "not_executed": True,
-            "starts_runtime": False,
-            "changes_strategy_parameters": False,
-            "changes_live_profile": False,
-            "changes_order_sizing_defaults": False,
-            "changes_tier_policy": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "calls_final_gate": False,
-            "calls_operation_layer": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
-        },
-        "safety_invariants": {
-            "local_btpc_live_fact_source_mapping_only": True,
-            "mapping_is_not_live_required_fact": True,
-            "input_is_not_execution_authority": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "runtime_started": False,
-            "strategy_parameters_changed": False,
-            "live_profile_changed": False,
-            "order_sizing_defaults_changed": False,
-            "tier_policy_changed": False,
-            "l2_promotion_authorized": False,
-            "l4_real_order_scope_expanded": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-            "does_not_lower_owner_selected_leverage": True,
-            "does_not_change_live_profile_or_sizing_defaults": True,
-            "source_forbidden_effects": forbidden_effects,
-        },
+        "review_outcome_state": review_outcome_state_boundary(
+            source_role="btpc_live_derivatives_fact_source_mapping_provenance",
+            review_scope="live_derivatives_fact_source_mapping",
+            extra={
+                "strategy_group_id": "BTPC-001",
+                "live_derivatives_fact_source_mapping_ready": mapping_ready,
+                "attach_live_sources_before_btpc_live_eligibility": True,
+                "mapping_satisfies_live_required_facts": False,
+                "source_attachment_required_before_live_eligibility": True,
+                "tier_policy_change_recommended_now": False,
+                "l2_promotion_recommended_now": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+                "default_next_step": _default_next_step(status),
+            },
+        ),
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=(
+                "local_btpc_live_fact_source_mapping_only",
+                "mapping_is_not_live_required_fact",
+                "input_is_not_execution_authority",
+                "does_not_lower_owner_selected_leverage",
+                "does_not_change_live_profile_or_sizing_defaults",
+            ),
+            source_forbidden_effects=forbidden_effects,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
-    counts = _as_dict(packet.get("counts"))
-    decision = _as_dict(packet.get("decision"))
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
+    counts = _as_dict(artifact.get("counts"))
     lines = [
         "# BTPC Live Derivatives Fact Source Mapping",
         "",
         "## Summary",
         "",
-        f"- Status: `{packet.get('status')}`",
+        f"- Status: `{artifact.get('status')}`",
         f"- Source mappings: `{counts.get('mapping_ready_count', 0)}/{counts.get('expected_live_fact_source_count', 0)}`",
         f"- Source attachments pending: `{counts.get('source_attachment_pending_count', 0)}`",
         "- Live RequiredFacts satisfied by mapping: `false`",
         "- L2 promotion authority: `false`",
         "- L4 scope change: `false`",
-        "- Real order authority: `false`",
         "",
         "## Source Rows",
         "",
-        _source_table(_dict_rows(packet.get("source_rows"))),
+        _source_table(_dict_rows(artifact.get("source_rows"))),
         "",
         "## Next",
         "",
-        f"- `{decision.get('default_next_step')}`",
+        f"- `{review_outcome_default_next_step(artifact)}`",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -285,7 +264,6 @@ def _source_rows(required_facts: set[str]) -> list[dict[str, Any]]:
                 "can_feed_finalgate": False,
                 "can_feed_operation_layer": False,
                 "blocks_btpc_live_eligibility_until_attached": True,
-                "real_order_authority": False,
                 "candidate_or_finalgate_authority": False,
                 "operation_layer_authority": False,
                 "exchange_write_authority": False,
@@ -295,16 +273,15 @@ def _source_rows(required_facts: set[str]) -> list[dict[str, Any]]:
     return rows
 
 
-def _live_fact_source_action_present(packet: dict[str, Any]) -> bool:
+def _live_fact_source_action_present(artifact: dict[str, Any]) -> bool:
     return any(
         row.get("action")
         == "attach_live_derivatives_fact_sources_before_btpc_live_eligibility"
-        and row.get("decision_area") == "live_fact_source"
-        and row.get("real_order_authority") is False
+        and row.get("review_area") == "live_fact_source"
         and row.get("candidate_or_finalgate_authority") is False
         and row.get("operation_layer_authority") is False
         and row.get("exchange_write_authority") is False
-        for row in _dict_rows(packet.get("action_rows"))
+        for row in _dict_rows(artifact.get("action_rows"))
     )
 
 
@@ -329,51 +306,20 @@ def _btpc_boundary_ok(handoff: dict[str, Any]) -> bool:
     )
 
 
-def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
-    effects: list[str] = []
-    for index, packet in enumerate(packets):
-        safety = _as_dict(packet.get("safety_invariants"))
-        for item in safety.get("source_forbidden_effects") or []:
-            effects.append(f"packet_{index}.{item}")
-        for key in (
-            "server_files_mutated",
-            "runtime_started",
-            "strategy_parameters_changed",
-            "live_profile_changed",
-            "order_sizing_defaults_changed",
-            "tier_policy_changed",
-            "l2_promotion_authorized",
-            "l4_real_order_scope_expanded",
-            "shadow_candidate_created",
-            "execution_intent_created",
-            "final_gate_called",
-            "operation_layer_called",
-            "order_created",
-            "order_lifecycle_called",
-            "exchange_write_called",
-            "withdrawal_or_transfer_created",
-        ):
-            if safety.get(key) is True:
-                effects.append(f"packet_{index}.safety.{key}")
-        interaction = _as_dict(packet.get("interaction"))
-        for key in (
-            "mutates_remote_files",
-            "approaches_real_order",
-            "calls_finalgate",
-            "calls_operation_layer",
-            "calls_exchange_write",
-            "places_order",
-        ):
-            if interaction.get(key) is True:
-                effects.append(f"packet_{index}.interaction.{key}")
-    decision = _as_dict(packets[0].get("decision")) if packets else {}
-    if decision.get("l2_promotion_recommended_now") is True:
+def _forbidden_effects(*artifacts: dict[str, Any]) -> list[str]:
+    effects = artifact_source_forbidden_effects(
+        artifacts,
+        true_keys=EXTENDED_SOURCE_SAFETY_TRUE_KEYS,
+        include_interaction=True,
+    )
+    l2_decision = artifacts[0] if artifacts else {}
+    if review_outcome_flag(l2_decision, "l2_promotion_recommended_now"):
         effects.append("btpc_l2_decision.l2_promotion_recommended_now")
-    if decision.get("l4_scope_change_recommended") is True:
+    if review_outcome_flag(l2_decision, "l4_scope_change_recommended"):
         effects.append("btpc_l2_decision.l4_scope_change_recommended")
-    if decision.get("real_order_scope_change_recommended") is True:
+    if review_outcome_flag(l2_decision, "real_order_scope_change_recommended"):
         effects.append("btpc_l2_decision.real_order_scope_change_recommended")
-    handoff = packets[1] if len(packets) > 1 else {}
+    handoff = artifacts[1] if len(artifacts) > 1 else {}
     boundary = _as_dict(handoff.get("execution_boundary"))
     if boundary.get("final_gate_input") is True:
         effects.append("btpc_handoff.execution_boundary.final_gate_input")
@@ -381,14 +327,33 @@ def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
         effects.append("btpc_handoff.execution_boundary.operation_layer_input")
     if boundary.get("real_submit_authorized") is True:
         effects.append("btpc_handoff.execution_boundary.real_submit_authorized")
+    effects.extend(_legacy_authority_mirror_effects("btpc_l2_review", l2_decision))
+    effects.extend(_legacy_authority_mirror_effects("btpc_handoff", handoff))
     return sorted(set(effects))
+
+
+def _legacy_authority_mirror_effects(
+    artifact_name: str,
+    artifact: dict[str, Any],
+) -> list[str]:
+    return legacy_authority_mirror_effects_for_artifacts(
+        ((artifact_name, artifact),),
+        section_names=(
+            "safety_invariants",
+            "review_outcome_state",
+            "btpc_state",
+            "execution_boundary",
+        ),
+        row_names=("action_rows", "source_rows"),
+        row_id_keys=("action", "required_fact", "strategy_group_id"),
+    )
 
 
 def _default_next_step(status: str) -> str:
     if status == "blocked_forbidden_effect":
         return "stop_and_repair_btpc_live_fact_source_mapping_source_forbidden_effects"
-    if status == "btpc_live_derivatives_mapping_waiting_for_l2_decision_action":
-        return "rerun_btpc_l2_keep_revise_fact_source_decision_before_mapping"
+    if status == "btpc_live_derivatives_mapping_waiting_for_l2_review_work_action":
+        return "rerun_btpc_l2_keep_revise_fact_source_review_before_mapping"
     if status == "btpc_live_derivatives_mapping_incomplete":
         return "repair_btpc_handoff_required_facts_or_execution_boundary_before_mapping"
     return "review_btpc_conflict_and_freshness_classifier_rules_before_any_l2_promotion_review"
@@ -396,9 +361,9 @@ def _default_next_step(status: str) -> str:
 
 def _source_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| Fact | Source route | Mapping | Live fact | Real order |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+        return "| Fact | Source route | Mapping | Live fact | Exchange write |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
     output = [
-        "| Fact | Source route | Mapping | Live fact | Real order |",
+        "| Fact | Source route | Mapping | Live fact | Exchange write |",
         "| --- | --- | --- | --- | --- |",
     ]
     for row in rows:
@@ -408,7 +373,7 @@ def _source_table(rows: list[dict[str, Any]]) -> str:
                 row.get("source_route"),
                 row.get("mapping_ready"),
                 row.get("live_required_fact_satisfied"),
-                row.get("real_order_authority"),
+                row.get("exchange_write_authority"),
             )
         )
     return "\n".join(output)
@@ -439,7 +404,7 @@ def _int(value: Any) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--btpc-l2-decision-json",
+        "--btpc-l2-review-json",
         default=str(DEFAULT_BTPC_L2_DECISION_JSON),
     )
     parser.add_argument("--btpc-handoff-json", default=str(DEFAULT_BTPC_HANDOFF_JSON))
@@ -447,13 +412,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
 
-    packet = build_btpc_live_derivatives_fact_source_mapping(
-        btpc_l2_decision_packet=_load_json_object(
-            Path(args.btpc_l2_decision_json).expanduser()
+    artifact = build_btpc_live_derivatives_fact_source_mapping(
+        btpc_l2_review_artifact=_load_json_object(
+            Path(args.btpc_l2_review_json).expanduser()
         ),
         btpc_handoff=_load_json_object(Path(args.btpc_handoff_json).expanduser()),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -461,9 +426,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] != "blocked_forbidden_effect" else 2
+    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
 
 
 if __name__ == "__main__":

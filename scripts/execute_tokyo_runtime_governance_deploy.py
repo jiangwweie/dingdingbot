@@ -65,9 +65,9 @@ ShellRunner = Callable[[str], ShellResult]
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
-    owner_deploy_packet = (
-        _load_owner_deploy_packet(Path(args.owner_deploy_packet_path))
-        if args.owner_deploy_packet_path
+    owner_deploy_artifact = (
+        _load_owner_deploy_artifact(Path(args.owner_deploy_artifact_path))
+        if args.owner_deploy_artifact_path
         else None
     )
     plan = build_deploy_plan(
@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         plan,
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
-        owner_deploy_packet=owner_deploy_packet,
+        owner_deploy_artifact=owner_deploy_artifact,
         require_confirmation_phrase=args.require_confirmation_phrase,
     )
     if args.json:
@@ -106,7 +106,7 @@ def execute_deploy_plan(
     *,
     apply: bool,
     confirmation_phrase: str | None,
-    owner_deploy_packet: dict[str, Any] | None = None,
+    owner_deploy_artifact: dict[str, Any] | None = None,
     require_confirmation_phrase: bool = False,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
@@ -149,17 +149,17 @@ def execute_deploy_plan(
             confirmation_phrase_matches=confirmation_phrase_matches,
         )
 
-    packet_blockers = _owner_deploy_packet_blockers(
+    artifact_blockers = _owner_deploy_artifact_blockers(
         plan,
-        owner_deploy_packet,
+        owner_deploy_artifact,
         require_confirmation_phrase=require_confirmation_phrase,
     )
-    if packet_blockers:
+    if artifact_blockers:
         return _execution_report(
             plan=plan,
             status="blocked",
             apply=True,
-            blockers=packet_blockers,
+            blockers=artifact_blockers,
             command_results=[],
             confirmation_phrase_required=require_confirmation_phrase,
             confirmation_phrase_matches=confirmation_phrase_matches,
@@ -218,52 +218,52 @@ def execute_deploy_plan(
     )
 
 
-def _owner_deploy_packet_blockers(
+def _owner_deploy_artifact_blockers(
     plan: dict[str, Any],
-    packet: dict[str, Any] | None,
+    artifact: dict[str, Any] | None,
     *,
     require_confirmation_phrase: bool = False,
 ) -> list[str]:
-    if packet is None:
+    if artifact is None:
         return []
 
     blockers: list[str] = []
-    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
+    checks = artifact.get("checks") if isinstance(artifact.get("checks"), dict) else {}
     owner_gate = (
-        packet.get("owner_gate") if isinstance(packet.get("owner_gate"), dict) else {}
+        artifact.get("owner_gate") if isinstance(artifact.get("owner_gate"), dict) else {}
     )
     candidate = (
-        packet.get("candidate") if isinstance(packet.get("candidate"), dict) else {}
+        artifact.get("candidate") if isinstance(artifact.get("candidate"), dict) else {}
     )
     safety_invariants = (
-        packet.get("safety_invariants")
-        if isinstance(packet.get("safety_invariants"), dict)
+        artifact.get("safety_invariants")
+        if isinstance(artifact.get("safety_invariants"), dict)
         else {}
     )
     plan_release = plan.get("release") if isinstance(plan.get("release"), dict) else {}
     plan_inputs = plan.get("inputs") if isinstance(plan.get("inputs"), dict) else {}
 
-    if packet.get("status") != "ready_for_owner_deploy_decision":
-        blockers.append("owner_deploy_decision_packet_not_ready")
+    if artifact.get("status") != "ready_for_owner_deploy_decision":
+        blockers.append("owner_deploy_confirmation_record_not_ready")
     if checks.get("ready_for_owner_deploy_decision") is not True:
         blockers.append("owner_deploy_decision_check_not_ready")
     if checks.get("blockers"):
-        blockers.append("owner_deploy_packet_has_blockers")
+        blockers.append("owner_deploy_artifact_has_blockers")
     if checks.get("forbidden_effects"):
-        blockers.append("owner_deploy_packet_contains_forbidden_effects")
+        blockers.append("owner_deploy_artifact_contains_forbidden_effects")
     if (
         require_confirmation_phrase
         and owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE
     ):
-        blockers.append("owner_deploy_packet_confirmation_phrase_mismatch")
+        blockers.append("owner_deploy_artifact_confirmation_phrase_mismatch")
     if candidate.get("head") != plan_release.get("head"):
-        blockers.append("owner_deploy_packet_head_mismatch")
+        blockers.append("owner_deploy_artifact_head_mismatch")
     if candidate.get("archive_path") != plan_inputs.get("archive_path"):
-        blockers.append("owner_deploy_packet_archive_path_mismatch")
+        blockers.append("owner_deploy_artifact_archive_path_mismatch")
     if candidate.get("manifest_path") != plan_inputs.get("manifest_path"):
-        blockers.append("owner_deploy_packet_manifest_path_mismatch")
+        blockers.append("owner_deploy_artifact_manifest_path_mismatch")
     if safety_invariants.get("deploy_apply_requested") is True:
-        blockers.append("owner_deploy_packet_was_built_from_apply")
+        blockers.append("owner_deploy_artifact_was_built_from_apply")
     return blockers
 
 
@@ -411,15 +411,15 @@ def _repo_root() -> Path:
     return Path(completed.stdout.strip())
 
 
-def _load_owner_deploy_packet(path: Path) -> dict[str, Any]:
+def _load_owner_deploy_artifact(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text())
     except OSError as exc:
-        raise DeployExecutionError(f"owner deploy decision packet unreadable: {path}") from exc
+        raise DeployExecutionError(f"owner deploy confirmation record unreadable: {path}") from exc
     except json.JSONDecodeError as exc:
-        raise DeployExecutionError(f"owner deploy decision packet is not JSON: {path}") from exc
+        raise DeployExecutionError(f"owner deploy confirmation record is not JSON: {path}") from exc
     if not isinstance(payload, dict):
-        raise DeployExecutionError("owner deploy decision packet must be a JSON object")
+        raise DeployExecutionError("owner deploy confirmation record must be a JSON object")
     return payload
 
 
@@ -468,11 +468,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Require the legacy exact confirmation phrase even during apply.",
     )
     parser.add_argument(
-        "--owner-deploy-packet-path",
+        "--owner-deploy-artifact-path",
         default=None,
         help=(
             "Optional with --apply: JSON output from "
-            "build_tokyo_runtime_governance_owner_deploy_packet.py for the same "
+            "build_tokyo_runtime_governance_owner_deploy_policy_artifact.py for the same "
             "archive, manifest, and HEAD."
         ),
     )

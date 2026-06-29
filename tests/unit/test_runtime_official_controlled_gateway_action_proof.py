@@ -14,9 +14,22 @@ def test_official_controlled_gateway_action_passes(tmp_path):
     assert report["exchange_submit_execution_result_id"].startswith(
         "runtime-exchange-submit-execution-result-"
     )
+    assert "operator_command_plan" not in report
+    assert report["controlled_gateway_action_plan"] == {
+        "next_step": "build_runtime_post_submit_finalize_flow",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "live_submit_allowed": False,
+        "exchange_submit_execution_enabled": True,
+        "execution_mode": "in_memory_simulation",
+        "calls_gateway_port": True,
+        "calls_order_lifecycle_submit": True,
+        "calls_live_exchange": False,
+        "executes_real_submit": False,
+    }
 
     checks = report["checks"]
-    assert checks["exchange_boundary_packet_passed"] is True
+    assert checks["exchange_boundary_artifact_passed"] is True
     assert checks["exchange_adapter_result_armed"] is True
     assert checks["exchange_execution_result_submitted"] is True
     assert checks["exchange_execution_enabled_true"] is True
@@ -44,16 +57,16 @@ def test_official_controlled_gateway_action_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_controlled_gateway_action_outputs_packet(tmp_path):
+def test_official_controlled_gateway_action_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf087"
 
     report = script.build_proof_report(output_dir)
 
     expected_files = [
         "contract-report.json",
-        "exchange-submit-boundary-packet.json",
+        "exchange-submit-boundary-artifact.json",
         "exchange-submit-execution-result.json",
-        "controlled-gateway-action-packet.json",
+        "controlled-gateway-action-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -61,17 +74,17 @@ def test_official_controlled_gateway_action_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "controlled-gateway-action-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "controlled-gateway-action-artifact.json").read_text()
     )
-    assert packet["status"] == "controlled_gateway_action_submitted"
-    assert packet["statuses"]["exchange_submit_adapter_result"] == (
+    assert artifact["status"] == "controlled_gateway_action_submitted"
+    assert artifact["statuses"]["exchange_submit_adapter_result"] == (
         "exchange_submit_adapter_armed"
     )
-    assert packet["statuses"]["exchange_submit_execution_result"] == (
+    assert artifact["statuses"]["exchange_submit_execution_result"] == (
         "exchange_submit_orders_submitted"
     )
-    action = packet["gateway_action"]
+    action = artifact["gateway_action"]
     assert action["execution_mode"] == "in_memory_simulation"
     assert action["exchange_submit_execution_enabled"] is True
     assert action["fake_gateway_call_count"] == 2
@@ -83,15 +96,15 @@ def test_official_controlled_gateway_action_outputs_packet(tmp_path):
     assert action["entry_exchange_order_id"].startswith("controlled-ex-")
     assert len(action["protection_exchange_order_ids"]) == 1
     assert action["blockers"] == []
-    assert packet["local_projection"]["registered_order_count"] == 2
-    assert packet["local_projection"]["submit_call_count"] == 2
-    assert packet["local_projection"]["entry_fill_projected"] is True
-    assert packet["durable_result"]["repo_acquire_calls"] == 1
-    assert packet["durable_result"]["repo_complete_calls"] == 1
-    assert packet["safety_invariants"]["fake_gateway_called"] is True
-    assert packet["safety_invariants"]["live_exchange_called"] is False
-    assert packet["safety_invariants"]["durable_execution_result_recorded"] is True
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["local_projection"]["registered_order_count"] == 2
+    assert artifact["local_projection"]["submit_call_count"] == 2
+    assert artifact["local_projection"]["entry_fill_projected"] is True
+    assert artifact["durable_result"]["repo_acquire_calls"] == 1
+    assert artifact["durable_result"]["repo_complete_calls"] == 1
+    assert artifact["safety_invariants"]["fake_gateway_called"] is True
+    assert artifact["safety_invariants"]["live_exchange_called"] is False
+    assert artifact["safety_invariants"]["durable_execution_result_recorded"] is True
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_official_controlled_gateway_action_cli_stdout_is_json_only(

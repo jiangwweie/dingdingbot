@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a local runtime post-submit finalize dry-run packet from JSON facts."""
+"""Build a local runtime post-submit finalize dry-run payload from JSON facts."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from src.domain.runtime_execution_submit_outcome_review import (  # noqa: E402
     RuntimeExecutionSubmitOutcomeReview,
 )
 from src.domain.runtime_post_submit_finalize import (  # noqa: E402
-    build_runtime_post_submit_finalize_packet,
+    build_runtime_post_submit_finalize_payload,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance  # noqa: E402
 
@@ -50,7 +50,7 @@ def _load_payload(path: str) -> dict[str, Any]:
     return payload
 
 
-def build_packet_from_fixture(payload: dict[str, Any]) -> dict[str, Any]:
+def build_payload_from_fixture(payload: dict[str, Any]) -> dict[str, Any]:
     runtime = (
         StrategyRuntimeInstance.model_validate(payload["runtime"])
         if payload.get("runtime") is not None
@@ -77,7 +77,7 @@ def build_packet_from_fixture(payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("post_submit_budget_settlement") is not None
         else None
     )
-    packet = build_runtime_post_submit_finalize_packet(
+    post_submit_finalize_payload = build_runtime_post_submit_finalize_payload(
         authorization_id=str(payload["authorization_id"]),
         runtime=runtime,
         exchange_submit_execution_result=result,
@@ -90,18 +90,18 @@ def build_packet_from_fixture(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         now_ms=int(payload.get("now_ms", 0)),
     )
-    return _json_value(packet)
+    return _json_value(post_submit_finalize_payload)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a non-executing runtime post-submit finalize packet.",
+        description="Build a non-executing runtime post-submit finalize payload.",
     )
     parser.add_argument("--fixture", required=True)
     args = parser.parse_args()
-    packet = build_packet_from_fixture(_load_payload(args.fixture))
-    print(json.dumps(packet, ensure_ascii=False, indent=2))
-    return 0 if packet["status"] != "blocked" else 2
+    payload = build_payload_from_fixture(_load_payload(args.fixture))
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if payload["status"] != "blocked" else 2
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a local read-only signal coverage diagnostic packet.
+"""Build a local read-only signal coverage diagnostic artifact.
 
 This command compares the ACTIVE runtime watcher summary with the broader
 StrategyGroup read-only preview shelf. It is meant for no-signal periods: show
@@ -24,6 +24,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_boundary,
+)
 
 
 DEFAULT_RUNTIME_SUMMARY = Path(
@@ -65,31 +70,31 @@ FORBIDDEN_PREVIEW_FLAGS = (
 )
 
 
-def build_signal_coverage_diagnostic_packet(
+def build_signal_coverage_diagnostic_artifact(
     *,
-    runtime_summary_packet: dict[str, Any],
-    broader_preview_packet: dict[str, Any],
+    runtime_summary_artifact: dict[str, Any],
+    broader_preview_artifact: dict[str, Any],
     source_name: str,
     expansion_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return an execution-safe diagnostic packet from already-built inputs."""
+    """Return an execution-safe diagnostic artifact from already-built inputs."""
 
     policy_groups = _as_dict(_as_dict(expansion_policy).get("strategy_groups"))
-    runtime_rows = _runtime_signal_rows(runtime_summary_packet)
+    runtime_rows = _runtime_signal_rows(runtime_summary_artifact)
     broader_would_enter = [
         _with_policy(row, policy_groups)
-        for row in _dict_rows(broader_preview_packet.get("would_enter_signals"))
+        for row in _dict_rows(broader_preview_artifact.get("would_enter_signals"))
     ]
     broader_no_action = [
         _with_policy(row, policy_groups)
-        for row in _dict_rows(broader_preview_packet.get("no_action_signals"))
+        for row in _dict_rows(broader_preview_artifact.get("no_action_signals"))
     ]
     broader_invalid = [
         _with_policy(row, policy_groups)
-        for row in _dict_rows(broader_preview_packet.get("invalid_signals"))
+        for row in _dict_rows(broader_preview_artifact.get("invalid_signals"))
     ]
-    runtime_forbidden = _runtime_forbidden_effects(runtime_summary_packet)
-    preview_forbidden = _preview_forbidden_effects(broader_preview_packet)
+    runtime_forbidden = _runtime_forbidden_effects(runtime_summary_artifact)
+    preview_forbidden = _preview_forbidden_effects(broader_preview_artifact)
     forbidden_effects = sorted(set(runtime_forbidden + preview_forbidden))
 
     runtime_ready_rows = [
@@ -144,21 +149,14 @@ def build_signal_coverage_diagnostic_packet(
         "status": status,
         "owner_state": owner_state,
         "source": {
-            "runtime_summary_status": runtime_summary_packet.get("status"),
+            "runtime_summary_status": runtime_summary_artifact.get("status"),
             "runtime_summary_path_default": str(DEFAULT_RUNTIME_SUMMARY),
-            "broader_preview_status": broader_preview_packet.get("status"),
+            "broader_preview_status": broader_preview_artifact.get("status"),
             "broader_source_requested": source_name,
-            "broader_market_source": broader_preview_packet.get("market_source"),
+            "broader_market_source": broader_preview_artifact.get("market_source"),
         },
         "interaction": {
-            "level": "L0_local_signal_coverage",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
+            **non_executing_interaction("L0_local_signal_coverage"),
             "public_market_read_only": source_name == "live_market",
         },
         "checks": {
@@ -166,10 +164,10 @@ def build_signal_coverage_diagnostic_packet(
             "runtime_ready_signal_count": len(runtime_ready_rows),
             "runtime_no_action_signal_count": len(runtime_no_action_rows),
             "broader_candidate_count": _int(
-                _as_dict(broader_preview_packet.get("checks")).get("candidate_count")
+                _as_dict(broader_preview_artifact.get("checks")).get("candidate_count")
             ),
             "broader_current_signal_count": _int(
-                _as_dict(broader_preview_packet.get("checks")).get(
+                _as_dict(broader_preview_artifact.get("checks")).get(
                     "current_signal_count"
                 )
             ),
@@ -240,47 +238,37 @@ def build_signal_coverage_diagnostic_packet(
             "next_step": next_step,
             "recommended_actions": _recommended_actions(status),
         },
-        "operator_command_plan": {
-            "not_executed": True,
-            "next_step": next_step,
-            "starts_runtime": False,
-            "changes_strategy_parameters": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "calls_final_gate": False,
-            "calls_operation_layer": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
-        },
-        "safety_invariants": {
-            "local_diagnostic_only": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "runtime_started": False,
-            "strategy_parameters_changed": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-            "broader_signals_are_not_execution_authority": True,
-            "synthetic_or_preview_signal_not_live_submit_authority": True,
-            "source_forbidden_effects": forbidden_effects,
-        },
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=(
+                "local_diagnostic_only",
+                "broader_signals_are_not_execution_authority",
+                "synthetic_or_preview_signal_not_live_submit_authority",
+            ),
+            false_keys=(
+                "server_interaction",
+                "server_files_mutated",
+                "runtime_started",
+                "strategy_parameters_changed",
+                "shadow_candidate_created",
+                "final_gate_called",
+                "operation_layer_called",
+                "order_created",
+                "order_lifecycle_called",
+                "exchange_write_called",
+                "withdrawal_or_transfer_created",
+            ),
+            source_forbidden_effects=forbidden_effects,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
-    checks = _as_dict(packet.get("checks"))
-    diagnosis = _as_dict(packet.get("diagnosis"))
-    source = _as_dict(packet.get("source"))
-    broader = _as_dict(packet.get("broader_observation"))
-    mainline = _as_dict(packet.get("mainline_runtime"))
-    status = str(packet.get("status") or "unknown")
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
+    checks = _as_dict(artifact.get("checks"))
+    diagnosis = _as_dict(artifact.get("diagnosis"))
+    source = _as_dict(artifact.get("source"))
+    broader = _as_dict(artifact.get("broader_observation"))
+    mainline = _as_dict(artifact.get("mainline_runtime"))
+    status = str(artifact.get("status") or "unknown")
 
     lines = [
         "# 策略机会覆盖诊断",
@@ -288,7 +276,7 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## Owner 摘要",
         "",
         f"- Status: `{status}`",
-        f"- Owner state: `{packet.get('owner_state')}`",
+        f"- Owner state: `{artifact.get('owner_state')}`",
         f"- 当前判断：{diagnosis.get('owner_summary')}",
         f"- Runtime source status: `{source.get('runtime_summary_status')}`",
         f"- Broader source: `{source.get('broader_source_requested')}` / `{source.get('broader_market_source')}`",
@@ -335,14 +323,14 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _runtime_signal_rows(packet: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = _dict_rows(packet.get("runtime_signal_summaries"))
+def _runtime_signal_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = _dict_rows(artifact.get("runtime_signal_summaries"))
     if rows:
         return rows
-    rows = _dict_rows(packet.get("runtime_signals"))
+    rows = _dict_rows(artifact.get("runtime_signals"))
     if rows:
         return rows
-    return _dict_rows(packet.get("signal_summaries"))
+    return _dict_rows(artifact.get("signal_summaries"))
 
 
 def _summarize_runtime_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -477,23 +465,23 @@ def _strategy_id(row: dict[str, Any]) -> str:
     )
 
 
-def _runtime_forbidden_effects(packet: dict[str, Any]) -> list[str]:
+def _runtime_forbidden_effects(artifact: dict[str, Any]) -> list[str]:
     effects = []
     for key in FORBIDDEN_RUNTIME_FLAGS:
-        if packet.get(key) is True:
+        if artifact.get(key) is True:
             effects.append(f"runtime.{key}")
-    for item in packet.get("forbidden_effects") or []:
+    for item in artifact.get("forbidden_effects") or []:
         effects.append(f"runtime.{item}")
-    for item in _as_dict(packet.get("checks")).get("forbidden_effects") or []:
+    for item in _as_dict(artifact.get("checks")).get("forbidden_effects") or []:
         effects.append(f"runtime.checks.{item}")
     return sorted(set(str(item) for item in effects if item))
 
 
-def _preview_forbidden_effects(packet: dict[str, Any]) -> list[str]:
+def _preview_forbidden_effects(artifact: dict[str, Any]) -> list[str]:
     effects = []
-    checks = _as_dict(packet.get("checks"))
-    safety = _as_dict(packet.get("safety_invariants"))
-    plan = _as_dict(packet.get("operator_command_plan"))
+    checks = _as_dict(artifact.get("checks"))
+    safety = _as_dict(artifact.get("safety_invariants"))
+    interaction = _as_dict(artifact.get("interaction"))
     for item in checks.get("forbidden_effects") or []:
         effects.append(f"preview.checks.{item}")
     for key in FORBIDDEN_PREVIEW_FLAGS:
@@ -506,14 +494,14 @@ def _preview_forbidden_effects(packet: dict[str, Any]) -> list[str]:
         "calls_order_lifecycle",
         "withdrawal_or_transfer_requested",
     ):
-        if plan.get(key) is True:
-            effects.append(f"preview.command_plan.{key}")
+        if interaction.get(key) is True:
+            effects.append(f"preview.interaction.{key}")
     return sorted(set(str(item) for item in effects if item))
 
 
 def _recommended_actions(status: str) -> list[str]:
     if status == "blocked_forbidden_effect":
-        return ["stop_and_review_source_packet_before_any_runtime_action"]
+        return ["stop_and_review_source_artifact_before_any_runtime_action"]
     if status == "mainline_runtime_signal_ready":
         return ["continue_official_runtime_chain", "pause_low_priority_diagnostics"]
     if status == "mainline_no_signal_broader_would_enter":
@@ -627,7 +615,6 @@ def _load_runtime_summary_or_missing(path: Path) -> dict[str, Any]:
                 "local_missing_runtime_summary_placeholder": True,
                 "server_files_mutated": False,
                 "runtime_started": False,
-                "execution_intent_created": False,
                 "final_gate_called": False,
                 "operation_layer_called": False,
                 "order_created": False,
@@ -638,9 +625,9 @@ def _load_runtime_summary_or_missing(path: Path) -> dict[str, Any]:
 
 
 def _build_preview(source_name: str) -> dict[str, Any]:
-    from scripts.preview_strategy_group_readonly_observation import build_preview_packet
+    from scripts.preview_strategy_group_readonly_observation import build_preview_artifact
 
-    return build_preview_packet(source_name=source_name)  # type: ignore[arg-type]
+    return build_preview_artifact(source_name=source_name)  # type: ignore[arg-type]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -648,12 +635,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--runtime-summary-json",
         default=str(DEFAULT_RUNTIME_SUMMARY),
-        help="Local runtime summary packet to compare against broader preview.",
+        help="Local runtime summary artifact to compare against broader preview.",
     )
     parser.add_argument(
         "--source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
-        default="local_sqlite_fallback",
+        choices=["sample", "local_sqlite_read_only", "live_market"],
+        default="local_sqlite_read_only",
         help="Read-only broader strategy preview source.",
     )
     parser.add_argument("--broader-preview-json")
@@ -665,21 +652,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress")
     args = parser.parse_args(argv)
 
-    runtime_packet = _load_runtime_summary_or_missing(
+    runtime_artifact = _load_runtime_summary_or_missing(
         Path(args.runtime_summary_json).expanduser()
     )
     if args.broader_preview_json:
-        preview_packet = _load_json_object(Path(args.broader_preview_json).expanduser())
+        preview_artifact = _load_json_object(Path(args.broader_preview_json).expanduser())
     else:
-        preview_packet = _build_preview(args.source)
+        preview_artifact = _build_preview(args.source)
 
-    packet = build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=runtime_packet,
-        broader_preview_packet=preview_packet,
+    artifact = build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=runtime_artifact,
+        broader_preview_artifact=preview_artifact,
         source_name=args.source,
         expansion_policy=_load_json_object(Path(args.expansion_policy_json).expanduser()),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -687,9 +674,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] != "blocked_forbidden_effect" else 2
+    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
 
 
 if __name__ == "__main__":

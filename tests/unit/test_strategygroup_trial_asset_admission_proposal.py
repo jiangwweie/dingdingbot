@@ -26,12 +26,12 @@ def _load_module():
     return module
 
 
-def _bridge() -> dict:
+def _capital_trial_envelope_projection() -> dict:
     return {
-        "status": "capital_trial_readiness_bridge_ready",
+        "status": "trial_envelope_projection_ready",
         "selected_non_mpg_trial_candidate": {
             "strategy_group_id": "BRF2-001",
-            "candidate_status": "short_candidate_trade_packet_pending_owner_policy",
+            "candidate_status": "short_experiment_evidence_pending_owner_policy",
             "required_facts_draft": [
                 "closed_1h_ohlcv",
                 "squeeze_risk_state",
@@ -45,20 +45,16 @@ def _bridge() -> dict:
             },
             "symbol_scope": ["owner_policy_required"],
             "side_scope": ["short"],
-            "actionable_now": False,
-            "real_order_authority": False,
         },
     }
 
 
-def _trial_packet() -> dict:
+def _trial_envelope() -> dict:
     return {
-        "schema": "brc.strategygroup_capital_trial_packet.v0",
+        "schema": "brc.strategygroup_capital_trial_envelope.v0",
         "strategy_group_id": "BRF2-001",
         "required_facts_draft": ["closed_1h_ohlcv"],
         "side_scope": ["short"],
-        "actionable_now": False,
-        "real_order_authority": False,
         "authority_boundary": {
             "calls_finalgate": False,
             "calls_operation_layer": False,
@@ -101,30 +97,48 @@ def _owner_policy_scope() -> dict:
             "max_consecutive_losses": 2,
             "valid_until": "one_review_cycle",
             "pause_conditions": ["two_consecutive_losses"],
-            "authority_boundary": "owner_policy_only; actionable_now=false",
+            "authority_boundary": (
+                "owner_policy_only; finalgate_required; operation_layer_required"
+            ),
         },
     }
+
+
+def _assert_admission_does_not_answer_actionability(artifact: dict) -> None:
+    assert "actionable_now" not in artifact["checks"]
+    assert "real_order_authority" not in artifact["checks"]
+    assert "actionable_now" not in artifact["proposal"]
+    assert "real_order_authority" not in artifact["proposal"]
+    assert "actionable_now" not in artifact["safety_invariants"]
+    assert "real_order_authority" not in artifact["safety_invariants"]
 
 
 def test_trial_asset_admission_proposal_promotes_engineering_to_owner_policy():
     module = _load_module()
 
-    packet = module.build_trial_asset_admission_proposal(
-        capital_trial_bridge=_bridge(),
-        trial_packet=_trial_packet(),
+    artifact = module.build_trial_asset_admission_proposal(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        trial_envelope=_trial_envelope(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    assert packet["status"] == "trial_asset_admission_proposal_ready"
-    proposal = packet["proposal"]
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
+    proposal = artifact["proposal"]
     assert proposal["strategy_group_id"] == "BRF2-001"
     assert proposal["current_stage"] == "tiny_live_intake_candidate"
     assert proposal["proposed_stage"] == "trial_asset_admission_candidate"
     assert proposal["owner_policy_required"] is True
-    assert proposal["next_action"] == "record_owner_trial_scope_policy"
+    assert "next_action" not in proposal
+    assert proposal["non_authority_checkpoint"] == "record_owner_trial_scope_policy"
     assert proposal["after_next_state"] == "admitted_trial_asset"
     assert proposal["proposed_registry_row"]["strategy_group_id"] == "BRF2-001"
     assert proposal["proposed_registry_row"]["trial_eligible"] is False
+    assert "actionable_now=false" not in proposal["proposed_registry_row"][
+        "authority_boundary"
+    ]
+    assert "real_order_authority=false" not in proposal["proposed_registry_row"][
+        "authority_boundary"
+    ]
     assert proposal["proposed_tier_policy_row"]["mode"] == (
         "trial_asset_admission_candidate"
     )
@@ -132,35 +146,59 @@ def test_trial_asset_admission_proposal_promotes_engineering_to_owner_policy():
         "closed_1h_ohlcv",
         "squeeze_risk_state",
     ]
-    assert packet["checks"]["registry_policy_mutated"] is False
-    assert packet["checks"]["tier_policy_mutated"] is False
-    assert packet["checks"]["owner_policy_required"] is True
-    assert packet["checks"]["owner_decision_required"] is False
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
-    assert packet["interaction"]["calls_finalgate"] is False
-    assert packet["interaction"]["calls_operation_layer"] is False
-    assert packet["interaction"]["calls_exchange_write"] is False
+    assert artifact["checks"]["registry_policy_mutated"] is False
+    assert artifact["checks"]["tier_policy_mutated"] is False
+    assert artifact["checks"]["owner_policy_required"] is True
+    assert artifact["checks"]["owner_policy_confirmation_required"] is False
+    _assert_admission_does_not_answer_actionability(artifact)
+    assert artifact["interaction"]["calls_finalgate"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["interaction"]["calls_exchange_write"] is False
+
+
+def test_trial_asset_admission_proposal_blocks_legacy_authority_mirrors():
+    module = _load_module()
+    projection = _capital_trial_envelope_projection()
+    trial_envelope = _trial_envelope()
+    projection["actionable_now"] = True
+    trial_envelope["real_order_authority"] = True
+
+    artifact = module.build_trial_asset_admission_proposal(
+        capital_trial_envelope_projection=projection,
+        trial_envelope=trial_envelope,
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert (
+        "legacy_authority_mirror_present:source[0].actionable_now"
+        in artifact["checks"]["forbidden_effects"]
+    )
+    assert (
+        "legacy_authority_mirror_present:source[1].real_order_authority"
+        in artifact["checks"]["forbidden_effects"]
+    )
 
 
 def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
     module = _load_module()
 
-    packet = module.build_trial_asset_admission_proposal(
-        capital_trial_bridge=_bridge(),
-        trial_packet=_trial_packet(),
+    artifact = module.build_trial_asset_admission_proposal(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        trial_envelope=_trial_envelope(),
         brf2_owner_trial_policy_scope=_owner_policy_scope(),
         generated_at_utc="2026-06-23T00:00:00+00:00",
     )
 
-    proposal = packet["proposal"]
-    assert packet["status"] == "trial_asset_admission_proposal_ready"
+    proposal = artifact["proposal"]
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
     assert proposal["strategy_group_id"] == "BRF2-001"
     assert proposal["proposed_stage"] == "admitted_trial_asset"
     assert proposal["owner_policy_required"] is False
     assert proposal["owner_policy_recorded"] is True
     assert proposal["owner_policy_scope_missing"] is False
-    assert proposal["next_action"] == (
+    assert "next_action" not in proposal
+    assert proposal["non_authority_checkpoint"] == (
         "close_brf2_required_facts_mapping_for_armed_observation"
     )
     assert proposal["after_next_state"] == "armed_observation"
@@ -168,27 +206,30 @@ def test_trial_asset_admission_proposal_consumes_recorded_owner_policy():
         "BRF2_TINY_SHORT_TRIAL_30U_V0"
     )
     assert proposal["owner_policy_defaults"]["max_notional"]["amount"] == "150"
-    assert packet["owner_policy_checkpoint"]["owner_policy_required"] is False
-    assert packet["owner_policy_checkpoint"]["owner_policy_recorded"] is True
-    assert packet["checks"]["owner_policy_scope_missing"] is False
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
+    assert proposal["owner_policy_defaults"]["authority_boundary"] == (
+        "owner_policy_only; finalgate_required; operation_layer_required; "
+        "no_exchange_write"
+    )
+    assert artifact["owner_policy_checkpoint"]["owner_policy_required"] is False
+    assert artifact["owner_policy_checkpoint"]["owner_policy_recorded"] is True
+    assert artifact["checks"]["owner_policy_scope_missing"] is False
+    _assert_admission_does_not_answer_actionability(artifact)
 
 
 def test_trial_asset_admission_proposal_cli_writes_outputs(tmp_path: Path):
     module = _load_module()
-    bridge_json = tmp_path / "bridge.json"
+    projection_json = tmp_path / "projection.json"
     trial_json = tmp_path / "trial.json"
     output_json = tmp_path / "proposal.json"
     output_md = tmp_path / "proposal.md"
-    bridge_json.write_text(json.dumps(_bridge()), encoding="utf-8")
-    trial_json.write_text(json.dumps(_trial_packet()), encoding="utf-8")
+    projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+    trial_json.write_text(json.dumps(_trial_envelope()), encoding="utf-8")
 
     exit_code = module.main(
         [
-            "--capital-trial-readiness-bridge-json",
-            str(bridge_json),
-            "--trial-packet-json",
+            "--capital-trial-envelope-projection-json",
+            str(projection_json),
+            "--trial-envelope-json",
             str(trial_json),
             "--brf2-owner-trial-policy-scope-json",
             str(tmp_path / "missing-policy.json"),
@@ -200,8 +241,98 @@ def test_trial_asset_admission_proposal_cli_writes_outputs(tmp_path: Path):
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert packet["status"] == "trial_asset_admission_proposal_ready"
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
+    md = output_md.read_text(encoding="utf-8")
     assert "StrategyGroup Trial Asset Admission Proposal" in output_md.read_text(
         encoding="utf-8"
     )
+    assert "Real order authority" not in md
+
+
+def test_trial_asset_admission_proposal_cli_omitted_policy_artifact_does_not_read_default(
+    tmp_path: Path,
+):
+    module = _load_module()
+    trial_json = tmp_path / "trial.json"
+    output_json = tmp_path / "proposal.json"
+    output_md = tmp_path / "proposal.md"
+    trial_json.write_text(json.dumps(_trial_envelope()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--trial-envelope-json",
+            str(trial_json),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
+    assert artifact["proposal"]["strategy_group_id"] == "BRF2-001"
+    assert artifact["proposal"]["owner_policy_required"] is True
+
+
+def test_trial_asset_admission_proposal_cli_omitted_trial_envelope_does_not_read_default(
+    tmp_path: Path,
+):
+    module = _load_module()
+    projection_json = tmp_path / "projection.json"
+    output_json = tmp_path / "proposal.json"
+    output_md = tmp_path / "proposal.md"
+    projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--capital-trial-envelope-projection-json",
+            str(projection_json),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
+    assert artifact["proposal"]["strategy_group_id"] == "BRF2-001"
+    assert artifact["proposal"]["runtime_admission_plan"]["required_facts_draft"] == [
+        "closed_1h_ohlcv",
+        "squeeze_risk_state",
+    ]
+
+
+def test_trial_asset_admission_proposal_cli_omitted_owner_policy_does_not_read_default(
+    tmp_path: Path,
+):
+    module = _load_module()
+    projection_json = tmp_path / "projection.json"
+    trial_json = tmp_path / "trial.json"
+    output_json = tmp_path / "proposal.json"
+    output_md = tmp_path / "proposal.md"
+    projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+    trial_json.write_text(json.dumps(_trial_envelope()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--capital-trial-envelope-projection-json",
+            str(projection_json),
+            "--trial-envelope-json",
+            str(trial_json),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["status"] == "trial_asset_admission_proposal_ready"
+    assert artifact["proposal"]["owner_policy_required"] is True
+    assert artifact["owner_policy_checkpoint"]["owner_policy_scope_missing"] is True

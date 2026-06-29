@@ -3,7 +3,7 @@
 
 This is an operator wrapper around ``runtime_next_attempt_observation_monitor``.
 It discovers ACTIVE runtimes from the Trading Console API, runs the existing
-per-runtime monitor for each one, and writes an auditable aggregate packet.
+per-runtime monitor for each one, and writes an auditable aggregate artifact.
 
 By default it is observe-only. With ``--allow-prepare-records`` it may create
 shadow SignalEvaluation / shadow OrderCandidate / prepare authorization records
@@ -181,24 +181,24 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
         output_json=str(
             Path(args.output_dir).expanduser()
             / runtime_instance_id
-            / "monitor-packet.json"
+            / "monitor-artifact.json"
         ),
     )
 
 
-def _signal_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    latest_packet = packet.get("latest_packet")
-    if not isinstance(latest_packet, dict):
-        latest_packet = packet
-    observation_payload = latest_packet.get("observation_payload")
+def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    latest_artifact = artifact.get("latest_artifact")
+    if not isinstance(latest_artifact, dict):
+        latest_artifact = artifact
+    observation_payload = latest_artifact.get("observation_payload")
     if not isinstance(observation_payload, dict):
         observation_payload = {}
-    signal_packet = observation_payload.get("signal_packet")
-    if not isinstance(signal_packet, dict):
-        signal_packet = latest_packet.get("signal_packet")
-    if not isinstance(signal_packet, dict):
-        signal_packet = {}
-    evaluation = signal_packet.get("evaluation_result")
+    signal_artifact = observation_payload.get("signal_artifact")
+    if not isinstance(signal_artifact, dict):
+        signal_artifact = latest_artifact.get("signal_artifact")
+    if not isinstance(signal_artifact, dict):
+        signal_artifact = {}
+    evaluation = signal_artifact.get("evaluation_result")
     if not isinstance(evaluation, dict):
         evaluation = {}
     output = evaluation.get("output")
@@ -231,13 +231,18 @@ def _signal_summary(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
-    safety = packet.get("safety_invariants")
+def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
+    safety = artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
+    plan = (
+        artifact.get("observation_cycle_plan")
+        or artifact.get("observation_monitor_plan")
+        or {}
+    )
     return {
         "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
-        "status": packet.get("status"),
+        "status": artifact.get("status"),
         "symbol": _runtime_value(runtime, "symbol"),
         "side": _runtime_value(runtime, "side"),
         "strategy_family_id": _runtime_value(runtime, "strategy_family_id", "family"),
@@ -246,23 +251,16 @@ def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
             "strategy_family_version_id",
             "carrier_id",
         ),
-        "ready_for_prepare": packet.get("ready_for_prepare"),
-        "ready_for_final_gate_preflight": packet.get(
+        "ready_for_prepare": artifact.get("ready_for_prepare"),
+        "ready_for_final_gate_preflight": artifact.get(
             "ready_for_final_gate_preflight"
         ),
-        "blockers": list(packet.get("blockers") or []),
-        "warnings": list(packet.get("warnings") or []),
-        "report_path": (
-            (packet.get("operator_command_plan") or {}).get("report_path")
-            or packet.get("output_json")
-        ),
-        "signal_input_json": (packet.get("operator_command_plan") or {}).get(
-            "signal_input_json"
-        ),
-        "prepared_authorization_id": (
-            packet.get("operator_command_plan") or {}
-        ).get("prepared_authorization_id"),
-        "signal_summary": _signal_summary(packet),
+        "blockers": list(artifact.get("blockers") or []),
+        "warnings": list(artifact.get("warnings") or []),
+        "report_path": plan.get("report_path") or artifact.get("output_json"),
+        "signal_input_json": plan.get("signal_input_json"),
+        "prepared_authorization_id": plan.get("prepared_authorization_id"),
+        "signal_summary": _signal_summary(artifact),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "created_records": {
             "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
@@ -306,10 +304,13 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
 def _safety(
     *,
     allow_prepare_records: bool,
-    packets: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     def any_flag(name: str) -> bool:
-        return any(bool((packet.get("safety_invariants") or {}).get(name)) for packet in packets)
+        return any(
+            bool((artifact.get("safety_invariants") or {}).get(name))
+            for artifact in artifacts
+        )
 
     return {
         "uses_official_trading_console_api": True,
@@ -342,9 +343,9 @@ def _safety(
     }
 
 
-def _overall_status(packets: list[dict[str, Any]]) -> str:
-    statuses = {str(packet.get("status") or "unknown") for packet in packets}
-    if not packets:
+def _overall_status(artifacts: list[dict[str, Any]]) -> str:
+    statuses = {str(artifact.get("status") or "unknown") for artifact in artifacts}
+    if not artifacts:
         return "no_active_runtimes"
     if "ready_for_final_gate_preflight" in statuses:
         return "ready_for_final_gate_preflight"
@@ -357,15 +358,15 @@ def _overall_status(packets: list[dict[str, Any]]) -> str:
     return "mixed"
 
 
-def _build_packet(
+def _build_monitor_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
-    monitor_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
+    runtime_artifact_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     observation_flow._load_env_file(args.env_file)
     api_client = client or UrlLibApiClient(api_base=_api_base(args))
-    builder = monitor_builder or monitor._build_monitor_packet
+    builder = runtime_artifact_builder or monitor._build_monitor_artifact
     active = _active_runtimes(client=api_client)
     requested_runtime_instance_ids = list(
         getattr(args, "runtime_instance_id", None) or []
@@ -380,19 +381,21 @@ def _build_packet(
         max_runtimes=int(args.max_runtimes or 100),
     )
 
-    packets: list[dict[str, Any]] = []
+    runtime_artifacts: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
-        packet = builder(runtime_args)
-        packet = _downgrade_non_actionable_observation_blockers(packet)
-        packet["runtime_instance_id"] = runtime_args.runtime_instance_id
-        packet["output_json"] = runtime_args.output_json
-        _write_json(runtime_args.output_json, packet)
-        packets.append(packet)
-        summaries.append(_summary(runtime, packet))
+        runtime_artifact = builder(runtime_args)
+        runtime_artifact = _downgrade_non_actionable_observation_blockers(
+            runtime_artifact
+        )
+        runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
+        runtime_artifact["output_json"] = runtime_args.output_json
+        _write_json(runtime_args.output_json, runtime_artifact)
+        runtime_artifacts.append(runtime_artifact)
+        summaries.append(_summary(runtime, runtime_artifact))
 
-    status = _overall_status(packets)
+    status = _overall_status(runtime_artifacts)
     blockers: list[str] = []
     for item in summaries:
         for blocker in item["blockers"]:
@@ -429,15 +432,19 @@ def _build_packet(
         "requested_timeout_seconds": args.timeout_seconds,
         "effective_observation_timeout_seconds": effective_timeout,
         "runtime_summaries": summaries,
-        "runtime_packets": packets if args.include_runtime_packets else [],
+        "runtime_artifacts": runtime_artifacts if args.include_runtime_artifacts else [],
         "blockers": blockers,
         "warnings": warnings,
-        "operator_command_plan": {
+        "observation_monitor_plan": {
             "next_step": _next_step(status),
             "not_executed": True,
             "creates_shadow_candidate": any(
-                bool((packet.get("safety_invariants") or {}).get("prepare_records_created"))
-                for packet in packets
+                bool(
+                    (artifact.get("safety_invariants") or {}).get(
+                        "prepare_records_created"
+                    )
+                )
+                for artifact in runtime_artifacts
             ),
             "creates_execution_intent": False,
             "places_order": False,
@@ -448,7 +455,7 @@ def _build_packet(
         },
         "safety_invariants": _safety(
             allow_prepare_records=args.allow_prepare_records,
-            packets=packets,
+            artifacts=runtime_artifacts,
         ),
     }
 
@@ -466,20 +473,20 @@ def _next_step(status: str) -> str:
 
 
 def _downgrade_non_actionable_observation_blockers(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    if str(packet.get("status") or "") != "blocked":
-        return packet
-    blockers = [str(blocker) for blocker in packet.get("blockers") or []]
+    if str(artifact.get("status") or "") != "blocked":
+        return artifact
+    blockers = [str(blocker) for blocker in artifact.get("blockers") or []]
     if not blockers:
-        return packet
-    observation_only = _is_observe_only_review_packet(packet)
+        return artifact
+    observation_only = _is_observe_only_review_artifact(artifact)
     allowed_blockers = set(NON_ACTIONABLE_OBSERVATION_BLOCKERS)
     if observation_only:
         allowed_blockers.update(OBSERVE_ONLY_REVIEW_BLOCKERS)
     if any(blocker not in allowed_blockers for blocker in blockers):
-        return packet
-    safety = packet.get("safety_invariants")
+        return artifact
+    safety = artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
     if any(
@@ -501,32 +508,36 @@ def _downgrade_non_actionable_observation_blockers(
             "withdrawal_or_transfer_created",
         )
     ):
-        return packet
+        return artifact
 
-    downgraded = dict(packet)
+    downgraded = dict(artifact)
     downgraded["status"] = "waiting_for_signal"
     downgraded["blockers"] = []
     downgraded["warnings"] = sorted(
         {
-            *[str(warning) for warning in packet.get("warnings") or []],
+            *[str(warning) for warning in artifact.get("warnings") or []],
             *[
                 f"non_actionable_observation_blocker:{blocker}"
                 for blocker in blockers
             ],
         }
     )
-    plan = dict(packet.get("operator_command_plan") or {})
+    plan = dict(
+        artifact.get("observation_cycle_plan")
+        or artifact.get("observation_monitor_plan")
+        or {}
+    )
     plan["next_step"] = "continue_waiting_for_strategy_signal"
     plan["not_executed"] = True
     plan["places_order"] = False
     plan["calls_order_lifecycle"] = False
-    downgraded["operator_command_plan"] = plan
+    downgraded["observation_monitor_plan"] = plan
     downgraded["non_actionable_observation_blockers"] = blockers
     return downgraded
 
 
-def _is_observe_only_review_packet(packet: dict[str, Any]) -> bool:
-    summary = _signal_summary(packet)
+def _is_observe_only_review_artifact(artifact: dict[str, Any]) -> bool:
+    summary = _signal_summary(artifact)
     return str(summary.get("required_execution_mode") or "") == "observe_only"
 
 
@@ -577,7 +588,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default="output/runtime-active-observation-monitor",
     )
     parser.add_argument("--output-json")
-    parser.add_argument("--include-runtime-packets", action="store_true", default=False)
+    parser.add_argument("--include-runtime-artifacts", action="store_true", default=False)
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
         "--owner-confirmation-reference",
@@ -593,12 +604,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    output = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        artifact = _build_monitor_artifact(args)
+    output = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
-        _write_json(args.output_json, packet)
+        _write_json(args.output_json, artifact)
     print(output)
-    return 0 if packet["status"] in {
+    return 0 if artifact["status"] in {
         "waiting_for_signal",
         "ready_for_prepare",
         "ready_for_final_gate_preflight",

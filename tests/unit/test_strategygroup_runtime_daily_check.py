@@ -37,17 +37,15 @@ def _snapshot(**overrides):
         },
         "inputs": {
             "expected_runtime_head": "runtime-head-1",
-            "expected_frontend_head": None,
         },
         "owner_summary": {
             "state": "等待机会",
-            "current_action": "继续等待市场机会",
+            "non_authority_checkpoint": "继续等待市场机会",
             "runtime": "正常",
             "watcher": "运行中",
             "source_readiness": "正常",
             "dry_run_audit": "审计演练正常",
             "chain_closure": "非市场链路已收口",
-            "frontend": "外部项目",
         },
         "checks": {
             "blockers": [],
@@ -59,7 +57,6 @@ def _snapshot(**overrides):
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_execution_chain_closure_status_ready": True,
-            "frontend_scope": "externalized",
         },
         "facts": {
             "release": {
@@ -91,11 +88,11 @@ def _snapshot(**overrides):
                     "ready_segments": [
                         "fresh_signal_fast_auto_chain_checked",
                         "required_facts_readiness_checked",
-                        "non_executing_prepare_auto_bridge_checked",
+                        "execution_attempt_rehearsal_prepare_checked",
                         "selected_strategygroup_dispatch_guard_checked",
                         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
                         "operation_layer_evidence_relay_checked",
-                        "scoped_pipeline_operation_layer_handoff_checked",
+                        "scoped_pipeline_operation_layer_submit_projection_checked",
                         "operation_layer_authorization_chain_guard_checked",
                         "operation_layer_standing_authorization_relay_checked",
                         "operation_layer_blocker_review_policy_checked",
@@ -118,7 +115,7 @@ def _snapshot(**overrides):
                         "required_facts_readiness",
                         "candidate_authorization_evidence",
                         "action_time_finalgate",
-                        "official_operation_layer_evidence_handoff",
+                        "official_operation_layer_evidence_relay_projection",
                         "disabled_dry_run_proof",
                         "post_submit_exit_outcome_matrix",
                     ],
@@ -145,7 +142,11 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["schema_version"] == module.DAILY_CHECK_REPORT_SCHEMA_VERSION
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["state"] == "等待机会"
-    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续等待市场机会"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "daily_check_status_projection"
+    )
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L1_daily_check_from_snapshot"
@@ -154,6 +155,17 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["checks"]["blockers"] == []
+    assert "monitor_refresh_needed" not in report["checks"]
+    assert "monitor_refresh_reasons" not in report["checks"]
+    assert report["owner_runtime_state"] == {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": True,
+    }
     assert report["source"] == {
         "expected_runtime_head": "runtime-head-1",
         "runtime_head": "runtime-head-1",
@@ -221,7 +233,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         "waiting_keys": ["fresh_signal"],
     }
     assert report["notification"] == {
-        "decision": "DONT_NOTIFY",
+        "notification_result": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
         "message": "自动化正常运行，当前没有可用市场机会",
         "refresh_required": False,
@@ -229,6 +241,9 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         "owner_notify": False,
         "owner_intervention_required": False,
     }
+    assert "execution_intent_created" not in report["safety_invariants"]
+    assert report["safety_invariants"]["order_created"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
     assert report["runtime_status"] == "waiting_for_market"
     assert report["monitor_status"] == "fresh"
     assert report["owner_status"] == "waiting_for_opportunity"
@@ -306,10 +321,10 @@ def test_daily_check_normalizes_no_signal_live_closure_in_progress_to_waiting():
         "live_closure_in_progress"
     )
     assert report["owner_summary"]["state"] == "等待机会"
-    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续等待市场机会"
     assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
     assert report["notification"] == {
-        "decision": "DONT_NOTIFY",
+        "notification_result": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
         "message": "自动化正常运行，当前没有可用市场机会",
         "refresh_required": False,
@@ -353,13 +368,13 @@ def test_daily_check_projects_post_signal_live_closure_in_progress_as_processing
         "live_closure_in_progress"
     )
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
     assert report["owner_summary"]["visibility"]["category"] == "processing"
     assert report["owner_summary"]["progress"]["live_closure"] == (
         "live_closure_in_progress"
     )
     assert report["notification"] == {
-        "decision": "NOTIFY",
+        "notification_result": "NOTIFY",
         "reason": "processing",
         "message": "系统正在处理真实订单闭环证据",
         "refresh_required": False,
@@ -401,10 +416,10 @@ def test_daily_check_preserves_fresh_signal_processing_over_stale_waiting_summar
         "waiting_keys": ["candidate_authorization"],
     }
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
     assert report["owner_summary"]["visibility"]["category"] == "processing"
     assert report["notification"] == {
-        "decision": "NOTIFY",
+        "notification_result": "NOTIFY",
         "reason": "processing",
         "message": "系统正在处理真实订单闭环证据",
         "refresh_required": False,
@@ -417,6 +432,131 @@ def test_daily_check_preserves_fresh_signal_processing_over_stale_waiting_summar
     assert report["owner_status"] == "processing"
     assert report["interaction"]["calls_exchange_write"] is False
     assert report["interaction"]["places_order"] is False
+
+
+def test_daily_check_no_signal_flag_alone_does_not_create_waiting_state():
+    module = _load_module()
+
+    waiting = module._is_waiting_for_market(
+        owner_summary={"state": "运行中"},
+        goal_status={"status": "ready", "fresh_signal_present": False},
+    )
+
+    assert waiting is False
+
+
+def test_daily_check_explicit_goal_waiting_state_still_creates_waiting_state():
+    module = _load_module()
+
+    waiting = module._is_waiting_for_market(
+        owner_summary={"state": "运行中"},
+        goal_status={"status": "waiting_for_signal", "fresh_signal_present": False},
+    )
+
+    assert waiting is True
+
+
+def test_daily_check_no_signal_flag_alone_keeps_runtime_running():
+    module = _load_module()
+    snapshot = _snapshot(
+        owner_summary={
+            "state": "运行中",
+            "non_authority_checkpoint": "继续保持监控",
+        }
+    )
+    snapshot["facts"]["reports"]["goal_status"] = {
+        "status": "ready",
+        "fresh_signal_present": False,
+        "real_order_readiness_summary": {
+            "total": 1,
+            "pass": 1,
+            "waiting": 0,
+            "blocked": 0,
+            "submit_blocker_keys": [],
+            "waiting_keys": [],
+        },
+    }
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "ready"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["runtime_status"] == "running"
+    assert report["owner_status"] == "running"
+    assert report["owner_runtime_state"]["waiting_for_market"] is False
+
+
+def test_daily_check_owner_visibility_unknown_status_fails_closed():
+    module = _load_module()
+
+    visibility = module._owner_visibility(
+        status="unknown",
+        blockers=[],
+        product_gaps=[],
+        waiting_for_market=False,
+    )
+
+    assert visibility == {
+        "category": "runtime_state_unknown",
+        "label": "工程状态暂不可用",
+        "detail": "runtime monitor 权威状态不可用，等待系统刷新",
+        "non_authority_checkpoint": "刷新或修复 runtime monitor 权威状态",
+        "owner_intervention_required": False,
+    }
+
+
+def test_daily_check_owner_visibility_ready_remains_running():
+    module = _load_module()
+
+    visibility = module._owner_visibility(
+        status="ready",
+        blockers=[],
+        product_gaps=[],
+        waiting_for_market=False,
+    )
+
+    assert visibility["category"] == "running"
+    assert visibility["label"] == "运行中"
+    assert visibility["non_authority_checkpoint"] == "继续保持监控"
+
+
+def test_daily_check_checkpoint_unknown_status_fails_closed():
+    module = _load_module()
+
+    action = module._daily_non_authority_checkpoint(
+        status="unknown",
+        owner_summary={},
+        blockers=[],
+        product_gaps=[],
+    )
+
+    assert action == "刷新或修复 runtime monitor 权威状态"
+
+
+def test_daily_check_checkpoint_ready_remains_keep_monitoring():
+    module = _load_module()
+
+    action = module._daily_non_authority_checkpoint(
+        status="ready",
+        owner_summary={},
+        blockers=[],
+        product_gaps=[],
+    )
+
+    assert action == "继续保持监控"
+
+
+def test_daily_check_checkpoint_ignores_legacy_current_action():
+    module = _load_module()
+
+    action = module._daily_non_authority_checkpoint(
+        status="ready",
+        owner_summary={"current_action": "legacy_action_must_not_drive_checkpoint"},
+        blockers=[],
+        product_gaps=[],
+    )
+
+    assert action == "继续保持监控"
 
 
 def test_daily_check_projects_rejected_live_closure_as_product_gap():
@@ -444,15 +584,15 @@ def test_daily_check_projects_rejected_live_closure_as_product_gap():
         "product_gap:live_closure_evidence:official_live_closure_source_missing"
     ]
     assert report["owner_summary"]["state"] == "工程状态暂不可用"
-    assert report["owner_summary"]["current_action"] == "处理真实闭环证据异常"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "处理真实闭环证据异常"
     assert report["owner_summary"]["visibility"]["detail"] == (
         "真实闭环证据不可用，等待系统处理"
     )
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "product_gap_present"
 
 
-def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():
+def test_daily_check_does_not_require_external_client_release_for_quiet_waiting():
     module = _load_module()
     snapshot = _snapshot(
         checks={
@@ -464,7 +604,6 @@ def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
         }
     )
 
@@ -473,11 +612,11 @@ def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
-    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续等待市场机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["warnings"] == []
     assert report["checks"]["blockers"] == []
-    assert report["notification"]["decision"] == "DONT_NOTIFY"
+    assert report["notification"]["notification_result"] == "DONT_NOTIFY"
     assert report["notification"]["reason"] == "healthy_waiting_for_market"
 
 
@@ -494,7 +633,6 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
         },
     )
 
@@ -502,12 +640,12 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
 
     assert report["status"] == "blocked"
     assert report["owner_summary"]["state"] == "工程状态暂不可用"
-    assert report["owner_summary"]["current_action"] == "处理工程状态阻断"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "处理工程状态阻断"
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["owner_summary"]["visibility"]["category"] == "engineering_blocker"
     assert "owner_console_backend_inactive" in report["checks"]["blockers"]
     assert "l1_snapshot_blocked" in report["checks"]["blockers"]
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "blocker_present"
 
 
@@ -525,7 +663,6 @@ def test_daily_check_projects_runtime_head_mismatch_as_deployment_issue():
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_execution_chain_closure_status_ready": True,
-            "frontend_scope": "externalized",
         },
     )
 
@@ -536,10 +673,10 @@ def test_daily_check_projects_runtime_head_mismatch_as_deployment_issue():
     assert report["monitor_status"] == "deployment_issue"
     assert report["owner_status"] == "temporarily_unavailable"
     assert report["checks"]["deployment_issue"] is True
-    assert report["checks"]["owner_notify"] is False
+    assert "owner_notify" not in report["checks"]
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["owner_summary"]["visibility"]["category"] == "deployment_issue"
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["owner_notify"] is False
 
 
@@ -556,7 +693,6 @@ def test_daily_check_classifies_safety_blocker_separately():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
         },
     )
 
@@ -564,13 +700,13 @@ def test_daily_check_classifies_safety_blocker_separately():
 
     assert report["status"] == "blocked"
     assert report["owner_summary"]["state"] == "安全边界阻断"
-    assert report["owner_summary"]["current_action"] == "等待系统处理安全状态"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统处理安全状态"
     assert report["owner_summary"]["owner_intervention_required"] is True
     assert report["owner_summary"]["visibility"]["category"] == "safety_blocker"
     assert report["owner_summary"]["visibility"]["detail"] == (
         "真实订单保持关闭，等待安全状态恢复"
     )
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "blocker_present"
     assert report["notification"]["owner_intervention_required"] is True
 
@@ -588,7 +724,6 @@ def test_daily_check_classifies_missing_budget_as_safety_blocker():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
         },
     )
 
@@ -617,7 +752,6 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
             "runtime_dry_run_missing_required_checks": [
                 "fresh_signal_fast_auto_chain_checked"
             ],
-            "frontend_scope": "externalized",
         },
     )
 
@@ -629,7 +763,7 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == [
         "fresh_signal_fast_auto_chain_checked"
     ]
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "blocker_present"
 
 
@@ -638,12 +772,11 @@ def test_daily_check_notifies_when_fresh_signal_is_processing_not_waiting():
     snapshot = _snapshot(
         owner_summary={
             "state": "运行中",
-            "current_action": "继续保持监控",
+            "non_authority_checkpoint": "继续保持监控",
             "runtime": "正常",
             "watcher": "运行中",
             "source_readiness": "正常",
             "dry_run_audit": "审计演练正常",
-            "frontend": "已发布",
         },
     )
     snapshot["facts"]["reports"]["goal_status"] = {
@@ -657,8 +790,8 @@ def test_daily_check_notifies_when_fresh_signal_is_processing_not_waiting():
     assert report["checks"]["waiting_for_market"] is False
     assert report["checks"]["fresh_signal_notification_policy_checked"] is True
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "processing"
 
 
@@ -684,7 +817,7 @@ def test_daily_check_blocks_when_remote_interaction_budget_is_exceeded():
         "daily_check_remote_interaction_budget_exceeded:2>1"
         in report["checks"]["blockers"]
     )
-    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["notification_result"] == "NOTIFY"
     assert report["notification"]["reason"] == "blocker_present"
 
 
@@ -718,7 +851,7 @@ def test_daily_check_heartbeat_xml_uses_dont_notify_decision():
     xml = module._heartbeat_xml(report)
 
     assert "<automation_id>tokyo-runtime-quiet-monitor</automation_id>" in xml
-    assert "<decision>DONT_NOTIFY</decision>" in xml
+    assert "<notification_result>DONT_NOTIFY</notification_result>" in xml
     assert "<message>自动化正常运行，当前没有可用市场机会</message>" in xml
 
 
@@ -736,7 +869,6 @@ def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
                 "runtime_dry_run_audit_passed": True,
                 "runtime_dry_run_required_checks_present": True,
                 "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
             },
         )
     )
@@ -744,7 +876,7 @@ def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
 
     xml = module._heartbeat_xml(report)
 
-    assert "<decision>NOTIFY</decision>" in xml
+    assert "<notification_result>NOTIFY</notification_result>" in xml
     assert "<message>A &lt; B &amp; C</message>" in xml
 
 
@@ -763,9 +895,9 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 缓存年龄: 5m" in text
     assert "- 缓存状态: fresh" in text
     assert "- 当前阶段: 等待机会" in text
-    assert "- 当前动作: 继续等待市场机会" in text
+    assert "- 当前检查点: 继续等待市场机会" in text
     assert "- Owner 介入: 否" in text
-    assert "- 通知决策: DONT_NOTIFY" in text
+    assert "- 通知结果: DONT_NOTIFY" in text
     assert "- 交互等级: L1_daily_check_from_snapshot" in text
     assert "- 交互口径: 只读低交互" in text
     assert "- 远端交互次数: 1" in text
@@ -779,7 +911,6 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 入场快链: ready" in text
     assert "- 出场硬化: ready" in text
     assert "- 策略组分层: ready" in text
-    assert "- Frontend: 外部项目" in text
 
 
 def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
@@ -803,7 +934,7 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
                     ],
                     "ready_goal_chain_segments": ["fresh_or_mock_signal"],
                     "missing_or_failed_goal_chain_segments": [
-                        "official_operation_layer_evidence_handoff"
+                        "official_operation_layer_evidence_relay_projection"
                     ],
                 },
             },
@@ -818,7 +949,7 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
     assert "## Missing Chain Segments" in text
     assert "- operation_layer_evidence_relay_checked" in text
     assert "## Missing Goal Chain Segments" in text
-    assert "- official_operation_layer_evidence_handoff" in text
+    assert "- official_operation_layer_evidence_relay_projection" in text
 
 
 def test_daily_check_owner_progress_text_marks_chain_segments_unknown_when_absent():
@@ -853,7 +984,6 @@ def test_daily_check_owner_progress_text_surfaces_safety_blocker():
                 "runtime_dry_run_audit_passed": True,
                 "runtime_dry_run_required_checks_present": True,
                 "runtime_dry_run_missing_required_checks": [],
-            "frontend_scope": "externalized",
             },
         )
     )
@@ -861,9 +991,9 @@ def test_daily_check_owner_progress_text_surfaces_safety_blocker():
     text = module._owner_progress_text(report)
 
     assert "- 当前阶段: 安全边界阻断" in text
-    assert "- 当前动作: 等待系统处理安全状态" in text
+    assert "- 当前检查点: 等待系统处理安全状态" in text
     assert "- Owner 介入: 是" in text
-    assert "- 通知决策: NOTIFY" in text
+    assert "- 通知结果: NOTIFY" in text
     assert "## Blockers" in text
     assert "- active_position_open_order_conflict" in text
 
@@ -941,7 +1071,7 @@ def test_daily_check_reads_prebuilt_report_without_snapshot_probe(tmp_path, monk
 
     assert loaded["status"] == "waiting_for_market"
     assert loaded["interaction"]["remote_interaction_count"] == 1
-    assert loaded["notification"]["decision"] == "DONT_NOTIFY"
+    assert loaded["notification"]["notification_result"] == "DONT_NOTIFY"
 
 
 def test_daily_check_reads_default_cache_without_snapshot_probe(tmp_path, monkeypatch):
@@ -963,7 +1093,7 @@ def test_daily_check_reads_default_cache_without_snapshot_probe(tmp_path, monkey
     loaded = module._build_or_read_daily_check_report(args)
 
     assert loaded["status"] == "waiting_for_market"
-    assert loaded["notification"]["decision"] == "DONT_NOTIFY"
+    assert loaded["notification"]["notification_result"] == "DONT_NOTIFY"
 
 
 def test_daily_check_from_cache_missing_returns_monitor_refresh_state(tmp_path, monkeypatch):
@@ -985,18 +1115,109 @@ def test_daily_check_from_cache_missing_returns_monitor_refresh_state(tmp_path, 
     assert loaded["owner_status"] == "temporarily_unavailable"
     assert loaded["interaction"]["level"] == "L0_local_cache_read"
     assert loaded["interaction"]["remote_interaction_count"] == 0
-    assert loaded["notification"]["decision"] == "NOTIFY"
+    assert loaded["notification"]["notification_result"] == "NOTIFY"
     assert loaded["notification"]["reason"] == "runtime_progress_cache_missing"
     assert loaded["checks"]["blockers"] == []
     assert loaded["checks"]["deployment_issue"] is True
-    assert loaded["checks"]["monitor_refresh_needed"] is True
-    assert loaded["checks"]["refresh_required"] is True
-    assert loaded["checks"]["automation_notify"] is True
-    assert loaded["checks"]["owner_notify"] is False
-    assert loaded["checks"]["monitor_refresh_reasons"] == [
+    assert "refresh_required" not in loaded["checks"]
+    assert "automation_notify" not in loaded["checks"]
+    assert "owner_notify" not in loaded["checks"]
+    assert "monitor_refresh_needed" not in loaded["checks"]
+    assert "monitor_refresh_reasons" not in loaded["checks"]
+    assert loaded["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert loaded["owner_runtime_state"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_missing"
     ]
     assert loaded["owner_summary"]["state"] == "暂不可用"
+    assert "execution_intent_created" not in loaded["safety_invariants"]
+    assert loaded["safety_invariants"]["order_created"] is False
+    assert loaded["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_daily_check_status_projection_prefers_typed_owner_runtime_state():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["checks"]["monitor_refresh_needed"] = True
+    report["checks"]["monitor_refresh_reasons"] = ["legacy_stale_refresh_mirror"]
+    report["owner_runtime_state"] = {
+        "runtime_status": "waiting_for_market",
+        "monitor_status": "fresh",
+        "owner_status": "waiting_for_opportunity",
+        "owner_decision_required": True,
+        "owner_intervention_required": False,
+        "monitor_refresh_needed": False,
+        "monitor_refresh_reasons": [],
+        "waiting_for_market": True,
+    }
+
+    projected = module._ensure_status_projection(report)
+
+    assert projected["owner_runtime_state"]["monitor_refresh_needed"] is False
+    assert projected["owner_runtime_state"]["monitor_refresh_reasons"] == []
+    assert "owner_decision_required" not in projected["owner_runtime_state"]
+    assert projected["owner_runtime_state"]["owner_intervention_required"] is False
+    assert projected["monitor_status"] == "fresh"
+
+
+def test_daily_check_legacy_status_projection_does_not_fabricate_fresh_monitor():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report.pop("owner_runtime_state")
+    report.pop("monitor_status")
+    report["checks"]["monitor_refresh_needed"] = True
+    report["checks"]["monitor_refresh_reasons"] = ["legacy_cache_stale"]
+
+    projected = module._ensure_status_projection(report)
+
+    assert projected["owner_runtime_state"]["runtime_status"] == "waiting_for_market"
+    assert projected["owner_runtime_state"]["monitor_status"] == "unknown"
+    assert projected["owner_runtime_state"]["owner_status"] == "waiting_for_opportunity"
+    assert projected["owner_runtime_state"]["monitor_refresh_needed"] is False
+    assert projected["owner_runtime_state"]["monitor_refresh_reasons"] == []
+    assert projected["owner_runtime_state"]["waiting_for_market"] is True
+
+
+def test_daily_check_legacy_checks_waiting_cannot_override_cached_runtime_status():
+    module = _load_module()
+    report = {
+        "status": "blocked",
+        "owner_summary": {
+            "visibility": {
+                "owner_intervention_required": False,
+            },
+        },
+        "checks": {
+            "waiting_for_market": True,
+        },
+    }
+
+    projected = module._ensure_status_projection(report)
+
+    assert projected["runtime_status"] == "temporarily_unavailable"
+    assert projected["owner_status"] == "temporarily_unavailable"
+    assert projected["owner_runtime_state"]["runtime_status"] == "temporarily_unavailable"
+    assert projected["owner_runtime_state"]["waiting_for_market"] is False
+
+
+def test_daily_check_legacy_status_projection_retains_deployment_issue():
+    module = _load_module()
+    report = {
+        "status": "blocked",
+        "runtime_status": "temporarily_unavailable",
+        "owner_summary": {
+            "visibility": {
+                "owner_intervention_required": False,
+            },
+        },
+        "checks": {
+            "deployment_issue": True,
+        },
+    }
+
+    projected = module._ensure_status_projection(report)
+
+    assert projected["monitor_status"] == "deployment_issue"
+    assert projected["owner_runtime_state"]["monitor_status"] == "deployment_issue"
 
 
 def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
@@ -1015,17 +1236,19 @@ def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
     assert gated["runtime_status"] == "waiting_for_market"
     assert gated["monitor_status"] == "needs_refresh"
     assert gated["owner_status"] == "waiting_for_opportunity"
-    assert gated["notification"]["decision"] == "NOTIFY"
+    assert gated["notification"]["notification_result"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_stale"
     assert gated["notification"]["refresh_required"] is True
     assert gated["notification"]["automation_notify"] is True
     assert gated["notification"]["owner_notify"] is False
     assert gated["checks"]["blockers"] == []
-    assert gated["checks"]["monitor_refresh_needed"] is True
-    assert gated["checks"]["refresh_required"] is True
-    assert gated["checks"]["automation_notify"] is True
-    assert gated["checks"]["owner_notify"] is False
-    assert gated["checks"]["monitor_refresh_reasons"] == [
+    assert "refresh_required" not in gated["checks"]
+    assert "automation_notify" not in gated["checks"]
+    assert "owner_notify" not in gated["checks"]
+    assert "monitor_refresh_needed" not in gated["checks"]
+    assert "monitor_refresh_reasons" not in gated["checks"]
+    assert gated["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert gated["owner_runtime_state"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_stale"
     ]
     assert gated["checks"]["waiting_for_market"] is True
@@ -1033,6 +1256,90 @@ def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
+    assert "hard_safety_stop" not in gated["checks"]["blockers"]
+    assert gated["owner_summary"]["owner_intervention_required"] is False
+
+
+def test_daily_check_fresh_cache_report_uses_shared_monitor_refresh_classifier():
+    module = _load_module()
+    for status in (
+        "needs_refresh",
+        module.MONITOR_REFRESH_STATUS,
+        module.DEPLOYMENT_ISSUE_STATUS,
+        "temporarily_unavailable_monitor_refresh_needed",
+    ):
+        report = module.build_daily_check_report(snapshot=_snapshot())
+        report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+        report["status"] = status
+
+        assert (
+            module._is_fresh_cache_report(
+                report,
+                max_cache_age_minutes=5,
+            )
+            is False
+        )
+
+
+def test_daily_check_cache_gate_owner_labels_use_shared_monitor_mapping():
+    module = _load_module()
+
+    expected = {
+        module.MONITOR_REFRESH_STATUS: (
+            "等待机会",
+            "刷新本地 runtime monitor 缓存",
+        ),
+        "temporarily_unavailable_monitor_refresh_needed": (
+            "监控状态需刷新",
+            "刷新本地 runtime monitor 缓存",
+        ),
+    }
+
+    for status, (state, action) in expected.items():
+        assert module.monitor_owner_state_label(status) == state
+        assert module.monitor_owner_action_label(status) == action
+
+    projection = module.monitor_refresh_gate_projection(
+        runtime_status="waiting_for_market",
+        reason="runtime_progress_cache_stale",
+        detail="本地 runtime monitor 缓存已过期，等待自动化刷新",
+    )
+
+    assert projection.status == module.MONITOR_REFRESH_STATUS
+    assert projection.monitor_status == "needs_refresh"
+    assert projection.owner_status == "waiting_for_opportunity"
+    assert projection.visibility["label"] == "等待机会"
+    assert projection.visibility["non_authority_checkpoint"] == (
+        "刷新本地 runtime monitor 缓存"
+    )
+    assert projection.notification["owner_notify"] is False
+    assert projection.owner_runtime_state["monitor_refresh_needed"] is True
+
+
+def test_daily_check_stale_cache_gate_rejects_legacy_checks_waiting_source():
+    module = _load_module()
+    report = {
+        "schema_version": module.DAILY_CHECK_REPORT_SCHEMA_VERSION,
+        "status": "blocked",
+        "generated_at_utc": "2026-06-17T00:00:00+00:00",
+        "checks": {
+            "waiting_for_market": True,
+        },
+    }
+
+    gated = module._apply_cache_freshness_gate(
+        report,
+        require_fresh_cache=True,
+        now_utc=datetime(2026, 6, 17, 0, 10, tzinfo=timezone.utc),
+        max_cache_age_minutes=5,
+    )
+
+    assert gated["status"] == "temporarily_unavailable_monitor_refresh_needed"
+    assert gated["runtime_status"] == "temporarily_unavailable"
+    assert gated["owner_status"] == "temporarily_unavailable"
+    assert gated["owner_runtime_state"]["waiting_for_market"] is False
+    assert gated["owner_summary"]["state"] == "监控状态需刷新"
+    assert gated["checks"]["waiting_for_market"] is True
 
 
 def test_daily_check_require_fresh_cache_marks_stale_schema_for_refresh():
@@ -1051,15 +1358,23 @@ def test_daily_check_require_fresh_cache_marks_stale_schema_for_refresh():
     assert gated["runtime_status"] == "waiting_for_market"
     assert gated["monitor_status"] == "needs_refresh"
     assert gated["owner_status"] == "waiting_for_opportunity"
-    assert gated["notification"]["decision"] == "NOTIFY"
+    assert gated["notification"]["notification_result"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_schema_stale"
     assert gated["checks"]["blockers"] == []
-    assert gated["checks"]["monitor_refresh_needed"] is True
-    assert gated["checks"]["monitor_refresh_reasons"] == [
+    assert "monitor_refresh_needed" not in gated["checks"]
+    assert "monitor_refresh_reasons" not in gated["checks"]
+    assert gated["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert gated["owner_runtime_state"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_schema_stale"
     ]
     assert gated["owner_summary"]["state"] == "等待机会"
-    assert gated["owner_summary"]["current_action"] == "刷新本地 runtime monitor 缓存"
+    assert "current_action" not in gated["owner_summary"]
+    assert gated["owner_summary"]["non_authority_checkpoint"] == (
+        "刷新本地 runtime monitor 缓存"
+    )
+    assert gated["owner_summary"]["checkpoint_source"] == (
+        "daily_check_cache_gate_projection"
+    )
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
@@ -1089,14 +1404,16 @@ def test_daily_check_require_fresh_cache_marks_runtime_head_mismatch_for_refresh
     assert gated["runtime_status"] == "waiting_for_market"
     assert gated["monitor_status"] == "needs_refresh"
     assert gated["owner_status"] == "waiting_for_opportunity"
-    assert gated["notification"]["decision"] == "NOTIFY"
+    assert gated["notification"]["notification_result"] == "NOTIFY"
     assert (
         gated["notification"]["reason"]
         == "runtime_progress_cache_runtime_head_stale"
     )
     assert gated["checks"]["blockers"] == []
-    assert gated["checks"]["monitor_refresh_needed"] is True
-    assert gated["checks"]["monitor_refresh_reasons"] == [
+    assert "monitor_refresh_needed" not in gated["checks"]
+    assert "monitor_refresh_reasons" not in gated["checks"]
+    assert gated["owner_runtime_state"]["monitor_refresh_needed"] is True
+    assert gated["owner_runtime_state"]["monitor_refresh_reasons"] == [
         "runtime_progress_cache_runtime_head_stale"
     ]
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
@@ -1127,7 +1444,7 @@ def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     assert "- 当前阶段: 等待机会" in output_text
     assert "- 缓存状态: fresh" in output_text
     assert "- 实盘矩阵: 1 pass / 1 waiting / 0 blocked" in output_text
-    assert "- 通知决策: DONT_NOTIFY" in output_text
+    assert "- 通知结果: DONT_NOTIFY" in output_text
     assert captured.out == output_text
 
 
@@ -1275,6 +1592,8 @@ def test_daily_check_auto_cache_refreshes_fresh_monitor_refresh_report(
     assert len(calls) == 1
     assert refreshed["status"] == "waiting_for_market"
     assert refreshed["checks"].get("monitor_refresh_needed") is not True
+    assert "monitor_refresh_needed" not in refreshed["checks"]
+    assert refreshed["owner_runtime_state"]["monitor_refresh_needed"] is False
     assert "- 交互等级: L1_daily_check_from_snapshot" in captured.out
     assert owner_progress_path.exists()
 
@@ -1343,7 +1662,6 @@ def test_daily_check_auto_cache_refreshes_runtime_head_mismatch_once(
         return _snapshot(
             inputs={
                 "expected_runtime_head": "runtime-head-2",
-                "expected_frontend_head": None,
             },
             facts={
                 "release": {
@@ -1401,7 +1719,6 @@ def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
 
     assert module._resolve_expected_heads(args) == {
         "expected_runtime_head": "runtime-head-from-file",
-        "expected_frontend_head": None,
     }
 
 
@@ -1424,7 +1741,6 @@ def test_daily_check_resolves_local_git_head_sentinel_from_baseline_file(
 
     assert module._resolve_expected_heads(args) == {
         "expected_runtime_head": "runtime-head-from-git",
-        "expected_frontend_head": None,
     }
 
 
@@ -1434,8 +1750,7 @@ def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
     baseline.write_text(
         """
 {
-  "expected_runtime_head": "runtime-head-from-file",
-  "expected_frontend_head": "frontend-head-from-file"
+  "expected_runtime_head": "runtime-head-from-file"
 }
 """.strip(),
         encoding="utf-8",
@@ -1447,14 +1762,11 @@ def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
             str(baseline),
             "--expected-runtime-head",
             "runtime-head-from-cli",
-            "--expected-frontend-head",
-            "frontend-head-from-cli",
         ]
     )
 
     assert module._resolve_expected_heads(args) == {
         "expected_runtime_head": "runtime-head-from-cli",
-        "expected_frontend_head": "frontend-head-from-cli",
     }
 
 

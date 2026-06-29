@@ -29,16 +29,22 @@ def _load_module():
 def test_brf2_owner_trial_policy_scope_records_30u_boundary_without_authority():
     module = _load_module()
 
-    packet = module.build_brf2_owner_trial_policy_scope(
+    artifact = module.build_brf2_owner_trial_policy_scope(
         generated_at_utc="2026-06-23T00:00:00+00:00"
     )
 
-    policy = packet["policy"]
-    assert packet["status"] == "brf2_owner_trial_policy_scope_recorded"
-    assert packet["brf2_policy_scope_recorded"] is True
-    assert packet["owner_policy_scope_missing"] is False
-    assert packet["brf2_stage_after_policy"] == "admitted_trial_asset"
-    assert packet["brf2_new_first_blocker"] == "required_facts_mapping_gap"
+    policy = artifact["policy"]
+    assert artifact["status"] == "brf2_owner_trial_policy_scope_recorded"
+    assert artifact["brf2_policy_scope_recorded"] is True
+    assert artifact["owner_policy_scope_missing"] is False
+    assert artifact["brf2_stage_after_policy"] == "admitted_trial_asset"
+    assert artifact["brf2_new_first_blocker"] == "required_facts_mapping_gap"
+    assert "brf2_next_action" not in artifact
+    assert artifact["brf2_policy_checkpoint"] == (
+        "close_brf2_required_facts_mapping_for_armed_observation"
+    )
+    assert "final_policy_evidence" in artifact
+    assert "final_evidence_packet" not in artifact
     assert policy["strategy_group_id"] == "BRF2-001"
     assert policy["trial_identity"] == "BRF2_TINY_SHORT_TRIAL_30U_V0"
     assert policy["capital_scope"] == {
@@ -53,12 +59,19 @@ def test_brf2_owner_trial_policy_scope_records_30u_boundary_without_authority():
     assert policy["max_notional"]["amount"] == "150"
     assert policy["attempt_cap"] == 3
     assert policy["loss_unit"]["amount"] == "10"
-    assert packet["checks"]["actionable_now"] is False
-    assert packet["checks"]["real_order_authority"] is False
-    assert packet["checks"]["calls_finalgate"] is False
-    assert packet["checks"]["calls_operation_layer"] is False
-    assert packet["checks"]["calls_exchange_write"] is False
-    assert packet["checks"]["places_order"] is False
+    for authority_mirror in (
+        "actionable_now",
+        "real_order_authority",
+        "calls_finalgate",
+        "calls_operation_layer",
+        "calls_exchange_write",
+        "places_order",
+    ):
+        assert authority_mirror not in artifact["checks"]
+    assert "actionable_now" not in artifact["safety_invariants"]
+    assert "real_order_authority" not in artifact["safety_invariants"]
+    assert "actionable_now" not in policy["authority_boundary"]
+    assert "real_order_authority" not in policy["authority_boundary"]
 
 
 def test_brf2_owner_trial_policy_scope_cli_default_writes_output_only(
@@ -91,13 +104,16 @@ def test_brf2_owner_trial_policy_scope_cli_default_writes_output_only(
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert packet["schema"] == module.SCHEMA
-    assert packet["view_mode"] == "monitor_view_from_final_owned_policy"
-    assert packet["source_policy_json"] == str(policy_json)
-    assert "BRF2 Owner Trial Policy Scope V0" in output_md.read_text(
-        encoding="utf-8"
-    )
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["schema"] == module.SCHEMA
+    assert artifact["view_mode"] == "monitor_view_from_final_owned_policy"
+    assert artifact["source_policy_json"] == str(policy_json)
+    assert "final_policy_evidence" in artifact
+    assert "final_evidence_packet" not in artifact
+    markdown = output_md.read_text(encoding="utf-8")
+    assert "BRF2 Owner Trial Policy Scope V0" in markdown
+    assert "Actionable now" not in markdown
+    assert "Real order authority" not in markdown
     assert not docs_json.exists()
     assert not docs_md.exists()
 
@@ -126,6 +142,11 @@ def test_brf2_owner_trial_policy_scope_cli_writes_docs_only_when_explicit(
     )
 
     assert exit_code == 0
-    docs_packet = json.loads(docs_json.read_text(encoding="utf-8"))
-    assert docs_packet["schema"] == module.SCHEMA
-    assert "BRF2 Owner Trial Policy Scope V0" in docs_md.read_text(encoding="utf-8")
+    docs_artifact = json.loads(docs_json.read_text(encoding="utf-8"))
+    assert docs_artifact["schema"] == module.SCHEMA
+    assert "final_policy_evidence" in docs_artifact
+    assert "final_evidence_packet" not in docs_artifact
+    markdown = docs_md.read_text(encoding="utf-8")
+    assert "BRF2 Owner Trial Policy Scope V0" in markdown
+    assert "Actionable now" not in markdown
+    assert "Real order authority" not in markdown

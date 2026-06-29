@@ -4,8 +4,8 @@ from decimal import Decimal
 
 from scripts import execute_runtime_profile_apply_plan as executor
 from scripts import runtime_non_runtime_signal_profile_proposal as proposal_script
-from scripts import runtime_profile_confirmation_apply_packet as apply_script
-from scripts import runtime_profile_decision_packet as decision_script
+from scripts import runtime_profile_confirmation_apply_plan as apply_script
+from scripts import runtime_profile_confirmation_record as confirmation_record_script
 from scripts import runtime_profile_trial_binding_apply_readiness as readiness_script
 
 
@@ -49,7 +49,7 @@ class _FakeClient:
         return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
 
 
-def _selector_packet(signals: list[dict]) -> dict:
+def _selector_artifact(signals: list[dict]) -> dict:
     return {
         "scope": "runtime_live_strategy_signal_selector",
         "status": "would_enter_available_but_not_runtime_compatible",
@@ -97,20 +97,20 @@ def _binding(binding_id: str = "binding-rbr-1") -> dict:
     }
 
 
-def _ready_packet() -> dict:
-    proposal_packet = proposal_script.build_packet(
-        selector_packet=_selector_packet([_rbr_signal()]),
+def _ready_readiness() -> dict:
+    proposal_artifact = proposal_script.build_profile_proposal_artifact(
+        selector_artifact=_selector_artifact([_rbr_signal()]),
         capital_base=Decimal("30"),
     )
-    decision_packet = decision_script.build_packet(
-        proposal_packet=proposal_packet,
+    confirmation_record = confirmation_record_script.build_record(
+        proposal_artifact=proposal_artifact,
         created_at_ms=1781283600000,
     )
-    required = apply_script.build_packet(
-        decision_packet=decision_packet,
+    required = apply_script.build_apply_plan(
+        confirmation_record=confirmation_record,
     )["owner_confirmation"]["required_value"]
-    return readiness_script.build_packet(
-        apply_decision_packet=decision_packet,
+    return readiness_script.build_apply_readiness(
+        apply_confirmation_record=confirmation_record,
         trial_bindings_payload={"trial_bindings": [_binding()]},
         owner_confirmation_value=required,
     )
@@ -119,7 +119,7 @@ def _ready_packet() -> dict:
 def test_dry_run_reports_plan_without_api_calls() -> None:
     client = _FakeClient()
     report = executor.build_execution_report(
-        packet=_ready_packet(),
+        apply_readiness_artifact=_ready_readiness(),
         mode="dry-run",
         execute=False,
         client=client,
@@ -137,7 +137,7 @@ def test_dry_run_reports_plan_without_api_calls() -> None:
 
 def test_apply_mode_requires_execute_flag() -> None:
     report = executor.build_execution_report(
-        packet=_ready_packet(),
+        apply_readiness_artifact=_ready_readiness(),
         mode="apply",
         execute=False,
         client=_FakeClient(),
@@ -151,7 +151,7 @@ def test_apply_mode_requires_execute_flag() -> None:
 def test_apply_executes_two_official_api_requests_only() -> None:
     client = _FakeClient()
     report = executor.build_execution_report(
-        packet=_ready_packet(),
+        apply_readiness_artifact=_ready_readiness(),
         mode="apply",
         execute=True,
         client=client,
@@ -177,7 +177,7 @@ def test_apply_executes_two_official_api_requests_only() -> None:
 def test_apply_stops_on_api_error() -> None:
     client = _FakeClient(fail_step="/runtime-drafts")
     report = executor.build_execution_report(
-        packet=_ready_packet(),
+        apply_readiness_artifact=_ready_readiness(),
         mode="apply",
         execute=True,
         client=client,
@@ -190,8 +190,8 @@ def test_apply_stops_on_api_error() -> None:
 
 
 def test_blocks_unsafe_apply_request() -> None:
-    packet = _ready_packet()
-    packet["apply_packet"]["api_apply_plan"]["requests"].append(
+    apply_readiness_artifact = _ready_readiness()
+    apply_readiness_artifact["apply_plan"]["api_apply_plan"]["requests"].append(
         {
             "step": "bad_exchange_call",
             "method": "POST",
@@ -201,7 +201,7 @@ def test_blocks_unsafe_apply_request() -> None:
     )
 
     report = executor.build_execution_report(
-        packet=packet,
+        apply_readiness_artifact=apply_readiness_artifact,
         mode="dry-run",
     )
 
@@ -210,11 +210,11 @@ def test_blocks_unsafe_apply_request() -> None:
     assert "api_apply_plan_contains_unsafe_request" in report["blockers"]
 
 
-def test_blocks_not_ready_packet_without_noisy_plan_shape_blockers() -> None:
+def test_blocks_not_ready_readiness_without_noisy_plan_shape_blockers() -> None:
     report = executor.build_execution_report(
-        packet={
+        apply_readiness_artifact={
             "status": "waiting_for_matching_trial_binding",
-            "apply_packet": None,
+            "apply_plan": None,
         },
         mode="dry-run",
     )
@@ -222,5 +222,17 @@ def test_blocks_not_ready_packet_without_noisy_plan_shape_blockers() -> None:
     assert report["status"] == "blocked_runtime_profile_apply_plan"
     assert report["blockers"] == [
         "api_apply_plan_not_ready",
-        "rtf038_apply_readiness_packet_not_ready",
+        "rtf038_apply_readiness_not_ready",
     ]
+
+
+def test_rejects_legacy_packet_kwarg() -> None:
+    try:
+        executor.build_execution_report(
+            packet=_ready_readiness(),
+            mode="dry-run",
+        )
+    except TypeError as exc:
+        assert "packet" in str(exc)
+    else:
+        raise AssertionError("legacy packet kwarg must be rejected")

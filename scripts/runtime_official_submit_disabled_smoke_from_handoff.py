@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Call the official first-real-submit endpoint in disabled-smoke mode.
 
-This flow consumes a ready RuntimeOfficialSubmitHandoffPacket and calls the
+This flow consumes a ready official submit handoff artifact and calls the
 existing Trading Console first-real-submit action endpoint with
 owner_confirmed_for_first_real_submit_action=false. It deliberately refuses
 real_gateway_action handoffs, so it can prove the official path is reachable
@@ -29,7 +29,7 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 )
 from src.domain.runtime_official_submit_handoff import (  # noqa: E402
     RuntimeOfficialSubmitHandoffMode,
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
     RuntimeOfficialSubmitHandoffStatus,
 )
 
@@ -61,7 +61,7 @@ def _api_base(args: argparse.Namespace) -> str:
     )
 
 
-def _read_json_file(path: str) -> dict[str, Any]:
+def _read_handoff_artifact_file(path: str) -> dict[str, Any]:
     value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
@@ -69,7 +69,7 @@ def _read_json_file(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("packet", "api_payload"):
+    for key in ("handoff_artifact", "artifact", "api_payload"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -82,8 +82,8 @@ def _build_report(
     client: Any | None = None,
 ) -> dict[str, Any]:
     _load_env_file(args.env_file)
-    raw_handoff = _read_json_file(args.handoff_json)
-    handoff = RuntimeOfficialSubmitHandoffPacket.model_validate(raw_handoff)
+    raw_handoff = _read_handoff_artifact_file(args.handoff_artifact_json)
+    handoff = RuntimeOfficialSubmitHandoffArtifact.model_validate(raw_handoff)
     blockers = _handoff_blockers(handoff)
     if blockers:
         return _report(
@@ -141,7 +141,7 @@ def _build_report(
     )
 
 
-def _handoff_blockers(handoff: RuntimeOfficialSubmitHandoffPacket) -> list[str]:
+def _handoff_blockers(handoff: RuntimeOfficialSubmitHandoffArtifact) -> list[str]:
     blockers: list[str] = []
     if handoff.status != RuntimeOfficialSubmitHandoffStatus.READY_FOR_OFFICIAL_SUBMIT_CALL:
         blockers.append("handoff_not_ready_for_official_submit_call")
@@ -171,7 +171,7 @@ def _handoff_blockers(handoff: RuntimeOfficialSubmitHandoffPacket) -> list[str]:
 def _report(
     *,
     args: argparse.Namespace,
-    handoff: RuntimeOfficialSubmitHandoffPacket,
+    handoff: RuntimeOfficialSubmitHandoffArtifact,
     status: str,
     blocked_stage: str | None,
     blockers: list[str],
@@ -254,10 +254,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Call official first-real-submit endpoint from a ready handoff "
-            "packet in disabled-smoke mode."
+            "artifact in disabled-smoke mode."
         ),
     )
-    parser.add_argument("--handoff-json", required=True)
+    parser.add_argument("--handoff-artifact-json", required=True)
     parser.add_argument("--output")
     parser.add_argument("--env-file")
     parser.add_argument("--api-base")

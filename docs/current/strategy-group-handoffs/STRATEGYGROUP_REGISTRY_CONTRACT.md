@@ -18,7 +18,7 @@ It answers:
 What does this StrategyGroup eat?
 How does it trade?
 Which tier is it allowed to reach?
-Can it trade now, and if not, what first blocker remains?
+Which Tradeability Decision and Runtime Safety State summarize current runtime authority?
 What risks or evidence gaps remain?
 What would promote, downshift, park, or kill it?
 ```
@@ -35,8 +35,8 @@ or order-sizing authority.
 | StrategyGroup handoff pack | Reviewed main-control intake artifact for one StrategyGroup |
 | StrategyGroup Registry | Owner-readable asset registry contract for strategy governance |
 | Runtime tier policy | Defines what each tier may do |
-| Decision Ledger | Records current keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block decisions |
-| Tradeability Verdict | Records whether the strategy can trade now and the first blocker when it cannot |
+| Strategy Asset State evidence | Records current keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block evidence |
+| Tradeability Decision | Records whether the strategy can trade now and the first blocker when it cannot |
 | Review Ledger | Records real action outcomes and post-trial learning |
 
 The registry should summarize handoff and research evidence. It must not copy
@@ -49,7 +49,7 @@ The registry supports this authority split:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
@@ -59,13 +59,15 @@ risk tier. The registry must not require the Owner to manually assemble
 RequiredFacts, validate fresh signals, inspect candidate/auth evidence, judge
 FinalGate, or operate the Operation Layer.
 
-Registry and Owner policy may make a StrategyGroup `trial_eligible`.
-Only runtime state may make it `actionable_now`.
+Registry and Owner policy may make a StrategyGroup `trial_eligible`. Only the
+Tradeability Decision may answer whether it can trade now. Only Runtime Safety
+State may answer whether live-submit safety is currently satisfied.
 
-The registry may support a Tradeability Verdict, but it must not compute live
-actionability by itself. Registry rows explain asset admission, policy scope,
-risk envelope, and hard blocks. Runtime state decides whether the current
-market moment can actually trade.
+The registry may support those read models, but it must not compute live
+actionability or live order authority by itself. Registry rows explain asset
+admission, policy scope, risk envelope, and hard blocks. Tradeability Decision
+and Runtime Safety State decide whether the current market moment can actually
+enter the official path.
 
 ## Required Registry Fields
 
@@ -83,7 +85,8 @@ Each StrategyGroup registry row should define these fields:
 | `trial_eligible` | Whether the StrategyGroup may be considered for small-capital trial eligibility |
 | `tradeability_stage` | Lifecycle stage, such as `tiny_live_intake_candidate`, `trial_asset_admission_candidate`, `admitted_trial_asset`, `armed_observation`, `tiny_live_ready`, or `live_submit_ready` |
 | `first_tradeability_blocker` | Current first non-runtime reason it cannot trade, when known |
-| `actionable_now` | Whether it can submit now; usually generated at runtime, not hand-authored |
+| `tradeability_decision_ref` | Reference to the generated Tradeability Decision when a current can-trade answer is needed |
+| `runtime_safety_state_ref` | Reference to the generated Runtime Safety State when live-submit safety is needed |
 | `risk_gaps` | Strategy risks the Owner may accept or reject |
 | `hard_blocks` | Mechanical or authority issues the Owner cannot override |
 | `required_facts_summary` | Human-readable RequiredFacts summary by market, strategy, derivatives, risk, account, exchange |
@@ -91,20 +94,21 @@ Each StrategyGroup registry row should define these fields:
 | `downshift_rule` | Conditions that downgrade tier or disable candidate preparation |
 | `park_rule` | Conditions that keep it inactive without deleting the idea |
 | `kill_condition` | Conditions that remove it from active strategy allocation |
-| `evidence_refs` | Links to handoff packs, replay summaries, Decision Ledger rows, or Review Ledger rows |
+| `evidence_refs` | Links to handoff packs, replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |
 | `authority_boundary` | Explicit statement that the row does not authorize real orders |
 
-## Trial Eligibility And Actionability
+## Trial Eligibility And Runtime Authority
 
 The registry must separate strategy eligibility from action-time execution:
 
-| Field | Meaning | Source |
+| Boundary | Meaning | Source |
 | --- | --- | --- |
 | `trial_eligible` | This StrategyGroup is allowed to enter the small-capital trial candidate pool under scoped Owner policy | Registry plus Owner policy |
-| `actionable_now` | A real action is currently allowed because fresh signal, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, and account/exchange facts all pass | Runtime state only |
+| Tradeability Decision | Current can-trade answer and first blocker | Generated Tradeability Decision |
+| Runtime Safety State | Current live-submit safety answer for the official path | Generated Runtime Safety State |
 
-No fresh signal means `actionable_now=false`. It does not necessarily mean
-`trial_eligible=false`.
+No fresh signal means the Tradeability Decision reports market wait. It does
+not necessarily mean `trial_eligible=false`.
 
 ## Tradeability Stages
 
@@ -183,7 +187,8 @@ missed a fixed target or used a higher leverage scenario in research.
 | `L4` | Small-capital real-order eligible when action-time execution gates pass | Yes, bounded |
 
 `L4` is not direct order authority. It only means the StrategyGroup is allowed
-to attempt the official real-order path when `actionable_now=true`.
+to attempt the official real-order path when Tradeability Decision and Runtime
+Safety State both allow the action-time path.
 
 ## Current Pilot Registry Sketch
 
@@ -213,7 +218,8 @@ It should answer:
 - which StrategyGroups are visible;
 - which are enabled, paused, parked, or killed;
 - which are `trial_eligible`;
-- which are `actionable_now`;
+- which have a current Tradeability Decision and Runtime Safety State allowing
+  the official path;
 - what risk gap blocks or limits promotion;
 - what Owner decision is needed, if any.
 
@@ -229,7 +235,7 @@ Promotion should require a decision-changing evidence path:
 registry row
 -> observation / no-action / would-enter evidence
 -> replay or live outcome review
--> Decision Ledger row
+-> Strategy Asset State evidence row
 -> tier review
 -> Owner policy when risk acceptance or L4 eligibility changes
 ```

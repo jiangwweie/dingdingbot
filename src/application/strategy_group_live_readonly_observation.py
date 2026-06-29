@@ -44,6 +44,7 @@ from src.domain.strategy_family_signal import (
 
 
 OBSERVATION_V1_SOURCE = "strategy_group_live_readonly_observation_v1"
+LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE = "local_sqlite_read_only"
 MI001_FAMILY_ID = "MI-001"
 MI001_VERSION_ID = "MI-001-smoke-v0"
 CPM_FAMILY_ID = "CPM-RO-001"
@@ -118,7 +119,7 @@ class StrategyGroupObservationRecord(BaseModel):
     evaluated_at_ms: int
     recorded_at_ms: int | None = None
     source: str
-    source_type: str = "local_sqlite_fallback"
+    source_type: str = LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
     market_source: str
     market_bar_timestamp_ms: int
     market_bar_close: str | None = None
@@ -607,7 +608,6 @@ def _evaluate_observation_candidate(
     runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService,
 ) -> tuple[StrategyGroupObservationRecord | None, StrategyGroupObservationCandidate, list[str]]:
     blockers: list[str] = []
-    runtime_signal_planning_readiness: dict[str, Any] = {}
     try:
         one_hour = market_source.latest_closed_candles(
             symbol=spec.symbol,
@@ -624,70 +624,47 @@ def _evaluate_observation_candidate(
         if not one_hour:
             blockers.append("missing_1h_candle_context")
             raise ValueError("market source returned no 1h closed candles")
-
-        timestamp_ms = one_hour[-1].open_time_ms
-        signal_input = _sample_signal_input(
-            family_id=spec.strategy_group_id,
-            version_id=spec.strategy_family_version_id,
-            playbook_id=spec.playbook_id,
-            symbol=spec.symbol,
-            side=spec.side,
-            market_snapshot=_market_snapshot(
-                symbol=spec.symbol,
-                candles=_raw_candles_from_recent(one_hour),
-                four_hour_candles=_raw_candles_from_recent(four_hour) if four_hour else None,
-                timestamp_ms=timestamp_ms,
-                source=getattr(market_source, "source_id", "read_only_market_bar_source"),
-                freshness="latest_available_closed_bar",
-            ),
-            input_source=getattr(market_source, "source_id", "read_only_market_bar_source"),
-            freshness="latest_available_closed_bar",
-        )
-        output = spec.evaluator.evaluate(signal_input)
-        runtime_signal_planning_readiness = runtime_signal_planning_assembly.preview(
-            signal_input,
-            output,
-            candidate_id=spec.candidate_id,
-        ).model_dump(mode="json")
-        record = _observation_record_from_output(
-            spec,
-            output,
-            getattr(market_source, "source_id", "unknown"),
-            getattr(market_source, "source_type", None),
-            signal_input=signal_input,
-            runtime_signal_planning_readiness=runtime_signal_planning_readiness,
-        )
-        preview = _signal_preview(output)
     except Exception as exc:
         blockers.append("market_source_evaluation_failed")
-        record = None
-        preview = {
-            "signal_type": "invalid",
-            "side": "none",
-            "reason_codes": ["observation_source_unavailable"],
-            "human_summary": f"Observation unavailable: {type(exc).__name__}",
-            "not_order": True,
-            "not_execution_intent": True,
-            "symbol": spec.symbol,
-        }
-        runtime_signal_planning_readiness = {
-            "candidate_id": spec.candidate_id,
-            "strategy_family_id": spec.strategy_group_id,
-            "strategy_family_version_id": spec.strategy_family_version_id,
-            "symbol": spec.symbol,
-            "status": RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED.value,
-            "blockers": sorted(set(blockers)),
-            "planner_call_performed": False,
-            "signal_evaluation_created": False,
-            "order_candidate_created": False,
-            "execution_intent_created": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_called": False,
-            "not_order": True,
-            "not_execution_intent": True,
-            "not_execution_authority": True,
-        }
+        return _blocked_observation_candidate(
+            spec,
+            blockers=blockers,
+            reason=f"Observation unavailable: {type(exc).__name__}",
+        )
+
+    timestamp_ms = one_hour[-1].open_time_ms
+    signal_input = _sample_signal_input(
+        family_id=spec.strategy_group_id,
+        version_id=spec.strategy_family_version_id,
+        playbook_id=spec.playbook_id,
+        symbol=spec.symbol,
+        side=spec.side,
+        market_snapshot=_market_snapshot(
+            symbol=spec.symbol,
+            candles=_raw_candles_from_recent(one_hour),
+            four_hour_candles=_raw_candles_from_recent(four_hour) if four_hour else None,
+            timestamp_ms=timestamp_ms,
+            source=getattr(market_source, "source_id", "read_only_market_bar_source"),
+            freshness="latest_available_closed_bar",
+        ),
+        input_source=getattr(market_source, "source_id", "read_only_market_bar_source"),
+        freshness="latest_available_closed_bar",
+    )
+    output = spec.evaluator.evaluate(signal_input)
+    runtime_signal_planning_readiness = runtime_signal_planning_assembly.preview(
+        signal_input,
+        output,
+        candidate_id=spec.candidate_id,
+    ).model_dump(mode="json")
+    record = _observation_record_from_output(
+        spec,
+        output,
+        getattr(market_source, "source_id", "unknown"),
+        getattr(market_source, "source_type", None),
+        signal_input=signal_input,
+        runtime_signal_planning_readiness=runtime_signal_planning_readiness,
+    )
+    preview = _signal_preview(output)
 
     readiness_status = (
         "one_shot_observation_ready_pg_sink_gap"
@@ -716,6 +693,63 @@ def _evaluate_observation_candidate(
     return record, candidate, blockers
 
 
+def _blocked_observation_candidate(
+    spec: _ObservationSpec,
+    *,
+    blockers: list[str],
+    reason: str,
+) -> tuple[None, StrategyGroupObservationCandidate, list[str]]:
+    runtime_signal_planning_readiness = {
+        "candidate_id": spec.candidate_id,
+        "strategy_family_id": spec.strategy_group_id,
+        "strategy_family_version_id": spec.strategy_family_version_id,
+        "symbol": spec.symbol,
+        "status": RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED.value,
+        "blockers": sorted(set(blockers)),
+        "planner_call_performed": False,
+        "signal_evaluation_created": False,
+        "order_candidate_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "exchange_called": False,
+        "not_order": True,
+        "not_execution_intent": True,
+        "not_execution_authority": True,
+    }
+    all_blockers = sorted(set(spec.candidate_blockers + blockers))
+    return (
+        None,
+        StrategyGroupObservationCandidate(
+            candidate_id=spec.candidate_id,
+            strategy_group_id=spec.strategy_group_id,
+            strategy_family_version_id=spec.strategy_family_version_id,
+            symbol=spec.symbol,
+            side=spec.side_label,
+            observation_role=spec.observation_role,
+            evaluator_glue_status="wired_read_only_v1",
+            review_windows=list(spec.review_windows),
+            latest_signal_preview={
+                "signal_type": "invalid",
+                "side": "none",
+                "reason_codes": ["observation_source_unavailable"],
+                "human_summary": reason,
+                "not_order": True,
+                "not_execution_intent": True,
+                "symbol": spec.symbol,
+            },
+            evidence_payload_fields=list(spec.evidence_payload_fields),
+            evidence_record_mapping="observe_only_signal_record_ready_pg_schema_gap",
+            readiness_status="blocked_market_source_or_context_unavailable",
+            blockers=all_blockers,
+            not_allowed_now=_not_allowed_now(),
+            source_refs=list(spec.source_refs),
+            runtime_signal_planning_readiness=runtime_signal_planning_readiness,
+        ),
+        blockers,
+    )
+
+
 def _observation_record_from_output(
     spec: _ObservationSpec,
     output: StrategyFamilySignalOutput,
@@ -741,8 +775,7 @@ def _observation_record_from_output(
         side=output.side.value,
         evaluated_at_ms=output.timestamp_ms,
         source=OBSERVATION_V1_SOURCE,
-        source_type=source_type
-        or ("local_sqlite_fallback" if "sqlite" in market_source_id else "read_only_market_source"),
+        source_type=source_type or _read_only_market_source_type(market_source_id),
         market_source=market_source_id,
         market_bar_timestamp_ms=output.timestamp_ms,
         market_bar_close=output.evidence_payload.get("latest_close")
@@ -834,9 +867,9 @@ def build_strategy_group_live_readonly_observation_v1(
     source_type = getattr(
         source,
         "source_type",
-        "local_sqlite_fallback" if "sqlite" in source_id else "read_only_market_source",
+        _read_only_market_source_type(source_id),
     )
-    fallback_used = bool(getattr(source, "fallback_used", source_type == "local_sqlite_fallback"))
+    fallback_used = bool(getattr(source, "fallback_used", False))
     is_live_read_only = bool(getattr(source, "is_live_read_only", source_type == "live_market_read_only"))
     latest_bar_timestamp_ms = max((record.market_bar_timestamp_ms for record in current_signals), default=None)
 
@@ -904,6 +937,12 @@ def build_strategy_group_live_readonly_observation_v1(
             "no_exchange_write": True,
         },
     )
+
+
+def _read_only_market_source_type(market_source_id: str) -> str:
+    if "sqlite" in market_source_id:
+        return LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
+    return "read_only_market_source"
 
 
 def run_strategy_group_live_readonly_observation_once(

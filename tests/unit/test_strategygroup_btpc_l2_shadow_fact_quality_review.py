@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,15 +28,15 @@ def _load_module():
     return module
 
 
-def _opportunity_decision_loop() -> dict:
+def _opportunity_review_work_loop() -> dict:
     return {
-        "status": "decision_loop_ready",
-        "decision_rows": [
+        "status": "review_work_loop_ready",
+        "opportunity_review_rows": [
             {
                 "strategy_group_id": "BTPC-001",
                 "current_tier": "L2",
                 "tier_state": "l2_shadow_candidate_observation_enabled",
-                "decision_action": "continue_l2_shadow_quality_review",
+                "review_work_action": "continue_l2_shadow_quality_review",
                 "replay_verification": {
                     "covered": True,
                     "sample_count": 5,
@@ -60,7 +63,6 @@ def _opportunity_decision_loop() -> dict:
                         work_type="strategy_review_work",
                     ),
                 ],
-                "real_order_authority": False,
             }
         ],
         "safety_invariants": {
@@ -84,10 +86,10 @@ def _gap_item(
         "gap": gap,
         "coverage_status": coverage_status,
         "work_type": work_type,
-        "owner_priority": "P0.5-high",
+        "owner_priority": "signal-observation-grade-high",
         "scheduled": True,
         "blocks_l2_progression": False,
-        "next_stage_decision": "attach_fact_source_before_l2_review",
+        "next_stage_recommendation": "attach_fact_source_before_l2_review",
         "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_l2_readiness_review.py",
     }
 
@@ -166,9 +168,9 @@ def test_btpc_l2_shadow_fact_quality_review_classifies_current_gaps() -> None:
     module = _load_module()
 
     packet = module.build_btpc_l2_shadow_fact_quality_review(
-        opportunity_decision_loop_packet=_opportunity_decision_loop(),
-        l2_readiness_packet=_l2_readiness(),
-        replay_lab_packet=_replay_lab(),
+        opportunity_review_work_loop_artifact=_opportunity_review_work_loop(),
+        l2_readiness_artifact=_l2_readiness(),
+        replay_lab_artifact=_replay_lab(),
         btpc_handoff=_btpc_handoff(),
     )
 
@@ -180,7 +182,7 @@ def test_btpc_l2_shadow_fact_quality_review_classifies_current_gaps() -> None:
     assert packet["counts"]["promotion_blocker_count"] == 5
     assert packet["counts"]["real_order_eligibility_blocker_count"] == 1
     assert packet["counts"]["missing_derivatives_context_case_count"] == 1
-    assert packet["counts"]["real_order_authorized_count"] == 0
+    assert "real_order_authorized_count" not in packet["counts"]
     assert packet["counts"]["l4_scope_change_recommended_count"] == 0
     assert packet["btpc_state"]["l2_shadow_observation_enabled"] is True
     assert packet["btpc_state"]["replay_covered"] is True
@@ -200,15 +202,23 @@ def test_btpc_l2_shadow_fact_quality_review_classifies_current_gaps() -> None:
         "strategy_review_pending_not_runtime_blocking"
     )
     assert all(row["shadow_observation_can_continue"] is True for row in rows.values())
-    assert all(row["real_order_authority"] is False for row in rows.values())
+    assert all("real_order_authority" not in row for row in rows.values())
     assert all(row["l4_scope_change_recommended"] is False for row in rows.values())
 
-    assert packet["decision"]["l2_shadow_observation_can_continue"] is True
-    assert packet["decision"]["tier_policy_change_recommended_now"] is False
-    assert packet["decision"]["l2_promotion_recommended_now"] is False
-    assert packet["decision"]["l4_scope_change_recommended"] is False
-    assert packet["decision"]["real_order_scope_change_recommended"] is False
-    assert packet["decision"]["default_next_step"] == (
+    assert "decision" not in packet
+    review_outcome = packet["review_outcome_state"]
+    assert review_outcome["state_family"] == "Review Outcome State"
+    assert (
+        review_outcome["source_role"]
+        == "btpc_l2_shadow_fact_quality_review_provenance"
+    )
+    assert review_outcome["tradeability_decision_source"] is False
+    assert review_outcome["l2_shadow_observation_can_continue"] is True
+    assert review_outcome["tier_policy_change_recommended_now"] is False
+    assert review_outcome["l2_promotion_recommended_now"] is False
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert review_outcome["real_order_scope_change_recommended"] is False
+    assert review_outcome["default_next_step"] == (
         "attach_btpc_derivatives_fact_sources_and_margin_model_for_l2_quality_review"
     )
     assert packet["interaction"]["remote_interaction_count"] == 0
@@ -218,6 +228,8 @@ def test_btpc_l2_shadow_fact_quality_review_classifies_current_gaps() -> None:
     assert packet["interaction"]["calls_exchange_write"] is False
     assert packet["interaction"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert "operator_command_plan" not in packet
+    assert "execution_intent_created" not in packet["safety_invariants"]
 
 
 def test_btpc_l2_shadow_fact_quality_review_blocks_forbidden_source_effects() -> None:
@@ -226,9 +238,9 @@ def test_btpc_l2_shadow_fact_quality_review_blocks_forbidden_source_effects() ->
     handoff["execution_boundary"]["real_submit_authorized"] = True
 
     packet = module.build_btpc_l2_shadow_fact_quality_review(
-        opportunity_decision_loop_packet=_opportunity_decision_loop(),
-        l2_readiness_packet=_l2_readiness(),
-        replay_lab_packet=_replay_lab(),
+        opportunity_review_work_loop_artifact=_opportunity_review_work_loop(),
+        l2_readiness_artifact=_l2_readiness(),
+        replay_lab_artifact=_replay_lab(),
         btpc_handoff=handoff,
     )
 
@@ -236,10 +248,72 @@ def test_btpc_l2_shadow_fact_quality_review_blocks_forbidden_source_effects() ->
     assert "btpc_handoff.execution_boundary.real_submit_authorized" in packet[
         "safety_invariants"
     ]["source_forbidden_effects"]
-    assert packet["decision"]["default_next_step"] == (
+    assert packet["review_outcome_state"]["default_next_step"] == (
         "stop_and_repair_btpc_fact_quality_source_forbidden_effects"
     )
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["order_created"] is False
+
+
+def test_btpc_l2_shadow_fact_quality_review_rejects_source_authority_mirrors() -> None:
+    module = _load_module()
+    opportunity = deepcopy(_opportunity_review_work_loop())
+    readiness = deepcopy(_l2_readiness())
+    replay = deepcopy(_replay_lab())
+    handoff = deepcopy(_btpc_handoff())
+    opportunity["safety_invariants"]["actionable_now"] = False
+    opportunity["opportunity_review_rows"][0]["gap_work_items"][0][
+        "real_order_authority"
+    ] = False
+    readiness["readiness_rows"][0]["actionable_now"] = False
+    replay["l2_shadow_replay_samples"][0]["real_order_authority"] = False
+    handoff["execution_boundary"]["actionable_now"] = False
+
+    artifact = module.build_btpc_l2_shadow_fact_quality_review(
+        opportunity_review_work_loop_artifact=opportunity,
+        l2_readiness_artifact=readiness,
+        replay_lab_artifact=replay,
+        btpc_handoff=handoff,
+    )
+
+    forbidden = artifact["safety_invariants"]["source_forbidden_effects"]
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert (
+        "opportunity_review_work_loop.safety_invariants."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert (
+        "opportunity_review_work_loop.opportunity_review_rows.BTPC-001."
+        "gap_work_items.historical_open_interest_window_missing."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in forbidden
+    assert (
+        "l2_readiness.readiness_rows.BTPC-001."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert (
+        "replay_lab.l2_shadow_replay_samples.bear_pullback_would_enter."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in forbidden
+    assert (
+        "btpc_handoff.execution_boundary."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in forbidden
+    assert artifact["review_outcome_state"]["tradeability_decision_source"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["safety_invariants"]["operation_layer_called"] is False
+
+
+def test_btpc_l2_shadow_fact_quality_review_rejects_legacy_packet_kwargs() -> None:
+    module = _load_module()
+
+    with pytest.raises(TypeError):
+        module.build_btpc_l2_shadow_fact_quality_review(
+            opportunity_review_work_loop_packet=_opportunity_review_work_loop(),
+            l2_readiness_artifact=_l2_readiness(),
+            replay_lab_artifact=_replay_lab(),
+            btpc_handoff=_btpc_handoff(),
+        )
 
 
 def test_btpc_l2_shadow_fact_quality_review_cli_writes_outputs(
@@ -253,14 +327,14 @@ def test_btpc_l2_shadow_fact_quality_review_cli_writes_outputs(
     handoff_path = tmp_path / "handoff.json"
     output_path = tmp_path / "btpc-review.json"
     owner_path = tmp_path / "btpc-review.md"
-    decision_path.write_text(json.dumps(_opportunity_decision_loop()), encoding="utf-8")
+    decision_path.write_text(json.dumps(_opportunity_review_work_loop()), encoding="utf-8")
     readiness_path.write_text(json.dumps(_l2_readiness()), encoding="utf-8")
     replay_path.write_text(json.dumps(_replay_lab()), encoding="utf-8")
     handoff_path.write_text(json.dumps(_btpc_handoff()), encoding="utf-8")
 
     exit_code = module.main(
         [
-            "--opportunity-decision-loop-json",
+            "--opportunity-review-work-loop-json",
             str(decision_path),
             "--l2-readiness-json",
             str(readiness_path),
@@ -285,3 +359,106 @@ def test_btpc_l2_shadow_fact_quality_review_cli_writes_outputs(
     assert "BTPC L2 Shadow Fact Quality Review" in owner_text
     assert "historical_open_interest_window_missing" in owner_text
     assert "blocks_any_btpc_real_order_eligibility" in owner_text
+    assert "Real order authority" not in owner_text
+
+
+def test_btpc_l2_shadow_fact_quality_cli_omitted_opportunity_does_not_read_default(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    readiness_path = tmp_path / "readiness.json"
+    replay_path = tmp_path / "replay.json"
+    handoff_path = tmp_path / "handoff.json"
+    output_path = tmp_path / "btpc-review.json"
+    owner_path = tmp_path / "btpc-review.md"
+    readiness_path.write_text(json.dumps(_l2_readiness()), encoding="utf-8")
+    replay_path.write_text(json.dumps(_replay_lab()), encoding="utf-8")
+    handoff_path.write_text(json.dumps(_btpc_handoff()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--l2-readiness-json",
+            str(readiness_path),
+            "--replay-lab-json",
+            str(replay_path),
+            "--btpc-handoff-json",
+            str(handoff_path),
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] != "blocked_forbidden_effect"
+    assert packet["source_status"]["opportunity_review_work_loop"] is None
+
+
+def test_btpc_l2_shadow_fact_quality_cli_omitted_l2_readiness_does_not_read_default(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    decision_path = tmp_path / "decision.json"
+    replay_path = tmp_path / "replay.json"
+    handoff_path = tmp_path / "handoff.json"
+    output_path = tmp_path / "btpc-review.json"
+    owner_path = tmp_path / "btpc-review.md"
+    decision_path.write_text(json.dumps(_opportunity_review_work_loop()), encoding="utf-8")
+    replay_path.write_text(json.dumps(_replay_lab()), encoding="utf-8")
+    handoff_path.write_text(json.dumps(_btpc_handoff()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--opportunity-review-work-loop-json",
+            str(decision_path),
+            "--replay-lab-json",
+            str(replay_path),
+            "--btpc-handoff-json",
+            str(handoff_path),
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] != "blocked_forbidden_effect"
+    assert packet["source_status"]["l2_readiness"] is None
+
+
+def test_btpc_l2_shadow_fact_quality_cli_omitted_replay_lab_does_not_read_default(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    decision_path = tmp_path / "decision.json"
+    readiness_path = tmp_path / "readiness.json"
+    handoff_path = tmp_path / "handoff.json"
+    output_path = tmp_path / "btpc-review.json"
+    owner_path = tmp_path / "btpc-review.md"
+    decision_path.write_text(json.dumps(_opportunity_review_work_loop()), encoding="utf-8")
+    readiness_path.write_text(json.dumps(_l2_readiness()), encoding="utf-8")
+    handoff_path.write_text(json.dumps(_btpc_handoff()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--opportunity-review-work-loop-json",
+            str(decision_path),
+            "--l2-readiness-json",
+            str(readiness_path),
+            "--btpc-handoff-json",
+            str(handoff_path),
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] != "blocked_forbidden_effect"
+    assert packet["source_status"]["replay_lab"] is None

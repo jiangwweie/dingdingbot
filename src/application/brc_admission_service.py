@@ -12,7 +12,7 @@ from src.domain.brc_admission import (
     AdmissionAuditLog,
     AdmissionDecision,
     AdmissionDecisionValue,
-    AdmissionEvidencePacket,
+    AdmissionEvidence,
     AdmissionExecutionMode,
     AdmissionRequest,
     AdmissionRuleConfig,
@@ -90,13 +90,13 @@ class BrcAdmissionRepositoryPort(Protocol):
     async def get_latest_rule_config(self) -> Optional[AdmissionRuleConfig]:
         ...
 
-    async def create_evidence_packet(
+    async def create_admission_evidence(
         self,
-        packet: AdmissionEvidencePacket,
-    ) -> AdmissionEvidencePacket:
+        admission_evidence: AdmissionEvidence,
+    ) -> AdmissionEvidence:
         ...
 
-    async def get_evidence_packet(self, evidence_packet_id: str) -> Optional[AdmissionEvidencePacket]:
+    async def get_admission_evidence(self, admission_evidence_id: str) -> Optional[AdmissionEvidence]:
         ...
 
     async def create_owner_regime_input(
@@ -214,7 +214,7 @@ class RiskCapitalAdapter(Protocol):
         *,
         request: AdmissionRequest,
         strategy_family_version: StrategyFamilyVersion,
-        evidence_packet: AdmissionEvidencePacket,
+        admission_evidence: AdmissionEvidence,
         owner_regime_input: OwnerMarketRegimeInput,
         rule_config: AdmissionRuleConfig,
     ) -> RiskCapitalAdapterResult:
@@ -232,7 +232,7 @@ class PendingRiskCapitalAdapter:
         *,
         request: AdmissionRequest,
         strategy_family_version: StrategyFamilyVersion,
-        evidence_packet: AdmissionEvidencePacket,
+        admission_evidence: AdmissionEvidence,
         owner_regime_input: OwnerMarketRegimeInput,
         rule_config: AdmissionRuleConfig,
     ) -> RiskCapitalAdapterResult:
@@ -3132,7 +3132,7 @@ class BrcAdmissionService:
             raise AdmissionRuleViolation("; ".join(blockers))
 
         execution_mode = str(readiness.get("execution_mode") or "")
-        decision = TrialTradeIntentDecision(str(readiness["enforcement"]["decision"]))
+        decision = TrialTradeIntentDecision(str(readiness["enforcement"]["trial_trade_intent_result"]))
         if execution_mode in {
             AdmissionExecutionMode.AUTO_WITHIN_BUDGET.value,
             AdmissionExecutionMode.OWNER_CONFIRM_EACH_ENTRY.value,
@@ -3140,7 +3140,7 @@ class BrcAdmissionService:
             return {
                 "intent": None,
                 "intent_persisted": False,
-                "decision": decision.value,
+                "trial_trade_intent_result": decision.value,
                 "not_executed_reason": readiness["enforcement"]["not_executed_reason"],
                 "execution_mode": execution_mode,
                 "constraints_check": dict(readiness.get("constraints_check") or {}),
@@ -3200,7 +3200,7 @@ class BrcAdmissionService:
                 "binding_id": saved.binding_id,
                 "execution_mode": saved.execution_mode.value,
                 "intended_action": saved.intended_action,
-                "decision": saved.decision.value,
+                "trial_trade_intent_result": saved.decision.value,
                 "not_executed_reason": saved.not_executed_reason,
                 "order_created": False,
                 "execution_intent_created": False,
@@ -3214,7 +3214,7 @@ class BrcAdmissionService:
             "intent": saved.model_dump(mode="json"),
             "intent_id": saved.intent_id,
             "intent_persisted": True,
-            "decision": saved.decision.value,
+            "trial_trade_intent_result": saved.decision.value,
             "not_executed_reason": saved.not_executed_reason,
             "execution_mode": saved.execution_mode.value,
             "constraints_check": dict(readiness.get("constraints_check") or {}),
@@ -3427,7 +3427,11 @@ class BrcAdmissionService:
                 "intent_id": existing_id,
                 "intent_persisted": existing is not None,
                 "idempotent": True,
-                "decision": (existing.decision.value if existing is not None else readiness["enforcement"]["decision"]),
+                "trial_trade_intent_result": (
+                    existing.decision.value
+                    if existing is not None
+                    else readiness["enforcement"]["trial_trade_intent_result"]
+                ),
                 "not_executed_reason": (
                     existing.not_executed_reason if existing is not None else readiness["enforcement"]["not_executed_reason"]
                 ),
@@ -3441,7 +3445,7 @@ class BrcAdmissionService:
             }
 
         execution_mode = str(readiness.get("execution_mode") or "")
-        decision = TrialTradeIntentDecision(str(readiness["enforcement"]["decision"]))
+        decision = TrialTradeIntentDecision(str(readiness["enforcement"]["trial_trade_intent_result"]))
         now_value = _now_ms()
         intent = TrialTradeIntent(
             intent_id=_id("tti"),
@@ -3491,7 +3495,7 @@ class BrcAdmissionService:
                 "binding_id": saved.binding_id,
                 "execution_mode": saved.execution_mode.value,
                 "intended_action": saved.intended_action,
-                "decision": saved.decision.value,
+                "trial_trade_intent_result": saved.decision.value,
                 "not_executed_reason": saved.not_executed_reason,
                 "execution_permission_resolution": dict(execution_permission_resolution or {}),
                 "trial_trade_intent_is_order": False,
@@ -3509,7 +3513,7 @@ class BrcAdmissionService:
             "intent_id": saved.intent_id,
             "intent_persisted": True,
             "idempotent": False,
-            "decision": saved.decision.value,
+            "trial_trade_intent_result": saved.decision.value,
             "not_executed_reason": saved.not_executed_reason,
             "execution_mode": saved.execution_mode.value,
             "constraints_check": dict(readiness.get("constraints_check") or {}),
@@ -3614,34 +3618,34 @@ class BrcAdmissionService:
         )
         return saved
 
-    async def create_evidence_packet(
+    async def create_admission_evidence(
         self,
         *,
         strategy_family_version_id: str,
         payload_json: dict[str, Any],
         mandatory_complete: bool = False,
         created_by: str = "owner",
-    ) -> AdmissionEvidencePacket:
+    ) -> AdmissionEvidence:
         version = await self._repo.get_strategy_family_version(strategy_family_version_id)
         if version is None:
             raise AdmissionRuleViolation(
                 f"strategy family version not found: {strategy_family_version_id}"
             )
-        packet = AdmissionEvidencePacket(
-            evidence_packet_id=_id("evidence"),
+        admission_evidence = AdmissionEvidence(
+            admission_evidence_id=_id("evidence"),
             strategy_family_version_id=strategy_family_version_id,
             payload_json=dict(payload_json),
             mandatory_complete=mandatory_complete,
             created_at_ms=_now_ms(),
             created_by=created_by,
         )
-        saved = await self._repo.create_evidence_packet(packet)
+        saved = await self._repo.create_admission_evidence(admission_evidence)
         await self._audit(
-            event_type=AdmissionAuditEventType.EVIDENCE_PACKET_CREATED,
-            ref_type="admission_evidence_packet",
-            ref_id=saved.evidence_packet_id,
+            event_type=AdmissionAuditEventType.ADMISSION_EVIDENCE_CREATED,
+            ref_type="admission_evidence",
+            ref_id=saved.admission_evidence_id,
             actor=created_by,
-            message="Admission evidence packet created.",
+            message="Admission evidence created.",
             metadata={"strategy_family_version_id": strategy_family_version_id},
         )
         return saved
@@ -3678,7 +3682,7 @@ class BrcAdmissionService:
         self,
         *,
         strategy_family_version_id: str,
-        evidence_packet_id: str,
+        admission_evidence_id: str,
         owner_market_regime_input_id: str,
         trial_env: TrialEnv,
         trial_stage: TrialStage,
@@ -3692,16 +3696,18 @@ class BrcAdmissionService:
         requested_by: str = "owner",
     ) -> AdmissionRequest:
         await self._require_strategy_family_version(strategy_family_version_id)
-        evidence = await self._require_evidence_packet(evidence_packet_id)
+        evidence = await self._require_admission_evidence(admission_evidence_id)
         if evidence.strategy_family_version_id != strategy_family_version_id:
-            raise AdmissionRuleViolation("evidence packet is not pinned to requested strategy family version")
+            raise AdmissionRuleViolation(
+                "admission evidence is not pinned to requested strategy family version"
+            )
         await self._require_owner_regime_input(owner_market_regime_input_id)
         if admission_rule_config_id is not None:
             await self._require_rule_config(admission_rule_config_id)
         request = AdmissionRequest(
             admission_request_id=_id("admission-req"),
             strategy_family_version_id=strategy_family_version_id,
-            evidence_packet_id=evidence_packet_id,
+            admission_evidence_id=admission_evidence_id,
             owner_market_regime_input_id=owner_market_regime_input_id,
             trial_env=trial_env,
             trial_stage=trial_stage,
@@ -3731,7 +3737,9 @@ class BrcAdmissionService:
         strategy_version = await self._require_strategy_family_version(
             request.strategy_family_version_id
         )
-        evidence = await self._require_evidence_packet(request.evidence_packet_id)
+        evidence = await self._require_admission_evidence(
+            request.admission_evidence_id
+        )
         regime = await self._require_owner_regime_input(
             request.owner_market_regime_input_id
         )
@@ -3740,7 +3748,7 @@ class BrcAdmissionService:
         adapter_result = await self._risk_capital_adapter.resolve_constraints(
             request=request,
             strategy_family_version=strategy_version,
-            evidence_packet=evidence,
+            admission_evidence=evidence,
             owner_regime_input=regime,
             rule_config=rule_config,
         )
@@ -3779,7 +3787,7 @@ class BrcAdmissionService:
             playbook_id=playbook_id,
             playbook_catalog_snapshot_json=dict(playbook_snapshot or {}),
             owner_market_regime_input_id=regime.owner_market_regime_input_id,
-            evidence_packet_id=evidence.evidence_packet_id,
+            admission_evidence_id=evidence.admission_evidence_id,
             admission_rule_config_id=rule_config.admission_rule_config_id,
             trial_constraint_snapshot_id=constraint_snapshot.trial_constraint_snapshot_id,
             risk_profile=request.requested_risk_profile,
@@ -3889,7 +3897,7 @@ class BrcAdmissionService:
         self,
         *,
         request: AdmissionRequest,
-        evidence: AdmissionEvidencePacket,
+        evidence: AdmissionEvidence,
         constraint_snapshot: TrialConstraintSnapshot,
     ) -> tuple[AdmissionDecisionValue, list[str], list[str], AdmissionExecutionMode]:
         blockers: list[str] = []
@@ -4030,10 +4038,10 @@ class BrcAdmissionService:
             raise AdmissionRuleViolation(f"strategy family version not found: {item_id}")
         return item
 
-    async def _require_evidence_packet(self, item_id: str) -> AdmissionEvidencePacket:
-        item = await self._repo.get_evidence_packet(item_id)
+    async def _require_admission_evidence(self, item_id: str) -> AdmissionEvidence:
+        item = await self._repo.get_admission_evidence(item_id)
         if item is None:
-            raise AdmissionRuleViolation(f"evidence packet not found: {item_id}")
+            raise AdmissionRuleViolation(f"admission evidence not found: {item_id}")
         return item
 
     async def _require_owner_regime_input(self, item_id: str) -> OwnerMarketRegimeInput:
@@ -4148,7 +4156,7 @@ def _gated_trial_readiness_from_decision(
         "admission_summary": {
             "admission_decision_id": decision.admission_decision_id,
             "admission_request_id": decision.admission_request_id,
-            "decision": decision.decision.value,
+            "admission_result": decision.decision.value,
             "expires_at_ms": decision.expires_at_ms,
             "created_at_ms": decision.created_at_ms,
         },
@@ -4268,7 +4276,7 @@ def _campaign_carrier_readiness_from_binding(
         "admission_summary": {
             "admission_decision_id": binding.admission_decision_id,
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
             "created_at_ms": decision.created_at_ms if decision is not None else None,
         },
@@ -4475,7 +4483,7 @@ def _runtime_constraint_install_readiness_from_binding(
         "admission_summary": {
             "admission_decision_id": binding.admission_decision_id,
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
             "created_at_ms": decision.created_at_ms if decision is not None else None,
         },
@@ -4616,7 +4624,7 @@ def _runtime_carrier_readiness_from_binding(
         "admission_summary": {
             "admission_decision_id": binding.admission_decision_id,
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
             "created_at_ms": decision.created_at_ms if decision is not None else None,
         },
@@ -4746,7 +4754,7 @@ def _runtime_start_readiness_from_binding(
         "admission_summary": {
             "admission_decision_id": binding.admission_decision_id,
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
             "created_at_ms": decision.created_at_ms if decision is not None else None,
         },
@@ -4880,7 +4888,7 @@ def _trial_trade_intent_readiness_from_context(
             "constraints_snapshot_exists": constraint is not None,
         },
         "enforcement": {
-            "decision": enforcement_decision.value,
+            "trial_trade_intent_result": enforcement_decision.value,
             "not_executed_reason": not_executed_reason,
             "intent_would_be_persisted": ready and intent_would_be_persisted,
             "would_require_runtime_execution": would_require_runtime_execution,
@@ -4897,7 +4905,7 @@ def _trial_trade_intent_readiness_from_context(
             "evaluated_at_ms": now_ms_value,
             "non_executable_evidence_only": True,
             "intent_would_be_recorded": ready and intent_would_be_persisted,
-            "decision": enforcement_decision.value,
+            "trial_trade_intent_result": enforcement_decision.value,
             "not_executed_reason": not_executed_reason,
             "runtime_started": False,
             "strategy_active": False,
@@ -4979,7 +4987,7 @@ def _signal_trial_trade_intent_readiness_from_context(
             "constraints_snapshot_exists": constraint is not None,
         },
         "enforcement": {
-            "decision": enforcement_decision.value,
+            "trial_trade_intent_result": enforcement_decision.value,
             "not_executed_reason": not_executed_reason,
             "intent_would_be_persisted": ready and intent_would_be_persisted and not idempotent_intent,
             "already_recorded_idempotent": idempotent_intent,
@@ -4996,7 +5004,7 @@ def _signal_trial_trade_intent_readiness_from_context(
             "non_executable_evidence_only": True,
             "intent_would_be_recorded": ready and intent_would_be_persisted and not idempotent_intent,
             "already_recorded_idempotent": idempotent_intent,
-            "decision": enforcement_decision.value,
+            "trial_trade_intent_result": enforcement_decision.value,
             "not_executed_reason": not_executed_reason,
             "runtime_status_after_confirm": "trial_trade_intent_recorded_no_execution",
             "execution_intent_created": False,
@@ -5055,7 +5063,7 @@ def _runtime_handoff_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
             "created_at_ms": decision.created_at_ms if decision is not None else None,
         },
@@ -5175,7 +5183,7 @@ def _start_runtime_from_handoff_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {
@@ -5294,7 +5302,7 @@ def _strategy_activation_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {
@@ -5399,7 +5407,7 @@ def _strategy_state_activation_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {
@@ -5512,7 +5520,7 @@ def _signal_loop_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {
@@ -5625,7 +5633,7 @@ def _signal_loop_start_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {
@@ -5743,7 +5751,7 @@ def _signal_evaluation_readiness_from_context(
                 else campaign_metadata.get("admission_decision_id")
             ),
             "admission_request_id": decision.admission_request_id if decision is not None else None,
-            "decision": decision.decision.value if decision is not None else None,
+            "admission_result": decision.decision.value if decision is not None else None,
             "expires_at_ms": decision.expires_at_ms if decision is not None else None,
         },
         "strategy_family_summary": {

@@ -35,7 +35,7 @@ def test_post_revision_replay_review_accepts_brf_lsr_vcb_revision_cases() -> Non
     assert packet["counts"]["brf_case_count"] == 3
     assert packet["counts"]["would_enter_case_count"] == 3
     assert packet["counts"]["disable_or_no_action_case_count"] == 5
-    assert packet["counts"]["real_order_authorized_count"] == 0
+    assert "real_order_authorized_count" not in packet["counts"]
     assert packet["counts"]["l4_scope_change_recommended_count"] == 0
     assert packet["checks"] == {
         "brf_bear_rally_failure_short_would_enter": True,
@@ -135,19 +135,27 @@ def test_post_revision_replay_review_accepts_brf_lsr_vcb_revision_cases() -> Non
 
     for row in packet["review_rows"]:
         assert row["passed"] is True
-        assert row["real_order_authority"] is False
+        assert "real_order_authority" not in row
         assert row["candidate_or_finalgate_authority"] is False
         assert row["operation_layer_authority"] is False
         assert row["l2_promotion_authority"] is False
         assert row["l4_scope_change_recommended"] is False
 
-    assert packet["decision"] == {
-        "post_revision_replay_review_passed": True,
-        "l2_promotion_recommended_now": False,
-        "l4_scope_change_recommended": False,
-        "real_order_scope_change_recommended": False,
-        "default_next_step": "record_brf001_lsr001_vcb001_post_revision_quality_before_l2",
-    }
+    assert "decision" not in packet
+    review_outcome = packet["review_outcome_state"]
+    assert review_outcome["state_family"] == "Review Outcome State"
+    assert review_outcome["source_role"] == "post_revision_replay_review_provenance"
+    assert review_outcome["review_scope"] == "post_revision_replay_review"
+    assert review_outcome["primary_judgment_source"] is False
+    assert review_outcome["primary_judgment_source_name"] == "strategy_asset_state"
+    assert review_outcome["tradeability_decision_source"] is False
+    assert review_outcome["post_revision_replay_review_passed"] is True
+    assert review_outcome["l2_promotion_recommended_now"] is False
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert review_outcome["real_order_scope_change_recommended"] is False
+    assert review_outcome["default_next_step"] == (
+        "record_brf001_lsr001_vcb001_post_revision_quality_before_l2"
+    )
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["approaches_real_order"] is False
     assert packet["interaction"]["calls_finalgate"] is False
@@ -157,6 +165,8 @@ def test_post_revision_replay_review_accepts_brf_lsr_vcb_revision_cases() -> Non
     assert packet["safety_invariants"]["server_files_mutated"] is False
     assert packet["safety_invariants"]["l4_real_order_scope_expanded"] is False
     assert packet["safety_invariants"]["order_created"] is False
+    assert "execution_intent_created" not in packet["safety_invariants"]
+    assert "source_forbidden_effects" not in packet["safety_invariants"]
 
 
 def test_post_revision_replay_review_cli_writes_json_and_owner_progress(
@@ -188,3 +198,4 @@ def test_post_revision_replay_review_cli_writes_json_and_owner_progress(
     assert "short_revival_short_would_enter" in owner_text
     assert "false_breakout_reversal_disabled" in owner_text
     assert "record_brf001_lsr001_vcb001_post_revision_quality_before_l2" in owner_text
+    assert "Real order authority" not in owner_text

@@ -7,6 +7,7 @@ import time
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.interfaces.operator_auth import create_password_hash
@@ -109,6 +110,7 @@ class _FakeBrcService:
     def __init__(self, campaign=None, review=None) -> None:
         self._campaign = campaign
         self._review = review
+        self._review_outcomes = []
         self.mutation_calls = 0
 
     async def get_latest_campaign(self):
@@ -124,7 +126,29 @@ class _FakeBrcService:
         return []
 
     async def list_review_decisions(self, *, campaign_id=None, limit: int = 50):
+        if self._review_outcomes:
+            return self._review_outcomes[:limit]
         return []
+
+    async def record_review_decision(self, **kwargs):
+        self.mutation_calls += 1
+        payload = {
+            "review_id": "review-outcome-1",
+            "campaign_id": kwargs["campaign_id"],
+            "source_action_id": kwargs.get("source_action_id"),
+            "decision": kwargs["decision"].value if hasattr(kwargs["decision"], "value") else kwargs["decision"],
+            "reason_text": kwargs["reason_text"],
+            "next_recommended_task": kwargs["next_recommended_task"],
+            "created_by": kwargs.get("created_by") or "owner",
+            "metadata": kwargs.get("metadata") or {},
+            "real_live_authorized": False,
+            "withdrawal_authorized": False,
+            "created_at_ms": 123,
+        }
+        record = SimpleNamespace(model_dump=lambda mode="json": dict(payload))
+        self._review_outcomes.append(record)
+        self._review = record
+        return record
 
     async def create_campaign(self, *args, **kwargs):  # pragma: no cover - should never be called
         self.mutation_calls += 1
@@ -377,6 +401,102 @@ def test_brc_operations_api_switch_playbook_flow(monkeypatch):
         assert audit_payload["operation_results"][0]["campaign_refs"]
 
 
+def test_brc_audit_trail_projects_review_as_outcome_not_decision(monkeypatch):
+    _configure_auth(monkeypatch)
+    service = _patch_runtime(monkeypatch, campaign=_FakeCampaign())
+
+    async def _list_review_decisions(*, campaign_id=None, limit: int = 50):
+        return [
+            SimpleNamespace(
+                review_id="review-1",
+                decision="revise",
+                created_at_ms=123,
+                reason_text="closed trade review recorded",
+                next_recommended_task="revise_classifier",
+            )
+        ]
+
+    service.list_review_decisions = _list_review_decisions
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/brc/audit-trail?limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    review_events = [
+        item for item in payload["timeline"] if item["type"] == "review_outcome"
+    ]
+    assert review_events
+    assert review_events[0]["result"] == "revise"
+    assert review_events[0]["result_source_role"] == "review_outcome_provenance"
+    assert payload["review_outcomes"][0]["review_outcome"] == "revise"
+    assert "decision" not in payload["review_outcomes"][0]
+    assert "review_decisions" not in payload
+    assert not any(item["type"] == "review_decision" for item in payload["timeline"])
+
+
+def test_brc_review_outcome_api_projects_persistence_without_decision(monkeypatch):
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    _patch_runtime(monkeypatch, campaign=_FakeCampaign())
+    from src.interfaces import api as api_module
+
+    monkeypatch.setattr(api_module, "get_runtime_context", lambda: None)
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        old_route = client.post(
+            "/api/brc/review-decisions",
+            json={
+                "campaign_id": "brc_unit_latest",
+                "review_outcome": "accepted",
+                "reason_text": "old route must not stay public",
+                "next_recommended_task": "none",
+            },
+        )
+        response = client.post(
+            "/api/brc/review-outcomes",
+            json={
+                "campaign_id": "brc_unit_latest",
+                "review_outcome": "accepted",
+                "reason_text": "Owner review outcome recorded",
+                "next_recommended_task": "continue_review",
+            },
+        )
+        old_payload = client.post(
+            "/api/brc/review-outcomes",
+            json={
+                "campaign_id": "brc_unit_latest",
+                "decision": "accepted",
+                "reason_text": "old payload must not be accepted",
+                "next_recommended_task": "none",
+            },
+        )
+        latest = client.get("/api/brc/review-outcomes/latest")
+        listed = client.get("/api/brc/review-outcomes?campaign_id=brc_unit_latest")
+
+    assert old_route.status_code == 404
+    assert old_payload.status_code == 422
+    assert response.status_code == 200
+    payload = response.json()
+    assert "review_decision" not in payload
+    assert "review_record" not in payload
+    record = payload["review_outcome_record"]
+    assert record["review_outcome"] == "accepted"
+    assert record["result_source_role"] == "review_outcome_persistence_projection"
+    assert "decision" not in record
+    assert latest.status_code == 200
+    assert latest.json()["review_outcome_record"]["review_outcome"] == "accepted"
+    assert listed.status_code == 200
+    assert len(listed.json()["review_outcome_records"]) == 1
+    assert "review_records" not in listed.json()
+
+
 def test_brc_operation_preflight_reads_runtime_safety_readiness_by_runtime_id(monkeypatch):
     _configure_auth(monkeypatch)
     from src.interfaces import api as api_module
@@ -429,7 +549,7 @@ def test_brc_operation_preflight_reads_runtime_safety_readiness_by_runtime_id(mo
     assert response.status_code == 200
     payload = response.json()
     assert runtime_service.calls == ["runtime-api-safety-readiness"]
-    assert payload["decision"] == "block"
+    assert payload["preflight_result"] == "block"
     readiness = payload["runtime_summary"]["runtime_safety_readiness"]
     assert readiness["runtime_instance_id"] == "runtime-api-safety-readiness"
     assert readiness["status"] == "blocked"
@@ -460,7 +580,7 @@ def test_brc_readiness_standalone_returns_owner_safe_summary(monkeypatch):
     assert payload["live_ready"] is False
     assert payload["mode"] == "standalone_console"
     assert _action(payload, "create_read_only_plan")["enabled"] is False
-    assert _action(payload, "write_review_decision")["enabled"] is False
+    assert _action(payload, "write_review_outcome")["enabled"] is False
     assert "Standalone Console" in " ".join(payload["why"])
 
 
@@ -478,7 +598,7 @@ def test_brc_readiness_no_campaign_disables_review_only(monkeypatch):
     payload = response.json()
     assert payload["mode"] in {"brc_ready", "testnet_ready"}
     assert _action(payload, "create_read_only_plan")["enabled"] is True
-    assert _action(payload, "write_review_decision")["enabled"] is False
+    assert _action(payload, "write_review_outcome")["enabled"] is False
     assert payload["latest_campaign"] is None
     assert service.mutation_calls == 0
 
@@ -498,7 +618,7 @@ def test_brc_readiness_latest_campaign_enables_review_without_mutation(monkeypat
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_campaign"]["campaign_id"] == "brc_unit_latest"
-    assert _action(payload, "write_review_decision")["enabled"] is True
+    assert _action(payload, "write_review_outcome")["enabled"] is True
     assert _action(payload, "run_controlled_testnet_workflow")["enabled"] is True
     assert service.mutation_calls == 0
 
@@ -524,14 +644,14 @@ def test_brc_readiness_includes_owner_console_summaries(monkeypatch):
     assert payload["risk_decision"] == "ALLOW_MONITOR"
     assert payload["risk_account_summary"]["risk_decision"] == "ALLOW_MONITOR"
     assert payload["strategy_playbook_summary"]["strategy_execution_enabled"] is False
-    card = next(item for item in payload["action_cards"] if item["action_type"] == "testnet_rehearsal")
-    assert card["authority_source"] == "application_preflight"
-    assert card["fact_snapshot_id"]
-    assert card["preflight_result_id"]
-    assert card["idempotency_key"]
-    assert card["expiry_time"]
-    assert card["final_state_proof_required"] is True
-    assert "live_trade" in card["blocked_next_states"]
+    item = next(item for item in payload["action_items"] if item["action_type"] == "testnet_rehearsal")
+    assert item["authority_source"] == "application_preflight"
+    assert item["fact_snapshot_id"]
+    assert item["preflight_result_id"]
+    assert item["idempotency_key"]
+    assert item["expiry_time"]
+    assert item["final_state_proof_required"] is True
+    assert "live_trade" in item["blocked_next_states"]
     assert payload["global_cutoff_controls"][0]["action_type"] == "pause_new_entries"
 
 
@@ -556,10 +676,10 @@ def test_brc_readiness_attention_required_blocks_testnet_when_exposure_unknown(m
     assert payload["runtime_state"] == "attention_required"
     assert payload["risk_decision"] == "ATTENTION_REQUIRED"
     assert payload["risk_account_summary"]["exposure_orders"]["unknown_exposure"] is True
-    card = next(item for item in payload["action_cards"] if item["action_type"] == "testnet_rehearsal")
-    assert card["enabled"] is False
-    assert card["authority_source"] == "application_preflight"
-    assert card["allowed_next_states"] == []
+    item = next(item for item in payload["action_items"] if item["action_type"] == "testnet_rehearsal")
+    assert item["enabled"] is False
+    assert item["authority_source"] == "application_preflight"
+    assert item["allowed_next_states"] == []
 
 
 def test_startup_guard_readiness_arm_requires_runtime_guard(monkeypatch):
@@ -585,7 +705,7 @@ def test_startup_guard_readiness_arm_requires_runtime_guard(monkeypatch):
     assert payload["trial_started"] is False
     assert payload["execution_intent_created"] is False
     assert payload["order_created"] is False
-    assert payload["next_checklist_verdict"] == "blocked_runtime_start_required"
+    assert payload["next_checklist_status"] == "blocked_runtime_start_required"
 
 
 def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
@@ -612,7 +732,7 @@ def test_mi001_sol_owner_console_view_exposes_safe_mainline(monkeypatch):
     assert payload["evidence"]["mean_7d"] == "4.7372"
     assert "no campaign replay" in payload["evidence"]["limitations"]
     assert payload["risk_policy"]["operation_layer_notional_cap"] == "18262.85481460"
-    assert payload["readiness"]["verdict"] == "blocked_startup_guard_runtime_coupled"
+    assert payload["readiness"]["status"] == "blocked_startup_guard_runtime_coupled"
     checks = {item["check"]: item for item in payload["readiness"]["checks"]}
     assert checks["PG registration"]["status"] == "pass"
     assert checks["Account facts"]["status"] == "pass"
@@ -759,6 +879,26 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
     assert "order_permission_granted" not in raw_payload
 
 
+@pytest.mark.asyncio
+async def test_live_readonly_observation_api_does_not_fallback_on_source_build_error(monkeypatch):
+    import src.interfaces.api_brc_console as brc_console
+
+    def _raise_source_error(*_args, **_kwargs):
+        raise ValueError("malformed read-only observation source")
+
+    monkeypatch.setattr(
+        brc_console,
+        "build_strategy_group_live_readonly_observation_v1",
+        _raise_source_error,
+    )
+
+    with pytest.raises(ValueError, match="malformed read-only observation source"):
+        await brc_console._strategy_group_live_readonly_observation_response(
+            record_observation=False,
+            source_name="local_sqlite_read_only",
+        )
+
+
 def test_strategy_group_live_readonly_observation_run_once_records_history_without_execution(monkeypatch):
     _configure_auth(monkeypatch)
     from src.interfaces.api import app
@@ -833,7 +973,7 @@ def test_mi001_bnb_trial_readiness_gap_api_is_design_only(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["candidate_id"] == "MI-001-BNB-LONG"
-    assert payload["readiness_verdict"] == "not_testnet_ready_not_live_ready"
+    assert payload["readiness_status"] == "not_testnet_ready_not_live_ready"
     assert len(payload["gap_matrix"]) >= 19
     gate_ids = {item["gate_id"] for item in payload["gap_matrix"]}
     assert {"G01", "G02", "G05", "G06", "G18", "G19"} <= gate_ids
@@ -857,8 +997,18 @@ def test_mi001_bnb_trial_readiness_gap_api_is_design_only(monkeypatch):
     assert payload["non_permissions"]["no_trial_start"] is True
     assert payload["non_permissions"]["no_execution_intent"] is True
     assert payload["non_permissions"]["no_order_permission"] is True
+    owner_options = {
+        option
+        for item in payload["owner_policy_checklist"]
+        for option in item["options"]
+    }
+    assert "prepare_testnet_artifact" in owner_options
+    assert "prepare_testnet_packet" not in owner_options
 
     raw_payload = json.dumps(payload)
+    assert "rehearsal packet" not in raw_payload
+    assert "audit packet" not in raw_payload
+    assert "prepare_testnet_packet" not in raw_payload
     assert "Start Trading" not in raw_payload
     assert "Place Order" not in raw_payload
     assert "Run Strategy" not in raw_payload
@@ -880,12 +1030,12 @@ def test_strategy_trial_readiness_api_exposes_bnb_carrier_without_execution(monk
     assert payload["strategy_profile"]["candidate_id"] == "MI-001-BNB-LONG"
     assert payload["strategy_profile"]["execution_mode"] == "owner_confirm_each_entry"
     assert payload["risk_cap_profile"]["profile_status"] == "present"
-    assert payload["readiness_verdict"] in {
+    assert payload["readiness_status"] in {
         "testnet_rehearsal_ready",
         "testnet_rehearsal_blocked_with_explicit_reasons",
         "testnet_rehearsal_completed",
     }
-    assert payload["owner_decision_state"]["owner_authorization_required"] is False
+    assert payload["owner_policy_state"]["owner_authorization_required"] is False
     assert payload["live_ready"] is False
     assert payload["auto_execution_ready"] is False
     assert payload["non_permissions"]["no_execution_intent"] is True
@@ -947,8 +1097,8 @@ def test_strategy_trial_readiness_api_uses_cached_account_facts_when_fresh(monke
     assert account_fact["source"] == "runtime_cached_account_snapshot"
     assert account_fact["evidence"]["equity_available"] is True
     assert account_fact["evidence"]["available_margin_available"] is True
-    assert payload["readiness_verdict"] == "testnet_rehearsal_ready"
-    assert payload["owner_decision_state"]["owner_authorization_required"] is False
+    assert payload["readiness_status"] == "testnet_rehearsal_ready"
+    assert payload["owner_policy_state"]["owner_authorization_required"] is False
     assert payload["live_ready"] is False
     assert payload["preflight_result"]["execution_intent_created"] is False
     assert payload["preflight_result"]["order_created"] is False
@@ -971,10 +1121,10 @@ def test_bnb_first_carrier_architecture_governance_api_is_non_executable(monkeyp
     payload = response.json()
     assert payload["final_state"] == "strategy_trial_architecture_governed"
     assert payload["bnb_state"] == "bnb_first_carrier_consolidated"
-    assert payload["owner_review_packet"]["carrier"]["carrier_id"] == "MI-001-BNB-LONG"
-    assert payload["owner_review_packet"]["carrier"]["strategy_family"] == "MI-001"
-    assert payload["owner_review_packet"]["carrier"]["strategy_family_order_authority"] is False
-    assert payload["owner_review_packet"]["testnet_rehearsal_result"] == "completed_with_valid_protection"
+    assert payload["owner_review_artifact"]["carrier"]["carrier_id"] == "MI-001-BNB-LONG"
+    assert payload["owner_review_artifact"]["carrier"]["strategy_family"] == "MI-001"
+    assert payload["owner_review_artifact"]["carrier"]["strategy_family_order_authority"] is False
+    assert payload["owner_review_artifact"]["testnet_rehearsal_result"] == "completed_with_valid_protection"
     assert payload["authorization_draft"]["pending_owner_live_authorization"] is True
     assert payload["authorization_draft"]["owner_confirmed"] is False
     assert payload["authorization_draft"]["live_ready"] is False
@@ -1003,7 +1153,7 @@ def test_mi001_sol_owner_console_view_marks_guard_action_enabled_when_runtime_re
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["readiness"]["verdict"] == "blocked_startup_guard_runtime_coupled"
+    assert payload["readiness"]["status"] == "blocked_startup_guard_runtime_coupled"
     assert payload["startup_guard_action"]["enabled"] is True
     action = next(
         item for item in payload["owner_actions"]["allowed_actions"]
@@ -1060,7 +1210,7 @@ def test_startup_guard_readiness_arm_only_touches_guard(monkeypatch):
     assert payload["armed_before"] is False
     assert payload["armed_after"] is True
     assert payload["runtime_effect"] == "startup_guard_process_state_only"
-    assert payload["next_checklist_verdict"] == "ready_for_trial_start_after_owner_approval"
+    assert payload["next_checklist_status"] == "ready_for_trial_start_after_owner_approval"
     assert payload["trial_started"] is False
     assert payload["strategy_runtime_started"] is False
     assert payload["execution_intent_created"] is False
@@ -1302,13 +1452,14 @@ def test_tf001_carrier_decision_review_is_bounded_and_ready_for_full_chain():
     payload = asyncio.run(run_tf001_carrier_decision_review())
 
     assert payload["mode"] == "tf001-carrier-decision-review"
-    assert payload["decision"]["tf001_switch_playbook_ready"] is True
-    assert payload["decision"]["tf001_monitor_carrier_ready"] is True
+    assert "decision" not in payload
+    assert payload["readiness_result"]["tf001_switch_playbook_ready"] is True
+    assert payload["readiness_result"]["tf001_monitor_carrier_ready"] is True
     assert payload["safety_boundary"]["live_ready"] is False
     assert payload["safety_boundary"]["strategy_execution_enabled"] is False
     assert payload["safety_boundary"]["order_cancel_executed"] is False
     assert payload["tf001_switch_playbook"]["preflight"]["known"] is True
-    assert payload["tf001_switch_playbook"]["preflight"]["decision"] == "allow"
+    assert payload["tf001_switch_playbook"]["preflight"]["preflight_result"] == "allow"
     assert payload["tf001_switch_playbook"]["blocked_reason"] is None
     assert payload["tf001_monitor_carrier"]["confirm"]["status"] == "noop"
     assert payload["campaign_playbook_after_review"] == "PB-000-OBSERVE-ONLY"
@@ -1330,9 +1481,14 @@ def test_tf001_carrier_full_chain_smoke_completes_bounded_trial_flow():
         "review": "executed",
     }
     assert payload["campaign_playbook_after_full_chain"] == "TF-001"
-    assert payload["review_decision_count"] == 1
+    assert payload["review_outcome_count"] == 1
+    assert payload["review_outcome_summary"]["review_outcome"] == "accepted"
+    assert payload["review_outcome_summary"]["next_recommended_task"] == (
+        "Review TF-001 evidence artifact before any strategy-family trial expansion"
+    )
+    assert "evidence packet" not in json.dumps(payload["review_outcome_summary"])
     assert payload["operation_list"]["all_chain_operations_listed"] is True
-    assert payload["operations"]["switch_playbook"]["preflight_decision"] == "allow"
+    assert payload["operations"]["switch_playbook"]["preflight_result"] == "allow"
     assert payload["operations"]["switch_playbook"]["confirm_status"] == "executed"
     assert payload["operations"]["enter_strategy_or_monitor"]["confirm_status"] == "noop"
     assert payload["operations"]["emergency_stop_runtime"]["confirm_status"] == "executed"

@@ -13,7 +13,7 @@ from src.application.strategy_trial_architecture_governance import (
 def test_strategy_family_does_not_imply_order_authority():
     review = build_bnb_strategy_trial_architecture_governance()
 
-    carrier = review.owner_review_packet.carrier
+    carrier = review.owner_review_artifact.carrier
     assert carrier.strategy_family == "MI-001"
     assert carrier.carrier_id == "MI-001-BNB-LONG"
     assert carrier.strategy_family_order_authority is False
@@ -25,7 +25,7 @@ def test_strategy_family_does_not_imply_order_authority():
 def test_bnb_is_first_carrier_not_whole_architecture():
     review = build_bnb_strategy_trial_architecture_governance()
 
-    carrier = review.owner_review_packet.carrier
+    carrier = review.owner_review_artifact.carrier
     assert carrier.symbol == "BNBUSDT"
     assert carrier.runtime_symbol == "BNB/USDT:USDT"
     assert carrier.side == "long"
@@ -45,12 +45,12 @@ def test_bnb_is_first_carrier_not_whole_architecture():
 def test_strategy_warnings_require_ack_but_are_not_hard_blockers():
     review = build_bnb_strategy_trial_architecture_governance()
 
-    warning_ids = {warning.warning_id for warning in review.owner_review_packet.strategy_warnings}
+    warning_ids = {warning.warning_id for warning in review.owner_review_artifact.strategy_warnings}
     assert "strategy_not_proven_profitable" in warning_ids
     assert "forward_review_incomplete" in warning_ids
     assert all(
         warning.owner_ack_required and warning.blocks_after_ack is False
-        for warning in review.owner_review_packet.strategy_warnings
+        for warning in review.owner_review_artifact.strategy_warnings
     )
     assert review.minimal_live_trial_gate.acknowledgement_blockers == [
         "strategy_risk_acknowledgement_required"
@@ -122,7 +122,7 @@ def test_authorization_scope_rejects_wrong_symbol_side_and_cap_violation():
             explicit_owner_live_authorization_exists=True,
             warnings_acknowledged=True,
         ),
-        strategy_warnings=base.owner_review_packet.strategy_warnings,
+        strategy_warnings=base.owner_review_artifact.strategy_warnings,
         hard_blockers=[],
     )
 
@@ -149,7 +149,7 @@ def test_protection_impossible_blocks_live_trial():
             explicit_owner_live_authorization_exists=True,
             warnings_acknowledged=True,
         ),
-        strategy_warnings=base.owner_review_packet.strategy_warnings,
+        strategy_warnings=base.owner_review_artifact.strategy_warnings,
         hard_blockers=[],
     )
 

@@ -25,6 +25,19 @@ from src.interfaces.operator_auth import create_password_hash
 
 
 BNB = "BNB/USDT:USDT"
+OWNER_PRIMARY_INTERNAL_GATE_TERMS = {
+    "FinalGate",
+    "Operation Layer",
+    "RequiredFacts",
+    "candidate",
+    "authorization",
+    "preflight",
+    "proof",
+    "route",
+    "refId",
+    "blocker code",
+    "runtime grant",
+}
 
 
 def test_trading_console_live_read_only_exchange_env_allows_order_allowed_ceiling(monkeypatch):
@@ -55,6 +68,33 @@ def test_trading_console_live_read_only_exchange_env_blocks_runtime_control(monk
     assert _live_read_only_exchange_env_safe() is False
 
 
+def test_signal_evaluation_view_exposes_signal_observation_result_not_decision():
+    from src.domain.signal_evaluation import (
+        SignalEvaluation,
+        SignalEvaluationDecision,
+    )
+    from src.interfaces.api_trading_console import _signal_evaluation_view
+
+    view = _signal_evaluation_view(
+        SignalEvaluation(
+            signal_evaluation_id="signal-eval-1",
+            symbol=BNB,
+            side="short",
+            decision=SignalEvaluationDecision.CANDIDATE,
+            rationale="unit signal observation",
+            evaluated_at_ms=1780496663000,
+            created_at_ms=1780496663000,
+            updated_at_ms=1780496663000,
+        )
+    )
+    payload = view.model_dump(mode="json")
+
+    assert payload["signal_observation_result"] == "candidate"
+    assert "decision" not in payload
+    assert payload["not_order"] is True
+    assert payload["not_execution_intent"] is True
+
+
 def _configure_auth(monkeypatch):
     # Importing the API composition root loads local dotenv files with override=True.
     # Keep test credentials authoritative even when an individual test imports app later.
@@ -77,6 +117,39 @@ def _login(client: TestClient):
         "/api/auth/login",
         json={"username": "owner", "password": "pw", "totp_code": _totp()},
     )
+
+
+def _assert_owner_primary_projection_has_no_internal_gate_terms(
+    payload: dict,
+) -> None:
+    data = payload["data"]
+    primary_strings: list[str] = []
+    primary_strings.extend(
+        str(value)
+        for value in (data.get("owner_state") or {}).values()
+        if isinstance(value, str)
+    )
+    primary_strings.extend(
+        str(value)
+        for value in (data.get("owner_summary") or {}).values()
+        if isinstance(value, str)
+    )
+    primary_strings.extend(
+        str((data.get("runtime_interaction") or {}).get(key) or "")
+        for key in ("owner_label", "detail")
+    )
+    primary_strings.extend(
+        str((source or {}).get("owner_label") or "")
+        for source in (data.get("source_health") or {}).values()
+        if isinstance(source, dict)
+    )
+    primary_strings.append(str((data.get("real_order_readiness") or {}).get("owner_label") or ""))
+    rendered = "\n".join(primary_strings)
+
+    assert rendered.strip()
+    assert not [
+        term for term in OWNER_PRIMARY_INTERNAL_GATE_TERMS if term in rendered
+    ]
 
 
 def _config_provider():
@@ -291,7 +364,7 @@ class _FakeLiveLifecycleReviewRepo:
                 places_order=False,
                 mutates_exchange=False,
                 grants_trading_permission=False,
-                frontend_action_enabled=False,
+                owner_action_enabled=False,
                 created_at_ms=1780496664000,
                 updated_at_ms=1780496664000,
             )
@@ -643,7 +716,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-previews",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/resolve",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/bind",
-        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets",
+        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-payloads",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-intent-draft-sources",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/live-enablement-mutations",
@@ -864,7 +937,7 @@ def test_trading_console_runtime_active_position_exit_plan_surfaces_tp1_feasibil
     assert exchange.cancel_calls == 0
 
 
-def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
+def test_trading_console_runtime_post_close_followup_surfaces_followup_plan(
     monkeypatch,
 ):
     _configure_auth(monkeypatch)
@@ -939,17 +1012,22 @@ def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
 
     assert response.status_code == 200
     payload = response.json()
-    packet = payload["packet"]
-    plan = payload["operator_command_plan"]
+    followup_evidence = payload["followup_evidence"]
+    assert "operator_command_plan" not in payload
+    plan = payload["post_close_followup_plan"]
     assert payload["status"] == "ready_for_standing_reduce_only_recovery"
-    assert packet["owner_close_approval_env"] is None
-    assert packet["owner_close_approval_value"] is None
-    assert packet["standing_recovery_authorization_scope"] == (
+    assert payload["scope"] == "runtime_post_close_followup_evidence"
+    assert "packet" not in payload
+    assert "owner_close_packet" not in payload
+    assert "closed_review_facts_artifact" not in payload
+    assert followup_evidence["owner_close_approval_env"] is None
+    assert followup_evidence["owner_close_approval_value"] is None
+    assert followup_evidence["standing_recovery_authorization_scope"] == (
         "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
     )
-    assert packet["closed_review_facts_status"] == "waiting_for_close"
-    assert packet["closed_review_entry_order_id"] == "entry-1"
-    assert packet["closed_review_exit_order_id"] is None
+    assert followup_evidence["closed_review_facts_status"] == "waiting_for_close"
+    assert followup_evidence["closed_review_entry_order_id"] == "entry-1"
+    assert followup_evidence["closed_review_exit_order_id"] is None
     assert plan["not_executed"] is True
     assert plan["requires_explicit_owner_approval_before_execute"] is False
     assert plan["requires_official_operation_layer"] is True
@@ -959,7 +1037,11 @@ def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
         "prepare_reduce_only_recovery",
     ]
     assert plan["safety_invariants"]["exchange_write_called"] is False
+    assert plan["safety_invariants"]["evidence_only"] is True
+    assert "packet_only" not in plan["safety_invariants"]
     assert payload["safety_invariants"]["api_read_only"] is True
+    assert payload["safety_invariants"]["evidence_only"] is True
+    assert "packet_only" not in payload["safety_invariants"]
     assert payload["safety_invariants"]["review_record_created"] is False
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
@@ -992,7 +1074,7 @@ def test_trading_console_runtime_post_close_followup_completes_after_live_review
             places_order=False,
             mutates_exchange=False,
             grants_trading_permission=False,
-            frontend_action_enabled=False,
+            owner_action_enabled=False,
         )
     ]
     _patch_deps(
@@ -1041,13 +1123,15 @@ def test_trading_console_runtime_post_close_followup_completes_after_live_review
 
     assert response.status_code == 200
     payload = response.json()
-    packet = payload["packet"]
-    plan = payload["operator_command_plan"]
+    followup_evidence = payload["followup_evidence"]
+    assert "operator_command_plan" not in payload
+    plan = payload["post_close_followup_plan"]
     assert payload["status"] == "post_close_complete"
-    assert packet["closed_review_recorded"] is True
-    assert packet["closed_review_id"] == "live-review-runtime-live-monitor-1-closed-reviewed"
-    assert packet["required_steps"] == ["verify_next_attempt_gate"]
-    assert "record_runtime_closed_trade_review" not in packet["required_steps"]
+    assert "packet" not in payload
+    assert followup_evidence["closed_review_recorded"] is True
+    assert followup_evidence["closed_review_id"] == "live-review-runtime-live-monitor-1-closed-reviewed"
+    assert followup_evidence["required_steps"] == ["verify_next_attempt_gate"]
+    assert "record_runtime_closed_trade_review" not in followup_evidence["required_steps"]
     assert plan["closed_review_command_args"] == []
     assert plan["post_close_required_sequence"] == ["verify_next_attempt_gate"]
     assert payload["closed_lifecycle_review"]["review_status"] == "closed_reviewed"
@@ -1071,7 +1155,7 @@ def test_trading_console_can_run_scheduled_observation_without_shadow_planning(
     async def fake_run_scheduled_readonly_observation_once(**kwargs):
         captured.update(kwargs)
         return ScheduledReadonlyObservationRunResult(
-            source_requested="local_sqlite_fallback",
+            source_requested="local_sqlite_read_only",
             market_source="unit_test_market_source",
             source_type="unit_test_source",
             candidates_evaluated=0,
@@ -1090,11 +1174,11 @@ def test_trading_console_can_run_scheduled_observation_without_shadow_planning(
         assert _login(client).status_code == 200
         response = client.post(
             "/api/trading-console/strategy-observations/scheduled-runs",
-            json={"source_name": "local_sqlite_fallback"},
+            json={"source_name": "local_sqlite_read_only"},
         )
 
     assert response.status_code == 200
-    assert captured == {"source_name": "local_sqlite_fallback"}
+    assert captured == {"source_name": "local_sqlite_read_only"}
     payload = response.json()
     assert payload["inserted_count"] == 0
     assert payload["non_permissions"]["no_exchange_write"] is True
@@ -1121,7 +1205,7 @@ def test_trading_console_scheduled_observation_can_inject_shadow_plan(
     async def fake_run_scheduled_readonly_observation_once(**kwargs):
         captured.update(kwargs)
         return ScheduledReadonlyObservationRunResult(
-            source_requested="local_sqlite_fallback",
+            source_requested="local_sqlite_read_only",
             market_source="unit_test_market_source",
             source_type="unit_test_source",
             candidates_evaluated=0,
@@ -1147,14 +1231,14 @@ def test_trading_console_scheduled_observation_can_inject_shadow_plan(
         response = client.post(
             "/api/trading-console/strategy-observations/scheduled-runs",
             json={
-                "source_name": "local_sqlite_fallback",
+                "source_name": "local_sqlite_read_only",
                 "shadow_plan": True,
                 "allow_shadow_candidate_creation": True,
             },
         )
 
     assert response.status_code == 200
-    assert captured["source_name"] == "local_sqlite_fallback"
+    assert captured["source_name"] == "local_sqlite_read_only"
     assert captured["runtime_resolver"].__class__.__name__ == (
         "StrategyRuntimeObservationResolver"
     )
@@ -1186,10 +1270,10 @@ def test_trading_console_scheduled_observation_rejects_shadow_candidate_without_
     assert "requires shadow_plan=true" in response.json()["message"]
 
 
-def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
+def test_trading_console_legacy_proxy_keeps_brc_posts_narrow():
     server_path = Path("trading-console/server.ts")
     if not server_path.exists():
-        pytest.skip("legacy trading console frontend has been removed")
+        pytest.skip("legacy trading console proxy has been removed")
 
     server_source = server_path.read_text()
 
@@ -1333,7 +1417,7 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     data = payload["data"]
     assert data["overall_status"]["status"] == "recovery_required"
-    assert data["primary_next_action"]["action_id"] == "view_recovery"
+    assert data["primary_runtime_checkpoint"]["action_id"] == "view_recovery"
     assert data["autonomy"]["state"] == "recovery_required"
     assert data["recovery"]["required"] is True
     assert data["protection"]["status"] == "orphaned"
@@ -1351,6 +1435,8 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     )
     assert governance["next_attempt_gate"]["legacy_authorization_replay_allowed"] is False
     assert governance["next_attempt_gate"]["executable_submit_allowed_by_cockpit"] is False
+    assert "packet_id" not in governance["post_submit_finalize"]
+    assert "payload_id" in governance["post_submit_finalize"]
     assert governance["runtime_grant"]["grants_trading_permission"] is False
     assert governance["safety_invariants"]["places_order"] is False
     assert governance["safety_invariants"]["calls_exchange_write"] is False
@@ -1560,7 +1646,8 @@ def test_owner_action_flow_post_action_scopes_review_ledger_to_active_signal(mon
     assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
     assert ledger["exit"]["status"] == "not_available"
     assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
-    assert ledger["review_decision"]["status"] == "pending_open_recorded"
+    assert "review_decision" not in ledger
+    assert ledger["review_outcome"]["status"] == "pending_open_recorded"
     assert post_action["next_attempt_gate"]["gate"] == "current_lifecycle_open_protected"
     assert post_action["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is False
     assert exchange.place_calls == 0
@@ -1617,7 +1704,7 @@ def test_owner_action_flow_live_review_scopes_to_active_authorization(monkeypatc
                     places_order=False,
                     mutates_exchange=False,
                     grants_trading_permission=False,
-                    frontend_action_enabled=False,
+                    owner_action_enabled=False,
                 ),
                 SimpleNamespace(
                     review_id="live-review-auth-current-pending-open",
@@ -1628,7 +1715,7 @@ def test_owner_action_flow_live_review_scopes_to_active_authorization(monkeypatc
                     places_order=False,
                     mutates_exchange=False,
                     grants_trading_permission=False,
-                    frontend_action_enabled=False,
+                    owner_action_enabled=False,
                 ),
             ]
 
@@ -1652,8 +1739,8 @@ def test_owner_action_flow_live_review_scopes_to_active_authorization(monkeypatc
     ledger = post_action["review_ledger"]
     assert post_action["current_lifecycle_authorization_ids"] == ["auth-current"]
     assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
-    assert ledger["review_decision"]["review_id"] == "live-review-auth-current-pending-open"
-    assert ledger["review_decision"]["review_status"] == "pending_open"
+    assert ledger["review_outcome"]["review_id"] == "live-review-auth-current-pending-open"
+    assert ledger["review_outcome"]["review_status"] == "pending_open"
 
 
 def test_execution_control_blocks_consumed_authorization_but_stays_read_only(monkeypatch):
@@ -1695,10 +1782,10 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert payload["no_action_guarantee"]["starts_runtime"] is False
-    assert payload["data"]["trading_console_authorization_readiness"]["frontend_action_enabled"] is False
+    assert payload["data"]["trading_console_authorization_readiness"]["owner_action_enabled"] is False
     assert (
         payload["data"]["trading_console_authorization_readiness"]["action_enablement_source"]
-        == "backend_actionable_only"
+        == "official_action_state_only"
     )
     assert payload["data"]["official_action_api_inventory"]["trading_console_action_api_exposed"] is False
     assert payload["data"]["official_action_api_inventory"]["owner_trial_flow_supported_carrier_ids"] == [
@@ -1725,7 +1812,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert candidate_output["Trend"]["admission_level"] == "L3"
     assert candidate_output["Trend"]["candidate_state"] == "bounded_live_candidate"
     assert candidate_output["Trend"]["action_registry_supported"] is True
-    assert candidate_output["Trend"]["frontend_action_enabled"] is False
+    assert candidate_output["Trend"]["owner_action_enabled"] is False
     assert candidate_output["Trend"]["may_execute_live"] is False
     assert candidate_output["Volatility expansion"]["admission_level"] == "L2"
     assert candidate_output["Volatility expansion"]["candidate_state"] == "proposal"
@@ -1747,7 +1834,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert transition_by_name["create_admission_request"]["endpoint"] == (
         "POST /api/brc/admissions/requests"
     )
-    assert "evidence_packet_id" in transition_by_name["create_admission_request"]["required_refs"]
+    assert "admission_evidence_id" in transition_by_name["create_admission_request"]["required_refs"]
     assert transition_by_name["create_owner_risk_acceptance"]["status"] == "proposal_only"
     assert transition_by_name["create_gated_trial_from_admission"]["status"] == (
         "metadata_available"
@@ -1768,12 +1855,12 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["starts_strategy_execution"] is False
         assert item["places_order"] is False
         assert item["mutates_pg"] is False
-    assert payload["data"]["sprint_acceptance_verdict"]["status"] == (
+    assert payload["data"]["sprint_acceptance_outcome"]["status"] == (
         "in_progress_pass_with_constraint"
     )
-    assert payload["data"]["sprint_acceptance_verdict"]["completed_family_count"] == 0
-    assert payload["data"]["sprint_acceptance_verdict"]["actionable_family_count"] == 1
-    assert payload["data"]["sprint_acceptance_verdict"]["frontend_action_enabled"] is False
+    assert payload["data"]["sprint_acceptance_outcome"]["completed_family_count"] == 0
+    assert payload["data"]["sprint_acceptance_outcome"]["actionable_family_count"] == 1
+    assert payload["data"]["sprint_acceptance_outcome"]["owner_action_enabled"] is False
     baseline = payload["data"]["production_baseline_context"]
     assert baseline["status"] == "historical_bnb_context_not_action_permission"
     assert baseline["prior_scoped_carrier_id"] == "MI-001-BNB-LONG"
@@ -1793,7 +1880,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert baseline["reusable_for_strategy_family_authorization"] is False
     assert baseline["grants_execution_permission"] is False
     assert baseline["grants_order_permission"] is False
-    assert baseline["frontend_action_enabled"] is False
+    assert baseline["owner_action_enabled"] is False
     assert baseline["requires_fresh_pre_action_pg_evidence"] is True
     assert baseline["requires_fresh_pre_action_exchange_evidence"] is True
     assert baseline["creates_authorization"] is False
@@ -1816,18 +1903,18 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["live_action_status"] == "BLOCKED"
         assert item["pg_exchange_evidence_status"] == "BLOCKED"
         assert item["blocker_count"] > 0
-        assert "ActionCandidate" in item["bridge_methods"]
-        assert "FinalGateDryRun" in item["bridge_methods"]
+        assert "ActionCandidate" in item["evidence_methods"]
+        assert "FinalGateDryRun" in item["evidence_methods"]
         assert f"family_completion_matrix:{item['family']}" in item["evidence_refs"]
         assert f"owner_review_handoff_matrix:{item['family']}" in item["evidence_refs"]
-        assert f"production_action_decision_matrix:{item['family']}" in item["evidence_refs"]
+        assert f"production_action_result_matrix:{item['family']}" in item["evidence_refs"]
         assert f"evidence_collection_summary_matrix:{item['family']}" in item["evidence_refs"]
         assert item["next_retry_conditions"]
         assert item["safety_flags"] == {
             "live_action_taken": False,
             "runtime_started": False,
             "backend_actionable": False,
-            "frontend_action_enabled": False,
+            "owner_action_enabled": False,
             "places_order": False,
             "mutates_pg": False,
             "exchange_write_action": False,
@@ -1835,7 +1922,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["live_action_taken"] is False
         assert item["runtime_started"] is False
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -1845,61 +1932,64 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["exchange_write_action"] is False
     final_report = payload["data"]["final_report_package"]
     assert final_report["status"] == "PASS_WITH_CONSTRAINT"
-    section_by_name = {item["section"]: item for item in final_report["sections"]}
-    assert set(section_by_name) == {
+    group_by_name = {
+        item["group"]: item for item in final_report["evidence_groups"]
+    }
+    assert "sections" not in final_report
+    assert set(group_by_name) == {
         "completed_work_by_family",
         "strategy_group_carrier_mappings",
         "admission_risk_control_changes",
         "trading_console_authorization_readiness",
         "live_actions_taken",
         "pg_exchange_evidence",
-        "blocker_records_and_bridge_artifacts",
+        "blocker_records_and_lifecycle_evidence_artifacts",
         "tests_checks",
         "next_retry_conditions",
         "safety_proof",
     }
-    assert section_by_name["completed_work_by_family"]["status"] == "PASS_WITH_CONSTRAINT"
-    assert "family_completion_matrix" in section_by_name[
+    assert group_by_name["completed_work_by_family"]["status"] == "PASS_WITH_CONSTRAINT"
+    assert "family_completion_matrix" in group_by_name[
         "completed_work_by_family"
     ]["evidence_refs"]
-    assert "family_final_report_matrix" in section_by_name[
+    assert "family_final_report_matrix" in group_by_name[
         "completed_work_by_family"
     ]["evidence_refs"]
-    assert "official_api_request_draft_matrix" in section_by_name[
+    assert "official_api_request_draft_matrix" in group_by_name[
         "trading_console_authorization_readiness"
     ]["evidence_refs"]
-    assert "owner_review_handoff_matrix" in section_by_name[
+    assert "owner_review_handoff_matrix" in group_by_name[
         "trading_console_authorization_readiness"
     ]["evidence_refs"]
-    assert "final_gate_readiness_matrix" in section_by_name[
+    assert "final_gate_readiness_matrix" in group_by_name[
         "trading_console_authorization_readiness"
     ]["evidence_refs"]
-    assert "production_capital_boundary_matrix" in section_by_name[
+    assert "production_capital_boundary_matrix" in group_by_name[
         "admission_risk_control_changes"
     ]["evidence_refs"]
-    assert "objective_acceptance_audit_matrix" in section_by_name[
-        "blocker_records_and_bridge_artifacts"
+    assert "objective_acceptance_audit_matrix" in group_by_name[
+        "blocker_records_and_lifecycle_evidence_artifacts"
     ]["evidence_refs"]
-    assert "objective_acceptance_audit_matrix" in section_by_name[
+    assert "objective_acceptance_audit_matrix" in group_by_name[
         "tests_checks"
     ]["evidence_refs"]
-    assert section_by_name["live_actions_taken"]["status"] == "BLOCKED"
-    assert "live_actions_taken=[]" in section_by_name["live_actions_taken"]["evidence_refs"]
-    assert "production_baseline_context" in section_by_name[
+    assert group_by_name["live_actions_taken"]["status"] == "BLOCKED"
+    assert "live_actions_taken=[]" in group_by_name["live_actions_taken"]["evidence_refs"]
+    assert "production_baseline_context" in group_by_name[
         "live_actions_taken"
     ]["evidence_refs"]
-    assert "production_action_decision_matrix" in section_by_name[
+    assert "production_action_result_matrix" in group_by_name[
         "live_actions_taken"
     ]["evidence_refs"]
-    assert section_by_name["pg_exchange_evidence"]["status"] == "BLOCKED"
-    assert "family_evidence_collection_matrix" in section_by_name[
+    assert group_by_name["pg_exchange_evidence"]["status"] == "BLOCKED"
+    assert "family_evidence_collection_matrix" in group_by_name[
         "pg_exchange_evidence"
     ]["evidence_refs"]
-    assert "evidence_collection_summary_matrix" in section_by_name[
+    assert "evidence_collection_summary_matrix" in group_by_name[
         "pg_exchange_evidence"
     ]["evidence_refs"]
-    assert section_by_name["safety_proof"]["status"] == "PASS"
-    assert "production_baseline_context" in section_by_name[
+    assert group_by_name["safety_proof"]["status"] == "PASS"
+    assert "production_baseline_context" in group_by_name[
         "safety_proof"
     ]["evidence_refs"]
     assert final_report["live_actions_taken"] is False
@@ -1925,9 +2015,9 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "strategy_group_carrier_alignment",
         "admission_and_risk_control",
         "production_capital_boundary",
-        "live_action_decision",
+        "live_action_result",
         "pg_exchange_evidence",
-        "blocker_records_and_bridges",
+        "blocker_records_and_lifecycle_evidence",
         "final_report_package",
         "safety_proof",
     }
@@ -1938,7 +2028,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert audit_by_requirement["trading_console_authorization_path"]["status"] == (
         "PASS_WITH_CONSTRAINT"
     )
-    assert audit_by_requirement["live_action_decision"]["status"] == "BLOCKED"
+    assert audit_by_requirement["live_action_result"]["status"] == "BLOCKED"
     assert audit_by_requirement["pg_exchange_evidence"]["status"] == "BLOCKED"
     assert audit_by_requirement["safety_proof"]["status"] == "PASS"
     assert "owner_review_handoff_matrix" in audit_by_requirement[
@@ -1947,13 +2037,13 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert "production_baseline_context" in audit_by_requirement[
         "production_baseline_context"
     ]["evidence_refs"]
-    assert "production_action_decision_matrix" in audit_by_requirement[
-        "live_action_decision"
+    assert "production_action_result_matrix" in audit_by_requirement[
+        "live_action_result"
     ]["evidence_refs"]
     assert "live_actions_taken=[]" in audit_by_requirement[
-        "live_action_decision"
+        "live_action_result"
     ]["evidence_refs"]
-    assert audit_by_requirement["live_action_decision"]["blocker_ids"]
+    assert audit_by_requirement["live_action_result"]["blocker_ids"]
     for item in audit_by_requirement.values():
         assert item["next_retry_condition"]
         assert item["action_allowed"] is False
@@ -1975,15 +2065,15 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert completion_by_family["Trend"]["carrier_id"] == "TF-001-live-readonly-v0"
     assert "StrategyFamily" in completion_by_family["Trend"]["completed_stages"]
     assert "BoundedLiveAuthorization" in completion_by_family["Trend"]["blocked_stages"]
-    assert "ActionCandidate" in completion_by_family["Trend"]["bridge_methods"]
-    assert "FinalGateDryRun" in completion_by_family["Trend"]["bridge_methods"]
+    assert "ActionCandidate" in completion_by_family["Trend"]["evidence_methods"]
+    assert "FinalGateDryRun" in completion_by_family["Trend"]["evidence_methods"]
     assert completion_by_family["Volatility expansion"]["completion_status"] == "dry_run_only"
     assert completion_by_family["Mean reversion"]["completion_status"] == "dry_run_only"
     for item in completion_by_family.values():
         assert item["blocker_ids"]
         assert item["next_retry_conditions"]
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_execution_intent"] is False
         assert item["places_order"] is False
@@ -1995,7 +2085,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert risk_control_by_family["Trend"]["admission_level"] == (
         "Owner-confirmed action-capable carrier"
     )
-    assert risk_control_by_family["Trend"]["scope_review_verdict"] == "not_provided"
+    assert risk_control_by_family["Trend"]["scope_review_status"] == "not_provided"
     assert risk_control_by_family["Trend"]["risk_disclosure_status"] == "draft_for_owner_review"
     assert risk_control_by_family["Trend"]["budget_envelope_status"] == (
         "scope_incomplete_no_numbers_fabricated"
@@ -2022,7 +2112,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["blocker_ids"]
         assert item["next_retry_conditions"]
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["action_allowed"] is False
         assert item["creates_authorization"] is False
@@ -2041,7 +2131,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     }
     for item in capital_boundary_by_family.values():
         assert item["status"] == "scope_required"
-        assert item["scope_review_verdict"] == "not_provided"
+        assert item["scope_review_status"] == "not_provided"
         assert item["required_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
         assert item["provided_scope_fields"] == []
         assert item["missing_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
@@ -2070,7 +2160,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         full_chain_by_family.setdefault(item["family"], []).append(item)
         assert item["required_evidence_refs"]
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -2094,7 +2184,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "Review",
     ]
     assert trend_chain["AuthorizationDraft"]["status"] == "proposal_only_scope_required"
-    assert trend_chain["AuthorizationDraft"]["bridge_method"] == "AuthorizationDraftProposal"
+    assert trend_chain["AuthorizationDraft"]["evidence_method"] == "AuthorizationDraftProposal"
     assert "complete_owner_scope" in trend_chain["AuthorizationDraft"]["required_evidence_refs"]
     assert trend_chain["BoundedLiveAuthorization"]["status"] == (
         "blocked_scope_incomplete_or_unmatched"
@@ -2167,38 +2257,38 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API" not in trend_retry_by_id
     assert trend_retry_by_id[
         "BRC-PROD-ADMIT-20260604-TREND-001-PROTECTION"
-    ]["bridge_method"] == "ProtectionPlanDraft"
+    ]["evidence_method"] == "ProtectionPlanDraft"
     assert "take_profit_price defined by official service" in (
         trend_retry_by_id["BRC-PROD-ADMIT-20260604-TREND-001-PROTECTION"][
             "retry_requires"
         ]
     )
-    packet_by_family = {
-        item["family"]: item for item in payload["data"]["owner_authorization_packet_matrix"]
+    artifact_by_family = {
+        item["family"]: item for item in payload["data"]["owner_authorization_artifact_matrix"]
     }
-    assert set(packet_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
-    trend_packet = packet_by_family["Trend"]
-    assert trend_packet["status"] == "scope_required"
-    assert trend_packet["owner_can_review"] is True
-    assert trend_packet["owner_scope_verdict"] == "not_provided"
-    assert trend_packet["risk_disclosure_status"] == "draft_for_owner_review"
-    assert trend_packet["budget_envelope_status"] == "scope_incomplete_no_numbers_fabricated"
-    assert trend_packet["authorization_draft_status"] == "scope_required"
-    assert trend_packet["confirmation_phrase_required"] == "I ACCEPT BOUNDED PRODUCTION RISK"
-    assert trend_packet["api_backed_flow_available"] is True
-    assert trend_packet["api_request_draft_names"] == [
-        "create_admission_evidence_packet",
+    assert set(artifact_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
+    trend_artifact = artifact_by_family["Trend"]
+    assert trend_artifact["status"] == "scope_required"
+    assert trend_artifact["owner_can_review"] is True
+    assert trend_artifact["owner_scope_status"] == "not_provided"
+    assert trend_artifact["risk_disclosure_status"] == "draft_for_owner_review"
+    assert trend_artifact["budget_envelope_status"] == "scope_incomplete_no_numbers_fabricated"
+    assert trend_artifact["authorization_draft_status"] == "scope_required"
+    assert trend_artifact["confirmation_phrase_required"] == "I ACCEPT BOUNDED PRODUCTION RISK"
+    assert trend_artifact["api_backed_flow_available"] is True
+    assert trend_artifact["api_request_draft_names"] == [
+        "create_admission_evidence",
         "create_owner_regime_input",
         "create_admission_request",
         "create_owner_risk_acceptance",
         "operation_preflight_create_gated_trial_from_admission",
     ]
-    assert "POST /api/brc/admissions/requests" in trend_packet["draft_endpoints"]
-    assert "POST /api/brc/operations/preflight" in trend_packet["draft_endpoints"]
-    assert "evidence_packet_id" in trend_packet["unresolved_refs"]
-    assert "owner_current_regime" in trend_packet["unresolved_refs"]
-    assert "complete matched Owner scope" in trend_packet["required_before_submit"]
-    for item in packet_by_family.values():
+    assert "POST /api/brc/admissions/requests" in trend_artifact["draft_endpoints"]
+    assert "POST /api/brc/operations/preflight" in trend_artifact["draft_endpoints"]
+    assert "admission_evidence_id" in trend_artifact["unresolved_refs"]
+    assert "owner_current_regime" in trend_artifact["unresolved_refs"]
+    assert "complete matched Owner scope" in trend_artifact["required_before_submit"]
+    for item in artifact_by_family.values():
         assert item["not_authorization"] is True
         assert item["not_execution_permission"] is True
         assert item["not_order_permission"] is True
@@ -2215,7 +2305,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     trend_handoff = handoff_by_family["Trend"]
     assert trend_handoff["status"] == "review_ready_scope_required"
     assert trend_handoff["owner_can_review_risk_scope"] is True
-    assert trend_handoff["owner_scope_verdict"] == "not_provided"
+    assert trend_handoff["owner_scope_status"] == "not_provided"
     assert trend_handoff["risk_disclosure_status"] == "draft_for_owner_review"
     assert "false continuation" in trend_handoff["risk_failure_modes"]
     assert trend_handoff["budget_envelope_status"] == (
@@ -2243,13 +2333,13 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "record_trial_trade_intent_from_signal_evaluation"
     )
     assert "POST /api/brc/admissions/requests" in trend_handoff["draft_endpoints"]
-    assert "evidence_packet_id" in trend_handoff["unresolved_refs"]
+    assert "admission_evidence_id" in trend_handoff["unresolved_refs"]
     assert "complete matched Owner scope" in trend_handoff["required_before_submit"]
     assert trend_handoff["blocker_ids"]
     assert trend_handoff["next_retry_conditions"]
     for item in handoff_by_family.values():
-        assert item["frontend_action_enabled"] is False
-        assert item["action_enablement_source"] == "backend_actionable_only"
+        assert item["owner_action_enabled"] is False
+        assert item["action_enablement_source"] == "official_action_state_only"
         assert item["not_authorization"] is True
         assert item["not_execution_permission"] is True
         assert item["not_order_permission"] is True
@@ -2267,7 +2357,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["status"] == "proposal_only_not_submitted"
         assert item["method"] == "POST"
         assert item["endpoint"].startswith("POST /api/brc/")
-        assert item["owner_scope_verdict"] == "not_provided"
+        assert item["owner_scope_status"] == "not_provided"
         assert item["required_before_submit"]
         assert item["payload_template_keys"]
         assert item["not_submitted"] is True
@@ -2283,7 +2373,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert set(request_rows_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     for items in request_rows_by_family.values():
         assert [item["draft_name"] for item in items] == [
-            "create_admission_evidence_packet",
+            "create_admission_evidence",
             "create_owner_regime_input",
             "create_admission_request",
             "create_owner_risk_acceptance",
@@ -2295,7 +2385,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert trend_request_rows["create_admission_request"]["endpoint"] == (
         "POST /api/brc/admissions/requests"
     )
-    assert "evidence_packet_id" in trend_request_rows[
+    assert "admission_evidence_id" in trend_request_rows[
         "create_admission_request"
     ]["unresolved_refs"]
     assert "account_facts_snapshot_json" in trend_request_rows[
@@ -2313,13 +2403,13 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["status"] == "blocked"
         assert item["readiness_level"] == "scope_required"
         assert item["final_gate_endpoint"] == (
-            "POST /api/brc/owner-trial-flow/live-execution-bridge/dry-run"
+            "POST /api/brc/owner-trial-flow/live-execution-boundary/dry-run"
         )
         assert item["execute_endpoint"] == (
             "POST /api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
         )
         assert item["final_gate_reason"] == "production_scope_incomplete"
-        assert item["owner_scope_verdict"] == "not_provided"
+        assert item["owner_scope_status"] == "not_provided"
         assert checks["owner_scope_complete"]["status"] == "block"
         assert checks["official_action_api_candidate_supported"]["status"] == (
             "pass" if item["family"] in {"Trend", "Mean reversion"} else "block"
@@ -2331,7 +2421,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["blocker_ids"]
         assert item["next_retry_conditions"]
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -2341,14 +2431,15 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["mutates_pg"] is False
         assert item["exchange_write_action"] is False
     decision_by_family = {
-        item["family"]: item for item in payload["data"]["production_action_decision_matrix"]
+        item["family"]: item for item in payload["data"]["production_action_result_matrix"]
     }
     assert set(decision_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     for item in decision_by_family.values():
-        assert item["decision"] == "do_not_execute"
+        assert "decision" not in item
+        assert item["command_result"] == "do_not_execute"
         assert item["selection_status"] == "not_selected_for_live_action"
         assert item["reason"] == "owner_scope_incomplete_or_unmatched"
-        assert item["owner_scope_verdict"] == "not_provided"
+        assert item["owner_scope_status"] == "not_provided"
         assert item["action_api_status"] == (
             "supported_by_current_official_action_api_but_not_actionable"
             if item["family"] in {"Trend", "Mean reversion"}
@@ -2361,7 +2452,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["next_retry_conditions"]
         assert item["live_action_taken"] is False
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -2375,9 +2466,10 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     }
     assert set(eligibility_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     for item in eligibility_by_family.values():
+        assert "decision" not in item
         checks = {check["code"]: check for check in item["checks"]}
         assert item["eligibility"] == "not_eligible"
-        assert item["decision"] == "scope_incomplete_or_unmatched"
+        assert item["eligibility_result"] == "scope_incomplete_or_unmatched"
         assert checks["owner_scope_complete"]["status"] == "block"
         assert checks["official_action_api_candidate_supported"]["status"] == (
             "pass" if item["family"] in {"Trend", "Mean reversion"} else "block"
@@ -2390,7 +2482,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert checks["review_contract"]["status"] == "draft_required"
         assert checks["audit_chain_ready"]["status"] == "block"
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["may_execute_live"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -2398,7 +2490,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["starts_strategy_execution"] is False
         assert item["places_order"] is False
         assert item["mutates_pg"] is False
-    assert payload["data"]["audit_chain_gap_report"]["bridge_method"] == "AuditChainGapReport"
+    assert payload["data"]["audit_chain_gap_report"]["evidence_method"] == "AuditChainGapReport"
     assert payload["data"]["audit_chain_gap_report"]["live_action_evidence_present"] is False
     assert payload["data"]["audit_chain_gap_report"]["places_order"] is False
     assert "execution_intent" in payload["data"]["audit_chain_gap_report"]["missing_evidence"]
@@ -2497,7 +2589,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert example_by_family["Trend"]["expected_action_api_status"] == (
         "supported_by_current_official_action_api_but_not_actionable"
     )
-    assert example_by_family["Trend"]["expected_eligibility_decision"] == (
+    assert example_by_family["Trend"]["expected_eligibility_result"] == (
         "scope_complete_but_backend_final_gate_blocked"
     )
     assert example_by_family["Volatility expansion"]["owner_scope_query"]["strategy_family_id"] == (
@@ -2507,7 +2599,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "MR-001-live-readonly-v0"
     )
     for item in example_by_family.values():
-        assert item["expected_scope_verdict"] == "complete_dry_run_only"
+        assert item["expected_scope_status"] == "complete_dry_run_only"
         assert item["expected_authorization_draft_status"] == "scope_reviewed_dry_run_only"
         assert item["not_owner_authorization"] is True
         assert item["action_allowed"] is False
@@ -2517,14 +2609,14 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["starts_strategy_execution"] is False
         assert item["places_order"] is False
         assert item["mutates_pg"] is False
-    assert payload["data"]["pre_execution_blocked_review"]["bridge_method"] == (
+    assert payload["data"]["pre_execution_blocked_review"]["evidence_method"] == (
         "PreExecutionBlockedReview"
     )
     assert payload["data"]["pre_execution_blocked_review"]["blocked_reason"] == (
         "no_family_candidate_is_pre_execution_actionable"
     )
     assert payload["data"]["pre_execution_blocked_review"]["action_allowed"] is False
-    assert payload["data"]["pre_execution_blocked_review"]["frontend_action_enabled"] is False
+    assert payload["data"]["pre_execution_blocked_review"]["owner_action_enabled"] is False
     assert payload["data"]["pre_execution_blocked_review"]["places_order"] is False
     assert payload["data"]["pre_execution_blocked_review"]["mutates_pg"] is False
     assert payload["data"]["pre_execution_blocked_review"]["unresolved_blocker_ids"]
@@ -2546,7 +2638,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "api_backed_authorization_flow"
     ]["evidence_refs"]
     assert acceptance_by_item[
-        "frontend_action_disabled_until_backend_actionable"
+        "owner_action_disabled_until_official_action_ready"
     ]["status"] == "PASS"
     assert acceptance_by_item["production_capital_boundary"]["status"] == (
         "PASS_WITH_CONSTRAINT"
@@ -2565,27 +2657,27 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["creates_execution_intent"] is False
         assert item["places_order"] is False
         assert item["mutates_pg"] is False
-    bridge_statuses = {
-        item["bridge_method"]: item for item in payload["data"]["bridge_artifact_statuses"]
+    projection_statuses = {
+        item["evidence_method"]: item for item in payload["data"]["lifecycle_evidence_statuses"]
     }
-    assert set(bridge_statuses) == set(payload["data"]["bridge_artifacts"])
-    assert bridge_statuses["TrendObservation"]["status"] == "present"
-    assert bridge_statuses["TrendObservation"]["families"] == ["Trend"]
-    assert bridge_statuses["StrategyGroupMappingProposal"]["status"] == "present"
-    assert bridge_statuses["CarrierCandidate"]["status"] == "mixed"
-    assert bridge_statuses["ActionCandidate"]["status"] == "blocked"
-    assert bridge_statuses["BudgetEnvelopeDraft"]["status"] == "draft"
-    assert bridge_statuses["FinalGateDryRun"]["status"] == "blocked"
-    assert bridge_statuses["PreExecutionBlockedReview"]["status"] == "blocked"
-    assert bridge_statuses["ProtectionPlanDraft"]["status"] == "draft"
-    assert bridge_statuses["ReviewContract"]["status"] == "draft"
-    assert bridge_statuses["AuditChainGapReport"]["status"] == "blocked"
-    assert bridge_statuses["BudgetEnvelopeDraft"]["row_statuses"] == {
+    assert set(projection_statuses) == set(payload["data"]["lifecycle_evidence_artifacts"])
+    assert projection_statuses["TrendObservation"]["status"] == "present"
+    assert projection_statuses["TrendObservation"]["families"] == ["Trend"]
+    assert projection_statuses["StrategyGroupMappingProposal"]["status"] == "present"
+    assert projection_statuses["CarrierCandidate"]["status"] == "mixed"
+    assert projection_statuses["ActionCandidate"]["status"] == "blocked"
+    assert projection_statuses["BudgetEnvelopeDraft"]["status"] == "draft"
+    assert projection_statuses["FinalGateDryRun"]["status"] == "blocked"
+    assert projection_statuses["PreExecutionBlockedReview"]["status"] == "blocked"
+    assert projection_statuses["ProtectionPlanDraft"]["status"] == "draft"
+    assert projection_statuses["ReviewContract"]["status"] == "draft"
+    assert projection_statuses["AuditChainGapReport"]["status"] == "blocked"
+    assert projection_statuses["BudgetEnvelopeDraft"]["row_statuses"] == {
         "Trend": "scope_incomplete_no_numbers_fabricated",
         "Volatility expansion": "scope_incomplete_no_numbers_fabricated",
         "Mean reversion": "scope_incomplete_no_numbers_fabricated",
     }
-    for item in bridge_statuses.values():
+    for item in projection_statuses.values():
         assert item["action_allowed"] is False
         assert item["creates_authorization"] is False
         assert item["creates_execution_intent"] is False
@@ -2596,16 +2688,16 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert set(by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     assert by_family["Trend"]["strategy_family_id"] == "TF-001-live-readonly-v0"
     assert by_family["Trend"]["classification"] == "actionable"
-    assert by_family["Trend"]["strategy_group_mapping"]["bridge_method"] == (
+    assert by_family["Trend"]["strategy_group_mapping"]["evidence_method"] == (
         "StrategyGroupMappingProposal"
     )
     assert by_family["Trend"]["carrier_candidate"]["status"] == "registered_metadata_only"
     assert by_family["Trend"]["carrier_readiness_report"]["status"] == (
         "candidate_registered_not_actionable"
     )
-    assert by_family["Trend"]["observation_bridge"]["bridge_method"] == "TrendObservation"
-    assert by_family["Trend"]["observation_bridge"]["status"] == "observation_bridge_only"
-    assert by_family["Trend"]["risk_disclosure_contract"]["bridge_method"] == "RiskDisclosureDraft"
+    assert by_family["Trend"]["observation_evidence"]["evidence_method"] == "TrendObservation"
+    assert by_family["Trend"]["observation_evidence"]["status"] == "observation_evidence_only"
+    assert by_family["Trend"]["risk_disclosure_contract"]["evidence_method"] == "RiskDisclosureDraft"
     assert "false continuation" in by_family["Trend"]["risk_disclosure_contract"]["failure_modes"]
     assert by_family["Volatility expansion"]["strategy_family_id"] == "VB-001-live-readonly-v0"
     assert by_family["Volatility expansion"]["classification"] == "dry-run-only"
@@ -2615,16 +2707,16 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert by_family["Volatility expansion"]["carrier_candidate"]["status"] == (
         "observation_candidate_only"
     )
-    assert by_family["Volatility expansion"]["observation_bridge"]["bridge_method"] == (
+    assert by_family["Volatility expansion"]["observation_evidence"]["evidence_method"] == (
         "CarrierReadinessReport"
     )
     assert by_family["Mean reversion"]["strategy_family_id"] == "MR-001-live-readonly-v0"
     assert by_family["Mean reversion"]["classification"] == "dry-run-only"
-    assert by_family["Mean reversion"]["observation_bridge"]["bridge_method"] == "CarrierCandidate"
+    assert by_family["Mean reversion"]["observation_evidence"]["evidence_method"] == "CarrierCandidate"
     assert "liquidity wick" in by_family["Mean reversion"]["risk_disclosure_contract"]["failure_modes"]
     for item in by_family.values():
         assert item["backend_actionable"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["risk_disclosure_contract"]["status"] == "draft_for_owner_review"
         assert item["risk_disclosure_contract"]["family"] == item["family"]
         assert item["risk_disclosure_contract"]["owner_acknowledgement_required"] is True
@@ -2636,7 +2728,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["strategy_group_mapping"]["carrier_id"] == item["carrier_id"]
         assert item["strategy_group_mapping"]["places_order"] is False
         assert item["strategy_group_mapping"]["mutates_pg"] is False
-        assert item["carrier_candidate"]["bridge_method"] == "CarrierCandidate"
+        assert item["carrier_candidate"]["evidence_method"] == "CarrierCandidate"
         assert item["carrier_candidate"]["family"] == item["family"]
         assert item["carrier_candidate"]["strategy_family_id"] == item["strategy_family_id"]
         assert item["carrier_candidate"]["carrier_id"] == item["carrier_id"]
@@ -2650,7 +2742,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["carrier_readiness_report"]["family"] == item["family"]
         assert item["carrier_readiness_report"]["carrier_id"] == item["carrier_id"]
         assert item["carrier_readiness_report"]["backend_actionable"] is False
-        assert item["carrier_readiness_report"]["frontend_action_enabled"] is False
+        assert item["carrier_readiness_report"]["owner_action_enabled"] is False
         assert item["carrier_readiness_report"]["places_order"] is False
         assert item["carrier_readiness_report"]["mutates_pg"] is False
         readiness_checks = {
@@ -2660,7 +2752,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
             "pass" if item["family"] in {"Trend", "Mean reversion"} else "block"
         )
         assert readiness_checks["backend_actionable"]["status"] == "block"
-        assert item["action_candidate"]["bridge_method"] == "ActionCandidate"
+        assert item["action_candidate"]["evidence_method"] == "ActionCandidate"
         assert item["action_candidate"]["family"] == item["family"]
         assert item["action_candidate"]["carrier_id"] == item["carrier_id"]
         assert item["action_candidate"]["status"] == (
@@ -2670,7 +2762,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         )
         assert item["action_candidate"]["action_allowed"] is False
         assert item["action_candidate"]["backend_actionable"] is False
-        assert item["action_candidate"]["frontend_action_enabled"] is False
+        assert item["action_candidate"]["owner_action_enabled"] is False
         assert item["action_candidate"]["creates_authorization"] is False
         assert item["action_candidate"]["creates_execution_intent"] is False
         assert item["action_candidate"]["places_order"] is False
@@ -2678,25 +2770,25 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert "backend final gate returns actionable=true" in (
             item["action_candidate"]["required_before_action"]
         )
-        assert item["observation_bridge"]["starts_runner"] is False
-        assert item["observation_bridge"]["creates_signal"] is False
-        assert item["observation_bridge"]["creates_trade_intent"] is False
-        assert item["observation_bridge"]["creates_execution_intent"] is False
-        assert item["observation_bridge"]["places_order"] is False
-        assert item["observation_bridge"]["mutates_pg"] is False
+        assert item["observation_evidence"]["starts_runner"] is False
+        assert item["observation_evidence"]["creates_signal"] is False
+        assert item["observation_evidence"]["creates_trade_intent"] is False
+        assert item["observation_evidence"]["creates_execution_intent"] is False
+        assert item["observation_evidence"]["places_order"] is False
+        assert item["observation_evidence"]["mutates_pg"] is False
         assert item["audit_chain_gap_report"]["family"] == item["family"]
-        assert item["audit_chain_gap_report"]["bridge_method"] == "AuditChainGapReport"
+        assert item["audit_chain_gap_report"]["evidence_method"] == "AuditChainGapReport"
         assert item["audit_chain_gap_report"]["live_action_evidence_present"] is False
         assert item["audit_chain_gap_report"]["creates_execution_intent"] is False
         assert item["audit_chain_gap_report"]["places_order"] is False
         assert item["audit_chain_gap_report"]["mutates_pg"] is False
         assert "post_action_review" in item["audit_chain_gap_report"]["missing_evidence"]
-        assert item["pre_execution_blocked_review"]["bridge_method"] == (
+        assert item["pre_execution_blocked_review"]["evidence_method"] == (
             "PreExecutionBlockedReview"
         )
         assert item["pre_execution_blocked_review"]["family"] == item["family"]
         assert item["pre_execution_blocked_review"]["action_allowed"] is False
-        assert item["pre_execution_blocked_review"]["frontend_action_enabled"] is False
+        assert item["pre_execution_blocked_review"]["owner_action_enabled"] is False
         assert item["pre_execution_blocked_review"]["places_order"] is False
         assert item["pre_execution_blocked_review"]["mutates_pg"] is False
         pre_execution_checks = {
@@ -2704,11 +2796,11 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         }
         assert pre_execution_checks["backend_final_gate_actionable"]["status"] == "block"
         assert pre_execution_checks["mandatory_tp_sl_plan"]["status"] == "draft_required"
-        assert item["admission_verdict"]["may_execute_live"] is False
-        assert item["admission_verdict"]["frontend_action_enabled"] is False
-        assert item["admission_verdict"]["remaining_requirements"]
+        assert item["admission_outcome"]["may_execute_live"] is False
+        assert item["admission_outcome"]["owner_action_enabled"] is False
+        assert item["admission_outcome"]["remaining_requirements"]
         assert "quantity" in item["required_scope_missing"]
-        assert item["budget_envelope_draft"]["bridge_method"] == "BudgetEnvelopeDraft"
+        assert item["budget_envelope_draft"]["evidence_method"] == "BudgetEnvelopeDraft"
         assert item["budget_envelope_draft"]["scope"] == {}
         assert item["budget_envelope_draft"]["provided_scope_fields"] == []
         assert item["budget_envelope_draft"]["missing_scope_fields"] == [
@@ -2739,7 +2831,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert item["execution_intent_state"] == "not_created"
         assert item["entry_state"] == "not_executed"
         assert item["protection_plan_state"] == "draft_required_mandatory_tp_sl"
-        assert item["protection_plan_draft"]["bridge_method"] == "ProtectionPlanDraft"
+        assert item["protection_plan_draft"]["evidence_method"] == "ProtectionPlanDraft"
         assert item["protection_plan_draft"]["status"] == "draft_required_mandatory_tp_sl"
         assert "complete_matched_owner_scope" in item["protection_plan_draft"]["missing_fields"]
         assert "take_profit_price" in item["protection_plan_draft"]["missing_fields"]
@@ -2766,7 +2858,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
             item["family"] in {"Trend", "Mean reversion"}
         )
         assert item["review_contract"]["status"] == "draft_no_action_evidence"
-        assert item["review_contract"]["bridge_method"] == "ReviewContract"
+        assert item["review_contract"]["evidence_method"] == "ReviewContract"
         assert item["review_contract"]["family"] == item["family"]
         assert "entry_order" in item["review_contract"]["required_evidence"]
         assert "entry_order" in item["review_contract"]["missing_evidence"]
@@ -2791,7 +2883,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         assert f"{item['blocker_record']['id']}-EVIDENCE" in gate_blocker_ids
         assert f"{item['blocker_record']['id']}-PROTECTION" in gate_blocker_ids
         assert [draft["name"] for draft in item["api_request_drafts"]] == [
-            "create_admission_evidence_packet",
+            "create_admission_evidence",
             "create_owner_regime_input",
             "create_admission_request",
             "create_owner_risk_acceptance",
@@ -2897,7 +2989,7 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert actionability["Trend"]["final_gate_preview_available"] is True
     assert actionability["Mean reversion"]["budget_envelope_compatible"] is True
     assert actionability["Volatility expansion"]["owner_authorization_path_available"] is False
-    assert all(item["frontend_action_enabled"] is False for item in actionability.values())
+    assert all(item["owner_action_enabled"] is False for item in actionability.values())
 
     final_gate_inputs = {
         item["strategy_family"]: item for item in payload["data"]["final_gate_preview_inputs"]
@@ -2934,7 +3026,7 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
         assert item["strategy_independent"] is True
         assert item["no_action_guarantee"]["places_order"] is False
         assert item["action_spec"]["may_execute_live"] is False
-        assert item["final_gate_preview"]["frontend_action_enabled"] is False
+        assert item["final_gate_preview"]["owner_action_enabled"] is False
 
     product_loop = payload["data"]["candidate_action_product_loop"]
     assert product_loop["status"] == "non_live_product_loop_ready"
@@ -2986,13 +3078,13 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     for item in readiness_loop.values():
         assert item["backend_actionable"] is False
         assert item["may_execute_live"] is False
-        assert item["frontend_action_enabled"] is False
+        assert item["owner_action_enabled"] is False
         assert item["places_order"] is False
         assert item["exchange_write_action"] is False
 
     console_action_model = payload["data"]["trading_console_candidate_action_read_model"]
     assert console_action_model["product_surface"] == "owner_action_entry"
-    assert console_action_model["frontend_policy"] == (
+    assert console_action_model["action_entry_policy"] == (
         "operate_as_candidate_action_entry_not_document_or_code_explanation"
     )
     assert "documentation_surface" in console_action_model["never_show_as"]
@@ -3013,7 +3105,7 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert trend["sizing_source"] == "budget_envelope_recommendation"
     assert trend["budget_owner_confirmation_required"] is True
     assert trend["may_execute_live"] is False
-    assert trend["frontend_action_enabled"] is False
+    assert trend["owner_action_enabled"] is False
     assert trend["places_order"] is False
     assert specs["Volatility expansion"]["status"] == "proposal_non_action"
     assert specs["Volatility expansion"]["action_registry_supported"] is False
@@ -3035,7 +3127,7 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
         "review-template:MR-001-live-readonly-v0"
     )
     assert specs["Mean reversion"]["may_execute_live"] is False
-    assert specs["Mean reversion"]["frontend_action_enabled"] is False
+    assert specs["Mean reversion"]["owner_action_enabled"] is False
     assert specs["Mean reversion"]["places_order"] is False
 
     payloads = {
@@ -3056,14 +3148,14 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert action_entry["Trend"]["action_entry_state"] == (
         "ready_for_owner_scope_final_gate"
     )
-    assert action_entry["Trend"]["frontend_action_enabled"] is False
+    assert action_entry["Trend"]["owner_action_enabled"] is False
     assert action_entry["Volatility expansion"]["action_entry_state"] == "proposal_only"
     assert action_entry["Mean reversion"]["action_entry_state"] == "proposal_only"
 
     selected = payload["data"]["selected_candidate"]
     assert selected["family"] == "Trend"
     assert selected["carrier_id"] == "TF-001-live-readonly-v0"
-    assert selected["scope_review"]["verdict"] == "not_checked"
+    assert selected["scope_review"]["status"] == "not_checked"
     risk_review = payload["data"]["risk_review"]
     assert risk_review["weak_strategy_evidence_policy"] == "warning_not_hard_blocker"
     assert "weak strategy evidence" in risk_review["warnings"]
@@ -3075,11 +3167,11 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     final_gate = payload["data"]["final_gate_result"]
     assert final_gate["status"] == "blocked_until_official_final_gate_passes"
     assert final_gate["may_execute_live"] is False
-    assert final_gate["frontend_action_enabled"] is False
+    assert final_gate["owner_action_enabled"] is False
     action_state = payload["data"]["action_state"]
     assert action_state["enabled"] is False
     assert action_state["may_execute_live"] is False
-    assert action_state["frontend_action_enabled"] is False
+    assert action_state["owner_action_enabled"] is False
     assert action_state["places_order"] is False
     assert action_state["mutates_pg"] is False
     post_action_state = payload["data"]["post_action_state"]
@@ -3116,9 +3208,9 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert ledger["costs"]["slippage"]["status"] == "not_available"
     assert ledger["tp_sl_result"]["status"] == "protected_open"
     assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
-    assert ledger["review_decision"]["status"] == "pending_open_recorded"
-    assert ledger["review_decision"]["source"] == "brc_live_lifecycle_reviews"
-    assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
+    assert ledger["review_outcome"]["status"] == "pending_open_recorded"
+    assert ledger["review_outcome"]["source"] == "brc_live_lifecycle_reviews"
+    assert ledger["review_outcome"]["allowed_values"] == ["promote", "revise", "park"]
     assert ledger["hard_blockers"] == []
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
@@ -3190,7 +3282,7 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
     assert flow["budget_summary"]["max_usable_notional"] == "150"
     assert "open orders reduce recommended usable budget" not in flow["budget_summary"]["warnings"]
     assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["used"] == 0
-    assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
+    assert flow["budgeted_autonomy_v01"]["owner_action_enabled"] is False
     assert flow["budgeted_autonomy_v01"]["places_order"] is False
     assert flow["next_attempt_gate"]["status"] == "clear_for_preflight"
     assert flow["next_attempt_gate"]["gate"] == "clear_for_next_preflight"
@@ -3202,7 +3294,8 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
         "no_current_lifecycle",
     }
     assert jit_audit["can_continue_to_authorization"] is True
-    assert jit_audit["decision"] == "continue_to_owner_budget_final_gate"
+    assert "decision" not in jit_audit
+    assert jit_audit["lifecycle_audit_result"] == "continue_to_owner_budget_final_gate"
     assert jit_audit["can_execute_live"] is False
     assert jit_audit["places_order"] is False
 
@@ -3252,7 +3345,7 @@ def test_owner_action_flow_blocks_closed_runtime_until_live_review_recorded(monk
             places_order=False,
             mutates_exchange=False,
             grants_trading_permission=False,
-            frontend_action_enabled=False,
+            owner_action_enabled=False,
         )
     ]
     _patch_deps(
@@ -3291,8 +3384,8 @@ def test_owner_action_flow_blocks_closed_runtime_until_live_review_recorded(monk
     ledger = post_action["review_ledger"]
     assert ledger["lifecycle_status"] == "closed_from_pg_exit_order"
     assert ledger["strategy_outcome"] == "pending_closed_trade_review"
-    assert ledger["review_decision"]["status"] == "pending"
-    assert ledger["review_decision"].get("source") is None
+    assert ledger["review_outcome"]["status"] == "pending"
+    assert ledger["review_outcome"].get("source") is None
     gate = post_action["next_attempt_gate"]
     assert gate["status"] == "blocked"
     assert gate["gate"] == "closed_trade_review_required"
@@ -3300,10 +3393,15 @@ def test_owner_action_flow_blocks_closed_runtime_until_live_review_recorded(monk
     assert gate["blockers"][0]["id"] == "NEXT-ATTEMPT-CLOSED-TRADE-REVIEW-REQUIRED"
     flow = data["owner_action_flow"]
     assert flow["next_attempt_gate"]["gate"] == "closed_trade_review_required"
-    assert flow["just_in_time_lifecycle_audit"]["decision"] == "block_next_attempt_review_required"
-    assert flow["just_in_time_lifecycle_audit"]["next_recommended_action"] == (
-        "record_closed_trade_review"
+    assert "decision" not in flow["just_in_time_lifecycle_audit"]
+    assert flow["just_in_time_lifecycle_audit"]["lifecycle_audit_result"] == (
+        "block_next_attempt_review_required"
     )
+    assert (
+        flow["just_in_time_lifecycle_audit"]["non_authority_recommendation"]
+        == "record_closed_trade_review"
+    )
+    assert "next_recommended_action" not in flow["just_in_time_lifecycle_audit"]
     assert data["action_state"]["enabled"] is False
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
@@ -3351,14 +3449,14 @@ def test_owner_action_flow_clears_next_attempt_after_closed_live_review(monkeypa
             lifecycle_status="closed_reviewed",
             review_status="closed_reviewed",
             metadata={
-                "review_decision": "revise",
+                "review_outcome": "revise",
                 "strategy_outcome": "small_bounded_loss",
                 "attempt_continuation_quality": "continue_after_small_loss",
             },
             places_order=False,
             mutates_exchange=False,
             grants_trading_permission=False,
-            frontend_action_enabled=False,
+            owner_action_enabled=False,
         )
     ]
     _patch_deps(
@@ -3397,11 +3495,12 @@ def test_owner_action_flow_clears_next_attempt_after_closed_live_review(monkeypa
     ledger = post_action["review_ledger"]
     assert ledger["lifecycle_status"] == "closed_reviewed"
     assert ledger["strategy_outcome"] == "small_bounded_loss"
-    assert ledger["review_decision"]["status"] == "closed_reviewed"
-    assert ledger["review_decision"]["requires_owner_review"] is False
-    assert ledger["review_decision"]["source"] == "brc_live_lifecycle_reviews"
-    assert ledger["review_decision"]["review_id"] == "live-review-runtime-closed-reviewed"
-    assert ledger["review_decision"]["attempt_continuation_quality"] == (
+    assert ledger["review_outcome"]["status"] == "closed_reviewed"
+    assert ledger["review_outcome"]["requires_owner_review"] is False
+    assert ledger["review_outcome"]["source"] == "brc_live_lifecycle_reviews"
+    assert ledger["review_outcome"]["review_id"] == "live-review-runtime-closed-reviewed"
+    assert ledger["review_outcome"]["review_outcome"] == "revise"
+    assert ledger["review_outcome"]["attempt_continuation_quality"] == (
         "continue_after_small_loss"
     )
     gate = post_action["next_attempt_gate"]
@@ -3410,7 +3509,8 @@ def test_owner_action_flow_clears_next_attempt_after_closed_live_review(monkeypa
     assert gate["lifecycle_classification"] == "closed_reviewed"
     assert gate["next_attempt_allowed_by_lifecycle"] is True
     flow = data["owner_action_flow"]
-    assert flow["just_in_time_lifecycle_audit"]["decision"] == (
+    assert "decision" not in flow["just_in_time_lifecycle_audit"]
+    assert flow["just_in_time_lifecycle_audit"]["lifecycle_audit_result"] == (
         "continue_to_owner_budget_final_gate"
     )
     assert data["action_state"]["enabled"] is False
@@ -3480,7 +3580,7 @@ def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkey
     assert "BUDGETED-AUTONOMY-V01-DAILY-ATTEMPTS-EXHAUSTED" not in {
         item["id"] for item in v01["hard_blockers"]
     }
-    assert v01["frontend_action_enabled"] is False
+    assert v01["owner_action_enabled"] is False
     assert v01["places_order"] is False
 
 
@@ -3579,7 +3679,7 @@ def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeyp
     assert flow["budgeted_autonomy_v01"]["selected_candidate"]["status"] == (
         "eligible_for_final_gate"
     )
-    assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
+    assert flow["budgeted_autonomy_v01"]["owner_action_enabled"] is False
     assert flow["budgeted_autonomy_v01"]["places_order"] is False
 
 
@@ -3681,7 +3781,7 @@ def test_owner_action_flow_computes_mr_eth_quantity_from_target_notional(monkeyp
     assert capital["silent_quantity_repair_allowed"] is False
     assert capital["places_order"] is False
     assert proposal["backend_actionable"] is False
-    assert proposal["frontend_action_enabled"] is False
+    assert proposal["owner_action_enabled"] is False
     assert proposal["places_order"] is False
 
 
@@ -3738,7 +3838,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     selected = data["selected_candidate"]
     assert selected["family"] == "Mean reversion"
     assert selected["carrier_id"] == "MR-001-live-readonly-v0"
-    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["scope_review"]["status"] == "matched"
     assert selected["generic_action_spec"]["status"] == "invalid_blocked"
     assert selected["generic_action_spec"]["action_registry_supported"] is True
     assert selected["generic_action_spec"]["symbol"] == "ETH/USDT:USDT"
@@ -3748,19 +3848,20 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     )
     assert data["action_state"]["enabled"] is False
     assert data["action_state"]["backend_actionable"] is False
-    assert data["action_state"]["frontend_action_enabled"] is False
+    assert data["action_state"]["owner_action_enabled"] is False
     assert data["action_state"]["places_order"] is False
     flow = data["owner_action_flow"]
     assert flow["next_attempt_gate"]["status"] == "blocked"
     assert flow["next_attempt_gate"]["gate"] == "current_lifecycle_open_protected"
     assert flow["next_attempt_gate"]["lifecycle_classification"] == "still_open_protected"
     assert flow["next_attempt_gate"]["disabled_reason"].startswith("Current lifecycle is still open")
-    assert flow["next_attempt_gate"]["required_next_step"] == (
+    assert flow["next_attempt_gate"]["non_authority_required_step"] == (
         "wait_for_current_tp_or_sl_then_reconcile_and_review"
     )
+    assert "required_next_step" not in flow["next_attempt_gate"]
     assert flow["next_attempt_gate"]["blocking_scope"]["current_lifecycle_blocks_new_entry"] is True
     assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is False
-    assert flow["next_attempt_gate"]["frontend_action_enabled"] is False
+    assert flow["next_attempt_gate"]["owner_action_enabled"] is False
     assert flow["disabled_reason"] == flow["next_attempt_gate"]["disabled_reason"]
     assert flow["status"] == "not_actionable"
     assert flow["unsafe_action_enabled"] is False
@@ -3772,10 +3873,12 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     jit_audit = flow["just_in_time_lifecycle_audit"]
     assert jit_audit["audit_stage"] == "next_attempt_preflight"
     assert jit_audit["classification"] == "still_open_protected"
-    assert jit_audit["decision"] == "block_next_attempt_current_lifecycle_open"
+    assert "decision" not in jit_audit
+    assert jit_audit["lifecycle_audit_result"] == "block_next_attempt_current_lifecycle_open"
     assert jit_audit["can_continue_to_authorization"] is False
     assert jit_audit["can_execute_live"] is False
-    assert jit_audit["next_recommended_action"] == "wait_for_tp_or_sl_close"
+    assert jit_audit["non_authority_recommendation"] == "wait_for_tp_or_sl_close"
+    assert "next_recommended_action" not in jit_audit
     assert jit_audit["active_tp_sl_cancel_allowed"] is False
     assert jit_audit["places_order"] is False
     assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
@@ -3822,10 +3925,10 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert protection_review["execution_protection_draft_status"] == "blocked"
     assert protection_review["review_status"] == "pending_open"
     assert protection_review["current_tp_sl_status"] == "protected_open"
-    assert protection_review["frontend_action_enabled"] is False
+    assert protection_review["owner_action_enabled"] is False
     assert proposal["protection_review_readiness"]["places_order"] is False
     assert proposal["backend_actionable"] is False
-    assert proposal["frontend_action_enabled"] is False
+    assert proposal["owner_action_enabled"] is False
     assert proposal["places_order"] is False
     autonomy_loop = flow["budgeted_autonomy_loop"]
     assert autonomy_loop["loop_version"] == "budgeted_autonomy_v0"
@@ -3839,7 +3942,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     )
     assert autonomy_loop["action_allowed"] is False
     assert autonomy_loop["backend_actionable"] is False
-    assert autonomy_loop["frontend_action_enabled"] is False
+    assert autonomy_loop["owner_action_enabled"] is False
     assert autonomy_loop["auto_execution_enabled"] is False
     assert autonomy_loop["places_order"] is False
     assert autonomy_loop["mutates_pg"] is False
@@ -3944,6 +4047,8 @@ def test_owner_action_flow_include_exchange_marks_eth_pg_exchange_cleanup_needed
     assert post_action["next_attempt_gate"]["blockers"][0]["id"] == (
         "NEXT-ATTEMPT-PG-EXCHANGE-CLEANUP-REQUIRED"
     )
+    assert "recovery_action" in post_action["next_attempt_gate"]["blockers"][0]
+    assert "bridge" not in post_action["next_attempt_gate"]["blockers"][0]
     flow = data["owner_action_flow"]
     assert flow["next_attempt_gate"]["status"] == "blocked"
     autonomy_loop = flow["budgeted_autonomy_loop"]
@@ -3956,7 +4061,7 @@ def test_owner_action_flow_include_exchange_marks_eth_pg_exchange_cleanup_needed
     )
     assert autonomy_loop["action_allowed"] is False
     assert autonomy_loop["backend_actionable"] is False
-    assert autonomy_loop["frontend_action_enabled"] is False
+    assert autonomy_loop["owner_action_enabled"] is False
     assert autonomy_loop["places_order"] is False
     assert data["action_state"]["enabled"] is False
     assert exchange.open_order_calls == [
@@ -4030,7 +4135,7 @@ def test_owner_action_flow_marks_external_flat_hygiene_closed_reviewed(monkeypat
     assert ledger["tp_sl_result"]["status"] == "external_flat_local_hygiene_terminalized"
     assert ledger["tp_sl_result"]["open_protection_order_count"] == 0
     assert ledger["exit"]["status"] == "external_exchange_flat_unresolved"
-    assert ledger["review_decision"]["status"] == "revise"
+    assert ledger["review_outcome"]["status"] == "revise"
     assert ledger["strategy_outcome"] == "revise_after_external_flat_reconciliation"
     assert post_action["next_attempt_gate"]["status"] == "clear_for_preflight"
     assert post_action["next_attempt_gate"]["gate"] == "clear_for_next_preflight"
@@ -4077,7 +4182,7 @@ def test_owner_action_flow_allows_mr_btc_owner_selection_without_actions(monkeyp
     data = payload["data"]
     selected = data["selected_candidate"]
     assert selected["family"] == "Mean reversion"
-    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["scope_review"]["status"] == "matched"
     assert selected["generic_action_spec"]["symbol"] == "BTC/USDT:USDT"
     assert selected["generic_action_spec"]["recommended_quantity"] == "0.001"
     assert selected["generic_action_spec"]["recommended_max_notional"] == "20"
@@ -4090,7 +4195,7 @@ def test_owner_action_flow_allows_mr_btc_owner_selection_without_actions(monkeyp
     assert proposal["proposal_role"] == "range_candidate"
     assert proposal["owner_selected_scope"]["symbol"] == "BTC/USDT:USDT"
     assert proposal["backend_actionable"] is False
-    assert proposal["frontend_action_enabled"] is False
+    assert proposal["owner_action_enabled"] is False
     assert proposal["places_order"] is False
     assert data["action_state"]["enabled"] is False
     assert exchange.place_calls == 0
@@ -4132,7 +4237,7 @@ def test_owner_action_flow_blocks_mr_symbol_outside_carrier_bounds(monkeypatch):
     proposal = data["owner_action_flow"]["selected_action_proposal"]
     assert proposal["symbol"] == "SOL/USDT:USDT"
     assert "owner_symbol_not_supported_by_carrier" in proposal["hard_blockers"]
-    assert proposal["frontend_action_enabled"] is False
+    assert proposal["owner_action_enabled"] is False
     assert proposal["places_order"] is False
     assert data["action_state"]["enabled"] is False
     assert exchange.place_calls == 0
@@ -4173,7 +4278,7 @@ def test_owner_action_flow_no_exact_match_returns_nearest_candidates_and_blocker
     selected = data["selected_candidate"]
     assert selected["family"] == "Trend"
     assert selected["carrier_id"] == "TF-001-live-readonly-v0"
-    assert selected["scope_review"]["verdict"] == "mismatch"
+    assert selected["scope_review"]["status"] == "mismatch"
     mismatches = {item["field"] for item in selected["scope_review"]["mismatches"]}
     assert {"symbol", "side", "quantity", "max_notional"} <= mismatches
     flow = data["owner_action_flow"]
@@ -4245,15 +4350,14 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     selected = payload["data"]["selected_candidate"]
     assert selected["family"] == "Trend"
     assert selected["carrier_id"] == "TF-001-live-readonly-v0"
-    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["scope_review"]["status"] == "matched"
     assert selected["scope_review"]["mismatches"] == []
     action_state = payload["data"]["action_state"]
     assert action_state["enabled"] is False
     assert action_state["backend_actionable"] is False
-    assert action_state["backend_actionable_only"] is False
     assert action_state["places_order"] is False
     assert payload["data"]["authorization_draft_path"]["creates_authorization"] is False
-    assert payload["data"]["final_gate_result"]["frontend_action_enabled"] is False
+    assert payload["data"]["final_gate_result"]["owner_action_enabled"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert exchange.open_order_calls == []
@@ -4291,10 +4395,13 @@ def test_budget_recommendation_degrades_without_account_facts(monkeypatch):
     blocker_ids = {item["id"] for item in data["blockers"]}
     assert "BUDGET-ACCOUNT-CAPACITY-ACCOUNT-FACTS" in blocker_ids
     assert "BUDGET-ACCOUNT-CAPACITY-FRESHNESS" in blocker_ids
+    for blocker in data["blockers"]:
+        assert "recovery_action" in blocker
+        assert "bridge" not in blocker
     assert data["budgeted_autonomy_enabled"] is False
     assert data["grants_trading_permission"] is False
     assert data["may_execute_live"] is False
-    assert data["frontend_action_enabled"] is False
+    assert data["owner_action_enabled"] is False
     assert data["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert exchange.open_order_calls == []
@@ -4383,6 +4490,8 @@ def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monk
         assert examples_response.status_code == 200
         examples = examples_response.json()["data"]["scoped_dry_run_examples"]
         assert len(examples) == 3
+        legacy_eligibility_key = "expected_eligibility_" + "decision"
+        assert all(legacy_eligibility_key not in item for item in examples)
 
         for example in examples:
             response = client.get(
@@ -4399,10 +4508,11 @@ def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monk
                 for item in payload["data"]["live_action_eligibility_matrix"]
                 if item["family"] == example["family"]
             )
+            assert "decision" not in eligibility
             checks = {check["code"]: check for check in eligibility["checks"]}
-            assert payload["data"]["scope_review"]["verdict"] == example["expected_scope_verdict"]
+            assert payload["data"]["scope_review"]["status"] == example["expected_scope_status"]
             assert payload["data"]["scope_review"]["matched_candidate"] is True
-            assert row["scope_review"]["verdict"] == example["expected_scope_verdict"]
+            assert row["scope_review"]["status"] == example["expected_scope_status"]
             assert row["budget_envelope_draft"]["status"] == "scope_complete_dry_run_only"
             assert row["authorization_draft_proposal"]["status"] == (
                 example["expected_authorization_draft_status"]
@@ -4413,14 +4523,14 @@ def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monk
             assert row["pre_execution_blocked_review"]["blocked_reason"] == (
                 example["expected_final_gate_reason"]
             )
-            assert eligibility["decision"] == example["expected_eligibility_decision"]
+            assert eligibility["eligibility_result"] == example["expected_eligibility_result"]
             assert checks["owner_scope_complete"]["status"] == "pass"
             assert checks["official_action_api_candidate_supported"]["status"] == (
                 "pass" if example["family"] in {"Trend", "Mean reversion"} else "block"
             )
             assert checks["backend_final_gate_actionable"]["status"] == "block"
             assert row["backend_actionable"] is False
-            assert row["frontend_action_enabled"] is False
+            assert row["owner_action_enabled"] is False
             assert row["authorization_draft_proposal"]["not_authorization"] is True
             assert row["authorization_draft_proposal"]["not_execution_permission"] is True
             assert row["authorization_draft_proposal"]["not_order_permission"] is True
@@ -4431,7 +4541,7 @@ def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monk
             assert row["budget_envelope_draft"]["mutates_pg"] is False
             assert row["action_candidate"]["action_allowed"] is False
             assert row["action_candidate"]["backend_actionable"] is False
-            assert row["action_candidate"]["frontend_action_enabled"] is False
+            assert row["action_candidate"]["owner_action_enabled"] is False
             assert row["action_candidate"]["creates_authorization"] is False
             assert row["action_candidate"]["creates_execution_intent"] is False
             assert row["action_candidate"]["places_order"] is False
@@ -4451,7 +4561,7 @@ def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monk
             )
             owner_scope = example["owner_scope_query"]
             assert capital_boundary["status"] == "scope_reviewed_dry_run_only"
-            assert capital_boundary["scope_review_verdict"] == example["expected_scope_verdict"]
+            assert capital_boundary["scope_review_status"] == example["expected_scope_status"]
             assert capital_boundary["required_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
             assert capital_boundary["provided_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
             assert capital_boundary["missing_scope_fields"] == []
@@ -4518,7 +4628,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["data"]["scope_review"]["verdict"] == "complete_dry_run_only"
+    assert payload["data"]["scope_review"]["status"] == "complete_dry_run_only"
     blocker_codes = {item["code"] for item in payload["blockers"]}
     assert "production_scope_incomplete" not in blocker_codes
     assert "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API" not in blocker_codes
@@ -4535,9 +4645,10 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
         item["family"]: item for item in payload["data"]["live_action_eligibility_matrix"]
     }
     trend_eligibility = eligibility_by_family["Trend"]
+    assert "decision" not in trend_eligibility
     trend_checks = {check["code"]: check for check in trend_eligibility["checks"]}
     assert trend_eligibility["eligibility"] == "not_eligible"
-    assert trend_eligibility["decision"] == "scope_complete_but_backend_final_gate_blocked"
+    assert trend_eligibility["eligibility_result"] == "scope_complete_but_backend_final_gate_blocked"
     assert trend_checks["owner_scope_complete"]["status"] == "pass"
     assert trend_checks["official_action_api_candidate_supported"]["status"] == "pass"
     assert trend_checks["backend_final_gate_actionable"]["status"] == "block"
@@ -4545,7 +4656,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
         item["family"]: item for item in payload["data"]["admission_risk_control_matrix"]
     }
     trend_risk_control = risk_control_by_family["Trend"]
-    assert trend_risk_control["scope_review_verdict"] == "complete_dry_run_only"
+    assert trend_risk_control["scope_review_status"] == "complete_dry_run_only"
     assert trend_risk_control["budget_envelope_status"] == "scope_complete_dry_run_only"
     assert trend_risk_control["authorization_draft_status"] == "scope_reviewed_dry_run_only"
     assert trend_risk_control["bounded_live_authorization_status"] == (
@@ -4561,7 +4672,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert trend_risk_control["review_contract_status"] == "draft_no_action_evidence"
     assert trend_risk_control["audit_chain_status"] == "gap_open_no_live_action_evidence"
     assert trend_risk_control["backend_actionable"] is False
-    assert trend_risk_control["frontend_action_enabled"] is False
+    assert trend_risk_control["owner_action_enabled"] is False
     assert trend_risk_control["action_allowed"] is False
     assert trend_risk_control["places_order"] is False
     capital_boundary_by_family = {
@@ -4569,7 +4680,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     }
     trend_boundary = capital_boundary_by_family["Trend"]
     assert trend_boundary["status"] == "scope_reviewed_dry_run_only"
-    assert trend_boundary["scope_review_verdict"] == "complete_dry_run_only"
+    assert trend_boundary["scope_review_status"] == "complete_dry_run_only"
     assert trend_boundary["required_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
     assert trend_boundary["provided_scope_fields"] == REQUIRED_OWNER_SCOPE_FIELDS
     assert trend_boundary["missing_scope_fields"] == []
@@ -4639,38 +4750,38 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert "BRC-PROD-ADMIT-20260604-TREND-001-REVIEW" in trend_retry_by_id
     assert all(item["retry_ready"] is False for item in trend_retry_by_id.values())
     assert all(item["places_order"] is False for item in trend_retry_by_id.values())
-    packet_by_family = {
-        item["family"]: item for item in payload["data"]["owner_authorization_packet_matrix"]
+    artifact_by_family = {
+        item["family"]: item for item in payload["data"]["owner_authorization_artifact_matrix"]
     }
-    trend_packet = packet_by_family["Trend"]
-    assert trend_packet["status"] == "scope_reviewed_dry_run_only"
-    assert trend_packet["owner_scope_verdict"] == "complete_dry_run_only"
-    assert trend_packet["budget_envelope_status"] == "scope_complete_dry_run_only"
-    assert trend_packet["authorization_draft_status"] == "scope_reviewed_dry_run_only"
-    assert "strategy_family_version_id" not in trend_packet["unresolved_refs"]
-    assert "playbook_id" not in trend_packet["unresolved_refs"]
-    assert "evidence_packet_id" in trend_packet["unresolved_refs"]
-    assert "admission_decision_id" in trend_packet["unresolved_refs"]
-    assert trend_packet["not_authorization"] is True
-    assert trend_packet["creates_authorization"] is False
-    assert trend_packet["creates_execution_intent"] is False
-    assert trend_packet["places_order"] is False
+    trend_artifact = artifact_by_family["Trend"]
+    assert trend_artifact["status"] == "scope_reviewed_dry_run_only"
+    assert trend_artifact["owner_scope_status"] == "complete_dry_run_only"
+    assert trend_artifact["budget_envelope_status"] == "scope_complete_dry_run_only"
+    assert trend_artifact["authorization_draft_status"] == "scope_reviewed_dry_run_only"
+    assert "strategy_family_version_id" not in trend_artifact["unresolved_refs"]
+    assert "playbook_id" not in trend_artifact["unresolved_refs"]
+    assert "admission_evidence_id" in trend_artifact["unresolved_refs"]
+    assert "admission_decision_id" in trend_artifact["unresolved_refs"]
+    assert trend_artifact["not_authorization"] is True
+    assert trend_artifact["creates_authorization"] is False
+    assert trend_artifact["creates_execution_intent"] is False
+    assert trend_artifact["places_order"] is False
     handoff_by_family = {
         item["family"]: item for item in payload["data"]["owner_review_handoff_matrix"]
     }
     trend_handoff = handoff_by_family["Trend"]
     assert trend_handoff["status"] == "review_ready_dry_run_only"
-    assert trend_handoff["owner_scope_verdict"] == "complete_dry_run_only"
+    assert trend_handoff["owner_scope_status"] == "complete_dry_run_only"
     assert trend_handoff["budget_envelope_status"] == "scope_complete_dry_run_only"
     assert trend_handoff["authorization_draft_status"] == "scope_reviewed_dry_run_only"
     assert "strategy_family_version_id" not in trend_handoff["unresolved_refs"]
     assert "playbook_id" not in trend_handoff["unresolved_refs"]
-    assert "evidence_packet_id" in trend_handoff["unresolved_refs"]
+    assert "admission_evidence_id" in trend_handoff["unresolved_refs"]
     assert "admission_decision_id" in trend_handoff["unresolved_refs"]
     assert "Owner risk acceptance is created through official API" in (
         trend_handoff["required_before_submit"]
     )
-    assert trend_handoff["frontend_action_enabled"] is False
+    assert trend_handoff["owner_action_enabled"] is False
     assert trend_handoff["read_model_submits_authorization"] is False
     assert trend_handoff["creates_authorization"] is False
     assert trend_handoff["creates_execution_intent"] is False
@@ -4682,7 +4793,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
         if item["family"] == "Trend"
     }
     assert len(trend_request_rows) == 5
-    assert trend_request_rows["create_admission_request"]["owner_scope_verdict"] == (
+    assert trend_request_rows["create_admission_request"]["owner_scope_status"] == (
         "complete_dry_run_only"
     )
     assert "strategy_family_version_id" not in trend_request_rows[
@@ -4691,7 +4802,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert "playbook_id" not in trend_request_rows[
         "create_admission_request"
     ]["unresolved_refs"]
-    assert "evidence_packet_id" in trend_request_rows[
+    assert "admission_evidence_id" in trend_request_rows[
         "create_admission_request"
     ]["unresolved_refs"]
     assert trend_request_rows["create_admission_request"]["not_submitted"] is True
@@ -4711,14 +4822,14 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert trend_final_gate["final_gate_reason"] == (
         "backend_final_gate_requires_authorization_and_live_preflight"
     )
-    assert trend_final_gate["owner_scope_verdict"] == "complete_dry_run_only"
+    assert trend_final_gate["owner_scope_status"] == "complete_dry_run_only"
     assert final_gate_checks["owner_scope_complete"]["status"] == "pass"
     assert final_gate_checks["official_action_api_candidate_supported"]["status"] == "pass"
     assert final_gate_checks["backend_final_gate_actionable"]["status"] == "block"
     assert "BoundedLiveAuthorization" in trend_final_gate["blocking_stages"]
     assert "ExecutionIntent" in trend_final_gate["blocking_stages"]
     assert trend_final_gate["backend_actionable"] is False
-    assert trend_final_gate["frontend_action_enabled"] is False
+    assert trend_final_gate["owner_action_enabled"] is False
     assert trend_final_gate["may_execute_live"] is False
     assert trend_final_gate["creates_authorization"] is False
     assert trend_final_gate["creates_execution_intent"] is False
@@ -4728,13 +4839,14 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert trend_final_gate["mutates_pg"] is False
     assert trend_final_gate["exchange_write_action"] is False
     decision_by_family = {
-        item["family"]: item for item in payload["data"]["production_action_decision_matrix"]
+        item["family"]: item for item in payload["data"]["production_action_result_matrix"]
     }
     trend_decision = decision_by_family["Trend"]
-    assert trend_decision["decision"] == "do_not_execute"
+    assert "decision" not in trend_decision
+    assert trend_decision["command_result"] == "do_not_execute"
     assert trend_decision["selection_status"] == "not_selected_for_live_action"
     assert trend_decision["reason"] == "backend_final_gate_not_actionable"
-    assert trend_decision["owner_scope_verdict"] == "complete_dry_run_only"
+    assert trend_decision["owner_scope_status"] == "complete_dry_run_only"
     assert trend_decision["final_gate_reason"] == (
         "backend_final_gate_requires_authorization_and_live_preflight"
     )
@@ -4742,7 +4854,7 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert "execution_intent" in trend_decision["missing_evidence"]
     assert trend_decision["live_action_taken"] is False
     assert trend_decision["backend_actionable"] is False
-    assert trend_decision["frontend_action_enabled"] is False
+    assert trend_decision["owner_action_enabled"] is False
     assert trend_decision["may_execute_live"] is False
     assert trend_decision["creates_authorization"] is False
     assert trend_decision["creates_execution_intent"] is False
@@ -4768,24 +4880,24 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert audit_by_requirement["production_capital_boundary"]["status"] == (
         "PASS_WITH_CONSTRAINT"
     )
-    assert audit_by_requirement["live_action_decision"]["status"] == "BLOCKED"
-    assert "scope_review.verdict=complete_dry_run_only" in audit_by_requirement[
+    assert audit_by_requirement["live_action_result"]["status"] == "BLOCKED"
+    assert "scope_review.status=complete_dry_run_only" in audit_by_requirement[
         "production_capital_boundary"
     ]["evidence_refs"]
-    assert "production_action_decision_matrix" in audit_by_requirement[
-        "live_action_decision"
+    assert "production_action_result_matrix" in audit_by_requirement[
+        "live_action_result"
     ]["evidence_refs"]
-    assert audit_by_requirement["live_action_decision"]["places_order"] is False
-    assert audit_by_requirement["live_action_decision"]["mutates_pg"] is False
-    bridge_statuses = {
-        item["bridge_method"]: item for item in payload["data"]["bridge_artifact_statuses"]
+    assert audit_by_requirement["live_action_result"]["places_order"] is False
+    assert audit_by_requirement["live_action_result"]["mutates_pg"] is False
+    projection_statuses = {
+        item["evidence_method"]: item for item in payload["data"]["lifecycle_evidence_statuses"]
     }
-    assert bridge_statuses["BudgetEnvelopeDraft"]["row_statuses"]["Trend"] == (
+    assert projection_statuses["BudgetEnvelopeDraft"]["row_statuses"]["Trend"] == (
         "scope_complete_dry_run_only"
     )
-    assert bridge_statuses["FinalGateDryRun"]["row_statuses"]["Trend"] == "blocked"
+    assert projection_statuses["FinalGateDryRun"]["row_statuses"]["Trend"] == "blocked"
     trend = next(item for item in payload["data"]["families"] if item["family"] == "Trend")
-    assert trend["scope_review"]["verdict"] == "complete_dry_run_only"
+    assert trend["scope_review"]["status"] == "complete_dry_run_only"
     assert trend["budget_envelope_draft"]["status"] == "scope_complete_dry_run_only"
     assert trend["budget_envelope_draft"]["scope"]["symbol"] == "SOL/USDT:USDT"
     assert trend["budget_envelope_draft"]["provided_scope_fields"] == [
@@ -4865,10 +4977,10 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert "complete_matched_owner_scope_required" not in trend["action_candidate"]["blockers"]
     assert "candidate_carrier_not_supported_by_owner_trial_flow" not in trend["action_candidate"]["blockers"]
     assert "backend_final_gate_actionable_true_required" in trend["action_candidate"]["blockers"]
-    assert trend["admission_verdict"]["verdict"] == "blocked_backend_final_gate"
-    assert trend["admission_verdict"]["may_execute_live"] is False
-    assert "AuthorizationDraft" in trend["admission_verdict"]["completed_stages"]
-    assert "BoundedLiveAuthorization" in trend["admission_verdict"]["blocked_stages"]
+    assert trend["admission_outcome"]["status"] == "blocked_backend_final_gate"
+    assert trend["admission_outcome"]["may_execute_live"] is False
+    assert "AuthorizationDraft" in trend["admission_outcome"]["completed_stages"]
+    assert "BoundedLiveAuthorization" in trend["admission_outcome"]["blocked_stages"]
     trend_gate_blocker_ids = {record["id"] for record in trend["gate_blocker_records"]}
     assert f"{trend['blocker_record']['id']}-SCOPE" not in trend_gate_blocker_ids
     assert f"{trend['blocker_record']['id']}-ACTION-API" not in trend_gate_blocker_ids
@@ -4880,10 +4992,10 @@ def test_strategy_family_admission_state_reviews_owner_scope_query_without_enabl
     assert admission_request_draft["payload_template"]["account_facts_snapshot_json"]["owner_scope"][
         "symbol"
     ] == "SOL/USDT:USDT"
-    assert "evidence_packet_id" in admission_request_draft["unresolved_refs"]
+    assert "admission_evidence_id" in admission_request_draft["unresolved_refs"]
     assert admission_request_draft["not_submitted"] is True
     assert trend["backend_actionable"] is False
-    assert trend["frontend_action_enabled"] is False
+    assert trend["owner_action_enabled"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert exchange.open_order_calls == []
@@ -5168,21 +5280,29 @@ def test_review_state_surfaces_right_tail_review_metrics(monkeypatch):
     assert review["trade_reviews"][0]["classification"] == "right_tail_win"
     assert review["trade_reviews"][0]["mfe_pct"] == "18.0000"
     assert review["trade_reviews"][0]["mae_pct"] == "-2.0000"
-    assert review["closed_trade_review_packet_summary"]["packet_count"] == 2
-    assert review["closed_trade_review_packet_summary"]["reviewed_packet_count"] == 2
-    assert review["closed_trade_review_packets"][0]["source_review_id"] == (
+    assert review["closed_trade_review_artifact_summary"]["artifact_count"] == 2
+    assert (
+        review["closed_trade_review_artifact_summary"]["reviewed_artifact_count"]
+        == 2
+    )
+    assert "closed_trade_review_packet_summary" not in review
+    assert "closed_trade_review_packets" not in review
+    assert review["closed_trade_review_artifacts"][0]["source_review_id"] == (
         "live-review-tail-win"
     )
-    assert review["closed_trade_review_packets"][0]["runtime_instance_id"] == (
+    assert review["closed_trade_review_artifacts"][0]["runtime_instance_id"] == (
         "runtime-cpm-1"
     )
-    assert review["closed_trade_review_packets"][0]["order_candidate_id"] == (
+    assert review["closed_trade_review_artifacts"][0]["order_candidate_id"] == (
         "candidate-cpm-1"
     )
-    assert review["closed_trade_review_packets"][0]["not_trading_authority"] is True
-    assert review["closed_trade_review_packets"][0]["places_order"] is False
-    assert review["closed_trade_review_packets"][0]["creates_execution_intent"] is False
-    assert review["closed_trade_review_packets"][0]["calls_exchange"] is False
+    assert review["closed_trade_review_artifacts"][0]["not_trading_authority"] is True
+    assert review["closed_trade_review_artifacts"][0]["places_order"] is False
+    assert (
+        review["closed_trade_review_artifacts"][0]["creates_execution_intent"]
+        is False
+    )
+    assert review["closed_trade_review_artifacts"][0]["calls_exchange"] is False
     assert review["no_action_guarantee"]["places_order"] is False
     assert review["no_action_guarantee"]["creates_execution_intent"] is False
     assert review["no_action_guarantee"]["calls_exchange"] is False
@@ -5254,7 +5374,6 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
         "status": "owner_notified",
         "wakeup_status": "prepared_shadow_evidence_ready_for_owner_review",
         "operator_status": "strategy_group_signal_review_available",
-        "status_packet_status": "ok",
         "blockers": [],
         "warnings": [],
         "notification": {
@@ -5280,9 +5399,10 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
             "next_recover_condition": (
                 "official_final_gate_preflight_passes_with_current_facts"
             ),
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "run_official_action_time_final_gate_preflight"
             ),
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "no_real_submit_until_final_gate_pass",
             "can_continue_without_owner_chat": True,
             "requires_action_time_final_gate": True,
@@ -5291,9 +5411,9 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     }
     files = {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "prepared_shadow_evidence_ready_for_owner_review"},
-        "operator-packet.json": {"status": "strategy_group_signal_review_available"},
-        "status-packet.json": {"status": "ok", "blockers": [], "warnings": []},
+        "wakeup-evidence.json": {"status": "prepared_shadow_evidence_ready_for_owner_review"},
+        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
+        "status-artifact.json": {"status": "ok", "blockers": [], "warnings": []},
         "notification-state.json": {"last_notified_event_key": "ready-event"},
     }
     for name, payload in files.items():
@@ -5314,6 +5434,17 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["deployment_readiness"]["status"] == "ready"
     assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
     assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
+    assert payload["data"]["deployment_readiness"]["systemd_timer"] == (
+        "verified_by_deployment_readiness_artifact"
+    )
+    assert (
+        payload["data"]["deployment_readiness"]["systemd_timer"]
+        != "verified_by_deployment_readiness_packet"
+    )
+    assert "status_packet" not in payload["data"]
+    assert "status_packet_status" not in payload["data"]["watcher"]
+    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == "ok"
+    assert payload["data"]["watcher_status_evidence"]["status"] == "ok"
     assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
     assert payload["data"]["post_signal_resume"]["status"] == (
         "ready_for_action_time_final_gate"
@@ -5321,20 +5452,23 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["post_signal_resume"]["current_gate"] == (
         "action_time_final_gate"
     )
+    assert "next_chain" not in payload["data"]["post_signal_resume"]
     assert payload["data"]["action_time_resume"]["status"] == (
         "ready_for_action_time_final_gate"
     )
     assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
         "run_official_action_time_final_gate_preflight"
     ]
-    assert payload["data"]["post_signal_auto_resume"]["automatic_recovery_action"] == (
+    assert "automatic_recovery_action" not in payload["data"]["post_signal_auto_resume"]
+    assert payload["data"]["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
     assert payload["data"]["owner_state"]["blocked_at"] == "FinalGate"
     assert payload["data"]["owner_state"]["blocked_reason"] == (
         "action_time_final_gate_not_run_yet"
     )
-    assert payload["data"]["owner_state"]["automatic_recovery_action"] == (
+    assert "automatic_recovery_action" not in payload["data"]["owner_state"]
+    assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
     assert payload["data"]["owner_state"]["downgrade_mode"] == (
@@ -5343,14 +5477,289 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["why_not_executable"] == [
         "action_time_final_gate_not_run_yet"
     ]
-    assert payload["data"]["next_safe_checkpoint"] == (
+    assert "next_safe_checkpoint" not in payload["data"]
+    assert payload["data"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
+    assert payload["data"]["checkpoint_source"] == "owner_state"
     assert payload["data"]["post_signal_resume"]["post_signal_auto_resume"][
         "can_continue_without_owner_chat"
     ] is True
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def test_runtime_signal_watcher_status_prefers_allowed_action_over_legacy_recovery_text(
+    monkeypatch, tmp_path
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+    stale_auto_resume = {
+        "status": "ready_for_action_time_final_gate",
+        "blocked_at": "FinalGate",
+        "blocked_reason": "action_time_final_gate_not_run_yet",
+        "next_recover_condition": (
+            "official_final_gate_preflight_passes_with_current_facts"
+        ),
+        "automatic_recovery_action": "legacy_recovery_text_must_not_drive_action",
+        "downgrade_mode": "no_real_submit_until_final_gate_pass",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+    }
+    action_time_resume = {
+        "status": "ready_for_action_time_final_gate",
+        "next_step": "legacy_next_step_must_not_drive_action",
+        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "shadow_candidate_id": "shadow-candidate-1",
+        "prepared_authorization_id": "auth-ready-1",
+        "allowed_auto_actions": ["run_official_action_time_final_gate_preflight"],
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": "not_run",
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "owner_notified",
+        "wakeup_status": "prepared_shadow_evidence_ready_for_owner_review",
+        "operator_status": "strategy_group_signal_review_available",
+        "blockers": [],
+        "warnings": [],
+        "notification": {
+            "required": True,
+            "configured": True,
+            "attempted": True,
+            "sent": True,
+            "duplicate_suppressed": False,
+            "skipped_reason": None,
+        },
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+        "post_signal_auto_resume": stale_auto_resume,
+    }
+    files = {
+        "watcher-tick.json": tick,
+        "wakeup-evidence.json": {
+            "status": "prepared_shadow_evidence_ready_for_owner_review"
+        },
+        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
+        "status-artifact.json": {"status": "ok", "blockers": [], "warnings": []},
+        "notification-state.json": {"last_notified_event_key": "ready-event"},
+        "post-signal-resume-pack.json": {
+            "status": "ready_for_action_time_final_gate",
+            "can_continue_steps_5_8": True,
+            "post_signal_auto_resume": stale_auto_resume,
+            "action_time_resume": action_time_resume,
+            "owner_state": {
+                "status": "ready_for_action_time_final_gate",
+                "blocker_class": "none",
+                "blocked_at": "FinalGate",
+                "blocked_reason": "action_time_final_gate_not_run_yet",
+                "next_recover_condition": (
+                    "official_final_gate_preflight_passes_with_current_facts"
+                ),
+                "automatic_recovery_action": (
+                    "legacy_recovery_text_must_not_drive_action"
+                ),
+                "downgrade_mode": "no_real_submit_until_final_gate_pass",
+            },
+        },
+    }
+    for name, payload in files.items():
+        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert "automatic_recovery_action" not in payload["data"]["post_signal_auto_resume"]
+    assert payload["data"]["action_time_resume"]["next_step"] == (
+        "legacy_next_step_must_not_drive_action"
+    )
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
+        "run_official_action_time_final_gate_preflight"
+    ]
+    assert "automatic_recovery_action" not in payload["data"]["owner_state"]
+    assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert "next_safe_checkpoint" not in payload["data"]
+    assert payload["data"]["non_authority_checkpoint"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+
+
+def test_runtime_signal_watcher_projection_helpers_keep_legacy_status_as_evidence():
+    from src.application.readmodels.trading_console import (
+        _RuntimeSignalWatcherSafetyProjection,
+        _RuntimeSignalWatcherStatusProjection,
+    )
+
+    projection = _RuntimeSignalWatcherStatusProjection(
+        watcher_tick={
+            "status": "waiting_for_market",
+            "blockers": [],
+            "warnings": [],
+        },
+        watcher_status_evidence={
+            "status": "ok",
+            "latest_status": "watching_no_signal",
+            "runtime_signal_summaries": [{"runtime_instance_id": "runtime-1"}],
+        },
+        wakeup_status="operator_evidence_needs_review",
+        operator_status="operator_review",
+        watcher_status_evidence_status="ok",
+        post_signal_auto_resume={"status": "waiting_for_market"},
+    ).to_dict()
+    safety = _RuntimeSignalWatcherSafetyProjection(
+        safety={"exchange_write_called": False, "runtime_budget_mutated": False},
+        unsafe_flags=[],
+    ).to_dict()
+
+    assert projection["watcher_status_evidence_status"] == "ok"
+    assert projection["runtime_signal_summaries"] == [
+        {"runtime_instance_id": "runtime-1"}
+    ]
+    assert "status_packet" not in projection
+    assert "status_packet_status" not in projection
+    assert safety["watcher_status_read_model_only"] is True
+    assert safety["places_order"] is False
+    assert safety["mutates_pg"] is False
+
+
+def test_runtime_signal_watcher_status_ignores_legacy_tick_status_packet_status(
+    monkeypatch, tmp_path
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "watching_no_signal",
+        "wakeup_status": "operator_evidence_needs_review",
+        "operator_status": "operator_review",
+        "status_packet_status": "legacy_tick_status_must_not_win",
+        "blockers": [],
+        "warnings": [],
+        "notification": {"configured": True},
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+    for name, packet in {
+        "watcher-tick.json": tick,
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "operator_review"},
+        "status-artifact.json": {
+            "status": "source_status_from_status_evidence",
+            "blockers": [],
+            "warnings": [],
+        },
+        "notification-state.json": {"last_notified_event_key": "waiting-event"},
+    }.items():
+        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == (
+        "source_status_from_status_evidence"
+    )
+    assert payload["data"]["watcher_status_evidence"]["status"] == (
+        "source_status_from_status_evidence"
+    )
+    assert "status_packet_status" not in payload["data"]["watcher"]
+
+
+def test_runtime_signal_watcher_status_ignores_legacy_watcher_packet_files(
+    monkeypatch, tmp_path
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "watching_no_signal",
+        "blockers": [],
+        "warnings": [],
+        "notification": {"configured": True},
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+    for name, artifact in {
+        "watcher-tick.json": tick,
+        "wakeup-packet.json": {"status": "operator_evidence_needs_review"},
+        "operator-packet.json": {"status": "operator_review"},
+        "status-artifact.json": {
+            "status": "source_status_from_status_evidence",
+            "blockers": [],
+            "warnings": [],
+        },
+        "notification-state.json": {"last_notified_event_key": "waiting-event"},
+    }.items():
+        (report_dir / name).write_text(json.dumps(artifact), encoding="utf-8")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    file_status = payload["data"]["deployment_readiness"]["file_status"]
+    assert file_status["wakeup_evidence"]["path"].endswith("wakeup-evidence.json")
+    assert file_status["operator_evidence"]["path"].endswith("operator-evidence.json")
+    assert file_status["wakeup_evidence"]["present"] is False
+    assert file_status["operator_evidence"]["present"] is False
+    assert payload["data"]["watcher"]["wakeup_status"] == "unknown"
+    assert payload["data"]["watcher"]["operator_status"] == "unknown"
+    assert payload["data"]["deployment_readiness"]["status"] == "evidence_missing"
 
 
 def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
@@ -5400,9 +5809,8 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
     tick = {
         "scope": "runtime_signal_watcher_tick",
         "status": "watching_no_signal",
-        "wakeup_status": "operator_packet_needs_review",
+        "wakeup_status": "operator_evidence_needs_review",
         "operator_status": "operator_review",
-        "status_packet_status": "ok",
         "blockers": [
             "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
         ],
@@ -5427,9 +5835,9 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
     }
     files = {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
-        "operator-packet.json": {"status": "operator_review"},
-        "status-packet.json": {
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "operator_review"},
+        "status-artifact.json": {
             "status": "ok",
             "blockers": tick["blockers"],
             "warnings": [],
@@ -5471,6 +5879,7 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
     assert payload["data"]["post_signal_resume"]["current_gate"] == (
         "waiting_for_fresh_strategy_signal"
     )
+    assert "next_chain" not in payload["data"]["post_signal_resume"]
     assert payload["data"]["post_signal_resume"]["raw_resume_pack_status"] == (
         "waiting_for_market"
     )
@@ -5481,11 +5890,13 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
     assert payload["data"]["owner_state"]["blocked_reason"] == (
         "no_fresh_strategy_signal"
     )
-    assert payload["data"]["owner_state"]["automatic_recovery_action"] == (
+    assert "automatic_recovery_action" not in payload["data"]["owner_state"]
+    assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
         "continue_watcher_observation"
     )
     assert payload["data"]["why_not_executable"] == ["no_fresh_strategy_signal"]
-    assert payload["data"]["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert "next_safe_checkpoint" not in payload["data"]
+    assert payload["data"]["non_authority_checkpoint"] == "continue_watcher_observation"
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
@@ -5514,10 +5925,10 @@ def _write_strategy_group_handoff(path: Path, strategy_group_id: str, *, default
                 },
                 "risk_defaults": {"max_notional_usdt": 8, "leverage": 1},
                 "hard_stops": ["active_position", "open_order"],
-                "sample_signal_packet": {"status": "ready_for_shadow_candidate_prepare"},
-                "sample_no_signal_packet": {"status": "no_signal"},
-                "sample_stale_signal_packet": {"status": "stale_signal"},
-                "sample_conflict_packet": {"status": "signal_conflict"},
+                "sample_signal_artifact": {"status": "ready_for_shadow_candidate_prepare"},
+                "sample_no_signal_artifact": {"status": "no_signal"},
+                "sample_stale_signal_artifact": {"status": "stale_signal"},
+                "sample_conflict_artifact": {"status": "signal_conflict"},
             }
         ),
         encoding="utf-8",
@@ -5531,7 +5942,7 @@ def _write_strategy_group_handoff_supplements(base: Path) -> None:
         "main-control-conflict-policy.md",
         "main-control-watcher-cadence.md",
         "main-control-handoff-index.md",
-        "main-control-task-card.md",
+        "main-control-task-item.md",
     ]:
         (base / name).write_text(f"# {name}\n", encoding="utf-8")
 
@@ -5578,6 +5989,51 @@ def test_strategy_group_handoff_intake_returns_picker_readiness(monkeypatch, tmp
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def test_strategy_group_handoff_intake_marks_prebuilt_source_as_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    artifact_path = tmp_path / "strategy-group-intake-projection.json"
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "scope": "strategy_group_intake_main_control_projection",
+                "status": "ready_for_main_control_intake",
+                "source_anchor": {"commit": "prebuilt"},
+                "counts": {"strategy_groups": 1},
+                "strategy_picker": [],
+                "required_facts_matrix": [],
+                "watcher_scope": [],
+                "blockers": [],
+                "safety_invariants": {
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH", str(artifact_path))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing"))
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/strategy-group-handoff-intake")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["data"]["intake_evidence_source"] == {
+        "path": str(artifact_path),
+        "present": True,
+        "source": "prebuilt_strategy_group_intake_evidence",
+    }
+    assert "handoff_packet_source" not in payload["data"]
 
 
 def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
@@ -5679,9 +6135,8 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     tick = {
         "scope": "runtime_signal_watcher_tick",
         "status": "owner_attention_pending",
-        "wakeup_status": "operator_packet_needs_review",
+        "wakeup_status": "operator_evidence_needs_review",
         "operator_status": "operator_review",
-        "status_packet_status": "ok",
         "blockers": [
             "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
         ],
@@ -5718,9 +6173,9 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     }
     for name, packet in {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
-        "operator-packet.json": {"status": "operator_review"},
-        "status-packet.json": {"status": "ok", "blockers": tick["blockers"], "warnings": []},
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "operator_review"},
+        "status-artifact.json": {"status": "ok", "blockers": tick["blockers"], "warnings": []},
         "notification-state.json": {"last_notified_event_key": "waiting-event"},
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
@@ -5746,17 +6201,18 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     assert payload["data"]["pilot_selection"]["selected_universe"] == ["BTCUSDT", "ETHUSDT"]
     assert payload["data"]["owner_state"]["blocked_at"] == "watcher_signal"
     assert payload["data"]["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
-    assert payload["data"]["owner_action_card"]["headline"] == (
+    assert payload["data"]["owner_action_item"]["headline"] == (
         "Watcher is active; waiting for a fresh strategy signal."
     )
-    assert payload["data"]["owner_action_card"]["blocked_at"] == "watcher_signal"
-    assert payload["data"]["owner_action_card"]["blocked_reason"] == (
+    assert payload["data"]["owner_action_item"]["blocked_at"] == "watcher_signal"
+    assert payload["data"]["owner_action_item"]["blocked_reason"] == (
         "no_fresh_strategy_signal"
     )
-    assert payload["data"]["owner_action_card"]["owner_next_action"] == (
+    assert "owner_next_action" not in payload["data"]["owner_action_item"]
+    assert payload["data"]["owner_action_item"]["owner_status_checkpoint"] == (
         "none_wait_for_signal_notification"
     )
-    assert payload["data"]["owner_action_card"]["no_packet_read_required"] is True
+    assert payload["data"]["owner_action_item"]["no_raw_evidence_review_required"] is True
     assert payload["data"]["why_not_executable"] == [
         "no_fresh_strategy_signal",
         "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal",
@@ -5766,14 +6222,17 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     }
     assert readiness_by_gate["FinalGate"]["class"] == "not_reached"
     assert readiness_by_gate["Operation Layer"]["class"] == "not_reached"
-    assert payload["data"]["control_board"]["strategy_group_row"]["next_action"] == (
+    assert "next_action" not in payload["data"]["control_board"]["strategy_group_row"]
+    assert payload["data"]["control_board"]["strategy_group_row"][
+        "non_authority_checkpoint"
+    ] == (
         "continue_watcher_observation"
     )
     assert payload["data"]["post_signal_auto_resume"]["status"] == "waiting_for_market"
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
 
 
-def test_owner_console_source_readiness_returns_single_frontend_contract(
+def test_owner_console_source_readiness_returns_owner_runtime_projection(
     monkeypatch,
     tmp_path,
 ):
@@ -5799,7 +6258,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                     "available_balance_present": True,
                     "available_balance_positive": True,
                     "total_wallet_balance_present": True,
-                    "can_trade": True,
+                    "exchange_account_trade_permission": True,
                 },
                 "active_position": {
                     "status": "no_active_position",
@@ -5870,9 +6329,8 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     tick = {
         "scope": "runtime_signal_watcher_tick",
         "status": "watching_no_signal",
-        "wakeup_status": "operator_packet_needs_review",
+        "wakeup_status": "operator_evidence_needs_review",
         "operator_status": "operator_review",
-        "status_packet_status": "ok",
         "blockers": [
             "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
         ],
@@ -5897,9 +6355,9 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     }
     for name, packet in {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
-        "operator-packet.json": {"status": "operator_review"},
-        "status-packet.json": {
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "operator_review"},
+        "status-artifact.json": {
             "status": "ok",
             "blockers": tick["blockers"],
             "warnings": [],
@@ -5941,15 +6399,15 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "post_submit_closed_loop_evidence_guard_checked": True,
                 "operation_layer_submit_result_identity_guard_checked": True,
                 "post_submit_finalize_result_identity_guard_checked": True,
-                "non_executing_prepare_auto_bridge_checked": True,
+                "execution_attempt_rehearsal_prepare_checked": True,
                 "operation_layer_evidence_relay_checked": True,
-                "scoped_pipeline_operation_layer_handoff_checked": True,
+                "scoped_pipeline_operation_layer_submit_projection_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
                 "shared_runtime_pipeline_checked": True,
                 "common_execution_chain_reuse_checked": True,
                 "strategygroup_adapter_boundary_checked": True,
-                "strategy_handoff_no_execution_pipeline_fields_checked": True,
+                "strategy_intake_no_execution_pipeline_fields_checked": True,
                 "runtime_tier_policy_checked": True,
                 "only_mpg_tiny_real_order_eligible_checked": True,
                 "new_strategygroups_default_observe_only_checked": True,
@@ -5969,7 +6427,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "owner_state": {
                 "label": "等待机会",
                 "detail": "系统健康，当前等待市场机会",
-                "next_safe_checkpoint": "continue_watcher_observation",
+                "non_authority_checkpoint": "continue_watcher_observation",
             },
             "blockers": [],
             "checks": {
@@ -6099,6 +6557,9 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
     assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
     assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道暂不可用"
+    funds_summary = payload["data"]["source_health"]["funds"]["summary"]
+    assert funds_summary["exchange_account_trade_permission"] is True
+    assert "can_trade" not in funds_summary
     assert payload["data"]["runtime_interaction"] == {
         "level": "L1_daily_check_from_snapshot",
         "owner_label": "只读低交互",
@@ -6135,7 +6596,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert dry_run_summary["common_execution_chain_reuse_checked"] is True
     assert dry_run_summary["strategygroup_adapter_boundary_checked"] is True
     assert (
-        dry_run_summary["strategy_handoff_no_execution_pipeline_fields_checked"]
+        dry_run_summary["strategy_intake_no_execution_pipeline_fields_checked"]
         is True
     )
     assert dry_run_summary["runtime_tier_policy_checked"] is True
@@ -6169,7 +6630,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         dry_run_summary["post_submit_finalize_result_identity_guard_checked"]
         is True
     )
-    assert dry_run_summary["non_executing_prepare_auto_bridge_checked"] is True
+    assert dry_run_summary["execution_attempt_rehearsal_prepare_checked"] is True
     assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
     assert set(dry_run_summary["required_checks"]) == {
         "required_scenarios_present",
@@ -6177,7 +6638,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "dangerous_effects_absent",
         "disabled_smoke_not_real_execution_proof",
         "operation_layer_evidence_relay_checked",
-        "scoped_pipeline_operation_layer_handoff_checked",
+        "scoped_pipeline_operation_layer_submit_projection_checked",
         "fresh_signal_fast_auto_chain_checked",
         "legacy_local_registration_probe_tolerance_checked",
         "mock_operation_layer_closed_loop_checked",
@@ -6188,11 +6649,11 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "post_submit_closed_loop_evidence_guard_checked",
         "operation_layer_submit_result_identity_guard_checked",
         "post_submit_finalize_result_identity_guard_checked",
-        "non_executing_prepare_auto_bridge_checked",
+        "execution_attempt_rehearsal_prepare_checked",
         "shared_runtime_pipeline_checked",
         "common_execution_chain_reuse_checked",
         "strategygroup_adapter_boundary_checked",
-        "strategy_handoff_no_execution_pipeline_fields_checked",
+        "strategy_intake_no_execution_pipeline_fields_checked",
         "runtime_tier_policy_checked",
         "only_mpg_tiny_real_order_eligible_checked",
         "new_strategygroups_default_observe_only_checked",
@@ -6213,14 +6674,10 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     ]
     assert len(payload["data"]["real_order_readiness"]["matrix"]) == 12
     assert len(payload["data"]["strategy_groups"]) == 5
-    assert payload["data"]["frontend_contract"] == {
-        "single_api_source": True,
-        "hide_strategy_groups_when_runtime_degraded": False,
-        "ready_empty_is_not_unavailable": True,
-        "owner_homepage_internal_gate_terms_allowed": False,
-    }
+    assert "front" not in json.dumps(payload["data"], sort_keys=True)
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+    _assert_owner_primary_projection_has_no_internal_gate_terms(payload)
 
     (report_dir / "strategygroup-runtime-goal-status.json").write_text(
         json.dumps(
@@ -6233,7 +6690,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                         "watcher 已报告 runtime attempt 或 scope 接力异常，"
                         "先修复自动观察链路"
                     ),
-                    "next_safe_checkpoint": "repair_runtime_attempt_renewal_or_scope",
+                    "non_authority_checkpoint": "repair_runtime_attempt_renewal_or_scope",
                 },
                 "blockers": [
                     "watcher_tick:loop_command_failed:2",
@@ -6291,6 +6748,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         ]
         == 1
     )
+    _assert_owner_primary_projection_has_no_internal_gate_terms(degraded_payload)
 
     (report_dir / "strategygroup-runtime-goal-status.json").write_text(
         json.dumps(
@@ -6300,7 +6758,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "owner_state": {
                     "label": "需要介入",
                     "detail": "live facts 尚未 ready，不能进入实盘动作边界",
-                    "next_safe_checkpoint": "refresh_strategy_group_live_facts_readiness",
+                    "non_authority_checkpoint": "refresh_strategy_group_live_facts_readiness",
                 },
                 "blockers": ["live_facts_not_ready"],
                 "real_order_boundary": {
@@ -6343,6 +6801,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "submit_blocking_keys"
         ]
     )
+    _assert_owner_primary_projection_has_no_internal_gate_terms(facts_blocked_payload)
 
 
 def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation():
@@ -6372,6 +6831,258 @@ def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation()
     assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
 
 
+def test_owner_console_owner_state_prefers_typed_checkpoint_over_legacy_action_text():
+    from src.application.readmodels.trading_console import _owner_console_owner_state
+
+    owner_state = _owner_console_owner_state(
+        critical_unavailable=[],
+        runtime={
+            "owner_state": {
+                "blocked_reason": "source_readiness_degraded",
+                "automatic_recovery_action": "legacy_runtime_recovery_text",
+            }
+        },
+        watcher={
+            "owner_state": {
+                "blocked_reason": "source_readiness_degraded",
+                "non_authority_checkpoint": "refresh_runtime_goal_status",
+                "automatic_recovery_action": "legacy_watcher_recovery_text",
+            }
+        },
+    )
+
+    assert owner_state == {
+        "status": "temporarily_unavailable",
+        "label": "暂不可用",
+        "reason": "source_readiness_degraded",
+        "non_authority_checkpoint": "refresh_runtime_goal_status",
+        "checkpoint_source": "owner_console_owner_state_projection",
+        "needs_owner_action": False,
+    }
+    assert "next_action" not in owner_state
+
+
+def test_owner_console_runtime_goal_overlay_uses_non_authority_checkpoint():
+    from src.application.readmodels.trading_console import (
+        _owner_console_apply_runtime_goal_status_overlay,
+    )
+
+    owner_state = _owner_console_apply_runtime_goal_status_overlay(
+        owner_state={
+            "status": "running",
+            "label": "运行中",
+            "reason": "sources_ready",
+        },
+        runtime_goal_status={
+            "status": "hard_safety_stop",
+            "owner_state": {
+                "detail": "active position requires manual resolution",
+                "non_authority_checkpoint": "resolve_active_position_before_submit",
+            },
+        },
+    )
+
+    assert owner_state == {
+        "status": "needs_intervention",
+        "label": "需要介入",
+        "reason": "active position requires manual resolution",
+        "non_authority_checkpoint": "resolve_active_position_before_submit",
+        "checkpoint_source": "runtime_goal_status_overlay",
+        "needs_owner_action": True,
+        "runtime_goal_status": "hard_safety_stop",
+    }
+    assert "next_action" not in owner_state
+
+
+def test_owner_console_detail_source_projection_preserves_boundary_shape():
+    from src.application.readmodels.owner_projection import (
+        OwnerConsoleOwnerStateProjection,
+        OwnerConsoleRealOrderReadinessProjection,
+        owner_console_binary_label_source,
+        owner_console_detail_source,
+        owner_console_owner_state_projection,
+        owner_non_authority_checkpoint,
+        owner_state_with_explicit_action_authority,
+    )
+
+    summary = {"checked": True, "blockers": ["tokyo_ssh_publickey_denied"]}
+
+    source = owner_console_detail_source(
+        status="degraded",
+        owner_label="部署通道暂不可用",
+        reason="tokyo_ssh_publickey_denied",
+        count=2,
+        summary=summary,
+    )
+    summary["blockers"].append("mutated_after_projection")
+
+    assert source == {
+        "status": "degraded",
+        "owner_label": "部署通道暂不可用",
+        "reason": "tokyo_ssh_publickey_denied",
+        "count": 2,
+        "summary": {
+            "checked": True,
+            "blockers": ["tokyo_ssh_publickey_denied"],
+        },
+    }
+    assert owner_console_binary_label_source(
+        status="ready",
+        ready_label="运行中",
+        not_ready_label="暂不可用",
+        reason="unit_ready",
+    ) == {
+        "status": "ready",
+        "owner_label": "运行中",
+        "reason": "unit_ready",
+    }
+    assert owner_console_binary_label_source(
+        status="degraded",
+        ready_label="运行中",
+        not_ready_label="暂不可用",
+        reason="unit_degraded",
+    ) == {
+        "status": "degraded",
+        "owner_label": "暂不可用",
+        "reason": "unit_degraded",
+    }
+    assert OwnerConsoleOwnerStateProjection(
+        status="waiting_for_opportunity",
+        label="等待机会",
+        reason="no_fresh_strategy_signal",
+        non_authority_checkpoint="continue_watcher_observation",
+    ).to_dict() == {
+        "status": "waiting_for_opportunity",
+        "label": "等待机会",
+        "reason": "no_fresh_strategy_signal",
+        "non_authority_checkpoint": "continue_watcher_observation",
+        "checkpoint_source": "owner_console_owner_state_projection",
+        "needs_owner_action": False,
+    }
+    assert owner_console_owner_state_projection(
+        status="needs_intervention",
+        label="需要介入",
+        reason="active_position_resolution",
+        non_authority_checkpoint="resolve_active_position_before_submit",
+        checkpoint_source="runtime_goal_status_overlay",
+        needs_owner_action=True,
+    ) == {
+        "status": "needs_intervention",
+        "label": "需要介入",
+        "reason": "active_position_resolution",
+        "non_authority_checkpoint": "resolve_active_position_before_submit",
+        "checkpoint_source": "runtime_goal_status_overlay",
+        "needs_owner_action": True,
+    }
+    owner_state = {
+        "status": "ready_for_action_time_final_gate",
+        "automatic_recovery_action": "legacy_recovery_text",
+    }
+    assert owner_state_with_explicit_action_authority(
+        owner_state=owner_state,
+        action_time_resume={
+            "allowed_auto_actions": [
+                "run_official_action_time_final_gate_preflight"
+            ]
+        },
+    ) == {
+        "status": "ready_for_action_time_final_gate",
+        "non_authority_checkpoint": "run_official_action_time_final_gate_preflight",
+    }
+    assert owner_state_with_explicit_action_authority(
+        owner_state=owner_state,
+        action_time_resume={"allowed_auto_actions": []},
+    ) is owner_state
+    assert (
+        owner_non_authority_checkpoint(
+            {"automatic_recovery_action": "legacy_runtime_recovery_text"},
+            default="continue_watcher_observation",
+        )
+        == "continue_watcher_observation"
+    )
+    assert (
+        owner_non_authority_checkpoint(
+            {"next_safe_checkpoint": "legacy_safe_checkpoint"},
+            default="continue_watcher_observation",
+        )
+        == "continue_watcher_observation"
+    )
+    assert (
+        owner_non_authority_checkpoint(
+            {"next_action": "legacy_next_action"},
+            default="continue_watcher_observation",
+        )
+        == "continue_watcher_observation"
+    )
+    assert (
+        owner_non_authority_checkpoint(
+            {"non_authority_checkpoint": "refresh_runtime_goal_status"},
+            default="continue_watcher_observation",
+        )
+        == "refresh_runtime_goal_status"
+    )
+    assert (
+        owner_non_authority_checkpoint(
+            {"non_authority_checkpoint": "current_projection_checkpoint"},
+            default="continue_watcher_observation",
+        )
+        == "current_projection_checkpoint"
+    )
+    readiness = OwnerConsoleRealOrderReadinessProjection(
+        status="waiting_for_market",
+        owner_label="等待机会",
+        owner_detail="实盘边界健康，等待 fresh signal",
+        ready_for_real_order_action=False,
+        pass_count=4,
+        waiting_count=1,
+        blocked_count=0,
+        submit_blocking_keys=["fresh_signal"],
+        submit_blocker_review={
+            "required": False,
+            "allowed": False,
+            "project_progress_allowed": True,
+            "continue_observation_allowed": True,
+            "real_submit_allowed": False,
+            "non_authority_checkpoint": "continue_watcher_observation",
+            "blocker_keys": ["fresh_signal"],
+        },
+        non_authority_checkpoint="continue_watcher_observation",
+        matrix=[{"key": "fresh_signal", "status": "waiting_for_market"}],
+        source_health={
+            "status": "ready_empty",
+            "owner_label": "等待机会",
+            "reason": "waiting_for_market",
+        },
+    ).to_dict()
+
+    assert readiness == {
+        "status": "waiting_for_market",
+        "owner_label": "等待机会",
+        "owner_detail": "实盘边界健康，等待 fresh signal",
+        "ready_for_real_order_action": False,
+        "pass_count": 4,
+        "waiting_count": 1,
+        "blocked_count": 0,
+        "submit_blocking_keys": ["fresh_signal"],
+        "submit_blocker_review": {
+            "required": False,
+            "allowed": False,
+            "project_progress_allowed": True,
+            "continue_observation_allowed": True,
+            "real_submit_allowed": False,
+            "non_authority_checkpoint": "continue_watcher_observation",
+            "blocker_keys": ["fresh_signal"],
+        },
+        "non_authority_checkpoint": "continue_watcher_observation",
+        "matrix": [{"key": "fresh_signal", "status": "waiting_for_market"}],
+        "source_health": {
+            "status": "ready_empty",
+            "owner_label": "等待机会",
+            "reason": "waiting_for_market",
+        },
+    }
+
+
 def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields():
     from src.application.readmodels.trading_console import (
         _owner_console_real_order_readiness,
@@ -6381,9 +7092,9 @@ def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields
         {
             "status": "operation_layer_ready",
             "ready_for_real_order_action": True,
-            "next_safe_checkpoint": "call_official_operation_layer_submit",
+            "non_authority_checkpoint": "call_official_operation_layer_submit",
             "checks": {"ready_for_real_order_action": False},
-            "owner_state": {"next_safe_checkpoint": "legacy_owner_checkpoint"},
+            "owner_state": {"non_authority_checkpoint": "owner_checkpoint"},
             "real_order_boundary": {"ready_for_real_order_action": False},
             "real_order_readiness_matrix": [
                 {
@@ -6404,7 +7115,8 @@ def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields
 
     assert readiness["status"] == "ready"
     assert readiness["ready_for_real_order_action"] is True
-    assert readiness["next_safe_checkpoint"] == "call_official_operation_layer_submit"
+    assert "next_safe_checkpoint" not in readiness
+    assert readiness["non_authority_checkpoint"] == "call_official_operation_layer_submit"
     assert readiness["pass_count"] == 2
     assert readiness["submit_blocking_keys"] == []
     assert readiness["submit_blocker_review"] == {
@@ -6413,7 +7125,36 @@ def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields
         "project_progress_allowed": False,
         "continue_observation_allowed": False,
         "real_submit_allowed": True,
-        "next_safe_checkpoint": "call_official_operation_layer_submit",
+        "non_authority_checkpoint": "call_official_operation_layer_submit",
+        "blocker_keys": [],
+    }
+
+
+def test_owner_console_real_order_readiness_missing_source_is_unavailable():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness({})
+
+    assert readiness["status"] == "unavailable"
+    assert readiness["owner_label"] == "实盘边界暂不可用"
+    assert readiness["ready_for_real_order_action"] is False
+    assert readiness["pass_count"] == 0
+    assert readiness["waiting_count"] == 0
+    assert readiness["blocked_count"] == 0
+    assert readiness["submit_blocking_keys"] == []
+    assert readiness["matrix"] == []
+    assert "next_safe_checkpoint" not in readiness
+    assert readiness["non_authority_checkpoint"] == "refresh_runtime_goal_status"
+    assert readiness["source_health"]["status"] == "unavailable"
+    assert readiness["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": False,
+        "non_authority_checkpoint": "refresh_runtime_goal_status",
         "blocker_keys": [],
     }
 
@@ -6427,7 +7168,7 @@ def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_process
         {
             "status": "fresh_signal_processing",
             "ready_for_real_order_action": False,
-            "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+            "non_authority_checkpoint": "prepare_candidate_grant_authorization_evidence",
             "real_order_readiness_matrix": [
                 {
                     "key": "fresh_signal",
@@ -6469,7 +7210,7 @@ def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_process
         "project_progress_allowed": False,
         "continue_observation_allowed": False,
         "real_submit_allowed": False,
-        "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+        "non_authority_checkpoint": "prepare_candidate_grant_authorization_evidence",
         "blocker_keys": [],
     }
 
@@ -6483,7 +7224,7 @@ def test_owner_console_real_order_readiness_projects_submit_blocker_review():
         {
             "status": "missing_fact",
             "ready_for_real_order_action": False,
-            "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+            "non_authority_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
             "evidence": {
                 "submit_blocker_review": {
                     "required": True,
@@ -6491,7 +7232,7 @@ def test_owner_console_real_order_readiness_projects_submit_blocker_review():
                     "project_progress_allowed": True,
                     "continue_observation_allowed": True,
                     "real_submit_allowed": False,
-                    "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+                    "non_authority_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
                     "blocker_keys": ["protection", "budget"],
                 }
             },
@@ -6530,18 +7271,58 @@ def test_owner_console_real_order_readiness_projects_submit_blocker_review():
         "project_progress_allowed": True,
         "continue_observation_allowed": True,
         "real_submit_allowed": False,
-        "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+        "non_authority_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
         "blocker_keys": ["protection", "budget"],
     }
+
+
+def test_owner_console_submit_blocker_review_prefers_current_checkpoint_over_evidence():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "missing_fact",
+            "ready_for_real_order_action": False,
+            "non_authority_checkpoint": "refresh_current_required_facts",
+            "evidence": {
+                "submit_blocker_review": {
+                    "required": True,
+                    "allowed": True,
+                    "project_progress_allowed": True,
+                    "continue_observation_allowed": True,
+                    "real_submit_allowed": False,
+                    "non_authority_checkpoint": "evidence_submit_blocker_review_checkpoint",
+                    "blocker_keys": ["required_facts"],
+                }
+            },
+            "real_order_readiness_matrix": [
+                {
+                    "key": "required_facts",
+                    "status": "blocked",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                }
+            ],
+        }
+    )
+
+    assert "next_safe_checkpoint" not in readiness
+    assert readiness["non_authority_checkpoint"] == "refresh_current_required_facts"
+    assert "next_safe_checkpoint" not in readiness["submit_blocker_review"]
+    assert readiness["submit_blocker_review"]["non_authority_checkpoint"] == (
+        "refresh_current_required_facts"
+    )
 
 
 def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():
     from src.application.readmodels.trading_console import (
         _owner_console_deploy_channel_source,
-        _owner_console_effective_deploy_channel_packet,
+        _owner_console_effective_deploy_channel_artifact,
     )
 
-    packet, path = _owner_console_effective_deploy_channel_packet(
+    artifact, path = _owner_console_effective_deploy_channel_artifact(
         deploy_channel={},
         deploy_channel_path="/reports/tokyo-deploy-channel-status.json",
         readonly_probe={
@@ -6552,11 +7333,11 @@ def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_mis
         },
         readonly_probe_path="/reports/tokyo-readonly-probe-current.json",
     )
-    source = _owner_console_deploy_channel_source(packet)
+    source = _owner_console_deploy_channel_source(artifact)
 
     assert path == "/reports/tokyo-readonly-probe-current.json"
-    assert packet["scope"] == "tokyo_runtime_governance_deploy_channel_status"
-    assert packet["source_scope"] == "tokyo_runtime_governance_readonly_probe"
+    assert artifact["scope"] == "tokyo_runtime_governance_deploy_channel_status"
+    assert artifact["source_scope"] == "tokyo_runtime_governance_readonly_probe"
     assert source["status"] == "degraded"
     assert source["owner_label"] == "部署通道暂不可用"
     assert source["reason"] == "tokyo_ssh_publickey_denied"
@@ -6625,7 +7406,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert ready["summary"]["common_execution_chain_reuse_checked"] is True
     assert ready["summary"]["strategygroup_adapter_boundary_checked"] is True
     assert (
-        ready["summary"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        ready["summary"]["strategy_intake_no_execution_pipeline_fields_checked"]
         is True
     )
     assert ready["summary"]["runtime_tier_policy_checked"] is True
@@ -6659,7 +7440,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         ready["summary"]["post_submit_finalize_result_identity_guard_checked"]
         is True
     )
-    assert ready["summary"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert ready["summary"]["execution_attempt_rehearsal_prepare_checked"] is True
     assert ready["summary"]["required_checks"] == {
         name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
     }
@@ -6670,7 +7451,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         if key != "shared_runtime_pipeline_checked"
         and key != "common_execution_chain_reuse_checked"
         and key != "strategygroup_adapter_boundary_checked"
-        and key != "strategy_handoff_no_execution_pipeline_fields_checked"
+        and key != "strategy_intake_no_execution_pipeline_fields_checked"
         and key != "runtime_tier_policy_checked"
         and key != "only_mpg_tiny_real_order_eligible_checked"
         and key != "new_strategygroups_default_observe_only_checked"
@@ -6684,7 +7465,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert "common_execution_chain_reuse_checked" in degraded["reason"]
     assert "shared_runtime_pipeline_checked" in degraded["reason"]
     assert "strategygroup_adapter_boundary_checked" in degraded["reason"]
-    assert "strategy_handoff_no_execution_pipeline_fields_checked" in degraded["reason"]
+    assert "strategy_intake_no_execution_pipeline_fields_checked" in degraded["reason"]
     assert "runtime_tier_policy_checked" in degraded["reason"]
     assert "only_mpg_tiny_real_order_eligible_checked" in degraded["reason"]
     assert "new_strategygroups_default_observe_only_checked" in degraded["reason"]
@@ -6728,9 +7509,8 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     tick = {
         "scope": "runtime_signal_watcher_tick",
         "status": "watching_no_signal",
-        "wakeup_status": "operator_packet_needs_review",
+        "wakeup_status": "operator_evidence_needs_review",
         "operator_status": "strategy_group_signal_review_available",
-        "status_packet_status": "ok",
         "blockers": [
             "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
         ],
@@ -6758,7 +7538,7 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
             "requires_official_operation_layer": True,
         },
     }
-    status_packet = {
+    status_artifact = {
         "status": "ok",
         "blockers": tick["blockers"],
         "warnings": [],
@@ -6775,9 +7555,9 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     }
     for name, packet in {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
-        "operator-packet.json": {"status": "strategy_group_signal_review_available"},
-        "status-packet.json": status_packet,
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
+        "status-artifact.json": status_artifact,
         "notification-state.json": {},
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
@@ -6813,17 +7593,17 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     assert payload["data"]["safety_invariants"]["places_order"] is False
 
 
-def test_strategygroup_runtime_pilot_status_uses_prebuilt_handoff_packet(
+def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifact(
     monkeypatch,
     tmp_path,
 ):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    handoff_packet_path = tmp_path / "strategy-group-handoff-intake-packet.json"
-    handoff_packet_path.write_text(
+    intake_evidence_path = tmp_path / "strategy-group-handoff-intake-artifact.json"
+    intake_evidence_path.write_text(
         json.dumps(
             {
-                "scope": "strategy_group_handoff_main_control_intake",
+                "scope": "strategy_group_intake_main_control_projection",
                 "status": "ready_for_main_control_intake",
                 "source_anchor": {"commit": "prebuilt"},
                 "counts": {"strategy_groups": 1},
@@ -6872,9 +7652,8 @@ def test_strategygroup_runtime_pilot_status_uses_prebuilt_handoff_packet(
     tick = {
         "scope": "runtime_signal_watcher_tick",
         "status": "owner_attention_pending",
-        "wakeup_status": "operator_packet_needs_review",
+        "wakeup_status": "operator_evidence_needs_review",
         "operator_status": "operator_review",
-        "status_packet_status": "ok",
         "blockers": blockers,
         "warnings": [],
         "notification": {"configured": True},
@@ -6887,15 +7666,15 @@ def test_strategygroup_runtime_pilot_status_uses_prebuilt_handoff_packet(
             "withdrawal_or_transfer_created": False,
         },
     }
-    for name, packet in {
+    for name, artifact in {
         "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
-        "operator-packet.json": {"status": "operator_review"},
-        "status-packet.json": {"status": "ok", "blockers": blockers, "warnings": []},
+        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
+        "operator-evidence.json": {"status": "operator_review"},
+        "status-artifact.json": {"status": "ok", "blockers": blockers, "warnings": []},
         "notification-state.json": {"last_notified_event_key": "waiting-event"},
     }.items():
-        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH", str(handoff_packet_path))
+        (report_dir / name).write_text(json.dumps(artifact), encoding="utf-8")
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH", str(intake_evidence_path))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing-handoffs"))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
@@ -6914,3 +7693,46 @@ def test_strategygroup_runtime_pilot_status_uses_prebuilt_handoff_packet(
     assert source == "prebuilt"
     handoff_source = payload["data"]["control_board"]["strategy_group_row"]["id"]
     assert handoff_source == "MPG-001"
+
+
+def test_strategy_group_handoff_intake_ignores_legacy_packet_env_source(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    legacy_packet_path = tmp_path / "strategy-group-handoff-intake-packet.json"
+    legacy_packet_path.write_text(
+        json.dumps(
+            {
+                "scope": "strategy_group_intake_main_control_projection",
+                "status": "ready_for_main_control_intake",
+                "source_anchor": {"commit": "legacy-packet"},
+                "counts": {"strategy_groups": 1},
+                "strategy_picker": [],
+                "required_facts_matrix": [],
+                "watcher_scope": [],
+                "blockers": [],
+                "safety_invariants": {
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH", str(legacy_packet_path))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing-handoffs"))
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/strategy-group-handoff-intake")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["data"]["status"] == "blocked_strategy_intake_source"
+    assert payload["data"]["source_anchor"]["commit"] != "legacy-packet"
+    assert "intake_evidence_source" not in payload["data"]
+    assert payload["blockers"][0]["code"] == "strategy_group_intake_source_blocked"

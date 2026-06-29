@@ -11,8 +11,8 @@ def test_official_exchange_submit_boundary_proof_passes(tmp_path):
     assert report["status"] == "official_exchange_submit_boundary_passed"
     assert report["order_candidate_id"] == "order-candidate-rtf075-contract"
     assert report["authorization_id"].startswith("runtime-submit-authorization-")
-    assert report["exchange_submit_packet_preview_id"].startswith(
-        "runtime-exchange-submit-packet-preview-"
+    assert report["exchange_submit_preview_id"].startswith(
+        "runtime-exchange-submit-preview-"
     )
     assert report["exchange_submit_action_authorization_id"].startswith(
         "runtime-exchange-submit-action-authorization-"
@@ -23,19 +23,33 @@ def test_official_exchange_submit_boundary_proof_passes(tmp_path):
     assert report["exchange_submit_adapter_result_id"].startswith(
         "runtime-exchange-submit-adapter-result-"
     )
+    assert "operator_command_plan" not in report
+    assert report["exchange_submit_boundary_plan"] == {
+        "next_step": "build_exchange_submit_execution_result_boundary",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "live_submit_allowed": False,
+        "exchange_submit_execution_enabled": False,
+        "calls_exchange_gateway": False,
+        "calls_order_lifecycle_submit": False,
+        "executes_real_submit": False,
+    }
 
     checks = report["checks"]
     assert checks["shadow_contract_passed"] is True
     assert checks["prepare_authorization_created"] is True
     assert checks["local_adapter_registered_created_orders"] is True
     assert checks["local_registered_two_orders"] is True
-    assert checks["local_orders_available_for_packet"] is True
+    assert checks["local_orders_available_for_exchange_preview"] is True
     assert checks["local_order_lifecycle_submit_not_called"] is True
-    assert checks["exchange_packet_preview_ready"] is True
-    assert checks["exchange_packet_has_two_requests"] is True
-    assert checks["exchange_packet_has_entry_request"] is True
-    assert checks["exchange_packet_has_protection_request"] is True
-    assert checks["exchange_packet_preview_only"] is True
+    assert checks["exchange_submit_preview_ready"] is True
+    assert checks["exchange_preview_has_two_requests"] is True
+    assert checks["exchange_preview_has_entry_request"] is True
+    assert checks["exchange_preview_has_protection_request"] is True
+    assert "exchange_packet_has_two_requests" not in checks
+    assert "exchange_packet_has_entry_request" not in checks
+    assert "exchange_packet_has_protection_request" not in checks
+    assert checks["exchange_submit_preview_only"] is True
     assert checks["exchange_action_authorization_approved"] is True
     assert checks["exchange_enablement_ready"] is True
     assert checks["exchange_adapter_result_armed"] is True
@@ -52,15 +66,15 @@ def test_official_exchange_submit_boundary_proof_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_exchange_submit_boundary_outputs_packet(tmp_path):
+def test_official_exchange_submit_boundary_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf085"
 
     report = script.build_proof_report(output_dir)
 
     expected_files = [
         "contract-report.json",
-        "exchange-submit-boundary-packet.json",
-        "exchange-submit-packet-preview.json",
+        "exchange-submit-boundary-artifact.json",
+        "exchange-submit-preview.json",
         "exchange-submit-action-authorization.json",
         "exchange-submit-enablement.json",
         "exchange-submit-adapter-result.json",
@@ -72,40 +86,40 @@ def test_official_exchange_submit_boundary_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
-        (output_dir / "exchange-submit-boundary-packet.json").read_text()
+    artifact = json.loads(
+        (output_dir / "exchange-submit-boundary-artifact.json").read_text()
     )
-    assert packet["status"] == "exchange_submit_adapter_armed_boundary"
-    assert packet["statuses"]["local_registration_adapter_result"] == (
+    assert artifact["status"] == "exchange_submit_adapter_armed_boundary"
+    assert artifact["statuses"]["local_registration_adapter_result"] == (
         "registered_created_local_orders"
     )
-    assert packet["statuses"]["exchange_submit_packet_preview"] == (
+    assert artifact["statuses"]["exchange_submit_preview"] == (
         "ready_for_exchange_submit_adapter_design"
     )
-    assert packet["statuses"]["exchange_submit_action_authorization"] == (
+    assert artifact["statuses"]["exchange_submit_action_authorization"] == (
         "approved_for_exchange_submit_action"
     )
-    assert packet["statuses"]["exchange_submit_enablement"] == (
+    assert artifact["statuses"]["exchange_submit_enablement"] == (
         "ready_for_exchange_submit_action"
     )
-    assert packet["statuses"]["exchange_submit_adapter_result"] == (
+    assert artifact["statuses"]["exchange_submit_adapter_result"] == (
         "exchange_submit_adapter_armed"
     )
-    assert packet["exchange_submit_packet"]["submit_request_count"] == 2
-    assert packet["exchange_submit_packet"]["entry_submit_request_count"] == 1
-    assert packet["exchange_submit_packet"]["protection_submit_request_count"] == 1
-    assert packet["exchange_submit_packet"]["exchange_payload_created"] is False
-    assert packet["exchange_submit_packet"]["exchange_order_id_assigned"] is False
-    assert packet["exchange_submit_boundary"]["duplicate_submit_lock_acquired"] is True
-    assert packet["exchange_submit_boundary"]["exchange_submit_adapter_enabled"] is True
-    assert packet["exchange_submit_boundary"]["exchange_submit_action_authorized"] is True
-    assert packet["exchange_submit_boundary"]["exchange_submit_adapter_implemented"] is False
-    assert packet["exchange_submit_boundary"]["exchange_called"] is False
-    assert packet["exchange_submit_boundary"]["exchange_order_submitted"] is False
-    assert packet["exchange_submit_boundary"]["order_lifecycle_submit_called"] is False
-    assert packet["safety_invariants"]["exchange_submit_adapter_boundary_armed"] is True
-    assert packet["safety_invariants"]["exchange_submit_execution_enabled"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["exchange_submit_preview"]["submit_request_count"] == 2
+    assert artifact["exchange_submit_preview"]["entry_submit_request_count"] == 1
+    assert artifact["exchange_submit_preview"]["protection_submit_request_count"] == 1
+    assert artifact["exchange_submit_preview"]["exchange_payload_created"] is False
+    assert artifact["exchange_submit_preview"]["exchange_order_id_assigned"] is False
+    assert artifact["exchange_submit_boundary"]["duplicate_submit_lock_acquired"] is True
+    assert artifact["exchange_submit_boundary"]["exchange_submit_adapter_enabled"] is True
+    assert artifact["exchange_submit_boundary"]["exchange_submit_action_authorized"] is True
+    assert artifact["exchange_submit_boundary"]["exchange_submit_adapter_implemented"] is False
+    assert artifact["exchange_submit_boundary"]["exchange_called"] is False
+    assert artifact["exchange_submit_boundary"]["exchange_order_submitted"] is False
+    assert artifact["exchange_submit_boundary"]["order_lifecycle_submit_called"] is False
+    assert artifact["safety_invariants"]["exchange_submit_adapter_boundary_armed"] is True
+    assert artifact["safety_invariants"]["exchange_submit_execution_enabled"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_official_exchange_submit_boundary_cli_stdout_is_json_only(

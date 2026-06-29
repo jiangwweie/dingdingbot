@@ -12,7 +12,7 @@ def _args(
     max_iterations=3,
     interval=0.0,
     cycle_timeout_seconds=0.0,
-    include_packets=False,
+    include_artifacts=False,
     loop_output_json=None,
     status_output_json=None,
 ):
@@ -34,14 +34,14 @@ def _args(
             "loop_output_json": loop_output_json,
             "status_output_json": status_output_json,
             "status_stale_after_seconds": 900.0,
-            "include_packets": include_packets,
+            "include_artifacts": include_artifacts,
             "output_dir": str(tmp_path / "loop"),
             "monitor_args": monitor_args,
         },
     )()
 
 
-def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=False):
+def _artifact(status="waiting_for_signal", *, prepare=False, nested_authorization=False):
     prepared_authorization_id = "auth-ready-1" if prepare else None
     signal_input_json = "/tmp/signal-input-ready.json" if prepare else None
     runtime_summary_extra = {}
@@ -49,9 +49,9 @@ def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=
         runtime_summary_extra = {
             "prepared_authorization_id": prepared_authorization_id,
             "signal_input_json": signal_input_json,
-            "latest_packet": {
+            "latest_artifact": {
                 "signal_input_json": signal_input_json,
-                "prepare_packet": {
+                "prepare_evidence": {
                     "ids": {
                         "authorization_id": prepared_authorization_id,
                     },
@@ -93,7 +93,7 @@ def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=
                 **runtime_summary_extra,
             }
         ],
-        "operator_command_plan": {
+        "observation_monitor_plan": {
             "signal_input_json": signal_input_json,
             "prepared_authorization_id": prepared_authorization_id,
             "creates_shadow_candidate": prepare,
@@ -124,22 +124,22 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
     def builder(args):
         seen.append(args.output_dir)
-        return _packet()
+        return _artifact()
 
-    packet = runtime_active_observation_loop._build_loop_packet(
+    artifact = runtime_active_observation_loop._build_loop_artifact(
         _args(tmp_path, max_iterations=3),
-        packet_builder=builder,
+        artifact_builder=builder,
         sleeper=lambda seconds: None,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["stop_reason"] == "max_iterations_exhausted"
-    assert packet["iterations_completed"] == 3
+    assert artifact["status"] == "waiting_for_signal"
+    assert artifact["stop_reason"] == "max_iterations_exhausted"
+    assert artifact["iterations_completed"] == 3
     assert len(seen) == 3
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["observation_loop_plan"]["places_order"] is False
 
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
     assert latest["status"] == "waiting_for_signal"
@@ -153,20 +153,20 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
 
 def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path):
-    output_path = tmp_path / "loop" / "loop-packet.json"
-    status_path = tmp_path / "loop" / "status-packet.json"
+    output_path = tmp_path / "loop" / "loop-artifact.json"
+    status_path = tmp_path / "loop" / "status-artifact.json"
     snapshots = []
     status_snapshots = []
 
     def builder(args):
-        return _packet()
+        return _artifact()
 
     def sleeper(seconds):
         assert seconds == 10.0
         snapshots.append(json.loads(output_path.read_text()))
         status_snapshots.append(json.loads(status_path.read_text()))
 
-    packet = runtime_active_observation_loop._build_loop_packet(
+    artifact = runtime_active_observation_loop._build_loop_artifact(
         _args(
             tmp_path,
             max_iterations=2,
@@ -174,7 +174,7 @@ def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path)
             loop_output_json=str(output_path),
             status_output_json=str(status_path),
         ),
-        packet_builder=builder,
+        artifact_builder=builder,
         sleeper=sleeper,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
@@ -186,13 +186,13 @@ def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path)
     assert status_snapshots[0]["status"] == "waiting_for_signal"
     assert status_snapshots[0]["loop_status"] == "waiting_for_signal"
     assert status_snapshots[0]["iterations_completed"] == 1
-    assert status_snapshots[0]["safety_invariants"]["read_packets_only"] is True
+    assert status_snapshots[0]["safety_invariants"]["read_artifacts_only"] is True
 
     latest_file = json.loads(output_path.read_text())
     latest_status_file = json.loads(status_path.read_text())
     assert latest_file["stop_reason"] == "max_iterations_exhausted"
     assert latest_file["iterations_completed"] == 2
-    assert latest_file == packet
+    assert latest_file == artifact
     assert latest_status_file["iterations_completed"] == 2
     assert latest_status_file["loop_status"] == "waiting_for_signal"
 
@@ -203,27 +203,27 @@ def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path
     def builder(args):
         calls.append(args.output_dir)
         if len(calls) == 1:
-            return _packet()
-        return _packet("ready_for_final_gate_preflight", prepare=True)
+            return _artifact()
+        return _artifact("ready_for_final_gate_preflight", prepare=True)
 
-    packet = runtime_active_observation_loop._build_loop_packet(
-        _args(tmp_path, max_iterations=5, include_packets=True),
-        packet_builder=builder,
+    artifact = runtime_active_observation_loop._build_loop_artifact(
+        _args(tmp_path, max_iterations=5, include_artifacts=True),
+        artifact_builder=builder,
         sleeper=lambda seconds: None,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["stop_reason"] == "status_changed:ready_for_final_gate_preflight"
-    assert packet["iterations_completed"] == 2
-    assert len(packet["cycle_packets"]) == 2
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
-    assert packet["safety_invariants"]["executable_execution_intent_created"] is False
-    assert packet["safety_invariants"]["creates_execution_intent"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["stop_reason"] == "status_changed:ready_for_final_gate_preflight"
+    assert artifact["iterations_completed"] == 2
+    assert len(artifact["cycle_artifacts"]) == 2
+    assert artifact["safety_invariants"]["prepare_records_created"] is True
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert artifact["safety_invariants"]["executable_execution_intent_created"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["observation_loop_plan"]["next_step"] == (
         "review_prepared_records_then_run_final_gate_preview"
     )
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
@@ -234,28 +234,28 @@ def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path
 
 def test_active_observation_loop_summarizes_nested_prepared_authorization_id(tmp_path):
     def builder(args):
-        return _packet(
+        return _artifact(
             "ready_for_final_gate_preflight",
             prepare=True,
             nested_authorization=True,
         )
 
-    packet = runtime_active_observation_loop._build_loop_packet(
-        _args(tmp_path, max_iterations=1, include_packets=True),
-        packet_builder=builder,
+    artifact = runtime_active_observation_loop._build_loop_artifact(
+        _args(tmp_path, max_iterations=1, include_artifacts=True),
+        artifact_builder=builder,
         sleeper=lambda seconds: None,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["latest_summary"]["prepared_authorization_id"] == "auth-ready-1"
-    assert packet["latest_summary"]["signal_input_json"] == (
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["latest_summary"]["prepared_authorization_id"] == "auth-ready-1"
+    assert artifact["latest_summary"]["signal_input_json"] == (
         "/tmp/signal-input-ready.json"
     )
-    assert packet["latest_summary"]["runtime_signal_summaries"][0][
+    assert artifact["latest_summary"]["runtime_signal_summaries"][0][
         "prepared_authorization_id"
     ] == "auth-ready-1"
-    assert packet["latest_summary"]["runtime_signal_summaries"][0][
+    assert artifact["latest_summary"]["runtime_signal_summaries"][0][
         "signal_input_json"
     ] == "/tmp/signal-input-ready.json"
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
@@ -263,73 +263,156 @@ def test_active_observation_loop_summarizes_nested_prepared_authorization_id(tmp
     assert latest["signal_input_json"] == "/tmp/signal-input-ready.json"
 
 
+def test_active_observation_loop_ignores_legacy_prepare_packet_authorization(tmp_path):
+    def builder(args):
+        return {
+            **_artifact("ready_for_final_gate_preflight"),
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-1",
+                    "symbol": "BNB/USDT:USDT",
+                    "side": "long",
+                    "strategy_family_id": "CPM-001",
+                    "strategy_family_version_id": "CPM-001-v0",
+                    "status": "ready_for_final_gate_preflight",
+                    "latest_artifact": {
+                        "prepare_packet": {
+                            "ids": {"authorization_id": "auth-legacy-packet"}
+                        }
+                    },
+                }
+            ],
+            "observation_monitor_plan": {
+                "creates_shadow_candidate": True,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+        }
+
+    artifact = runtime_active_observation_loop._build_loop_artifact(
+        _args(tmp_path, max_iterations=1, include_artifacts=True),
+        artifact_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["latest_summary"]["prepared_authorization_id"] is None
+    assert artifact["latest_summary"]["runtime_signal_summaries"][0][
+        "prepared_authorization_id"
+    ] is None
+
+
+def test_active_observation_loop_ignores_legacy_operator_command_plan_sources(tmp_path):
+    def builder(args):
+        return {
+            **_artifact("ready_for_final_gate_preflight"),
+            "operator_command_plan": {
+                "signal_input_json": "/tmp/legacy-signal-input.json",
+                "prepared_authorization_id": "auth-legacy-root",
+            },
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-1",
+                    "symbol": "BNB/USDT:USDT",
+                    "side": "long",
+                    "strategy_family_id": "CPM-001",
+                    "strategy_family_version_id": "CPM-001-v0",
+                    "status": "ready_for_final_gate_preflight",
+                    "operator_command_plan": {
+                        "signal_input_json": "/tmp/legacy-runtime-signal.json",
+                        "prepared_authorization_id": "auth-legacy-runtime",
+                    },
+                }
+            ],
+        }
+
+    artifact = runtime_active_observation_loop._build_loop_artifact(
+        _args(tmp_path, max_iterations=1, include_artifacts=True),
+        artifact_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["latest_summary"]["signal_input_json"] is None
+    assert artifact["latest_summary"]["prepared_authorization_id"] is None
+    assert artifact["latest_summary"]["runtime_signal_summaries"][0][
+        "signal_input_json"
+    ] is None
+    assert artifact["latest_summary"]["runtime_signal_summaries"][0][
+        "prepared_authorization_id"
+    ] is None
+
+
 def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_timeout(tmp_path):
     def builder(args):
         time.sleep(0.05)
-        return _packet()
+        return _artifact()
 
-    output_path = tmp_path / "loop-packet.json"
-    packet = runtime_active_observation_loop._build_loop_packet(
+    output_path = tmp_path / "loop-artifact.json"
+    artifact = runtime_active_observation_loop._build_loop_artifact(
         _args(
             tmp_path,
             max_iterations=2,
             cycle_timeout_seconds=0.01,
             loop_output_json=str(output_path),
         ),
-        packet_builder=builder,
+        artifact_builder=builder,
         sleeper=lambda seconds: None,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["stop_reason"] == "status_changed:blocked"
-    assert packet["iterations_completed"] == 1
-    assert packet["latest_summary"]["blockers"] == [
+    assert artifact["status"] == "blocked"
+    assert artifact["stop_reason"] == "status_changed:blocked"
+    assert artifact["iterations_completed"] == 1
+    assert artifact["latest_summary"]["blockers"] == [
         "active_observation_cycle_timeout:0.01s"
     ]
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["attempt_counter_mutated"] is False
 
-    file_packet = json.loads(output_path.read_text())
-    assert file_packet == packet
+    file_artifact = json.loads(output_path.read_text())
+    assert file_artifact == artifact
     blocked_cycle = json.loads(
         (tmp_path / "loop" / "cycle-1" / "active-monitor.json").read_text()
     )
     assert blocked_cycle["status"] == "blocked"
-    assert blocked_cycle["operator_command_plan"]["places_order"] is False
+    assert blocked_cycle["observation_monitor_plan"]["places_order"] is False
 
 
-def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_error(tmp_path):
+def test_active_observation_loop_blocks_and_writes_audit_artifact_on_cycle_error(tmp_path):
     def builder(args):
         raise ValueError("boom")
 
-    output_path = tmp_path / "loop-packet.json"
-    packet = runtime_active_observation_loop._build_loop_packet(
+    output_path = tmp_path / "loop-artifact.json"
+    artifact = runtime_active_observation_loop._build_loop_artifact(
         _args(
             tmp_path,
             max_iterations=2,
             loop_output_json=str(output_path),
         ),
-        packet_builder=builder,
+        artifact_builder=builder,
         sleeper=lambda seconds: None,
         cycle_name_builder=lambda iteration: f"cycle-{iteration}",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["iterations_completed"] == 1
-    assert packet["latest_summary"]["blockers"] == [
+    assert artifact["status"] == "blocked"
+    assert artifact["iterations_completed"] == 1
+    assert artifact["latest_summary"]["blockers"] == [
         "active_observation_cycle_failed:ValueError:boom"
     ]
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert json.loads(output_path.read_text()) == packet
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert json.loads(output_path.read_text()) == artifact
 
 
 def test_active_observation_loop_cli_writes_aggregate_json(monkeypatch, capsys, tmp_path):
-    output_path = tmp_path / "loop-packet.json"
+    output_path = tmp_path / "loop-artifact.json"
 
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         return {
             "status": "waiting_for_signal",
             "safety_invariants": {"exchange_write_called": False},
@@ -337,8 +420,8 @@ def test_active_observation_loop_cli_writes_aggregate_json(monkeypatch, capsys, 
 
     monkeypatch.setattr(
         runtime_active_observation_loop,
-        "_build_loop_packet",
-        fake_build_packet,
+        "_build_loop_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         runtime_active_observation_loop.sys,

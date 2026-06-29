@@ -115,7 +115,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             entry_order_id=args.entry_order_id,
             exit_order_id=args.exit_order_id,
             authorization_id=args.authorization_id,
-            review_decision=args.review_decision,
+            review_outcome=args.review_outcome,
             apply=args.apply,
         )
         return {
@@ -150,7 +150,7 @@ def main() -> int:
     parser.add_argument("--exit-order-id", required=True)
     parser.add_argument("--authorization-id")
     parser.add_argument(
-        "--review-decision",
+        "--review-outcome",
         choices=["auto", "promote", "revise", "park"],
         default="auto",
     )

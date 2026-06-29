@@ -1,6 +1,6 @@
 """Adapters from runtime artifacts to LLM advisory events.
 
-The adapter is intentionally read-only: it translates existing runtime packets
+The adapter is intentionally read-only: it translates existing runtime artifacts
 into LlmConsumableEvent instances and leaves persistence, LLM generation, and
 Feishu delivery to the advisory plane.
 """
@@ -10,9 +10,9 @@ from __future__ import annotations
 import time
 from typing import Any, Iterable
 
-from src.application.llm_context_packet_builder import (
+from src.application.llm_advisory_context_artifact_builder import (
     build_llm_advisory_event,
-    build_llm_context_packet,
+    build_llm_advisory_context_artifact,
 )
 from src.domain.llm_advisory import (
     LlmAdvisoryAllowedAction,
@@ -41,7 +41,7 @@ WATCHER_SIGNAL_STATUSES = {
     "runtime_signal_ready_for_non_executing_prepare",
     "runtime_prepare_records_ready_for_preview",
     "prepared_shadow_evidence_ready_for_owner_review",
-    "operator_packet_needs_review",
+    "operator_evidence_needs_review",
     "ready_for_final_gate_preflight",
 }
 
@@ -119,9 +119,9 @@ def build_daily_check_advisory_event(
     notification = _dict(report.get("notification"))
     blockers = _string_list(_dict(report.get("checks")).get("blockers"))
     warnings = _string_list(_dict(report.get("checks")).get("warnings"))
-    context_packet = build_llm_context_packet(
+    context_artifact = build_llm_advisory_context_artifact(
         now_ms=timestamp,
-        fallback_packet_id=f"llm-daily-check-{_source_suffix(report, status)}",
+        default_artifact_id=f"llm-daily-check-{_source_suffix(report, status)}",
         runtime={
             "source": "daily_check",
             "status": status,
@@ -155,7 +155,7 @@ def build_daily_check_advisory_event(
         source_type="daily_check",
         source_id=_source_id(report, default="strategygroup_runtime_daily_check"),
         now_ms=timestamp,
-        context_packet=context_packet,
+        context_artifact=context_artifact,
         allowed_llm_actions=_allowed_actions_for_digest(blockers=blockers),
         delivery_policy=_delivery_policy(notification=notification, status=status),
         severity=_severity(status=status, blockers=blockers),
@@ -177,9 +177,9 @@ def build_completion_audit_advisory_event(
         report.get("non_market_blockers")
     )
     notification = _dict(report.get("notification"))
-    context_packet = build_llm_context_packet(
+    context_artifact = build_llm_advisory_context_artifact(
         now_ms=timestamp,
-        fallback_packet_id=f"llm-completion-audit-{_source_suffix(report, status)}",
+        default_artifact_id=f"llm-completion-audit-{_source_suffix(report, status)}",
         runtime={
             "source": "completion_audit",
             "status": status,
@@ -201,7 +201,7 @@ def build_completion_audit_advisory_event(
         source_type="completion_audit",
         source_id=_source_id(report, default="first_bounded_live_order_completion_audit"),
         now_ms=timestamp,
-        context_packet=context_packet,
+        context_artifact=context_artifact,
         allowed_llm_actions=_allowed_actions_for_digest(blockers=gaps),
         delivery_policy=_delivery_policy(notification=notification, status=status),
         severity=_severity(status=status, blockers=gaps),
@@ -209,26 +209,26 @@ def build_completion_audit_advisory_event(
     )
 
 
-def build_watcher_packet_advisory_event(
-    packet: dict[str, Any],
+def build_watcher_artifact_advisory_event(
+    artifact: dict[str, Any],
     *,
     now: int | None = None,
     source_ref: str | None = None,
 ) -> LlmConsumableEvent:
-    """Build one event from a runtime signal watcher packet."""
+    """Build one event from a runtime signal watcher artifact."""
 
     timestamp = now if now is not None else now_ms()
-    status = _watcher_status(packet)
+    status = _watcher_status(artifact)
     event_type = _watcher_event_type(status)
-    signal_summary = _first_signal_summary(packet)
-    strategy_ids = _strategy_family_ids(packet)
-    notification = _dict(packet.get("notification"))
-    blockers = _string_list(packet.get("blockers")) + _string_list(
-        _dict(packet.get("latest_summary")).get("blockers")
+    signal_summary = _first_signal_summary(artifact)
+    strategy_ids = _strategy_family_ids(artifact)
+    notification = _dict(artifact.get("notification"))
+    blockers = _string_list(artifact.get("blockers")) + _string_list(
+        _dict(artifact.get("latest_summary")).get("blockers")
     )
-    context_packet = build_llm_context_packet(
+    context_artifact = build_llm_advisory_context_artifact(
         now_ms=timestamp,
-        fallback_packet_id=f"llm-watcher-{_source_suffix(packet, status)}",
+        default_artifact_id=f"llm-watcher-{_source_suffix(artifact, status)}",
         market={
             "status": status,
             "signal_status": signal_summary.get("status"),
@@ -239,23 +239,23 @@ def build_watcher_packet_advisory_event(
         runtime={
             "source": "runtime_signal_watcher",
             "status": status,
-            "post_signal_auto_resume": _safe_fragment(packet.get("post_signal_auto_resume")),
+            "post_signal_auto_resume": _safe_fragment(artifact.get("post_signal_auto_resume")),
             "notification": _safe_fragment(notification),
-            "operator_command_plan": _safe_fragment(packet.get("operator_command_plan")),
-            "safety_invariants": _safe_fragment(packet.get("safety_invariants")),
+            "watcher_tick_plan": _safe_fragment(artifact.get("watcher_tick_plan")),
+            "safety_invariants": _safe_fragment(artifact.get("safety_invariants")),
         },
         strategies={
             "strategy_family_ids": strategy_ids,
-            "symbol": _first_string_for_keys(packet, ["symbol"]),
-            "timeframe": _first_string_for_keys(packet, ["timeframe"]),
+            "symbol": _first_string_for_keys(artifact, ["symbol"]),
+            "timeframe": _first_string_for_keys(artifact, ["timeframe"]),
         },
         audit={
-            "operator_packet_status": _string(
-                _dict(packet.get("operator_packet")).get("status"),
+            "operator_evidence_status": _string(
+                _dict(artifact.get("operator_evidence")).get("status"),
                 "",
             ),
-            "wakeup_packet_status": _string(
-                _dict(packet.get("wakeup_packet")).get("status"),
+            "wakeup_evidence_status": _string(
+                _dict(artifact.get("wakeup_evidence")).get("status"),
                 "",
             ),
             "blockers": blockers,
@@ -265,45 +265,45 @@ def build_watcher_packet_advisory_event(
     return build_llm_advisory_event(
         event_type=event_type,
         source_type="runtime_signal_watcher",
-        source_id=_source_id(packet, default="runtime_signal_watcher_packet"),
+        source_id=_source_id(artifact, default="runtime_signal_watcher_artifact"),
         now_ms=timestamp,
-        context_packet=context_packet,
+        context_artifact=context_artifact,
         allowed_llm_actions=_allowed_actions_for_event(event_type, blockers=blockers),
         delivery_policy=_watcher_delivery_policy(status=status, notification=notification),
         severity=_severity(status=status, blockers=blockers),
-        symbol=_first_string_for_keys(packet, ["symbol"]),
-        timeframe=_first_string_for_keys(packet, ["timeframe"]),
+        symbol=_first_string_for_keys(artifact, ["symbol"]),
+        timeframe=_first_string_for_keys(artifact, ["timeframe"]),
         strategy_family_ids=strategy_ids,
         dedupe_key=_dedupe_key("watcher", status, notification.get("reason"), blockers),
     )
 
 
 def build_trade_closed_advisory_event(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     *,
     now: int | None = None,
     source_ref: str | None = None,
 ) -> LlmConsumableEvent:
-    """Build a post-trade review event from a closed-trade packet."""
+    """Build a post-trade review event from a closed-trade artifact."""
 
     timestamp = now if now is not None else now_ms()
     trade_id = _string(
-        packet.get("trade_id") or packet.get("position_id") or packet.get("review_id"),
+        artifact.get("trade_id") or artifact.get("position_id") or artifact.get("review_id"),
         "trade_closed",
     )
-    context_packet = build_llm_context_packet(
+    context_artifact = build_llm_advisory_context_artifact(
         now_ms=timestamp,
-        fallback_packet_id=f"llm-trade-closed-{trade_id}",
+        default_artifact_id=f"llm-trade-closed-{trade_id}",
         runtime={
             "source": "trade_closed",
-            "status": _string(packet.get("status"), "trade_closed"),
-            "symbol": packet.get("symbol"),
+            "status": _string(artifact.get("status"), "trade_closed"),
+            "symbol": artifact.get("symbol"),
         },
         review={
             "trade_id": trade_id,
-            "review_status": packet.get("review_status") or "review_due",
-            "settlement_status": packet.get("settlement_status"),
-            "outcome_summary": _safe_fragment(packet.get("outcome_summary")),
+            "review_status": artifact.get("review_status") or "review_due",
+            "settlement_status": artifact.get("settlement_status"),
+            "outcome_summary": _safe_fragment(artifact.get("outcome_summary")),
         },
         source_refs=_source_refs(source_ref),
     )
@@ -312,20 +312,20 @@ def build_trade_closed_advisory_event(
         source_type="trade_closed",
         source_id=trade_id,
         now_ms=timestamp,
-        context_packet=context_packet,
+        context_artifact=context_artifact,
         allowed_llm_actions=[
             LlmAdvisoryAllowedAction.REVIEW_CLOSED_TRADE,
             LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT,
         ],
         delivery_policy=[LlmAdvisoryDeliveryChannel.FEISHU_PUSH],
         severity="info",
-        symbol=_string(packet.get("symbol"), None),
-        dedupe_key=_dedupe_key("trade_closed", trade_id, packet.get("review_status"), []),
+        symbol=_string(artifact.get("symbol"), None),
+        dedupe_key=_dedupe_key("trade_closed", trade_id, artifact.get("review_status"), []),
     )
 
 
 def build_review_due_advisory_event(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     *,
     now: int | None = None,
     source_ref: str | None = None,
@@ -333,18 +333,18 @@ def build_review_due_advisory_event(
     """Build a review-due reminder event."""
 
     timestamp = now if now is not None else now_ms()
-    review_id = _string(packet.get("review_id") or packet.get("trade_id"), "review_due")
-    context_packet = build_llm_context_packet(
+    review_id = _string(artifact.get("review_id") or artifact.get("trade_id"), "review_due")
+    context_artifact = build_llm_advisory_context_artifact(
         now_ms=timestamp,
-        fallback_packet_id=f"llm-review-due-{review_id}",
+        default_artifact_id=f"llm-review-due-{review_id}",
         runtime={
             "source": "review_due",
-            "status": _string(packet.get("status"), "review_due"),
+            "status": _string(artifact.get("status"), "review_due"),
         },
         review={
             "review_id": review_id,
-            "reason": packet.get("reason"),
-            "strategy_family_ids": _strategy_family_ids(packet),
+            "reason": artifact.get("reason"),
+            "strategy_family_ids": _strategy_family_ids(artifact),
         },
         source_refs=_source_refs(source_ref),
     )
@@ -353,15 +353,15 @@ def build_review_due_advisory_event(
         source_type="review_due",
         source_id=review_id,
         now_ms=timestamp,
-        context_packet=context_packet,
+        context_artifact=context_artifact,
         allowed_llm_actions=[
             LlmAdvisoryAllowedAction.REVIEW_CLOSED_TRADE,
             LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT,
         ],
         delivery_policy=[LlmAdvisoryDeliveryChannel.FEISHU_PUSH],
         severity="info",
-        strategy_family_ids=_strategy_family_ids(packet),
-        dedupe_key=_dedupe_key("review_due", review_id, packet.get("reason"), []),
+        strategy_family_ids=_strategy_family_ids(artifact),
+        dedupe_key=_dedupe_key("review_due", review_id, artifact.get("reason"), []),
     )
 
 
@@ -375,7 +375,7 @@ def _delivery_policy(
         return [LlmAdvisoryDeliveryChannel.LEDGER_ONLY]
     if reason in OWNER_NOTIFICATION_BLOCKED_REASONS:
         return [LlmAdvisoryDeliveryChannel.LEDGER_ONLY]
-    if notification.get("decision") == "NOTIFY":
+    if notification.get("notification_result") == "NOTIFY":
         return [LlmAdvisoryDeliveryChannel.FEISHU_PUSH]
     if status in {"processing", "fresh_signal_detected", "fresh_signal_processing"}:
         return [LlmAdvisoryDeliveryChannel.FEISHU_PUSH]
@@ -434,13 +434,17 @@ def _allowed_actions_for_digest(*, blockers: list[str]) -> list[LlmAdvisoryAllow
     return actions
 
 
-def _watcher_status(packet: dict[str, Any]) -> str:
+def _watcher_status(artifact: dict[str, Any]) -> str:
     for key in ("status", "latest_status"):
-        value = packet.get(key)
+        value = artifact.get(key)
         if value:
             return str(value)
-    for key in ("wakeup_packet", "operator_packet", "latest_summary"):
-        nested = _dict(packet.get(key))
+    for key in (
+        "wakeup_evidence",
+        "operator_evidence",
+        "latest_summary",
+    ):
+        nested = _dict(artifact.get(key))
         value = nested.get("status")
         if value:
             return str(value)
@@ -554,20 +558,20 @@ def _dedupe_key(
     return f"{source}:{_string(status, 'unknown')}:{reason_part}:{blocker_part}"
 
 
-def _source_id(packet: dict[str, Any], *, default: str) -> str:
+def _source_id(artifact: dict[str, Any], *, default: str) -> str:
     return _string(
-        packet.get("event_id")
-        or packet.get("packet_id")
-        or packet.get("report_id")
-        or packet.get("id")
-        or packet.get("generated_at_utc")
-        or packet.get("created_at_utc"),
+        artifact.get("event_id")
+        or artifact.get("artifact_id")
+        or artifact.get("report_id")
+        or artifact.get("id")
+        or artifact.get("generated_at_utc")
+        or artifact.get("created_at_utc"),
         default,
     )[:128]
 
 
-def _source_suffix(packet: dict[str, Any], fallback: str) -> str:
-    return _source_id(packet, default=fallback).replace(":", "-").replace("/", "-")[:80]
+def _source_suffix(artifact: dict[str, Any], fallback: str) -> str:
+    return _source_id(artifact, default=fallback).replace(":", "-").replace("/", "-")[:80]
 
 
 def _source_refs(source_ref: str | None) -> list[str]:

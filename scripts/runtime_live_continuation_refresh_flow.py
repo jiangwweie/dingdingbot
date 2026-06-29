@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Refresh live runtime continuation from active-monitor evidence.
 
-RTF-098 is a packet-only orchestration flow:
+RTF-098 is a projection-only orchestration flow:
 
 active runtime observation monitor JSON
--> live-attempt readiness packet
--> continuation selector packet
+-> live-attempt readiness artifact
+-> continuation selector projection
 
-Optional per-runtime lifecycle packets may be supplied to enrich blocked runtime
-decisions, such as the BNB position lifecycle packet from RTF-096.  The flow
+Optional per-runtime lifecycle artifacts may be supplied to enrich blocked runtime
+decisions, such as the BNB position lifecycle artifact from RTF-096.  The flow
 does not call APIs, PG, exchange, OrderLifecycle, order registration, close
 flows, withdrawal, or transfer services.
 """
@@ -25,8 +25,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_live_attempt_readiness_packet as readiness  # noqa: E402
-from scripts import runtime_live_continuation_selector_packet as selector  # noqa: E402
+from scripts import runtime_live_attempt_readiness_artifact as readiness  # noqa: E402
+from scripts import runtime_live_continuation_selector_projection as selector  # noqa: E402
 
 
 FORBIDDEN_EFFECT_KEYS = (
@@ -65,12 +65,12 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _forbidden_effects(*packets: dict[str, Any] | None) -> dict[str, bool]:
+def _forbidden_effects(*artifacts: dict[str, Any] | None) -> dict[str, bool]:
     effects = {key: False for key in FORBIDDEN_EFFECT_KEYS}
-    for packet in packets:
-        if not isinstance(packet, dict):
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
             continue
-        safety = packet.get("safety_invariants")
+        safety = artifact.get("safety_invariants")
         if not isinstance(safety, dict):
             continue
         nested = safety.get("forbidden_effects")
@@ -82,10 +82,10 @@ def _forbidden_effects(*packets: dict[str, Any] | None) -> dict[str, bool]:
     return effects
 
 
-def _status(selector_packet: dict[str, Any], effects: dict[str, bool]) -> str:
+def _status(selector_projection: dict[str, Any], effects: dict[str, bool]) -> str:
     if any(effects.values()):
         return "continuation_refresh_blocked_forbidden_effect"
-    selector_status = str(selector_packet.get("status") or "")
+    selector_status = str(selector_projection.get("status") or "")
     if selector_status == "continuation_monitor_position_or_standing_recovery":
         return "continuation_refresh_monitor_position_or_standing_recovery"
     if selector_status == "continuation_monitor_position_or_owner_close":
@@ -101,12 +101,13 @@ def _status(selector_packet: dict[str, Any], effects: dict[str, bool]) -> str:
     return "continuation_refresh_mixed_or_blocked"
 
 
-def _operator_plan(status: str, selector_packet: dict[str, Any]) -> dict[str, Any]:
-    selector_plan = selector_packet.get("operator_command_plan")
+def _refresh_plan(status: str, selector_projection: dict[str, Any]) -> dict[str, Any]:
+    selector_plan = selector_projection.get("selector_plan")
     if not isinstance(selector_plan, dict):
         selector_plan = {}
     return {
-        "next_step": selector_plan.get("next_step") or "review_selector_packet",
+        "not_execution_authority": True,
+        "next_step": selector_plan.get("next_step") or "review_selector_projection",
         "selected_runtime_instance_id": selector_plan.get(
             "selected_runtime_instance_id"
         ),
@@ -129,51 +130,51 @@ def _operator_plan(status: str, selector_packet: dict[str, Any]) -> dict[str, An
     }
 
 
-def build_refresh_flow_packet(
+def build_refresh_flow_artifacts(
     *,
-    active_monitor_packet: dict[str, Any],
-    lifecycle_packets: list[dict[str, Any]] | None = None,
+    active_monitor_artifact: dict[str, Any],
+    lifecycle_artifacts: list[dict[str, Any]] | None = None,
     deployed_head: str | None = None,
     release_name: str | None = None,
     remote_report_path: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    lifecycle_packets = list(lifecycle_packets or [])
-    readiness_packet = readiness.build_readiness_packet(
-        active_monitor_packet=active_monitor_packet,
+    lifecycle_artifacts = list(lifecycle_artifacts or [])
+    readiness_artifact = readiness.build_readiness_artifact(
+        active_monitor_artifact=active_monitor_artifact,
         deployed_head=deployed_head,
         release_name=release_name,
         remote_report_path=remote_report_path,
     )
-    selector_packet = selector.build_selector_packet(
-        readiness_packet=readiness_packet,
-        lifecycle_packets=lifecycle_packets,
+    selector_projection = selector.build_selector_projection(
+        readiness_artifact=readiness_artifact,
+        lifecycle_artifacts=lifecycle_artifacts,
         deployed_head=deployed_head,
         release_name=release_name,
         remote_report_path=remote_report_path,
     )
     effects = _forbidden_effects(
-        active_monitor_packet,
-        readiness_packet,
-        selector_packet,
-        *lifecycle_packets,
+        active_monitor_artifact,
+        readiness_artifact,
+        selector_projection,
+        *lifecycle_artifacts,
     )
-    status = _status(selector_packet, effects)
-    refresh_packet = {
+    status = _status(selector_projection, effects)
+    refresh_artifact = {
         "scope": "runtime_live_continuation_refresh_flow",
         "status": status,
-        "source_monitor_status": active_monitor_packet.get("status"),
-        "readiness_status": readiness_packet.get("status"),
-        "selector_status": selector_packet.get("status"),
-        "active_runtime_count": readiness_packet.get("active_runtime_count"),
-        "monitored_runtime_count": readiness_packet.get("monitored_runtime_count"),
-        "selected_continuation": selector_packet.get("selected_continuation") or {},
+        "source_monitor_status": active_monitor_artifact.get("status"),
+        "readiness_status": readiness_artifact.get("status"),
+        "selector_status": selector_projection.get("status"),
+        "active_runtime_count": readiness_artifact.get("active_runtime_count"),
+        "monitored_runtime_count": readiness_artifact.get("monitored_runtime_count"),
+        "selected_continuation": selector_projection.get("selected_continuation") or {},
         "runtime_continuation_count": len(
-            selector_packet.get("runtime_continuations") or []
+            selector_projection.get("runtime_continuations") or []
         ),
-        "blockers": list(selector_packet.get("blockers") or []),
-        "warnings": list(selector_packet.get("warnings") or []),
+        "blockers": list(selector_projection.get("blockers") or []),
+        "warnings": list(selector_projection.get("warnings") or []),
         "safety_invariants": {
-            "packet_only": True,
+            "projection_only": True,
             "no_forbidden_live_side_effects": not any(effects.values()),
             "forbidden_effects": effects,
             "api_called_by_refresh_flow": False,
@@ -184,7 +185,7 @@ def build_refresh_flow_packet(
             "runtime_state_mutated_by_refresh_flow": False,
             "withdrawal_or_transfer_created_by_refresh_flow": False,
         },
-        "operator_command_plan": _operator_plan(status, selector_packet),
+        "refresh_plan": _refresh_plan(status, selector_projection),
         "deployment_context": {
             "deployed_head": deployed_head,
             "release_name": release_name,
@@ -195,7 +196,7 @@ def build_refresh_flow_packet(
             "real_strategy_signal_required_before_new_attempt": True,
             "bounded_active_position_may_continue": bool(
                 (
-                    selector_packet.get("right_tail_objective_context") or {}
+                    selector_projection.get("right_tail_objective_context") or {}
                 ).get("bounded_active_position_may_continue")
             ),
             "new_attempt_not_started_by_refresh_flow": True,
@@ -204,19 +205,19 @@ def build_refresh_flow_packet(
             "automatic_compounding_assumed": False,
         },
     }
-    return refresh_packet, readiness_packet, selector_packet
+    return refresh_artifact, readiness_artifact, selector_projection
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build selector-driven live continuation refresh packet.",
+        description="Build selector-driven live continuation refresh artifact.",
     )
     parser.add_argument("--active-monitor-json", required=True)
     parser.add_argument(
         "--lifecycle-json",
         action="append",
         default=[],
-        help="Optional per-runtime lifecycle packet. May be repeated.",
+        help="Optional per-runtime lifecycle artifact. May be repeated.",
     )
     parser.add_argument("--deployed-head")
     parser.add_argument("--release-name")
@@ -228,9 +229,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    refresh_packet, readiness_packet, selector_packet = build_refresh_flow_packet(
-        active_monitor_packet=_load_report(args.active_monitor_json),
-        lifecycle_packets=[
+    refresh_artifact, readiness_artifact, selector_projection = build_refresh_flow_artifacts(
+        active_monitor_artifact=_load_report(args.active_monitor_json),
+        lifecycle_artifacts=[
             _load_report(path)
             for path in (args.lifecycle_json or [])
         ],
@@ -240,13 +241,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.output_dir:
         output_dir = Path(args.output_dir).expanduser()
-        _write_json(output_dir / "live-attempt-readiness-packet.json", readiness_packet)
-        _write_json(output_dir / "live-continuation-selector.json", selector_packet)
-        _write_json(output_dir / "live-continuation-refresh-flow.json", refresh_packet)
+        _write_json(output_dir / "live-attempt-readiness-artifact.json", readiness_artifact)
+        _write_json(output_dir / "live-continuation-selector-projection.json", selector_projection)
+        _write_json(output_dir / "live-continuation-refresh-flow.json", refresh_artifact)
     if args.output_json:
-        _write_json(args.output_json, refresh_packet)
-    print(json.dumps(refresh_packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if refresh_packet["status"] in {
+        _write_json(args.output_json, refresh_artifact)
+    print(json.dumps(refresh_artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if refresh_artifact["status"] in {
         "continuation_refresh_monitor_position_or_standing_recovery",
         "continuation_refresh_monitor_position_or_owner_close",
         "continuation_refresh_ready_for_final_gate_review",

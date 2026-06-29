@@ -1,4 +1,4 @@
-"""Runtime-native live position monitor packet.
+"""Runtime-native live position monitor artifact.
 
 This module is pure domain logic. It summarizes post-submit runtime facts for
 Owner review and follow-up gating, but it never creates orders, closes
@@ -42,7 +42,7 @@ class RuntimeLiveProtectionStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RuntimeLivePositionMonitorPacket(RuntimeLivePositionMonitorModel):
+class RuntimeLivePositionMonitorArtifact(RuntimeLivePositionMonitorModel):
     monitor_id: str = Field(min_length=1, max_length=260)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
@@ -96,9 +96,9 @@ class RuntimeLivePositionMonitorPacket(RuntimeLivePositionMonitorModel):
     created_at_ms: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def _status_contract(self) -> "RuntimeLivePositionMonitorPacket":
+    def _status_contract(self) -> "RuntimeLivePositionMonitorArtifact":
         if self.status == RuntimeLivePositionMonitorStatus.BLOCKED and not self.blockers:
-            raise ValueError("blocked monitor packet requires blockers")
+            raise ValueError("blocked monitor artifact requires blockers")
         if self.status == RuntimeLivePositionMonitorStatus.ACTIVE_UNPROTECTED:
             if self.hard_stop_boundary_present:
                 raise ValueError("active_unprotected cannot have hard stop boundary")
@@ -109,7 +109,7 @@ class RuntimeLivePositionMonitorPacket(RuntimeLivePositionMonitorModel):
             RuntimeLivePositionMonitorStatus.FLAT_NO_REVIEW_REQUIRED,
         }:
             if self.active_position_present:
-                raise ValueError("flat monitor packet cannot have active position")
+                raise ValueError("flat monitor artifact cannot have active position")
         if self.can_continue_holding and not self.active_position_present:
             raise ValueError("can_continue_holding requires active position")
         if self.can_continue_holding and not self.hard_stop_boundary_present:
@@ -117,7 +117,7 @@ class RuntimeLivePositionMonitorPacket(RuntimeLivePositionMonitorModel):
         return self
 
 
-def build_runtime_live_position_monitor_packet(
+def build_runtime_live_position_monitor_artifact(
     *,
     runtime: StrategyRuntimeInstance,
     local_positions: list[Any],
@@ -127,8 +127,8 @@ def build_runtime_live_position_monitor_packet(
     reconciliation_result: Any | None,
     now_ms: int,
     exchange_facts_available: bool = True,
-) -> RuntimeLivePositionMonitorPacket:
-    """Build a post-submit monitor packet from already-read facts."""
+) -> RuntimeLivePositionMonitorArtifact:
+    """Build a post-submit monitor artifact from already-read facts."""
 
     local_positions = [
         position
@@ -242,7 +242,7 @@ def build_runtime_live_position_monitor_packet(
         local_positions=local_positions,
         exchange_positions=exchange_positions,
     )
-    return RuntimeLivePositionMonitorPacket(
+    return RuntimeLivePositionMonitorArtifact(
         monitor_id=f"runtime-live-position-monitor-{runtime.runtime_instance_id}-{now_ms}",
         runtime_instance_id=runtime.runtime_instance_id,
         symbol=runtime.symbol,

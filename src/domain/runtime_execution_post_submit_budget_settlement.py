@@ -82,6 +82,10 @@ class RuntimeExecutionPostSubmitBudgetSettlement(
     requires_reconciliation_before_retry: bool
     blocks_new_entries_until_resolved: bool
     not_execution_authority: Literal[True] = True
+    not_future_live_authorization: Literal[True] = True
+    cannot_authorize_future_live_action: Literal[True] = True
+    cannot_authorize_fresh_submit: Literal[True] = True
+    runtime_authorization_created: Literal[False] = False
     execution_intent_status_changed: Literal[False] = False
     order_created: Literal[False] = False
     order_cancelled: Literal[False] = False
@@ -380,6 +384,9 @@ def build_runtime_execution_post_submit_budget_settlement(
                 ),
                 "does_not_change_attempt_counter": True,
                 "does_not_change_execution_intent_status": True,
+                "does_not_authorize_future_live_action": True,
+                "does_not_authorize_fresh_submit": True,
+                "does_not_create_runtime_authorization": True,
                 "does_not_create_cancel_or_close_orders": True,
                 "does_not_call_order_lifecycle": True,
                 "does_not_call_exchange": True,

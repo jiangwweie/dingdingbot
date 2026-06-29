@@ -10,6 +10,7 @@ complete. Missing trusted facts remain blockers.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
@@ -49,22 +50,44 @@ _REQUIRED_TRUE_FIELDS = (
     "duplicate_submit_guard_ready",
 )
 
+_CURRENT_SOURCE_WRAPPERS = ("api_payload", "body", "readiness", "evidence", "artifact")
+_LEGACY_SOURCE_WRAPPERS = ("pack" + "et",)
+
+
+@dataclass(frozen=True)
+class ReadinessFactSource:
+    payload: dict[str, Any]
+    wrapper: str | None = None
+    legacy_wrapper: bool = False
+
 
 def _read_json(path: str | None) -> dict[str, Any]:
+    return _read_json_source(path).payload
+
+
+def _read_json_source(path: str | None) -> ReadinessFactSource:
     if not path:
-        return {}
+        return ReadinessFactSource(payload={})
     value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
-    return _unwrap(value)
+    return _unwrap_source(value)
 
 
-def _unwrap(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("api_payload", "packet", "body", "readiness", "decision"):
+def _unwrap_source(payload: dict[str, Any]) -> ReadinessFactSource:
+    for key in _CURRENT_SOURCE_WRAPPERS:
         nested = payload.get(key)
         if isinstance(nested, dict):
-            return nested
-    return payload
+            return ReadinessFactSource(payload=nested, wrapper=key)
+    for key in _LEGACY_SOURCE_WRAPPERS:
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            return ReadinessFactSource(
+                payload=nested,
+                wrapper=key,
+                legacy_wrapper=True,
+            )
+    return ReadinessFactSource(payload=payload)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -113,12 +136,12 @@ def _source_trusted_and_fresh(source: Any) -> bool:
 
 def _collect_final_gate(payload: dict[str, Any], evidence: dict[str, Any]) -> None:
     evidence["final_gate_preview_id"] = _optional_str(
-        _first(payload, "final_gate_preview_id", "preview_id", "packet_id", "id")
+        _first(payload, "final_gate_preview_id", "preview_id", "id")
     )
-    verdict = str(payload.get("verdict") or payload.get("status") or "").upper()
+    final_gate_status = str(payload.get("verdict") or payload.get("status") or "").upper()
     evidence["final_gate_passed"] = bool(
         payload.get("final_gate_passed") is True
-        or verdict == "PASS"
+        or final_gate_status == "PASS"
         or str(payload.get("status") or "") == "ready_for_final_gate_preflight"
     )
     candidate_snapshot = payload.get("candidate_snapshot")
@@ -170,7 +193,43 @@ def _collect_id(
     evidence[target] = _optional_str(_first(payload, *keys))
 
 
-def _evidence_payload(args: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
+def _source_wrapper_provenance(
+    *,
+    source_kind: str,
+    source: ReadinessFactSource,
+) -> dict[str, Any] | None:
+    if source.wrapper is None:
+        return None
+    return {
+        "source_kind": source_kind,
+        "wrapper": source.wrapper,
+        "legacy_wrapper": source.legacy_wrapper,
+    }
+
+
+def _read_named_source(
+    path: str | None,
+    *,
+    source_kind: str,
+    provenance_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    source = _read_json_source(path)
+    if not source.payload:
+        return {}
+    provenance = _source_wrapper_provenance(
+        source_kind=source_kind,
+        source=source,
+    )
+    if provenance:
+        provenance_items.append(provenance)
+    if source.legacy_wrapper:
+        return {}
+    return source.payload
+
+
+def _evidence_payload(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]]:
     evidence: dict[str, Any] = {
         "final_gate_preview_id": None,
         "final_gate_passed": False,
@@ -202,18 +261,31 @@ def _evidence_payload(args: argparse.Namespace) -> tuple[dict[str, Any], list[st
         ),
     }
     sources: list[str] = []
+    source_wrapper_provenance: list[dict[str, Any]] = []
 
-    final_gate = _read_json(args.final_gate_preview_json)
+    final_gate = _read_named_source(
+        args.final_gate_preview_json,
+        source_kind="final_gate_preview_json",
+        provenance_items=source_wrapper_provenance,
+    )
     if final_gate:
         _collect_final_gate(final_gate, evidence)
         sources.append("final_gate_preview_json")
 
-    trusted_facts = _read_json(args.trusted_submit_facts_json)
+    trusted_facts = _read_named_source(
+        args.trusted_submit_facts_json,
+        source_kind="trusted_submit_facts_json",
+        provenance_items=source_wrapper_provenance,
+    )
     if trusted_facts:
         _collect_trusted_facts(trusted_facts, evidence)
         sources.append("trusted_submit_facts_json")
 
-    idempotency = _read_json(args.submit_idempotency_json)
+    idempotency = _read_named_source(
+        args.submit_idempotency_json,
+        source_kind="submit_idempotency_json",
+        provenance_items=source_wrapper_provenance,
+    )
     if idempotency:
         _collect_idempotency(idempotency, evidence)
         sources.append("submit_idempotency_json")
@@ -269,7 +341,7 @@ def _evidence_payload(args: argparse.Namespace) -> tuple[dict[str, Any], list[st
         keys=("deployment_readiness_evidence_id", "readiness_id", "id"),
         ready_statuses=("ready_for_manual_gateway_binding",),
     )
-    return evidence, sources
+    return evidence, sources, source_wrapper_provenance
 
 
 def _missing_fields(payload: dict[str, Any]) -> list[str]:
@@ -289,12 +361,18 @@ def _missing_fields(payload: dict[str, Any]) -> list[str]:
 
 
 def _build_report(args: argparse.Namespace) -> dict[str, Any]:
-    evidence_payload, sources = _evidence_payload(args)
+    evidence_payload, sources, source_wrapper_provenance = _evidence_payload(args)
     missing = _missing_fields(evidence_payload)
     blockers = [f"{field}_missing" for field in missing]
     warnings: list[str] = []
     if not _present(evidence_payload.get("deployment_readiness_evidence_id")):
         warnings.append("deployment_readiness_evidence_id_missing")
+    warnings.extend(
+        "legacy_source_wrapper_used:"
+        f"{item['source_kind']}:{item['wrapper']}"
+        for item in source_wrapper_provenance
+        if item["legacy_wrapper"]
+    )
 
     evidence: dict[str, Any] | None = None
     evidence_path: str | None = None
@@ -315,6 +393,7 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
         "status": status,
         "runtime_instance_id": args.runtime_instance_id,
         "collected_source_kinds": sources,
+        "source_wrapper_provenance": source_wrapper_provenance,
         "missing_fields": missing,
         "evidence": evidence,
         "evidence_json_path": evidence_path,

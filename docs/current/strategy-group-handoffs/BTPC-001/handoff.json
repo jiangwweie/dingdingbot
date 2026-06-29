@@ -57,8 +57,8 @@
       "pullback_structure_loss",
       "regime_trend_down_state"
     ],
-    "stale_behavior": "emit_stale_signal_packet_and_block_l2_review",
-    "conflict_behavior": "emit_conflict_packet_and_block_l2_review"
+    "stale_behavior": "mark_signal_observation_stale_and_block_l2_review",
+    "conflict_behavior": "mark_signal_observation_conflict_and_block_l2_review"
   },
   "required_facts": {
     "market": [
@@ -140,30 +140,30 @@
     "risk_boundary_mismatch",
     "l4_promotion_requested_before_first_mpg_live_loop_closes"
   ],
-  "sample_signal_packet": {
+  "sample_signal_artifact": {
     "status": "would_enter_observe_only",
     "strategy_group_id": "BTPC-001",
     "side": "short",
     "freshness": "fresh",
     "not_execution_authority": true
   },
-  "sample_no_signal_packet": {
+  "sample_no_signal_artifact": {
     "status": "no_signal",
     "strategy_group_id": "BTPC-001",
-    "next_action": "continue_read_only_observation"
+    "next_observation_step": "continue_read_only_observation"
   },
-  "sample_stale_signal_packet": {
+  "sample_stale_signal_artifact": {
     "status": "stale_signal",
     "strategy_group_id": "BTPC-001",
     "blocked_reason": "signal_freshness_window_expired"
   },
-  "sample_conflict_packet": {
+  "sample_conflict_artifact": {
     "status": "signal_conflict",
     "strategy_group_id": "BTPC-001",
     "blocked_reason": "strong_uptrend_or_short_squeeze_conflict"
   },
   "execution_boundary": {
-    "research_handoff_only": true,
+    "research_intake_source_only": true,
     "runtime_registration_authorized": false,
     "candidate_creation_authorized": false,
     "final_gate_input": false,
@@ -174,7 +174,7 @@
     "source_workspace": "/Users/jiangwei/Documents/final-strategy-research",
     "source_branch": "codex/strategy-research-20260613-goal",
     "source_strategy_group": "BTPC-001",
-    "source_candidate_packet": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/candidate-packets/BTPC-001-bear-pullback-continuation-packet.md",
+    "source_candidate_artifact": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/candidate-packets/BTPC-001-bear-pullback-continuation-packet.md",
     "source_derivatives_review": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/btpc-derivatives-reviewability/btpc-derivatives-reviewability-summary.md"
   }
 }

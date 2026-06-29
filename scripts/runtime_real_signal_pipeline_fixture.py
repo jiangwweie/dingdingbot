@@ -295,8 +295,8 @@ class _FixtureClient:
                 "http_status": 200,
                 "body": {
                     "status": "ready_for_executable_submit",
-                    "packet_id": "readiness-rtf026",
-                    "source_strategy_planning_packet_id": "strategy-plan-rtf026",
+                    "artifact_id": "readiness-rtf026",
+                    "source_strategy_planning_artifact_id": "strategy-plan-rtf026",
                     "source_authorization_id": "persisted-draft-source:rtf026",
                     "signal_evaluation_id": "signal-rtf026",
                     "order_candidate_id": "candidate-rtf026",
@@ -354,7 +354,7 @@ class _FixtureClient:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "prepared_packet_blocked",
+                    "status": "prepared_evidence_blocked",
                     "available_evidence_ids": {
                         "trusted_submit_fact_snapshot_id": "facts-rtf026",
                         "submit_idempotency_policy_id": "idem-rtf026",
@@ -364,7 +364,7 @@ class _FixtureClient:
                         ),
                     },
                     "blockers": [
-                        "first_real_submit_packet_unavailable:"
+                        "first_real_submit_evidence_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ],
                 },

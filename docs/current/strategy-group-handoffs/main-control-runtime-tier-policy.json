@@ -101,7 +101,7 @@
     ],
     "one_current_row_per_strategy_group": true,
     "raw_replay_samples_stay_lower_level": true,
-    "real_order_authority": false
+    "review_rows_are_not_submit_authority": true
   },
   "safety_invariants": {
     "l4_still_requires_official_runtime_chain": true,
@@ -128,7 +128,7 @@
       "may_prepare_shadow_candidate": false,
       "may_reach_finalgate": false,
       "may_reach_operation_layer": false,
-      "meaning": "May record read-only observations and no-action packets only.",
+      "meaning": "May record read-only observations and no-action evidence only.",
       "name": "observe_only"
     },
     "L2": {

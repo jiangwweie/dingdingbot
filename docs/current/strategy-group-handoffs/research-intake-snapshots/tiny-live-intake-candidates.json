@@ -1,6 +1,5 @@
 {
   "authority_boundary": {
-    "actionable_now": false,
     "exchange_write": false,
     "execution_authority": false,
     "finalgate_input": false,
@@ -8,7 +7,6 @@
     "live_required_facts": false,
     "operation_layer_input": false,
     "order_created": false,
-    "real_order_authority": false,
     "research_only": true,
     "tier_policy_change": false
   },
@@ -185,7 +183,7 @@
     "evaluation_contract": "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md",
     "leverage_scenario": "1x through 5x are scenarios for path, liquidation, loss-envelope, and sensitivity review; they are not automatic authorization or automatic disqualification.",
     "right_tail_aspiration_anchor": "100% / 90d 100% is an aspiration and priority anchor, not a hard intake gate.",
-    "tiny_live_intake_candidate": "A strategy asset that main control may ingest for small-capital experimental review. It is not actionable_now, not FinalGate input, and not exchange execution authority.",
+    "tiny_live_intake_candidate": "A strategy asset that main control may ingest for small-capital experimental review. It is not current runtime actionability, not FinalGate input, and not exchange execution authority.",
     "tiny_live_ready": "A stricter downstream runtime state that still belongs to main control and requires official gates."
   },
   "main_control_handoff": {

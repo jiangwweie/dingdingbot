@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Local ready-signal rehearsal for observation API -> prepare bridge.
+"""Local ready-signal rehearsal for observation API -> prepare flow.
 
 This verifier uses in-memory fakes only. It proves that a ready observation
 payload can move through ``runtime_next_attempt_observation_api_prepare_flow``
-into a prepare packet when explicitly enabled, while still never submitting
+into a prepare artifact when explicitly enabled, while still never submitting
 orders, calling OrderLifecycle, calling exchange APIs, or moving funds.
 """
 
@@ -21,20 +21,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts import runtime_next_attempt_observation_api_prepare_flow as bridge  # noqa: E402
+from scripts import runtime_next_attempt_observation_api_prepare_flow as observation_flow  # noqa: E402
 
 
 def build_rehearsal_report() -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="brc-ready-prepare-rehearsal-") as tmp:
         output_dir = Path(tmp)
         dry_args = _args(output_dir=output_dir, allow_prepare_records=False)
-        dry_payload = bridge._build_packet(
+        dry_payload = observation_flow._build_artifact(
             dry_args,
             client=_ReadyObservationClient(),
             prepare_runner=_prepare_runner_should_not_run,
         )
         allow_args = _args(output_dir=output_dir, allow_prepare_records=True)
-        allow_payload = bridge._build_packet(
+        allow_payload = observation_flow._build_artifact(
             allow_args,
             client=_ReadyObservationClient(),
             prepare_runner=_fake_prepare_runner,
@@ -44,19 +44,17 @@ def build_rehearsal_report() -> dict[str, Any]:
     checks = {
         "ready_without_allow_stops_before_prepare": (
             dry_payload.get("status") == "ready_for_prepare"
-            and dry_payload.get("prepare_packet") is None
+            and dry_payload.get("prepare_artifact") is None
             and dry_payload.get("safety_invariants", {}).get("prepare_records_created")
             is False
         ),
         "allow_prepare_reaches_final_gate_preflight": (
             allow_payload.get("status") == "ready_for_final_gate_preflight"
-            and allow_payload.get("prepare_packet", {}).get("status")
+            and allow_payload.get("prepare_artifact", {}).get("status")
             == "ready_for_final_gate_preflight"
         ),
         "prepared_authorization_id_present": bool(
-            allow_payload.get("operator_command_plan", {}).get(
-                "prepared_authorization_id"
-            )
+            allow_payload.get("api_prepare_plan", {}).get("prepared_authorization_id")
         ),
         "forbidden_execution_flags": forbidden_flags,
     }
@@ -66,8 +64,8 @@ def build_rehearsal_report() -> dict[str, Any]:
         and checks["prepared_authorization_id_present"]
         and not forbidden_flags
     )
-    prepared_authorization_id = (
-        allow_payload.get("operator_command_plan", {}).get("prepared_authorization_id")
+    prepared_authorization_id = allow_payload.get("api_prepare_plan", {}).get(
+        "prepared_authorization_id"
     )
     return {
         "status": "rehearsal_passed" if passed else "blocked",
@@ -84,7 +82,7 @@ def build_rehearsal_report() -> dict[str, Any]:
             "real_submit_authorized": False,
         },
         "checks": checks,
-        "operator_command_plan": {
+        "ready_prepare_rehearsal_plan": {
             "not_executed": True,
             "next_step": (
                 "use_same_boundary_for_real_ready_signal_then_run_final_gate_arm_preview_and_disabled_smoke"
@@ -200,7 +198,7 @@ class _ReadyObservationClient:
                     "can_continue_to_authorization": True,
                     "can_execute_live": False,
                 },
-                "signal_packet": {
+                "signal_artifact": {
                     "status": "ready_for_shadow_candidate_prepare",
                     "signal_input": {
                         "evaluation_id": "rehearsal-eval-ready",
@@ -217,7 +215,7 @@ class _ReadyObservationClient:
                 },
                 "blockers": [],
                 "warnings": [],
-                "operator_command_plan": {
+                "observation_cycle_plan": {
                     "next_step": "run_official_runtime_next_attempt_prepare_api_flow",
                     "places_order": False,
                     "calls_order_lifecycle": False,
@@ -243,7 +241,7 @@ def _fake_prepare_runner(
     signal_input_json: str,
 ) -> dict[str, Any]:
     return {
-        "scope": "runtime_next_attempt_prepare_packet",
+        "scope": "runtime_next_attempt_prepare_artifact",
         "status": "ready_for_final_gate_preflight",
         "ids": {
             "runtime_execution_intent_draft_id": "draft-ready-rehearsal",
@@ -263,7 +261,7 @@ def _fake_prepare_runner(
             "attempt_mutation_created": False,
             "order_lifecycle_handoff_created": False,
         },
-        "operator_command_plan": {
+        "prepare_artifact_plan": {
             "prepared_authorization_id": "auth-ready-rehearsal",
             "live_submit_allowed": False,
             "places_order": False,
@@ -294,7 +292,7 @@ def _forbidden_flags(*payloads: dict[str, Any]) -> list[str]:
         ):
             if safety.get(key) is not False:
                 forbidden.append(f"payload_{index}.{key}")
-        prepare = payload.get("prepare_packet") or {}
+        prepare = payload.get("prepare_artifact") or {}
         prepare_safety = prepare.get("safety_invariants") or {}
         for key in (
             "exchange_write_called",

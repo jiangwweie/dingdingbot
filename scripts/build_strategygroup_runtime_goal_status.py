@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build a read-only StrategyGroup runtime goal status packet.
+"""Build a read-only StrategyGroup runtime goal status artifact.
 
-This packet is for the main control goal loop. It summarizes current watcher,
+This artifact is for the main control goal loop. It summarizes current watcher,
 source-readiness, dry-run audit, and deployment evidence into one decision
 surface. It never calls exchange write APIs, FinalGate, Operation Layer, or
 Tokyo APIs; callers provide already-written report files.
@@ -21,23 +21,18 @@ from typing import Any
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json"
 
-PACKET_FILES = {
+SOURCE_ARTIFACT_FILES = {
     "watcher_tick": "watcher-tick.json",
     "latest_summary": "latest-summary.json",
-    "wakeup": "wakeup-packet.json",
+    "wakeup": "wakeup-evidence.json",
     "post_signal_resume": "post-signal-resume-pack.json",
-    "resume_dispatch": "resume-dispatch-packet.json",
+    "resume_dispatch": "resume-dispatch-artifact.json",
     "runtime_dry_run_audit": "runtime-dry-run-audit-chain.json",
     "source_readiness": "owner-console-source-readiness.json",
     "pilot_status": "strategygroup-runtime-pilot-status.json",
     "live_facts_readiness": "strategy-group-live-facts-readiness.json",
 }
-PACKET_FILE_FALLBACKS = {
-    "runtime_dry_run_audit": (
-        "dry-run-audit-chain/runtime-dry-run-audit-chain.json",
-    ),
-}
-OPTIONAL_PACKET_KEYS = {"wakeup"}
+OPTIONAL_SOURCE_ARTIFACT_KEYS = {"wakeup"}
 
 DANGEROUS_TRUE_KEYS = {
     "exchange_write_called",
@@ -82,7 +77,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
-    "scoped_pipeline_operation_layer_handoff_checked",
+    "scoped_pipeline_operation_layer_submit_projection_checked",
     "fresh_signal_fast_auto_chain_checked",
     "required_facts_readiness_checked",
     "legacy_local_registration_probe_tolerance_checked",
@@ -99,13 +94,13 @@ REQUIRED_DRY_RUN_CHECKS = {
     "shared_runtime_pipeline_checked",
     "common_execution_chain_reuse_checked",
     "strategygroup_adapter_boundary_checked",
-    "strategy_handoff_no_execution_pipeline_fields_checked",
+    "strategy_intake_no_execution_pipeline_fields_checked",
     "runtime_tier_policy_checked",
     "only_mpg_tiny_real_order_eligible_checked",
     "new_strategygroups_default_observe_only_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-    "non_executing_prepare_auto_bridge_checked",
+    "execution_attempt_rehearsal_prepare_checked",
 }
 
 
@@ -118,42 +113,12 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload
 
 
-def _read_packet(report_dir: Path, key: str, filename: str) -> dict[str, Any] | None:
-    candidates: list[dict[str, Any]] = []
-    primary = _read_json(report_dir / filename)
-    if primary is not None:
-        candidates.append(primary)
-    for fallback in PACKET_FILE_FALLBACKS.get(key, ()):
-        packet = _read_json(report_dir / fallback)
-        if packet is not None:
-            candidates.append(packet)
-    if not candidates:
-        return None
-    if key == "runtime_dry_run_audit":
-        return max(candidates, key=_runtime_dry_run_packet_score)
-    return candidates[0]
-
-
-def _runtime_dry_run_packet_score(packet: dict[str, Any]) -> tuple[int, int, int, int]:
-    data = packet.get("data") if isinstance(packet.get("data"), dict) else packet
-    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
-    passed_required = sum(
-        1 for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is True
-    )
-    scenario_count = checks.get("scenario_count")
-    if not isinstance(scenario_count, int):
-        scenario_count = data.get("scenario_count")
-    if not isinstance(scenario_count, int):
-        scenario_count = 0
-    generated_at_ms = data.get("generated_at_ms")
-    if not isinstance(generated_at_ms, int):
-        generated_at_ms = 0
-    return (
-        1 if data.get("status") == "passed" else 0,
-        passed_required,
-        scenario_count,
-        generated_at_ms,
-    )
+def _read_source_artifact(
+    report_dir: Path,
+    key: str,
+    filename: str,
+) -> dict[str, Any] | None:
+    return _read_json(report_dir / filename)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -175,28 +140,34 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _data(packet: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(packet, dict):
+def _artifact_data(artifact: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(artifact, dict):
         return {}
-    nested = packet.get("data")
-    return nested if isinstance(nested, dict) else packet
+    nested = artifact.get("data")
+    return nested if isinstance(nested, dict) else artifact
 
 
-def _status(packet: dict[str, Any] | None) -> str:
-    return str(_data(packet).get("status") or "").strip()
+def _artifact_status(artifact: dict[str, Any] | None) -> str:
+    return str(_artifact_data(artifact).get("status") or "").strip()
 
 
-def _dispatch_status(packet: dict[str, Any] | None) -> str:
-    return str(_data(packet).get("dispatch_status") or "").strip()
+def _dispatch_artifact_status(artifact: dict[str, Any] | None) -> str:
+    return str(_artifact_data(artifact).get("dispatch_status") or "").strip()
 
 
-def _blockers(packet: dict[str, Any] | None) -> list[str]:
-    return [str(item) for item in _list(_data(packet).get("blockers")) if str(item)]
+def _artifact_blockers(artifact: dict[str, Any] | None) -> list[str]:
+    return [
+        str(item)
+        for item in _list(_artifact_data(artifact).get("blockers"))
+        if str(item)
+    ]
 
 
-def _non_waiting_blockers(packet: dict[str, Any] | None) -> list[str]:
+def _non_waiting_artifact_blockers(
+    artifact: dict[str, Any] | None,
+) -> list[str]:
     blockers: list[str] = []
-    for blocker in _blockers(packet):
+    for blocker in _artifact_blockers(artifact):
         text = blocker.lower()
         if any(fragment in text for fragment in WAITING_BLOCKER_FRAGMENTS):
             continue
@@ -204,14 +175,16 @@ def _non_waiting_blockers(packet: dict[str, Any] | None) -> list[str]:
     return blockers
 
 
-def _blocker_class(packet: dict[str, Any] | None) -> str:
-    data = _data(packet)
+def _artifact_blocker_class(artifact: dict[str, Any] | None) -> str:
+    data = _artifact_data(artifact)
     owner_state = _dict(data.get("owner_state"))
-    return str(data.get("blocker_class") or owner_state.get("blocker_class") or "").strip()
+    return str(
+        data.get("blocker_class") or owner_state.get("blocker_class") or ""
+    ).strip()
 
 
-def _ready_runtime_signal_count(packet: dict[str, Any] | None) -> int:
-    data = _data(packet)
+def _ready_runtime_signal_count(artifact: dict[str, Any] | None) -> int:
+    data = _artifact_data(artifact)
     value = data.get("ready_runtime_signals")
     if value is None:
         value = _dict(data.get("summary")).get("runtime_ready_signal_count")
@@ -240,28 +213,28 @@ def _walk_dangerous(value: Any, path: str, out: list[str]) -> None:
             _walk_dangerous(nested, f"{path}[{index}]", out)
 
 
-def _dangerous_effects(*packets: dict[str, Any] | None) -> list[str]:
+def _dangerous_effects(*source_artifacts: dict[str, Any] | None) -> list[str]:
     findings: list[str] = []
-    for index, packet in enumerate(packets):
-        _walk_dangerous(packet, f"packet[{index}]", findings)
+    for index, artifact in enumerate(source_artifacts):
+        _walk_dangerous(artifact, f"artifact[{index}]", findings)
     return sorted(set(findings))
 
 
-def _dangerous_scan_packets(
-    packets: dict[str, dict[str, Any] | None],
+def _dangerous_scan_artifacts(
+    source_artifacts: dict[str, dict[str, Any] | None],
 ) -> list[dict[str, Any] | None]:
-    scan_packets: list[dict[str, Any] | None] = []
-    for key, packet in packets.items():
+    scan_artifacts: list[dict[str, Any] | None] = []
+    for key, artifact in source_artifacts.items():
         if key == "runtime_dry_run_audit":
-            dry_run = _data(packet)
+            dry_run = _artifact_data(artifact)
             checks = _dict(dry_run.get("checks"))
             if (
                 dry_run.get("status") == "passed"
                 and checks.get("dangerous_effects_absent") is True
             ):
                 continue
-        scan_packets.append(packet)
-    return scan_packets
+        scan_artifacts.append(artifact)
+    return scan_artifacts
 
 
 def _release_head(release_manifest: dict[str, Any] | None) -> str | None:
@@ -270,23 +243,23 @@ def _release_head(release_manifest: dict[str, Any] | None) -> str | None:
     return str(local_git.get("head") or data.get("head") or "").strip() or None
 
 
-def _source_owner_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
-    data = _data(packet)
+def _source_owner_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
+    data = _artifact_data(artifact)
     return _dict(data.get("owner_summary"))
 
 
 def _source_health_item(
-    packet: dict[str, Any] | None,
+    artifact: dict[str, Any] | None,
     key: str,
 ) -> dict[str, Any]:
-    data = _data(packet)
+    data = _artifact_data(artifact)
     return _dict(_dict(data.get("source_health")).get(key))
 
 
-def _source_deploy_channel_blockers(
-    packet: dict[str, Any] | None,
+def _source_deploy_channel_artifact_blockers(
+    artifact: dict[str, Any] | None,
 ) -> list[str]:
-    item = _source_health_item(packet, "deploy_channel")
+    item = _source_health_item(artifact, "deploy_channel")
     status = str(item.get("status") or "").strip()
     if status in {"", "ready", "ready_empty"}:
         return []
@@ -309,22 +282,22 @@ def _source_deploy_channel_blockers(
 
 
 def _combined_blocker_text(
-    packets: dict[str, dict[str, Any] | None],
+    source_artifacts: dict[str, dict[str, Any] | None],
     blockers: list[str],
 ) -> str:
     parts = list(blockers)
-    for packet in packets.values():
-        parts.extend(_blockers(packet))
+    for artifact in source_artifacts.values():
+        parts.extend(_artifact_blockers(artifact))
     return " ".join(parts).lower()
 
 
-def _combined_blockers(
-    packets: dict[str, dict[str, Any] | None],
+def _combined_artifact_blockers(
+    source_artifacts: dict[str, dict[str, Any] | None],
     blockers: list[str],
 ) -> list[str]:
     combined = list(blockers)
-    for packet in packets.values():
-        combined.extend(_blockers(packet))
+    for artifact in source_artifacts.values():
+        combined.extend(_artifact_blockers(artifact))
     return [str(item) for item in combined if str(item)]
 
 
@@ -343,7 +316,7 @@ def _contains_blocker_family(text: str, families: tuple[str, ...]) -> bool:
 
 
 def _has_active_position_or_open_order_conflict(
-    packets: dict[str, dict[str, Any] | None],
+    source_artifacts: dict[str, dict[str, Any] | None],
     blockers: list[str],
 ) -> bool:
     conflict_families = (
@@ -369,7 +342,7 @@ def _has_active_position_or_open_order_conflict(
         "_not_ready",
         "not_ready_",
     )
-    for blocker in _combined_blockers(packets, blockers):
+    for blocker in _combined_artifact_blockers(source_artifacts, blockers):
         text = blocker.lower()
         if any(fragment in text for fragment in non_conflict_fragments):
             continue
@@ -400,20 +373,20 @@ def _real_order_readiness_matrix(
     *,
     status: str,
     checks: dict[str, bool],
-    packets: dict[str, dict[str, Any] | None],
+    source_artifacts: dict[str, dict[str, Any] | None],
     blockers: list[str],
     dangerous_effects: list[str],
     real_order_ready: bool,
 ) -> list[dict[str, Any]]:
-    blocker_text = _combined_blocker_text(packets, blockers)
-    source_summary = _source_owner_summary(packets.get("source_readiness"))
-    dispatch_status = _dispatch_status(packets.get("resume_dispatch"))
-    resume_status = _status(packets.get("resume_dispatch")) or _status(
-        packets.get("post_signal_resume")
+    blocker_text = _combined_blocker_text(source_artifacts, blockers)
+    source_summary = _source_owner_summary(source_artifacts.get("source_readiness"))
+    dispatch_status = _dispatch_artifact_status(source_artifacts.get("resume_dispatch"))
+    resume_status = _artifact_status(source_artifacts.get("resume_dispatch")) or _artifact_status(
+        source_artifacts.get("post_signal_resume")
     )
 
     has_active_position_blocker = _has_active_position_or_open_order_conflict(
-        packets,
+        source_artifacts,
         blockers,
     )
     has_protection_blocker = _contains_any(
@@ -543,7 +516,7 @@ def _real_order_readiness_matrix(
             ),
             status not in {"action_time_finalgate_ready", "operation_layer_ready"},
             "candidate / authorization evidence 状态",
-            "post-signal-resume-pack.json/resume-dispatch-packet.json",
+            "post_signal_resume/resume_dispatch",
         ),
         _readiness_item(
             "action_time_finalgate",
@@ -584,7 +557,7 @@ def _real_order_readiness_matrix(
             ),
             not real_order_ready,
             "官方 Operation Layer evidence 状态",
-            "resume-dispatch-packet.json",
+            "resume_dispatch",
         ),
         _readiness_item(
             "runtime_order_capable_profile",
@@ -669,7 +642,7 @@ def _matrix_submit_blocking_items(
     ]
 
 
-def _status_from_submit_blockers(
+def _status_from_submit_artifact_blockers(
     blocking_items: list[dict[str, Any]],
 ) -> tuple[str, str, str]:
     keys = {str(item.get("key") or "") for item in blocking_items}
@@ -696,7 +669,7 @@ def _status_from_submit_blockers(
     }:
         return (
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "Operation Layer evidence 已到边界，但存在真实提交硬阻断，真实提交保持关闭",
         )
     return (
@@ -727,7 +700,7 @@ def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str
     return sorted(name for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is not True)
 
 
-def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
+def _has_fresh_signal(source_artifacts: dict[str, dict[str, Any] | None]) -> bool:
     authoritative_names = (
         "latest_summary",
         "post_signal_resume",
@@ -735,12 +708,12 @@ def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
         "pilot_status",
     )
     authoritative_statuses = {
-        _status(packets.get(name))
+        _artifact_status(source_artifacts.get(name))
         for name in authoritative_names
-        if packets.get(name) is not None
+        if source_artifacts.get(name) is not None
     }
     authoritative_ready_signal_count = sum(
-        _ready_runtime_signal_count(packets.get(name))
+        _ready_runtime_signal_count(source_artifacts.get(name))
         for name in authoritative_names
     )
     if (
@@ -755,7 +728,7 @@ def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
     ):
         return False
     if any(
-        _ready_runtime_signal_count(packets.get(name)) > 0
+        _ready_runtime_signal_count(source_artifacts.get(name)) > 0
         for name in (
             "latest_summary",
             "wakeup",
@@ -766,26 +739,26 @@ def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
     ):
         return True
     statuses = {
-        _status(packets.get("wakeup")),
-        _status(packets.get("latest_summary")),
-        _status(packets.get("post_signal_resume")),
-        _status(packets.get("resume_dispatch")),
-        _status(packets.get("pilot_status")),
-        _dispatch_status(packets.get("resume_dispatch")),
+        _artifact_status(source_artifacts.get("wakeup")),
+        _artifact_status(source_artifacts.get("latest_summary")),
+        _artifact_status(source_artifacts.get("post_signal_resume")),
+        _artifact_status(source_artifacts.get("resume_dispatch")),
+        _artifact_status(source_artifacts.get("pilot_status")),
+        _dispatch_artifact_status(source_artifacts.get("resume_dispatch")),
     }
     return bool(statuses & FRESH_SIGNAL_STATUSES)
 
 
-def _selected_runtime_instance_ids(packet: dict[str, Any] | None) -> list[str]:
+def _selected_runtime_instance_ids(artifact: dict[str, Any] | None) -> list[str]:
     return [
         str(item)
-        for item in _list(_data(packet).get("selected_runtime_instance_ids"))
+        for item in _list(_artifact_data(artifact).get("selected_runtime_instance_ids"))
         if str(item)
     ]
 
 
-def _pilot_matched_runtime_instance_ids(packet: dict[str, Any] | None) -> list[str]:
-    alignment = _dict(_data(packet).get("watcher_scope_alignment"))
+def _pilot_matched_runtime_instance_ids(artifact: dict[str, Any] | None) -> list[str]:
+    alignment = _dict(_artifact_data(artifact).get("watcher_scope_alignment"))
     rows = _list(alignment.get("matched_runtime_signal_summaries"))
     return [
         str(_dict(item).get("runtime_instance_id"))
@@ -794,15 +767,15 @@ def _pilot_matched_runtime_instance_ids(packet: dict[str, Any] | None) -> list[s
     ]
 
 
-def _selected_scope_blockers(
+def _selected_scope_artifact_blockers(
     *,
-    packets: dict[str, dict[str, Any] | None],
+    source_artifacts: dict[str, dict[str, Any] | None],
     fresh_signal_present: bool,
 ) -> list[str]:
     if not fresh_signal_present:
         return []
 
-    pilot = _data(packets.get("pilot_status"))
+    pilot = _artifact_data(source_artifacts.get("pilot_status"))
     alignment = _dict(pilot.get("watcher_scope_alignment"))
     if not alignment:
         return []
@@ -811,7 +784,7 @@ def _selected_scope_blockers(
     if alignment_status == "mismatch":
         return ["selected_strategygroup_scope_mismatch"]
 
-    matched_ids = set(_pilot_matched_runtime_instance_ids(packets.get("pilot_status")))
+    matched_ids = set(_pilot_matched_runtime_instance_ids(source_artifacts.get("pilot_status")))
     if not matched_ids:
         return ["selected_strategygroup_matched_runtime_ids_missing"]
     if alignment_status == "expanded_scope":
@@ -830,9 +803,9 @@ def _selected_scope_blockers(
         return []
 
     candidate_ids = (
-        _selected_runtime_instance_ids(packets.get("resume_dispatch"))
-        or _selected_runtime_instance_ids(packets.get("post_signal_resume"))
-        or _selected_runtime_instance_ids(packets.get("latest_summary"))
+        _selected_runtime_instance_ids(source_artifacts.get("resume_dispatch"))
+        or _selected_runtime_instance_ids(source_artifacts.get("post_signal_resume"))
+        or _selected_runtime_instance_ids(source_artifacts.get("latest_summary"))
     )
     if not candidate_ids:
         return ["fresh_signal_runtime_instance_id_missing"]
@@ -846,28 +819,31 @@ def _selected_scope_blockers(
     return []
 
 
-def _watcher_liveness_blockers(
-    packets: dict[str, dict[str, Any] | None],
+def _watcher_liveness_artifact_blockers(
+    source_artifacts: dict[str, dict[str, Any] | None],
     *,
     fresh_signal_present: bool,
 ) -> list[str]:
     blockers: list[str] = []
     for name in ("watcher_tick", "latest_summary"):
-        packet = packets.get(name)
-        status = _status(packet)
-        blockers.extend(f"{name}:{item}" for item in _non_waiting_blockers(packet))
+        artifact = source_artifacts.get(name)
+        status = _artifact_status(artifact)
+        blockers.extend(
+            f"{name}:{item}"
+            for item in _non_waiting_artifact_blockers(artifact)
+        )
         if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
             if status not in {"blocked", "owner_attention_pending"}:
                 blockers.append(f"{name}:unexpected_status:{status}")
-            elif not _non_waiting_blockers(packet):
+            elif not _non_waiting_artifact_blockers(artifact):
                 continue
     return sorted(set(blockers))
 
 
-def _current_status(
+def _current_artifact_status(
     *,
     checks: dict[str, bool],
-    packets: dict[str, dict[str, Any] | None],
+    source_artifacts: dict[str, dict[str, Any] | None],
     dangerous_effects: list[str],
     deployment_blockers: list[str],
     watcher_liveness_blockers: list[str],
@@ -880,12 +856,12 @@ def _current_status(
             "发现危险效果标记，禁止继续靠近实盘动作",
             False,
         )
-    dispatch_blocker_class = _blocker_class(packets.get("resume_dispatch"))
+    dispatch_blocker_class = _artifact_blocker_class(source_artifacts.get("resume_dispatch"))
     if dispatch_blocker_class == "hard_safety_stop":
         return (
             "hard_safety_stop",
             "stop_and_investigate_hard_safety_stop",
-            "官方接力 packet 报告 hard safety stop，禁止继续靠近实盘动作",
+            "官方接力状态报告 hard safety stop，禁止继续靠近实盘动作",
             False,
         )
     if deployment_blockers:
@@ -895,11 +871,11 @@ def _current_status(
             "部署通道或目标部署状态不可用，watcher 可继续观察，真实提交保持关闭",
             False,
         )
-    if not checks["required_packets_present"]:
+    if not checks["required_artifacts_present"]:
         return (
             "missing_fact",
-            "refresh_required_runtime_packets",
-            "主链路状态所需 packet 不完整，先刷新本地/东京只读证据",
+            "refresh_required_runtime_artifacts",
+            "主链路状态所需产物不完整，先刷新本地/东京只读证据",
             False,
         )
     if not checks["runtime_dry_run_audit_passed"]:
@@ -952,9 +928,9 @@ def _current_status(
             False,
         )
 
-    dispatch_status = _dispatch_status(packets.get("resume_dispatch"))
-    latest_status = _status(packets.get("latest_summary"))
-    post_status = _status(packets.get("post_signal_resume"))
+    dispatch_status = _dispatch_artifact_status(source_artifacts.get("resume_dispatch"))
+    latest_status = _artifact_status(source_artifacts.get("latest_summary"))
+    post_status = _artifact_status(source_artifacts.get("post_signal_resume"))
     if not checks["fresh_signal_present"] and (
         latest_status in WAITING_STATUSES or post_status in WAITING_STATUSES
     ):
@@ -966,12 +942,12 @@ def _current_status(
         )
 
     chain_statuses = {
-        _status(packets.get("resume_dispatch")),
-        _status(packets.get("post_signal_resume")),
-        _status(packets.get("pilot_status")),
+        _artifact_status(source_artifacts.get("resume_dispatch")),
+        _artifact_status(source_artifacts.get("post_signal_resume")),
+        _artifact_status(source_artifacts.get("pilot_status")),
     }
     if checks["fresh_signal_present"]:
-        chain_statuses.add(_status(packets.get("wakeup")))
+        chain_statuses.add(_artifact_status(source_artifacts.get("wakeup")))
     chain_statuses.discard("")
 
     if dispatch_status == "official_operation_layer_evidence_ready":
@@ -1003,7 +979,7 @@ def _current_status(
             "fresh signal 已出现，先补 candidate / authorization evidence",
             False,
         )
-    if _has_fresh_signal(packets):
+    if _has_fresh_signal(source_artifacts):
         return (
             "fresh_signal_detected",
             "rebuild_resume_dispatch_and_prepare_evidence",
@@ -1020,24 +996,24 @@ def _current_status(
         )
     return (
         "needs_review",
-        "review_runtime_packets",
-        "当前 packet 状态无法自动归类",
+        "review_runtime_artifacts",
+        "当前状态产物无法自动归类",
         False,
     )
 
 
-def build_goal_status_packet(
+def build_goal_status_artifact(
     *,
     report_dir: Path,
     release_manifest: Path | None = None,
     expected_head: str | None = None,
 ) -> dict[str, Any]:
-    packets = {
-        key: _read_packet(report_dir, key, filename)
-        for key, filename in PACKET_FILES.items()
+    source_artifacts = {
+        key: _read_source_artifact(report_dir, key, filename)
+        for key, filename in SOURCE_ARTIFACT_FILES.items()
     }
-    manifest_packet = _read_json(release_manifest) if release_manifest else None
-    deployed_head = _release_head(manifest_packet)
+    manifest_artifact = _read_json(release_manifest) if release_manifest else None
+    deployed_head = _release_head(manifest_artifact)
     expected_head = expected_head or deployed_head
     deployment_blockers: list[str] = []
     if expected_head and deployed_head and expected_head != deployed_head:
@@ -1045,33 +1021,33 @@ def build_goal_status_packet(
     if expected_head and release_manifest and not deployed_head:
         deployment_blockers.append("deployed_head_unknown")
 
-    dry_run = _data(packets["runtime_dry_run_audit"])
+    dry_run = _artifact_data(source_artifacts["runtime_dry_run_audit"])
     dry_run_checks = _dict(dry_run.get("checks"))
     dry_run_missing_required_checks = _runtime_dry_run_missing_required_checks(
         dry_run_checks
     )
-    source = _data(packets["source_readiness"])
-    source_deploy_channel_blockers = _source_deploy_channel_blockers(
-        packets["source_readiness"]
+    source = _artifact_data(source_artifacts["source_readiness"])
+    source_deploy_channel_blockers = _source_deploy_channel_artifact_blockers(
+        source_artifacts["source_readiness"]
     )
     deploy_channel_enforced = release_manifest is not None or expected_head is not None
     if deploy_channel_enforced:
         deployment_blockers.extend(source_deploy_channel_blockers)
-    live_facts = _data(packets["live_facts_readiness"])
-    dangerous = _dangerous_effects(*_dangerous_scan_packets(packets))
-    fresh_signal_present = _has_fresh_signal(packets)
-    watcher_liveness = _watcher_liveness_blockers(
-        packets,
+    live_facts = _artifact_data(source_artifacts["live_facts_readiness"])
+    dangerous = _dangerous_effects(*_dangerous_scan_artifacts(source_artifacts))
+    fresh_signal_present = _has_fresh_signal(source_artifacts)
+    watcher_liveness = _watcher_liveness_artifact_blockers(
+        source_artifacts,
         fresh_signal_present=fresh_signal_present,
     )
-    selected_scope_blockers = _selected_scope_blockers(
-        packets=packets,
+    selected_scope_blockers = _selected_scope_artifact_blockers(
+        source_artifacts=source_artifacts,
         fresh_signal_present=fresh_signal_present,
     )
-    missing_packets = [
+    missing_artifacts = [
         key
-        for key, value in packets.items()
-        if value is None and key not in OPTIONAL_PACKET_KEYS
+        for key, value in source_artifacts.items()
+        if value is None and key not in OPTIONAL_SOURCE_ARTIFACT_KEYS
     ]
 
     dry_run_required_check_status = {
@@ -1080,10 +1056,10 @@ def build_goal_status_packet(
     }
 
     checks = {
-        "required_packets_present": all(
+        "required_artifacts_present": all(
             value is not None
-            for key, value in packets.items()
-            if key not in OPTIONAL_PACKET_KEYS
+            for key, value in source_artifacts.items()
+            if key not in OPTIONAL_SOURCE_ARTIFACT_KEYS
         ),
         "deployment_aligned": not deployment_blockers,
         "runtime_dry_run_audit_passed": (
@@ -1101,19 +1077,19 @@ def build_goal_status_packet(
         "watcher_liveness_healthy": not watcher_liveness,
         **dry_run_required_check_status,
     }
-    status, next_checkpoint, owner_detail, real_order_ready = _current_status(
+    status, next_checkpoint, owner_detail, real_order_ready = _current_artifact_status(
         checks=checks,
-        packets=packets,
+        source_artifacts=source_artifacts,
         dangerous_effects=dangerous,
         deployment_blockers=deployment_blockers,
         watcher_liveness_blockers=watcher_liveness,
         selected_scope_blockers=selected_scope_blockers,
     )
 
-    source_summary = _source_owner_summary(packets["source_readiness"])
+    source_summary = _source_owner_summary(source_artifacts["source_readiness"])
     blockers = [
         *deployment_blockers,
-        *[f"missing_packet:{key}" for key in missing_packets],
+        *[f"missing_artifact:{key}" for key in missing_artifacts],
         *([] if checks["runtime_dry_run_audit_passed"] else ["runtime_dry_run_audit_not_passed"]),
         *[
             f"runtime_dry_run_missing_required_check:{name}"
@@ -1128,7 +1104,7 @@ def build_goal_status_packet(
     readiness_matrix = _real_order_readiness_matrix(
         status=status,
         checks=checks,
-        packets=packets,
+        source_artifacts=source_artifacts,
         blockers=blockers,
         dangerous_effects=dangerous,
         real_order_ready=real_order_ready,
@@ -1146,7 +1122,7 @@ def build_goal_status_packet(
         str(item.get("key") or "") for item in submit_blocker_review_items
     ]
     if real_order_ready and matrix_submit_blockers:
-        status, next_checkpoint, owner_detail = _status_from_submit_blockers(
+        status, next_checkpoint, owner_detail = _status_from_submit_artifact_blockers(
             matrix_submit_blockers
         )
         real_order_ready = False
@@ -1160,7 +1136,7 @@ def build_goal_status_packet(
         readiness_matrix = _real_order_readiness_matrix(
             status=status,
             checks=checks,
-            packets=packets,
+            source_artifacts=source_artifacts,
             blockers=blockers,
             dangerous_effects=dangerous,
             real_order_ready=real_order_ready,
@@ -1193,7 +1169,7 @@ def build_goal_status_packet(
         "generated_at_ms": int(time.time() * 1000),
         "status": status,
         "ready_for_real_order_action": real_order_ready,
-        "next_safe_checkpoint": next_checkpoint,
+        "non_authority_checkpoint": next_checkpoint,
         "owner_state": {
             "label": (
                 "等待机会"
@@ -1208,7 +1184,7 @@ def build_goal_status_packet(
                 else "需要介入"
             ),
             "detail": owner_detail,
-            "next_safe_checkpoint": next_checkpoint,
+            "non_authority_checkpoint": next_checkpoint,
         },
         "checks": checks,
         "blockers": blockers,
@@ -1220,14 +1196,14 @@ def build_goal_status_packet(
             "deploy_channel_enforced": deploy_channel_enforced,
             "deploy_channel_blockers": source_deploy_channel_blockers,
             "deploy_channel_source_health": _source_health_item(
-                packets["source_readiness"],
+                source_artifacts["source_readiness"],
                 "deploy_channel",
             ),
-            "latest_summary_status": _status(packets["latest_summary"]),
-            "watcher_tick_status": _status(packets["watcher_tick"]),
-            "post_signal_resume_status": _status(packets["post_signal_resume"]),
-            "resume_dispatch_status": _status(packets["resume_dispatch"]),
-            "resume_dispatch_action": _data(packets["resume_dispatch"]).get(
+            "latest_summary_status": _artifact_status(source_artifacts["latest_summary"]),
+            "watcher_tick_status": _artifact_status(source_artifacts["watcher_tick"]),
+            "post_signal_resume_status": _artifact_status(source_artifacts["post_signal_resume"]),
+            "resume_dispatch_status": _artifact_status(source_artifacts["resume_dispatch"]),
+            "resume_dispatch_action": _artifact_data(source_artifacts["resume_dispatch"]).get(
                 "dispatch_action"
             ),
             "source_owner_summary": source_summary,
@@ -1243,21 +1219,21 @@ def build_goal_status_packet(
                 "project_progress_allowed": submit_blocker_review_allowed,
                 "continue_observation_allowed": submit_blocker_review_allowed,
                 "real_submit_allowed": real_order_ready,
-                "next_safe_checkpoint": next_checkpoint,
+                "non_authority_checkpoint": next_checkpoint,
                 "blocker_keys": submit_blocker_review_keys,
             },
             "pilot_matched_runtime_instance_ids": _pilot_matched_runtime_instance_ids(
-                packets["pilot_status"]
+                source_artifacts["pilot_status"]
             ),
             "resume_dispatch_selected_runtime_instance_ids": (
-                _selected_runtime_instance_ids(packets["resume_dispatch"])
+                _selected_runtime_instance_ids(source_artifacts["resume_dispatch"])
             ),
-            "active_runtime_count": _data(packets["latest_summary"]).get(
+            "active_runtime_count": _artifact_data(source_artifacts["latest_summary"]).get(
                 "active_runtime_count"
             ),
             "selected_runtime_instance_count": len(
                 _list(
-                    _data(packets["latest_summary"]).get(
+                    _artifact_data(source_artifacts["latest_summary"]).get(
                         "selected_runtime_instance_ids"
                     )
                 )
@@ -1282,7 +1258,7 @@ def build_goal_status_packet(
         },
         "real_order_readiness_matrix": readiness_matrix,
         "safety_invariants": {
-            "read_only_packet_builder": True,
+            "read_only_artifact_builder": True,
             "calls_tokyo_api": False,
             "calls_exchange_write": False,
             "calls_finalgate": False,
@@ -1300,7 +1276,7 @@ def build_goal_status_packet(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a read-only StrategyGroup runtime goal status packet."
+        description="Build a read-only StrategyGroup runtime goal status artifact."
     )
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--release-manifest", type=Path)
@@ -1315,15 +1291,19 @@ def main() -> int:
         output_json=args.output_json,
         report_dir_explicit=args.report_dir is not None,
     )
-    packet = build_goal_status_packet(
+    artifact = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=args.release_manifest,
         expected_head=args.expected_head,
     )
-    _write_json(output_json, packet)
+    _write_json(output_json, artifact)
     if args.json:
-        print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if packet["status"] not in {"hard_safety_stop", "deployment_issue"} else 2
+        print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
+    return (
+        0
+        if artifact["status"] not in {"hard_safety_stop", "deployment_issue"}
+        else 2
+    )
 
 
 if __name__ == "__main__":

@@ -20,17 +20,17 @@ from src.domain.runtime_execution_submit_authorization import (
     RuntimeExecutionSubmitAuthorization,
 )
 from src.domain.runtime_fresh_submit_authorization_binding import (
-    RuntimeFreshSubmitAuthorizationBindingPacket,
+    RuntimeFreshSubmitAuthorizationBindingArtifact,
     RuntimeFreshSubmitAuthorizationBindingSource,
     RuntimeFreshSubmitAuthorizationBindingStatus,
-    build_runtime_fresh_submit_authorization_binding_packet,
+    build_runtime_fresh_submit_authorization_binding_artifact,
 )
 from src.domain.runtime_fresh_submit_authorization_resolution import (
-    RuntimeFreshSubmitAuthorizationResolutionPacket,
+    RuntimeFreshSubmitAuthorizationResolutionArtifact,
     RuntimeFreshSubmitAuthorizationResolutionStatus,
 )
 from src.domain.runtime_official_submit_handoff import (
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
 )
 
 
@@ -71,13 +71,13 @@ class RuntimeFreshSubmitAuthorizationBindingService:
     async def bind_for_handoff(
         self,
         *,
-        handoff: RuntimeOfficialSubmitHandoffPacket,
+        handoff: RuntimeOfficialSubmitHandoffArtifact,
         requested_fresh_submit_authorization_id: str | None = None,
         allow_create_from_existing_intent: bool = True,
         allow_create_intent_from_latest_draft: bool = True,
         additional_blockers: list[str] | None = None,
         additional_warnings: list[str] | None = None,
-    ) -> RuntimeFreshSubmitAuthorizationBindingPacket:
+    ) -> RuntimeFreshSubmitAuthorizationBindingArtifact:
         warnings = list(additional_warnings or [])
         blockers = list(additional_blockers or [])
         resolution = await self._resolution_service.resolve_for_handoff(
@@ -96,7 +96,7 @@ class RuntimeFreshSubmitAuthorizationBindingService:
                     blockers=blockers,
                     warnings=warnings,
                 )
-            return build_runtime_fresh_submit_authorization_binding_packet(
+            return build_runtime_fresh_submit_authorization_binding_artifact(
                 handoff=handoff,
                 resolution=resolution,
                 authorization=authorization,
@@ -144,7 +144,7 @@ class RuntimeFreshSubmitAuthorizationBindingService:
                 except Exception as exc:
                     blockers.append(_error_code("create_authorization_failed", exc))
                 else:
-                    return build_runtime_fresh_submit_authorization_binding_packet(
+                    return build_runtime_fresh_submit_authorization_binding_artifact(
                         handoff=handoff,
                         resolution=resolution,
                         authorization=authorization,
@@ -189,7 +189,7 @@ class RuntimeFreshSubmitAuthorizationBindingService:
                         _error_code("create_intent_or_authorization_failed", exc)
                     )
                 else:
-                    return build_runtime_fresh_submit_authorization_binding_packet(
+                    return build_runtime_fresh_submit_authorization_binding_artifact(
                         handoff=handoff,
                         resolution=resolution,
                         authorization=authorization,
@@ -246,12 +246,12 @@ class RuntimeFreshSubmitAuthorizationBindingService:
     def _blocked(
         self,
         *,
-        handoff: RuntimeOfficialSubmitHandoffPacket,
-        resolution: RuntimeFreshSubmitAuthorizationResolutionPacket | None,
+        handoff: RuntimeOfficialSubmitHandoffArtifact,
+        resolution: RuntimeFreshSubmitAuthorizationResolutionArtifact | None,
         blockers: list[str],
         warnings: list[str],
-    ) -> RuntimeFreshSubmitAuthorizationBindingPacket:
-        return build_runtime_fresh_submit_authorization_binding_packet(
+    ) -> RuntimeFreshSubmitAuthorizationBindingArtifact:
+        return build_runtime_fresh_submit_authorization_binding_artifact(
             handoff=handoff,
             resolution=resolution,
             authorization=None,
@@ -268,7 +268,7 @@ class RuntimeFreshSubmitAuthorizationBindingService:
 
 
 def _authorization_from_resolution(
-    resolution: RuntimeFreshSubmitAuthorizationResolutionPacket,
+    resolution: RuntimeFreshSubmitAuthorizationResolutionArtifact,
 ) -> RuntimeExecutionSubmitAuthorization | None:
     snapshot: dict[str, Any] = dict(resolution.authorization_snapshot or {})
     authorization_id = _optional_str(snapshot.get("authorization_id"))

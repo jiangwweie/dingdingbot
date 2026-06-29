@@ -11,6 +11,7 @@ available, it can run the existing disabled first-real-submit smoke with
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -67,13 +68,27 @@ FORBIDDEN_LOOP_FLAGS = (
 )
 
 
+@dataclass(frozen=True)
+class PreparedAuthorizationSource:
+    authorization_id: str
+    source_path: str
+    legacy_source: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "authorization_id": self.authorization_id,
+            "source_path": self.source_path,
+            "legacy_source": self.legacy_source,
+        }
+
+
 def _load_json_object(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise RuntimeError(f"loop packet not found: {path}") from exc
+        raise RuntimeError(f"loop artifact not found: {path}") from exc
     if not isinstance(payload, dict):
-        raise RuntimeError("loop packet must be a JSON object")
+        raise RuntimeError("loop artifact must be a JSON object")
     return payload
 
 
@@ -93,11 +108,11 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _latest_summary(loop_packet: dict[str, Any]) -> dict[str, Any]:
-    summary = _as_dict(loop_packet.get("latest_summary"))
+def _latest_summary(loop_artifact: dict[str, Any]) -> dict[str, Any]:
+    summary = _as_dict(loop_artifact.get("latest_summary"))
     if summary:
         return summary
-    runtime_summaries = loop_packet.get("runtime_summaries")
+    runtime_summaries = loop_artifact.get("runtime_summaries")
     if isinstance(runtime_summaries, list):
         for item in runtime_summaries:
             if not isinstance(item, dict):
@@ -110,7 +125,7 @@ def _latest_summary(loop_packet: dict[str, Any]) -> dict[str, Any]:
         for item in runtime_summaries:
             if isinstance(item, dict):
                 return item
-    summaries = loop_packet.get("cycle_summaries")
+    summaries = loop_artifact.get("cycle_summaries")
     if isinstance(summaries, list) and summaries:
         last = summaries[-1]
         if isinstance(last, dict):
@@ -118,65 +133,113 @@ def _latest_summary(loop_packet: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _prepared_authorization_id(loop_packet: dict[str, Any]) -> str | None:
-    summary = _latest_summary(loop_packet)
-    candidates = [
-        summary.get("prepared_authorization_id"),
-        _as_dict(loop_packet.get("operator_command_plan")).get(
-            "prepared_authorization_id"
-        ),
-    ]
-    packets = loop_packet.get("cycle_packets")
-    if isinstance(packets, list) and packets:
-        packet = packets[-1]
-        if isinstance(packet, dict):
-            candidates.append(
-                _as_dict(packet.get("operator_command_plan")).get(
-                    "prepared_authorization_id"
-                )
-            )
-    runtime_summaries = loop_packet.get("runtime_summaries")
-    if isinstance(runtime_summaries, list):
-        for item in runtime_summaries:
-            if not isinstance(item, dict):
-                continue
-            if (
-                item.get("status") == READY_STATUS
-                or item.get("ready_for_final_gate_preflight") is True
-            ):
-                candidates.append(item.get("prepared_authorization_id"))
-    runtime_packets = loop_packet.get("runtime_packets")
-    if isinstance(runtime_packets, list):
-        for item in runtime_packets:
-            if not isinstance(item, dict):
-                continue
-            if (
-                item.get("status") == READY_STATUS
-                or item.get("ready_for_final_gate_preflight") is True
-            ):
-                candidates.append(
-                    _as_dict(item.get("operator_command_plan")).get(
-                        "prepared_authorization_id"
-                    )
-                )
-                latest_packet = _as_dict(item.get("latest_packet"))
-                candidates.append(
-                    _as_dict(latest_packet.get("operator_command_plan")).get(
-                        "prepared_authorization_id"
-                    )
-                )
-                prepare_packet = _as_dict(latest_packet.get("prepare_packet"))
-                candidates.append(_as_dict(prepare_packet.get("ids")).get("authorization_id"))
-    for value in candidates:
+def _prepared_authorization_source(
+    loop_artifact: dict[str, Any],
+) -> PreparedAuthorizationSource | None:
+    summary = _latest_summary(loop_artifact)
+    candidates: list[PreparedAuthorizationSource] = []
+
+    def add_candidate(
+        value: Any,
+        *,
+        source_path: str,
+        legacy_source: bool = False,
+    ) -> None:
         text = str(value or "").strip()
         if text:
-            return text
-    return None
+            candidates.append(
+                PreparedAuthorizationSource(
+                    authorization_id=text,
+                    source_path=source_path,
+                    legacy_source=legacy_source,
+                )
+            )
+
+    add_candidate(
+        summary.get("prepared_authorization_id"),
+        source_path="latest_summary.prepared_authorization_id",
+    )
+    add_candidate(
+        _as_dict(loop_artifact.get("observation_loop_plan")).get(
+            "prepared_authorization_id",
+        ),
+        source_path="observation_loop_plan.prepared_authorization_id",
+    )
+    cycle_artifacts = loop_artifact.get("cycle_artifacts")
+    if isinstance(cycle_artifacts, list) and cycle_artifacts:
+        cycle_artifact = cycle_artifacts[-1]
+        if isinstance(cycle_artifact, dict):
+            add_candidate(
+                _as_dict(cycle_artifact.get("observation_monitor_plan")).get(
+                    "prepared_authorization_id"
+                ),
+                source_path=(
+                    "cycle_artifacts[-1].observation_monitor_plan."
+                    "prepared_authorization_id"
+                ),
+            )
+    runtime_summaries = loop_artifact.get("runtime_summaries")
+    if isinstance(runtime_summaries, list):
+        for index, item in enumerate(runtime_summaries):
+            if not isinstance(item, dict):
+                continue
+            if (
+                item.get("status") == READY_STATUS
+                or item.get("ready_for_final_gate_preflight") is True
+            ):
+                add_candidate(
+                    item.get("prepared_authorization_id"),
+                    source_path=(
+                        f"runtime_summaries[{index}].prepared_authorization_id"
+                    ),
+                )
+    runtime_artifacts = loop_artifact.get("runtime_artifacts")
+    if isinstance(runtime_artifacts, list):
+        for index, item in enumerate(runtime_artifacts):
+            if not isinstance(item, dict):
+                continue
+            if (
+                item.get("status") == READY_STATUS
+                or item.get("ready_for_final_gate_preflight") is True
+            ):
+                add_candidate(
+                    _as_dict(item.get("observation_monitor_plan")).get(
+                        "prepared_authorization_id"
+                    ),
+                    source_path=(
+                        f"runtime_artifacts[{index}].observation_monitor_plan."
+                        "prepared_authorization_id"
+                    ),
+                )
+                latest_artifact = _as_dict(item.get("latest_artifact"))
+                add_candidate(
+                    _as_dict(latest_artifact.get("observation_cycle_plan")).get(
+                        "prepared_authorization_id"
+                    ),
+                    source_path=(
+                        f"runtime_artifacts[{index}].latest_artifact."
+                        "observation_cycle_plan.prepared_authorization_id"
+                    ),
+                )
+                prepare_evidence = _as_dict(latest_artifact.get("prepare_evidence"))
+                add_candidate(
+                    _as_dict(prepare_evidence.get("ids")).get("authorization_id"),
+                    source_path=(
+                        f"runtime_artifacts[{index}].latest_artifact."
+                        "prepare_evidence.ids.authorization_id"
+                    ),
+                )
+    return candidates[0] if candidates else None
 
 
-def _loop_forbidden_effects(loop_packet: dict[str, Any]) -> list[str]:
-    safety = _as_dict(loop_packet.get("safety_invariants"))
-    summary = _latest_summary(loop_packet)
+def _prepared_authorization_id(loop_artifact: dict[str, Any]) -> str | None:
+    source = _prepared_authorization_source(loop_artifact)
+    return source.authorization_id if source else None
+
+
+def _loop_forbidden_effects(loop_artifact: dict[str, Any]) -> list[str]:
+    safety = _as_dict(loop_artifact.get("safety_invariants"))
+    summary = _latest_summary(loop_artifact)
     effects: list[str] = []
     for source_name, source in (
         ("loop", safety),
@@ -401,17 +464,17 @@ def _run_attempt_policy_preflight(
     body = _as_dict(result.get("body"))
     blockers = [str(item) for item in body.get("blockers") or []]
     raw_status = body.get("status") or body.get("controlled_submit_plan_status")
-    verdict = body.get("final_gate_verdict")
+    final_gate_status = body.get("final_gate_verdict")
     if raw_status is not None and str(raw_status) != "ready_for_controlled_submit_adapter":
         blockers.append(f"preflight_status:{raw_status}")
-    if verdict is not None and str(verdict).lower() != "pass":
-        blockers.append(f"final_gate_verdict:{verdict}")
+    if final_gate_status is not None and str(final_gate_status).lower() != "pass":
+        blockers.append(f"final_gate_verdict:{final_gate_status}")
     if result.get("http_status", 0) >= 300 or result.get("error"):
         blockers.append(f"preflight_http_{result.get('http_status')}")
     passed = (
         result.get("http_status") == 200
         and str(raw_status) == "ready_for_controlled_submit_adapter"
-        and str(verdict).lower() == "pass"
+        and str(final_gate_status).lower() == "pass"
         and not blockers
     )
     return {
@@ -420,7 +483,7 @@ def _run_attempt_policy_preflight(
         "authorization_id": authorization_id,
         "http_status": result.get("http_status"),
         "body_status": raw_status,
-        "final_gate_verdict": verdict,
+        "final_gate_verdict": final_gate_status,
         "blockers": _dedupe_text(blockers),
         "warnings": [str(item) for item in body.get("warnings") or []],
         "safety": {
@@ -579,7 +642,7 @@ def _local_registration_readiness(
         return {
             "classification": "not_evaluated",
             "expected_non_mutating_preview_stop": False,
-            "ready_for_local_registration_authorization_packet": False,
+            "ready_for_local_registration_evidence_prep": False,
         }
 
     arm_blockers = [str(item) for item in (arm_report or {}).get("blockers") or []]
@@ -616,23 +679,25 @@ def _local_registration_readiness(
         and disabled_stopped_before_action
         and adapter_result_missing
     )
-    ready_for_packet = (
+    ready_for_evidence_prep = (
         bool(authorization_id)
         and expected_stop
         and not missing_evidence_ids
     )
-    if ready_for_packet:
+    if ready_for_evidence_prep:
         classification = "ready_for_standing_authorized_operation_layer_evidence_prep"
     elif expected_stop:
         classification = "expected_non_mutating_preview_stop_missing_evidence"
     else:
-        classification = "not_ready_for_local_registration_authorization_packet"
+        classification = "not_ready_for_local_registration_evidence_prep"
 
     return {
         "classification": classification,
         "expected_non_mutating_preview_stop": expected_stop,
-        "ready_for_local_registration_authorization_packet": ready_for_packet,
-        "ready_for_standing_authorized_operation_layer_evidence_prep": ready_for_packet,
+        "ready_for_local_registration_evidence_prep": ready_for_evidence_prep,
+        "ready_for_standing_authorized_operation_layer_evidence_prep": (
+            ready_for_evidence_prep
+        ),
         "authorization_id_present": bool(authorization_id),
         "arm_stopped_before_attempt_consumption": arm_stopped_before_attempt,
         "disabled_smoke_stopped_before_first_real_submit_action": (
@@ -666,10 +731,10 @@ def _contains_text(values: Any, expected: str) -> bool:
     return needle in str(values or "").lower()
 
 
-def build_followup_packet(
+def build_followup_artifact(
     args: argparse.Namespace,
     *,
-    loop_packet: dict[str, Any] | None = None,
+    loop_artifact: dict[str, Any] | None = None,
     arm_preview_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
     | None = None,
     attempt_policy_preflight_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
@@ -679,11 +744,15 @@ def build_followup_packet(
     disabled_smoke_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
     | None = None,
 ) -> dict[str, Any]:
-    packet = loop_packet or _load_json_object(Path(args.loop_packet_json).expanduser())
-    latest = _latest_summary(packet)
-    status = str(packet.get("status") or latest.get("status") or "unknown")
-    authorization_id = _prepared_authorization_id(packet)
-    loop_forbidden = _loop_forbidden_effects(packet)
+    artifact_path = Path(args.loop_artifact_json).expanduser()
+    artifact = loop_artifact or _load_json_object(artifact_path)
+    latest = _latest_summary(artifact)
+    status = str(artifact.get("status") or latest.get("status") or "unknown")
+    authorization_source = _prepared_authorization_source(artifact)
+    authorization_id = (
+        authorization_source.authorization_id if authorization_source else None
+    )
+    loop_forbidden = _loop_forbidden_effects(artifact)
     blockers: list[str] = []
     warnings: list[str] = []
     arm_report: dict[str, Any] | None = None
@@ -696,16 +765,16 @@ def build_followup_packet(
     local_registration_readiness: dict[str, Any] = {
         "classification": "not_evaluated",
         "expected_non_mutating_preview_stop": False,
-        "ready_for_local_registration_authorization_packet": False,
+        "ready_for_local_registration_evidence_prep": False,
     }
 
     if loop_forbidden:
-        blockers.append("loop_packet_contains_forbidden_effects")
+        blockers.append("loop_artifact_contains_forbidden_effects")
     if status == READY_FOR_PREPARE_STATUS:
         followup_status = "ready_for_prepare_records"
     elif (
         status == "waiting_for_signal"
-        and packet.get("stop_reason") == MAX_ITERATIONS_EXHAUSTED
+        and artifact.get("stop_reason") == MAX_ITERATIONS_EXHAUSTED
     ):
         followup_status = "observation_window_complete_no_signal"
     elif status != READY_STATUS:
@@ -816,8 +885,11 @@ def build_followup_packet(
         "scope": "runtime_active_observation_followup",
         "status": followup_status,
         "source_loop_status": status,
-        "source_loop_stop_reason": packet.get("stop_reason"),
+        "source_loop_stop_reason": artifact.get("stop_reason"),
         "prepared_authorization_id": authorization_id,
+        "prepared_authorization_source": (
+            authorization_source.as_dict() if authorization_source else None
+        ),
         "attempt_policy_preflight_report": attempt_policy_preflight,
         "attempt_policy_prepare_report": attempt_policy_report,
         "arm_preview_report": arm_report,
@@ -825,7 +897,7 @@ def build_followup_packet(
         "local_registration_readiness": local_registration_readiness,
         "blockers": blockers,
         "warnings": warnings,
-        "operator_command_plan": {
+        "followup_plan": {
             "not_executed": followup_status
             not in {"disabled_smoke_completed", "disabled_smoke_blocked"},
             "arm_preview_called": arm_report is not None and not arm_report_json_used,
@@ -839,7 +911,7 @@ def build_followup_packet(
                 followup_status,
                 local_registration_readiness=local_registration_readiness,
             ),
-            "local_registration_authorization_packet_script": (
+            "local_registration_evidence_prep_script": (
                 "scripts/runtime_first_real_submit_api_flow.py"
                 if local_registration_readiness.get(
                     "expected_non_mutating_preview_stop"
@@ -849,7 +921,7 @@ def build_followup_packet(
             "standing_authorized_operation_layer_evidence_prep_allowed": bool(
                 getattr(args, "allow_standing_operation_layer_evidence_prep", False)
             ),
-            "mutating_attempt_consumption_allowed_by_this_packet": (
+            "mutating_attempt_consumption_allowed_by_this_artifact": (
                 False
             ),
             "requires_fresh_real_signal_revalidation_before_mutation": (
@@ -860,7 +932,7 @@ def build_followup_packet(
             ),
         },
         "safety_invariants": {
-            "loop_packet_read_only": True,
+            "loop_artifact_read_only": True,
             "arm_preview_called": arm_report is not None and not arm_report_json_used,
             "arm_report_attached": arm_report is not None,
             "arm_report_json_used": arm_report_json_used,
@@ -938,15 +1010,15 @@ def _operation_layer_arm_evidence_path(args: argparse.Namespace, output_path: Pa
     return output_path.parent / "operation-layer-arm-evidence.json"
 
 
-def _operation_layer_arm_evidence_payload(packet: Mapping[str, Any]) -> dict[str, Any]:
-    arm_report = packet.get("arm_preview_report")
+def _operation_layer_arm_evidence_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    arm_report = artifact.get("arm_preview_report")
     if isinstance(arm_report, dict):
         return dict(arm_report)
     return {
         "scope": "runtime_operation_layer_arm_evidence",
         "status": "no_current_arm_preview",
-        "source_followup_status": packet.get("status"),
-        "prepared_authorization_id": packet.get("prepared_authorization_id"),
+        "source_followup_status": artifact.get("status"),
+        "prepared_authorization_id": artifact.get("prepared_authorization_id"),
         "blockers": [],
         "warnings": [],
         "ids": {},
@@ -982,14 +1054,14 @@ def _next_step(
             "operation_layer_chain"
         )
     if status == "disabled_smoke_blocked":
-        if readiness.get("ready_for_local_registration_authorization_packet") is True:
+        if readiness.get("ready_for_local_registration_evidence_prep") is True:
             return (
                 "for_fresh_real_signal_run_standing_authorized_operation_layer_"
                 "evidence_prep_then_rerun_action_time_finalgate"
             )
         if readiness.get("expected_non_mutating_preview_stop") is True:
             return (
-                "resolve_missing_evidence_before_local_registration_authorization_packet"
+                "resolve_missing_evidence_before_local_registration_evidence_prep"
             )
         return "review_disabled_smoke_blockers"
     return "resolve_followup_blockers"
@@ -1002,7 +1074,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "ready_for_final_gate_preflight."
         ),
     )
-    parser.add_argument("--loop-packet-json", required=True)
+    parser.add_argument("--loop-artifact-json", dest="loop_artifact_json")
     parser.add_argument("--output-json")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--env-file")
@@ -1045,25 +1117,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Do not call evidence preparation after a disabled-smoke 404.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.loop_artifact_json:
+        parser.error("--loop-artifact-json is required")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_followup_packet(args)
+    artifact = build_followup_artifact(args)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
-            json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-            + "\n",
-            encoding="utf-8",
-        )
-        arm_evidence_path = _operation_layer_arm_evidence_path(args, output_path)
-        arm_evidence_path.parent.mkdir(parents=True, exist_ok=True)
-        arm_evidence_path.write_text(
             json.dumps(
-                _operation_layer_arm_evidence_payload(packet),
+                artifact,
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
@@ -1072,8 +1140,21 @@ def main(argv: list[str] | None = None) -> int:
             + "\n",
             encoding="utf-8",
         )
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        arm_evidence_path = _operation_layer_arm_evidence_path(args, output_path)
+        arm_evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        arm_evidence_path.write_text(
+            json.dumps(
+                _operation_layer_arm_evidence_payload(artifact),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         "observation_window_complete_no_signal",
         "waiting_for_ready_final_gate_preflight",
         "ready_for_prepare_records",

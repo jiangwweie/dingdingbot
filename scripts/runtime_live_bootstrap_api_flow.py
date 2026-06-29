@@ -236,9 +236,9 @@ class RuntimeLiveBootstrapApiFlow:
 
     def _create_admission(self, account_facts: dict[str, Any]) -> None:
         evidence = self._step(
-            "create_evidence_packet",
+            "create_admission_evidence",
             "POST",
-            "/api/brc/admissions/evidence-packets",
+            "/api/brc/admissions/admission-evidence",
             body={
                 "strategy_family_version_id": self._config.strategy_family_version_id,
                 "payload_json": {
@@ -251,7 +251,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "created_by": self._config.owner_operator_id,
             },
         )
-        self.state.remember("evidence_packet_id", _body(evidence).get("evidence_packet_id"))
+        self.state.remember("admission_evidence_id", _body(evidence).get("admission_evidence_id"))
         regime = self._step(
             "create_owner_regime_input",
             "POST",
@@ -280,7 +280,7 @@ class RuntimeLiveBootstrapApiFlow:
             "/api/brc/admissions/requests",
             body={
                 "strategy_family_version_id": self._config.strategy_family_version_id,
-                "evidence_packet_id": self.state.ids.get("evidence_packet_id"),
+                "admission_evidence_id": self.state.ids.get("admission_evidence_id"),
                 "owner_market_regime_input_id": self.state.ids.get(
                     "owner_market_regime_input_id"
                 ),
@@ -299,7 +299,7 @@ class RuntimeLiveBootstrapApiFlow:
             "admission_request_id",
             _body(admission).get("admission_request_id"),
         )
-        decision = self._step(
+        admission_evaluation = self._step(
             "evaluate_admission_request",
             "POST",
             (
@@ -307,17 +307,18 @@ class RuntimeLiveBootstrapApiFlow:
                 f"{self.state.ids.get('admission_request_id')}/evaluate"
             ),
         )
-        decision_body = _body(decision)
+        admission_body = _body(admission_evaluation)
         self.state.remember(
             "admission_decision_id",
-            decision_body.get("admission_decision_id"),
+            admission_body.get("admission_decision_id"),
         )
         self.state.remember(
             "trial_constraint_snapshot_id",
-            decision_body.get("trial_constraint_snapshot_id"),
+            admission_body.get("trial_constraint_snapshot_id"),
         )
-        if decision_body.get("decision") not in {"admit", "admit_with_constraints"}:
-            self.state.add_blockers([f"admission_decision_{decision_body.get('decision')}"])
+        admission_result = admission_body.get("admission_result")
+        if admission_result not in {"admit", "admit_with_constraints"}:
+            self.state.add_blockers([f"admission_result_{admission_result or 'missing'}"])
         acceptance = self._step(
             "create_owner_risk_acceptance",
             "POST",
@@ -357,8 +358,9 @@ class RuntimeLiveBootstrapApiFlow:
             },
         )
         preflight_body = _body(preflight)
-        if preflight_body.get("decision") not in {"allow", "warn"}:
-            self.state.add_blockers([f"binding_preflight_{preflight_body.get('decision')}"])
+        preflight_result = preflight_body.get("preflight_result")
+        if preflight_result not in {"allow", "warn"}:
+            self.state.add_blockers([f"binding_preflight_{preflight_result}"])
         self.state.add_blockers(preflight_body.get("risk_summary", {}).get("blockers"))
         if self.state.blockers:
             return
@@ -527,7 +529,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "path": path,
                 "http_status": result.get("http_status"),
                 "status": body_value.get("status") if isinstance(body_value, dict) else None,
-                "decision": body_value.get("decision") if isinstance(body_value, dict) else None,
+                "step_result": _step_result(name, body_value),
                 "ids": _id_summary(body_value),
                 "blockers": body_value.get("blockers", []) if isinstance(body_value, dict) else [],
                 "warnings": body_value.get("warnings", []) if isinstance(body_value, dict) else [],
@@ -718,13 +720,23 @@ def _body(result: dict[str, Any]) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+def _step_result(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(body, dict):
+        return {}
+    if name == "evaluate_admission_request":
+        return {"admission_result": body.get("admission_result")}
+    if name == "preflight_create_gated_trial":
+        return {"preflight_result": body.get("preflight_result")}
+    return {}
+
+
 def _id_summary(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     keys = (
         "strategy_family_id",
         "strategy_family_version_id",
-        "evidence_packet_id",
+        "admission_evidence_id",
         "owner_market_regime_input_id",
         "admission_request_id",
         "admission_decision_id",

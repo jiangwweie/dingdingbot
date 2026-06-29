@@ -13,10 +13,20 @@ import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    LEGACY_AUTHORITY_MIRROR_KEYS,
+    legacy_authority_mirror_present_errors,
+)
+from src.domain.runtime_readiness_state import false_flag_errors  # noqa: E402
+
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
@@ -26,11 +36,6 @@ DEFAULT_OUTPUT_MD = (
     / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.md"
 )
 
-ACTIONABLE_NOW_REASON = (
-    "runtime_state_only; requires fresh signal, live facts, candidate/auth, "
-    "action-time execution gates, official submission path, protection, account, "
-    "and exchange facts"
-)
 AUTHORITY_BOUNDARY = (
     "Registry row is strategy asset governance only. It does not authorize "
     "runtime start, candidate creation, FinalGate, Operation Layer, exchange "
@@ -53,8 +58,6 @@ REQUIRED_ROW_FIELDS = [
     "supported_sides",
     "default_tier",
     "trial_eligible",
-    "actionable_now",
-    "actionable_now_reason",
     "risk_gaps",
     "hard_blocks",
     "required_facts_summary",
@@ -98,15 +101,17 @@ def build_registry_baseline() -> dict[str, Any]:
                 "docs/current/strategy-group-handoffs/"
                 "main-control-handoff-index.md"
             ),
-            "decision_ledger_contract": (
+            "strategy_asset_state_evidence_contract": (
                 "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md"
             ),
         },
-        "actionability_contract": {
+        "runtime_authority_contract": {
             "trial_eligible_source": "registry_plus_owner_policy",
-            "actionable_now_source": "runtime_state_only",
-            "static_rows_must_not_set_actionable_now_true": True,
-            "actionable_now_reason": ACTIONABLE_NOW_REASON,
+            "runtime_authority_sources": [
+                "Tradeability Decision",
+                "Runtime Safety State",
+            ],
+            "static_rows_must_not_grant_runtime_authority": True,
         },
         "risk_acceptance_policy": {
             "owner_may_accept": [
@@ -120,7 +125,6 @@ def build_registry_baseline() -> dict[str, Any]:
             ],
         },
         "safety_invariants": {
-            "real_order_authority": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
             "calls_exchange_write": False,
@@ -134,8 +138,8 @@ def build_registry_baseline() -> dict[str, Any]:
     }
 
 
-def build_owner_markdown(packet: dict[str, Any]) -> str:
-    rows = _dict_rows(packet.get("rows"))
+def build_owner_markdown(artifact: dict[str, Any]) -> str:
+    rows = _dict_rows(artifact.get("rows"))
     lines = [
         "---",
         "title: STRATEGYGROUP_REGISTRY_BASELINE",
@@ -150,7 +154,7 @@ def build_owner_markdown(packet: dict[str, Any]) -> str:
         "",
         "这份基线是 Owner/Codex 共用的 StrategyGroup 策略资产地图，用来说明每个 StrategyGroup 吃什么机会、怎么交易、当前层级、是否具备试运行资格，以及哪些证据会改变 keep / revise / promote / park / kill 决策。",
         "",
-        "它不是实时运行状态。`actionable_now` 只能由运行时判断，因此静态 registry 中始终保持 `false`。",
+        "它不是实时运行状态，也不回答当前能否交易；实时提交资格只能由运行时状态判断。",
         "",
         "## 总览",
         "",
@@ -183,34 +187,42 @@ def build_owner_markdown(packet: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def validate_packet(packet: dict[str, Any]) -> list[str]:
+def validate_artifact(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    rows = _dict_rows(packet.get("rows"))
+    rows = _dict_rows(artifact.get("rows"))
     groups = [str(row.get("strategy_group_id") or "") for row in rows]
     if groups != EXPECTED_GROUPS:
         errors.append(f"unexpected_strategy_groups:{groups}")
-    if packet.get("schema") != "brc.strategygroup_registry_baseline.v1":
+    if artifact.get("schema") != "brc.strategygroup_registry_baseline.v1":
         errors.append("schema_mismatch")
-    safety = _as_dict(packet.get("safety_invariants"))
-    for key in (
-        "real_order_authority",
-        "calls_finalgate",
-        "calls_operation_layer",
-        "calls_exchange_write",
-        "places_order",
-        "changes_live_profile",
-        "changes_order_sizing_defaults",
-        "withdrawal_or_transfer",
-    ):
-        if safety.get(key) is not False:
-            errors.append(f"safety_invariant_not_false:{key}")
+    safety = _as_dict(artifact.get("safety_invariants"))
+    errors.extend(
+        false_flag_errors(
+            safety,
+            error_prefix="safety_invariant",
+            false_keys=(
+                "calls_finalgate",
+                "calls_operation_layer",
+                "calls_exchange_write",
+                "places_order",
+                "changes_live_profile",
+                "changes_order_sizing_defaults",
+                "withdrawal_or_transfer",
+            ),
+        )
+    )
     for row in rows:
         group = str(row.get("strategy_group_id") or "unknown")
         for field in REQUIRED_ROW_FIELDS:
             if field not in row:
                 errors.append(f"{group}.missing_field:{field}")
-        if row.get("actionable_now") is True:
-            errors.append(f"{group}.actionable_now_true")
+        errors.extend(
+            legacy_authority_mirror_present_errors(
+                row,
+                label_prefix=f"{group}.static_row_",
+                keys=(*LEGACY_AUTHORITY_MIRROR_KEYS, "actionable_now_reason"),
+            )
+        )
         if not isinstance(row.get("trial_eligible"), bool):
             errors.append(f"{group}.trial_eligible_not_bool")
         if not _dict_rows(row.get("evidence_refs")):
@@ -229,8 +241,6 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
 
 def _with_defaults(row: dict[str, Any]) -> dict[str, Any]:
     output = deepcopy(row)
-    output["actionable_now"] = False
-    output["actionable_now_reason"] = ACTIONABLE_NOW_REASON
     output["authority_boundary"] = AUTHORITY_BOUNDARY
     output["risk_gaps"] = _normalize_risk_gaps(output.get("risk_gaps"))
     output["hard_blocks"] = [
@@ -243,7 +253,6 @@ def _with_defaults(row: dict[str, Any]) -> dict[str, Any]:
     ]
     output["evidence_refs"] = _dedupe_evidence_refs(output.get("evidence_refs"))
     output["safety_invariants"] = {
-        "real_order_authority": False,
         "calls_finalgate": False,
         "calls_operation_layer": False,
         "calls_exchange_write": False,
@@ -380,7 +389,7 @@ def _row_specs() -> list[dict[str, Any]]:
                 "risk": "exchange margin/liquidation model, spread/liquidity downshift, mark deviation, protection plan",
                 "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
             },
-            promotion_gate="Derivatives facts and margin/liquidation mapping must support a Decision Ledger promote/go-live review after P0 closure or Owner lane change.",
+            promotion_gate="Derivatives facts and margin/liquidation mapping must support a Strategy Asset State promote/go-live review after P0 closure or Owner lane change.",
             downshift_rule="Downshift if derivatives facts are stale or settlement timing invalidates the setup.",
             park_rule="Park if crowding stress is absent or derivatives source quality is too weak.",
             kill_condition="Kill if stress signals repeatedly fail after funding, basis, and liquidation costs.",
@@ -479,15 +488,15 @@ def _row_specs() -> list[dict[str, Any]]:
                 "derivatives": "funding, premium, OI/crowding proxy, squeeze risk, historical OI, long/short, top-trader ratio",
                 "risk_account_exchange": "margin/liquidation model, slippage, protection, account state, exchange filters",
             },
-            promotion_gate="Complete live derivatives fact-source mapping, classifier review, and Decision Ledger revise resolution before higher-tier review.",
+            promotion_gate="Complete live derivatives fact-source mapping, classifier review, and Strategy Asset State revise resolution before higher-tier review.",
             downshift_rule="Downshift if strong-uptrend conflict, stale signal, squeeze risk, or derivatives facts invalidate review.",
             park_rule="Park if proxy replay or live derivatives source review shows no durable right-tail edge.",
             kill_condition="Kill if bear-pullback would-enter cases fail after derivatives, squeeze, freshness, and cost review.",
             evidence_refs=[
                 _evidence("handoff", "docs/current/strategy-group-handoffs/BTPC-001/handoff.json"),
                 _evidence("replay", "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json"),
-                _evidence("decision", "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json"),
-                _evidence("ledger", "output/runtime-monitor/latest-strategygroup-decision-ledger.json"),
+                _evidence("decision", "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json"),
+                _evidence("strategy_asset_state", "output/runtime-monitor/latest-strategy-asset-state.json"),
             ],
             risk_gaps={
                 "strategy_quality_risk": ["strong-uptrend conflict", "stale signal handling", "short squeeze classifier quality"],
@@ -508,7 +517,7 @@ def _row_specs() -> list[dict[str, Any]]:
             supported_sides=["long"],
             default_tier="L1",
             replay_ref="docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json",
-            ledger_decision="keep_observing",
+            current_decision_ref="keep_observing",
             promotion_gate="False-breakout disable and economic replay must remain stable before L2 review.",
             risk_gaps={
                 "strategy_quality_risk": ["false breakout reversal", "breakout close confirmation fragility"],
@@ -527,7 +536,7 @@ def _row_specs() -> list[dict[str, Any]]:
             supported_sides=["long_observe", "short_revival_review"],
             default_tier="L1",
             replay_ref="docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json",
-            ledger_decision="keep_observing",
+            current_decision_ref="keep_observing",
             promotion_gate="Side-specific classifier rewrite and economic replay must support non-executing L2 review.",
             risk_gaps={
                 "strategy_quality_risk": ["lookahead proxy failure", "short-revival classifier fragility", "range context missing"],
@@ -546,7 +555,7 @@ def _row_specs() -> list[dict[str, Any]]:
             supported_sides=["short"],
             default_tier="L1",
             replay_ref="docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json",
-            ledger_decision="keep_observing",
+            current_decision_ref="keep_observing",
             promotion_gate="Rally context, squeeze-risk classifier, and cost replay must be attached before L2 review.",
             risk_gaps={
                 "strategy_quality_risk": ["rally failure context may be weak", "short squeeze risk"],
@@ -564,8 +573,8 @@ def _row_specs() -> list[dict[str, Any]]:
             regime_fit="Calm range boundary rejection regimes, currently weak or negative in review.",
             supported_sides=["short_review"],
             default_tier="L1",
-            replay_ref="output/runtime-monitor/latest-strategygroup-decision-ledger.json",
-            ledger_decision="park",
+            replay_ref="output/runtime-monitor/latest-strategy-asset-state.json",
+            current_decision_ref="park",
             promotion_gate="Materially new positive replay or live-observation evidence is required before unpark.",
             risk_gaps={
                 "strategy_quality_risk": ["weak edge evidence", "negative or low-priority review", "range-quality uncertainty"],
@@ -597,7 +606,7 @@ def _observe_replay_row(
     supported_sides: list[str],
     default_tier: str,
     replay_ref: str,
-    ledger_decision: str,
+    current_decision_ref: str,
     promotion_gate: str,
     risk_gaps: dict[str, list[str]],
     evidence_status: str = "partial_replay_and_decision_evidence",
@@ -613,7 +622,7 @@ def _observe_replay_row(
         "default_tier": default_tier,
         "trial_eligible": False,
         "required_facts_summary": {
-            "strategy": "partial; see replay corpus and current Decision Ledger evidence",
+            "strategy": "partial; see replay corpus and current Strategy Asset State evidence",
             "market": "partial; runtime observation facts remain lower-level evidence",
             "risk_account_exchange": "runtime-only before any live or shadow authority",
         },
@@ -623,12 +632,12 @@ def _observe_replay_row(
         "kill_condition": "Kill if replay/live outcomes repeatedly contradict the edge after facts and costs are reviewed.",
         "evidence_refs": [
             _evidence("replay_or_generated_view", replay_ref),
-            _evidence("ledger", "output/runtime-monitor/latest-strategygroup-decision-ledger.json"),
+            _evidence("strategy_asset_state", "output/runtime-monitor/latest-strategy-asset-state.json"),
         ],
         "risk_gaps": risk_gaps,
         "evidence_status": evidence_status,
         "required_next_evidence": required_next_evidence,
-        "current_decision_ref": ledger_decision,
+        "current_decision_ref": current_decision_ref,
     }
 
 
@@ -638,17 +647,16 @@ def _evidence(kind: str, path: str) -> dict[str, str]:
 
 def _summary_table(rows: list[dict[str, Any]]) -> str:
     output = [
-        "| StrategyGroup | 策略含义 | 层级 | 可试运行 | 当前可行动性 `actionable_now` | 证据状态 |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| StrategyGroup | 策略含义 | 层级 | 可试运行 | 证据状态 |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         output.append(
-            "| `{}` | {} | `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | {} | `{}` | `{}` | `{}` |".format(
                 row.get("strategy_group_id"),
                 row.get("owner_label"),
                 row.get("default_tier"),
                 str(row.get("trial_eligible")).lower(),
-                str(row.get("actionable_now")).lower(),
                 row.get("evidence_status"),
             )
         )
@@ -671,7 +679,7 @@ def _row_section(row: dict[str, Any]) -> list[str]:
         f"- 交易逻辑: {row.get('trade_logic')}",
         f"- 适用市场结构: {row.get('regime_fit')}",
         f"- 层级 / 可试运行: `{row.get('default_tier')}` / `{str(row.get('trial_eligible')).lower()}`",
-        "- 当前可行动性: `false`，只能由运行时根据当前实盘状态判断",
+        "- 运行边界: 静态 registry 只定义策略资产，不授权运行时提交",
         f"- 晋级条件: {row.get('promotion_gate')}",
         f"- 降级 / 停放 / 淘汰: {row.get('downshift_rule')} / {row.get('park_rule')} / {row.get('kill_condition')}",
         f"- 风险缺口: {risk_summary}",
@@ -688,14 +696,14 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _write_files(packet: dict[str, Any], json_path: Path, md_path: Path) -> None:
+def _write_files(artifact: dict[str, Any], json_path: Path, md_path: Path) -> None:
     json_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    md_path.write_text(build_owner_markdown(packet), encoding="utf-8")
+    md_path.write_text(build_owner_markdown(artifact), encoding="utf-8")
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -720,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     json_path = Path(args.output_json).expanduser()
     md_path = Path(args.output_md).expanduser()
     expected = build_registry_baseline()
-    errors = validate_packet(expected)
+    errors = validate_artifact(expected)
     if args.check:
         if not json_path.exists():
             errors.append(f"missing_json:{json_path}")
@@ -730,14 +738,16 @@ def main(argv: list[str] | None = None) -> int:
             existing = _load_json(json_path)
             if existing != expected:
                 errors.append("json_output_drift")
-            errors.extend(validate_packet(existing))
+            errors.extend(validate_artifact(existing))
         if md_path.exists():
             markdown = md_path.read_text(encoding="utf-8")
             for group in EXPECTED_GROUPS:
                 if group not in markdown:
                     errors.append(f"markdown_missing_group:{group}")
-            if "actionable_now" not in markdown:
-                errors.append("markdown_missing_actionable_boundary")
+            if "runtime-only" not in markdown:
+                errors.append("markdown_missing_runtime_only_boundary")
+            if "does not authorize" not in markdown:
+                errors.append("markdown_missing_non_authority_boundary")
     else:
         _write_files(expected, json_path, md_path)
 

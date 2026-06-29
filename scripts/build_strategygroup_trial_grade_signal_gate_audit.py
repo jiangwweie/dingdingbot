@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a trial-grade signal gate audit for MPG, BRF2, and SOR.
 
-This packet answers whether current fresh-signal gates are closer to
+This artifact answers whether current fresh-signal gates are closer to
 production-grade or bounded trial-grade. It is non-executing: replay, preview,
 and proxy observations never become live RequiredFacts, FinalGate input,
 Operation Layer evidence, exchange writes, or order authority.
@@ -14,10 +14,18 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_MPG_REPLAY_CORPUS_JSON = (
     REPO_ROOT
@@ -103,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_trial_grade_signal_gate_audit(
+    audit_artifact = build_trial_grade_signal_gate_audit(
         mpg_replay_corpus=_read_optional_json(Path(args.mpg_replay_corpus_json)),
         brf_replay_corpus=_read_optional_json(Path(args.brf_replay_corpus_json)),
         sor_handoff=_read_optional_json(Path(args.sor_handoff_json)),
@@ -118,17 +126,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, audit_artifact)
+    _write_text(output_md, _markdown(audit_artifact, output_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_count": packet["summary"]["strategy_group_count"],
-                "trial_grade_observation_count_30d": packet["summary"][
+                "status": audit_artifact["status"],
+                "strategy_group_count": audit_artifact["summary"]["strategy_group_count"],
+                "trial_grade_observation_count_30d": audit_artifact["summary"][
                     "trial_grade_observation_count_30d"
                 ],
-                "action_time_trial_submit_count_30d": packet["summary"][
+                "action_time_trial_submit_count_30d": audit_artifact["summary"][
                     "action_time_trial_submit_count_30d"
                 ],
                 "output_json": str(output_json),
@@ -137,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if packet["status"] == "trial_grade_signal_gate_audit_ready" else 2
+    return 0 if audit_artifact["status"] == "trial_grade_signal_gate_audit_ready" else 2
 
 
 def build_trial_grade_signal_gate_audit(
@@ -235,12 +243,6 @@ def build_trial_grade_signal_gate_audit(
             ),
             "recent_counts_are_source_qualified": True,
             "replay_or_proxy_not_action_time_authority": True,
-            "actionable_now": False,
-            "real_order_authority": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
         },
         "interaction": _interaction(),
         "safety_invariants": _safety_invariants(),
@@ -314,8 +316,6 @@ def _strategy_audit_row(
             "trial_grade_signal_can_prepare_30u_trial": True,
             "trial_grade_signal_can_bypass_hard_safety_gates": False,
             "replay_or_proxy_counts_are_live_signals": False,
-            "actionable_now": False,
-            "real_order_authority": False,
         },
     }
 
@@ -862,14 +862,14 @@ def _summary(strategy_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _preview_rows(packet: dict[str, Any], *, source_name: str) -> list[dict[str, Any]]:
+def _preview_rows(source_artifact: dict[str, Any], *, source_name: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key in ("would_enter_signals", "no_action_signals", "invalid_signals"):
-        for row in _dict_rows(packet.get(key)):
+        for row in _dict_rows(source_artifact.get(key)):
             item = dict(row)
             item["_source_name"] = source_name
             rows.append(item)
-    preview = _as_dict(packet.get("preview"))
+    preview = _as_dict(source_artifact.get("preview"))
     for key in ("current_signals", "signal_history", "candidates"):
         for row in _dict_rows(preview.get(key)):
             item = dict(row)
@@ -1025,47 +1025,29 @@ def _ms_to_iso(value: int) -> str:
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_trial_grade_signal_gate_audit",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_trial_grade_signal_gate_audit")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "replay_or_proxy_signal_treated_as_live_signal": False,
-        "action_time_required_facts_satisfied_by_proxy": False,
-        "authorization_evidence_created": False,
-        "execution_intent_created": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "withdrawal_or_transfer_created": False,
-    }
+    return non_executing_safety_invariants(
+        extra_false_keys=(
+            "replay_or_proxy_signal_treated_as_live_signal",
+            "action_time_required_facts_satisfied_by_proxy",
+            "authorization_evidence_created",
+        ),
+        include_authority_mirrors=False,
+    )
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
-    summary = packet["summary"]
+def _markdown(audit_artifact: dict[str, Any], output_json: Path) -> str:
+    summary = audit_artifact["summary"]
     lines = [
         "## Trial-Grade Signal Gate Audit",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{audit_artifact['status']}`",
+        f"- Generated: `{audit_artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
         "- Scope: `30U bounded trial only`",
-        "- Actionable now: `否`",
-        "- Real order authority: `否`",
         "",
         "## Summary",
         "",
@@ -1079,7 +1061,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         "| StrategyGroup | Current gate | 30d trial observations | Fixture trial cases | Max loss estimate | Tomorrow assessment |",
         "| --- | --- | ---: | ---: | ---: | --- |",
     ]
-    for row in packet["strategy_group_rows"].values():
+    for row in audit_artifact["strategy_group_rows"].values():
         counts_30d = _as_dict(row["verified_recent_window_counts"]["windows_days"]["30"])
         tomorrow = _as_dict(row["tomorrow_same_structure_assessment"])
         lines.append(
@@ -1098,7 +1080,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
             "- Trial-grade risk is expressed as envelope: attempt cap, loss unit, pause rule, protection, and review.",
             "- Replay, preview, and proxy rows do not satisfy action-time RequiredFacts.",
-            "- This packet does not call FinalGate, Operation Layer, exchange write, or order creation.",
+            "- This artifact does not call FinalGate, Operation Layer, exchange write, or order creation.",
         ]
     )
     return "\n".join(lines) + "\n"

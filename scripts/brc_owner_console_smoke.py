@@ -10,7 +10,7 @@ switch_playbook can preflight and confirm successfully when BRC campaign,
 account facts, audit, and operation repository services are bound.
 
 Runtime-bound-evidence mode uses the same bounded service context and emits a
-local evidence packet for Owner Console verification. It does not start live,
+local evidence artifact for Owner Console verification. It does not start live,
 generic trading, actual flatten, order cancel/close, withdrawal/transfer, or
 LLM direct execution.
 
@@ -19,7 +19,7 @@ can carry TF-001 without expanding authority.
 
 TF-001 carrier full-chain mode validates the bounded third-stage trial flow:
 select playbook, confirm, enter monitor carrier, pause, stop runtime, and write
-the review decision. It does not start live/mainnet, generic trading, actual
+the review outcome. It does not start live/mainnet, generic trading, actual
 flatten, order cancel/close, withdrawal/transfer, or LLM direct execution.
 """
 
@@ -189,7 +189,7 @@ def run_http_smoke(base_url: str, cookie: str) -> dict[str, Any]:
         "capabilities_status": capabilities["status_code"],
         "account_facts_status": facts["status_code"],
         "preflight_status": preflight["status_code"],
-        "preflight_decision": preflight_body.get("decision"),
+        "preflight_result": preflight_body.get("preflight_result"),
         "preflight_operation_status": preflight_body.get("status"),
         "live_ready": readiness["body"].get("live_ready"),
         "account_source": facts["body"].get("source"),
@@ -214,7 +214,7 @@ async def run_runtime_bound_test_smoke() -> dict[str, Any]:
     return {
         "mode": "runtime-bound-test",
         "preflight": {
-            "decision": preflight.decision,
+            "preflight_result": preflight.preflight_result,
             "status": preflight.status,
             "operation_id": preflight.operation_id,
             "preflight_id": preflight.preflight_id,
@@ -306,7 +306,7 @@ async def run_runtime_bound_evidence_smoke() -> dict[str, Any]:
             "preflight": {
                 "operation_id": switch_preflight.operation_id,
                 "preflight_id": switch_preflight.preflight_id,
-                "decision": switch_preflight.decision,
+                "preflight_result": switch_preflight.preflight_result,
                 "status": switch_preflight.status,
                 "idempotency_key_present": bool(switch_preflight.idempotency_key),
                 "account_source": switch_preflight.account_order_summary.get("source"),
@@ -327,7 +327,7 @@ async def run_runtime_bound_evidence_smoke() -> dict[str, Any]:
             "preflight": {
                 "operation_id": stop_preflight.operation_id,
                 "preflight_id": stop_preflight.preflight_id,
-                "decision": stop_preflight.decision,
+                "preflight_result": stop_preflight.preflight_result,
                 "status": stop_preflight.status,
                 "summary": stop_preflight.summary,
             },
@@ -339,7 +339,7 @@ async def run_runtime_bound_evidence_smoke() -> dict[str, Any]:
             "preflight": {
                 "operation_id": flatten_preflight.operation_id,
                 "preflight_id": flatten_preflight.preflight_id,
-                "decision": flatten_preflight.decision,
+                "preflight_result": flatten_preflight.preflight_result,
                 "status": flatten_preflight.status,
                 "dry_run_only": bool(flatten_preflight.after.get("dry_run_only")),
                 "actual_execution_available": bool(flatten_preflight.after.get("actual_execution_available")),
@@ -396,11 +396,11 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
 
     listed = await service.list(limit=10)
     switch_result = switch_detail.result
-    switch_ready = switch_preflight.decision == "allow" and switch_preflight.status == "awaiting_confirmation"
+    switch_ready = switch_preflight.preflight_result == "allow" and switch_preflight.status == "awaiting_confirmation"
     return {
         "mode": "tf001-carrier-decision-review",
         "generated_at_ms": int(time.time() * 1000),
-        "decision": {
+        "readiness_result": {
             "tf001_switch_playbook_ready": switch_ready,
             "tf001_monitor_carrier_ready": monitor_confirm.status == "noop",
             "recommended_next_task": "BRC-R5-001 TF-001 carrier full-chain validation smoke",
@@ -446,7 +446,7 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
             "preflight": {
                 "operation_id": switch_preflight.operation_id,
                 "preflight_id": switch_preflight.preflight_id,
-                "decision": switch_preflight.decision,
+                "preflight_result": switch_preflight.preflight_result,
                 "status": switch_preflight.status,
                 "target_playbook_id": switch_preflight.playbook_summary.get("target_playbook_id"),
                 "known": switch_preflight.playbook_summary.get("known"),
@@ -460,7 +460,7 @@ async def run_tf001_carrier_decision_review() -> dict[str, Any]:
             "preflight": {
                 "operation_id": monitor_preflight.operation_id,
                 "preflight_id": monitor_preflight.preflight_id,
-                "decision": monitor_preflight.decision,
+                "preflight_result": monitor_preflight.preflight_result,
                 "status": monitor_preflight.status,
                 "idempotency_key_present": bool(monitor_preflight.idempotency_key),
                 "target_state": monitor_preflight.after,
@@ -552,12 +552,12 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
     )
 
     review_preflight = await service.preflight(
-        operation_type="write_review_decision",
+        operation_type="write_review_outcome",
         requested_by="owner",
         input_params={
-            "decision": "accepted",
+            "review_outcome": "accepted",
             "reason_text": "TF-001 carrier full-chain validation completed as governance smoke only",
-            "next_recommended_task": "Review TF-001 evidence packet before any strategy-family trial expansion",
+            "next_recommended_task": "Review TF-001 evidence artifact before any strategy-family trial expansion",
             "metadata": {
                 "carrier_playbook_id": "TF-001",
                 "carrier_only": True,
@@ -592,6 +592,7 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
         and stages["review"] == "executed"
         and brc_repo.campaign.current_playbook_id == "TF-001"
     )
+    review_outcome = brc_repo.review_decisions[0] if brc_repo.review_decisions else None
     return {
         "mode": "tf001-carrier-full-chain",
         "generated_at_ms": int(time.time() * 1000),
@@ -636,7 +637,7 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
             "switch_playbook": {
                 "operation_id": switch_preflight.operation_id,
                 "preflight_id": switch_preflight.preflight_id,
-                "preflight_decision": switch_preflight.decision,
+                "preflight_result": switch_preflight.preflight_result,
                 "confirm_status": switch_confirm.status,
                 "campaign_refs": switch_confirm.campaign_refs,
                 "audit_refs": switch_confirm.audit_refs,
@@ -644,7 +645,7 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
             "enter_strategy_or_monitor": {
                 "operation_id": monitor_preflight.operation_id,
                 "preflight_id": monitor_preflight.preflight_id,
-                "preflight_decision": monitor_preflight.decision,
+                "preflight_result": monitor_preflight.preflight_result,
                 "confirm_status": monitor_confirm.status,
                 "result_summary": monitor_confirm.result_summary,
                 "final_state": monitor_confirm.next_state,
@@ -652,7 +653,7 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
             "enter_pause": {
                 "operation_id": pause_preflight.operation_id,
                 "preflight_id": pause_preflight.preflight_id,
-                "preflight_decision": pause_preflight.decision,
+                "preflight_result": pause_preflight.preflight_result,
                 "confirm_status": pause_confirm.status,
                 "runtime_refs": pause_confirm.result_summary.get("runtime_refs", pause_confirm.audit_refs),
                 "final_state": pause_confirm.next_state,
@@ -660,7 +661,7 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
             "emergency_stop_runtime": {
                 "operation_id": stop_preflight.operation_id,
                 "preflight_id": stop_preflight.preflight_id,
-                "preflight_decision": stop_preflight.decision,
+                "preflight_result": stop_preflight.preflight_result,
                 "confirm_status": stop_confirm.status,
                 "runtime_refs": stop_confirm.result_summary.get("runtime_refs", stop_confirm.audit_refs),
                 "audit_refs": stop_confirm.audit_refs,
@@ -668,17 +669,30 @@ async def run_tf001_carrier_full_chain() -> dict[str, Any]:
                 "does_not_cancel_orders": True,
                 "runtime_stop_call_count": len(market.get("runtime_stop_calls", [])),
             },
-            "write_review_decision": {
+            "write_review_outcome": {
                 "operation_id": review_preflight.operation_id,
                 "preflight_id": review_preflight.preflight_id,
-                "preflight_decision": review_preflight.decision,
+                "preflight_result": review_preflight.preflight_result,
                 "confirm_status": review_confirm.status,
                 "review_refs": review_confirm.review_refs,
                 "audit_refs": review_confirm.audit_refs,
             },
         },
         "campaign_playbook_after_full_chain": brc_repo.campaign.current_playbook_id,
-        "review_decision_count": len(brc_repo.review_decisions),
+        "review_outcome_count": len(brc_repo.review_decisions),
+        "review_outcome_summary": {
+            "review_outcome": (
+                review_outcome.decision.value
+                if review_outcome is not None
+                and hasattr(review_outcome.decision, "value")
+                else (review_outcome.decision if review_outcome is not None else None)
+            ),
+            "next_recommended_task": (
+                review_outcome.next_recommended_task
+                if review_outcome is not None
+                else None
+            ),
+        },
         "operation_list": {
             "count": len(listed.operations),
             "operation_ids": operation_ids,

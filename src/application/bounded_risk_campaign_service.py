@@ -23,7 +23,7 @@ from src.domain.bounded_risk_campaign import (
     BrcOperatorIntentDraft,
     BrcOperatorPlanStep,
     BrcOperatorRunResult,
-    BrcReviewPacket,
+    BrcReviewArtifact,
     BrcReviewDecision,
     BrcReviewDecisionRecord,
     BrcWorkflowRun,
@@ -1730,7 +1730,7 @@ class BoundedRiskCampaignService:
         installed_constraint_snapshot_id: str,
         execution_mode: str,
         trial_trade_intent_id: Optional[str],
-        trial_trade_intent_decision: str,
+        trial_trade_intent_result: str,
         not_executed_reason: str,
         execution_permission_resolution: dict[str, Any],
         operation_id: str,
@@ -1800,7 +1800,7 @@ class BoundedRiskCampaignService:
             "trial_trade_intent_created": True,
             "trade_intent_created": True,
             "trial_trade_intent_id": trial_trade_intent_id,
-            "trial_trade_intent_decision": trial_trade_intent_decision,
+            "trial_trade_intent_result": trial_trade_intent_result,
             "trial_trade_intent_not_executed_reason": not_executed_reason,
             "trial_trade_intent_recorded_at": now,
             "trial_trade_intent_recorded_by_operation_id": operation_id,
@@ -1832,7 +1832,7 @@ class BoundedRiskCampaignService:
                 "installed_constraint_snapshot_id": installed_constraint_snapshot_id,
                 "execution_mode": execution_mode,
                 "trial_trade_intent_id": trial_trade_intent_id,
-                "trial_trade_intent_decision": trial_trade_intent_decision,
+                "trial_trade_intent_result": trial_trade_intent_result,
                 "not_executed_reason": not_executed_reason,
                 "execution_permission_resolution": dict(execution_permission_resolution or {}),
                 "runtime_status": "trial_trade_intent_recorded_no_execution",
@@ -1881,14 +1881,14 @@ class BoundedRiskCampaignService:
         if latest.outcome != CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED:
             return
         review = await self._repo.get_latest_review_decision()
-        allowed_review_decisions = {
+        allowed_review_outcomes = {
             BrcReviewDecision.ACCEPTED,
             BrcReviewDecision.TESTNET_REHEARSAL_AUTHORIZED,
         }
         if (
             review is None
             or review.campaign_id != latest.campaign_id
-            or review.decision not in allowed_review_decisions
+            or review.decision not in allowed_review_outcomes
             or (
                 latest.finalized_at_ms is not None
                 and review.created_at_ms < latest.finalized_at_ms
@@ -2217,21 +2217,21 @@ class BoundedRiskCampaignService:
         )
         return updated
 
-    async def build_evidence_packet(self) -> dict[str, Any]:
+    async def build_evidence_artifact(self) -> dict[str, Any]:
         campaign = await self.require_current_campaign()
-        return await self._build_evidence_packet_for(campaign)
+        return await self._build_evidence_artifact_for(campaign)
 
-    async def build_latest_evidence_packet(self) -> dict[str, Any]:
+    async def build_latest_evidence_artifact(self) -> dict[str, Any]:
         campaign = await self.require_latest_campaign()
-        return await self._build_evidence_packet_for(campaign)
+        return await self._build_evidence_artifact_for(campaign)
 
-    async def build_review_packet(
+    async def build_review_artifact(
         self,
         *,
         final_inventory: Optional[dict[str, Any]] = None,
-    ) -> BrcReviewPacket:
+    ) -> BrcReviewArtifact:
         campaign = await self.require_latest_campaign()
-        evidence = await self._build_evidence_packet_for(campaign)
+        evidence = await self._build_evidence_artifact_for(campaign)
         if final_inventory is not None:
             evidence["final_inventory"] = final_inventory
         switches = evidence["switch_decisions"]
@@ -2255,7 +2255,7 @@ class BoundedRiskCampaignService:
             switch_decisions=switches,
             final_inventory_flat=final_inventory_flat,
         )
-        return BrcReviewPacket(
+        return BrcReviewArtifact(
             campaign_id=campaign.campaign_id,
             status=campaign.status,
             outcome=campaign.outcome,
@@ -2281,12 +2281,12 @@ class BoundedRiskCampaignService:
         if not normalized:
             raise BrcRuleViolation("operator intent text is required")
 
-        if any(token in normalized for token in ("review", "复盘", "报告", "packet")):
+        if any(token in normalized for token in ("review", "复盘", "报告")):
             return BrcOperatorIntentDraft(
                 source_text=source_text,
-                action=BrcOperatorAction.READ_REVIEW_PACKET,
+                action=BrcOperatorAction.READ_REVIEW_ARTIFACT,
                 confidence=Decimal("0.90"),
-                endpoint_path="/api/runtime/test/brc/review-packet",
+                endpoint_path="/api/runtime/test/brc/review-artifact",
                 executable_without_owner_confirmation=True,
             )
         if any(
@@ -2300,7 +2300,7 @@ class BoundedRiskCampaignService:
                 endpoint_path="/api/runtime/test/brc/next-eligibility",
                 executable_without_owner_confirmation=True,
             )
-        if any(token in normalized for token in ("evidence", "证据", "验收", "evidence packet")):
+        if any(token in normalized for token in ("evidence", "证据", "验收")):
             return BrcOperatorIntentDraft(
                 source_text=source_text,
                 action=BrcOperatorAction.READ_EVIDENCE,
@@ -2531,16 +2531,16 @@ class BoundedRiskCampaignService:
             raise BrcRuleViolation("Owner confirmation phrase mismatch")
 
         action = plan.draft.action
-        if action == BrcOperatorAction.READ_REVIEW_PACKET:
-            packet = await self.build_review_packet(final_inventory=final_inventory)
-            result = {"review_packet": packet.model_dump(mode="json")}
+        if action == BrcOperatorAction.READ_REVIEW_ARTIFACT:
+            artifact = await self.build_review_artifact(final_inventory=final_inventory)
+            result = {"review_artifact": artifact.model_dump(mode="json")}
         elif action == BrcOperatorAction.READ_NEXT_ELIGIBILITY:
             eligibility = await self.evaluate_next_campaign_eligibility(
                 final_inventory=final_inventory,
             )
             result = {"eligibility": eligibility.model_dump(mode="json")}
         elif action == BrcOperatorAction.READ_EVIDENCE:
-            evidence = await self.build_latest_evidence_packet()
+            evidence = await self.build_latest_evidence_artifact()
             if final_inventory is not None:
                 evidence["final_inventory"] = final_inventory
             result = {"evidence": evidence}
@@ -2584,7 +2584,7 @@ class BoundedRiskCampaignService:
         campaign = await self.get_latest_campaign()
         if campaign is None:
             return BrcNextCampaignEligibility(
-                decision=BrcNextEligibilityDecision.OBSERVE_ONLY,
+                eligibility_result=BrcNextEligibilityDecision.OBSERVE_ONLY,
                 reason="no prior BRC campaign; start in observe-only until Owner authorizes a bounded risk bucket",
                 owner_review_required=True,
                 next_campaign_allowed=False,
@@ -2597,7 +2597,7 @@ class BoundedRiskCampaignService:
 
         if final_inventory is not None and not bool(final_inventory.get("all_flat")):
             return BrcNextCampaignEligibility(
-                decision=BrcNextEligibilityDecision.BLOCKED,
+                eligibility_result=BrcNextEligibilityDecision.BLOCKED,
                 reason="final inventory is not flat",
                 campaign_id=campaign.campaign_id,
                 latest_status=campaign.status,
@@ -2608,21 +2608,21 @@ class BoundedRiskCampaignService:
 
         if campaign.status != BrcCampaignStatus.ENDED:
             return BrcNextCampaignEligibility(
-                decision=BrcNextEligibilityDecision.BLOCKED,
+                eligibility_result=BrcNextEligibilityDecision.BLOCKED,
                 reason="current BRC campaign is still open",
                 campaign_id=campaign.campaign_id,
                 latest_status=campaign.status,
                 latest_outcome=campaign.outcome,
                 blocked_reasons=["open campaign must be finalized or manually stopped first"],
                 required_actions=[
-                    "complete current campaign review packet",
+                    "complete current campaign review artifact",
                     "finalize or manually stop the current campaign",
                 ],
             )
 
         if campaign.outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED:
             return BrcNextCampaignEligibility(
-                decision=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
+                eligibility_result=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
                 reason="latest BRC ended through loss-lock rehearsal; next campaign requires Owner review and a fresh risk bucket decision",
                 campaign_id=campaign.campaign_id,
                 latest_status=campaign.status,
@@ -2631,14 +2631,14 @@ class BoundedRiskCampaignService:
                 cooldown_required=True,
                 next_campaign_allowed=False,
                 required_actions=[
-                    "review loss-lock evidence packet",
+                    "review loss-lock evidence artifact",
                     "confirm no refill of the same risk bucket",
                     "authorize a new campaign envelope before any next testnet attempt",
                 ],
             )
 
         return BrcNextCampaignEligibility(
-            decision=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
+            eligibility_result=BrcNextEligibilityDecision.OWNER_REVIEW_REQUIRED,
             reason="latest BRC campaign ended; next campaign requires explicit Owner review",
             campaign_id=campaign.campaign_id,
             latest_status=campaign.status,
@@ -2651,7 +2651,7 @@ class BoundedRiskCampaignService:
             ],
         )
 
-    async def _build_evidence_packet_for(
+    async def _build_evidence_artifact_for(
         self,
         campaign: BoundedRiskCampaign,
     ) -> dict[str, Any]:
@@ -3081,7 +3081,7 @@ def _trial_trade_intent_recording_summary(metadata_json: dict[str, Any]) -> dict
         "trial_trade_intent_created": metadata_json.get("trial_trade_intent_created") is True,
         "trade_intent_created": metadata_json.get("trade_intent_created") is True,
         "trial_trade_intent_id": metadata_json.get("trial_trade_intent_id"),
-        "trial_trade_intent_decision": metadata_json.get("trial_trade_intent_decision"),
+        "trial_trade_intent_result": metadata_json.get("trial_trade_intent_result"),
         "trial_trade_intent_not_executed_reason": metadata_json.get(
             "trial_trade_intent_not_executed_reason"
         ),

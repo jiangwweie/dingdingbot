@@ -165,10 +165,10 @@ def _capture_gap_audit() -> dict:
     }
 
 
-def _decision_ledger() -> dict:
-    return {
-        "status": "decision_ledger_ready",
-        "ledger_rows": [
+def _strategy_asset_state_source() -> dict:
+    return _with_strategy_asset_state({
+        "status": "strategy_asset_state_ready",
+        "source_rows": [
             {
                 "strategy_group_id": "BRF-001",
                 "tier": "L1",
@@ -226,7 +226,43 @@ def _decision_ledger() -> dict:
                 "next_checkpoint": "park_until_material_new_edge_evidence",
             },
         ],
+    })
+
+
+def _with_strategy_asset_state(source: dict) -> dict:
+    source["strategy_asset_state"] = {
+        "status": "strategy_asset_state_ready",
+        "asset_rows": [
+            {
+                "strategy_group_id": row["strategy_group_id"],
+                "current_tier": row.get("tier", "unknown"),
+                "current_decision": row["decision"],
+                "promotion_target": row.get("required_next_evidence", "not_applicable"),
+                "required_next_evidence": row.get("required_next_evidence", ""),
+                "next_checkpoint": row.get("next_checkpoint", ""),
+            }
+            for row in source["source_rows"]
+        ],
     }
+    return source
+
+
+def _strategy_asset_state_source_with_conflict() -> dict:
+    source = _strategy_asset_state_source()
+    for row in source["strategy_asset_state"]["asset_rows"]:
+        if row["strategy_group_id"] == "BTPC-001":
+            row["current_decision"] = "park"
+            row["next_checkpoint"] = "strategy_asset_state_checkpoint"
+    return source
+
+
+def _strategy_asset_state_source_with_missing_decision() -> dict:
+    source = _strategy_asset_state_source()
+    for row in source["strategy_asset_state"]["asset_rows"]:
+        if row["strategy_group_id"] == "BTPC-001":
+            row.pop("current_decision", None)
+            row["next_checkpoint"] = "missing_decision_checkpoint"
+    return source
 
 
 def _registry() -> dict:
@@ -240,8 +276,6 @@ def _registry() -> dict:
                 "edge_thesis": "Capture clean momentum continuation.",
                 "regime_fit": "Directional momentum.",
                 "trade_logic": "Long-only continuation.",
-                "actionable_now": False,
-                "actionable_now_reason": "runtime_state_only",
                 "required_next_evidence": "first live outcome",
                 "risk_gaps": {
                     "strategy_quality_risk": {
@@ -257,8 +291,6 @@ def _registry() -> dict:
                 "edge_thesis": "Capture bear rally failure.",
                 "regime_fit": "Bear rally rejection.",
                 "trade_logic": "Short-only review.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "rally context review",
                 "risk_gaps": {},
             },
@@ -269,8 +301,6 @@ def _registry() -> dict:
                 "edge_thesis": "Capture bear pullback continuation.",
                 "regime_fit": "Weak rally in downtrend.",
                 "trade_logic": "Short-only shadow.",
-                "actionable_now": False,
-                "actionable_now_reason": "shadow_only",
                 "required_next_evidence": "fact-source review",
                 "risk_gaps": {},
             },
@@ -281,8 +311,6 @@ def _registry() -> dict:
                 "edge_thesis": "Capture side-specific revival.",
                 "regime_fit": "Range sweep.",
                 "trade_logic": "Observe-only.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "rewrite review",
                 "risk_gaps": {},
             },
@@ -293,8 +321,6 @@ def _registry() -> dict:
                 "edge_thesis": "Capture compression breakout.",
                 "regime_fit": "Volatility compression breakout.",
                 "trade_logic": "Observe-only breakout review.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "breakout classifier review",
                 "risk_gaps": {},
             },
@@ -305,8 +331,6 @@ def _registry() -> dict:
                 "edge_thesis": "Range-boundary vocabulary.",
                 "regime_fit": "Range rejection.",
                 "trade_logic": "Parked vocabulary.",
-                "actionable_now": False,
-                "actionable_now_reason": "parked",
                 "required_next_evidence": "material new edge evidence",
                 "risk_gaps": {},
             },
@@ -317,8 +341,6 @@ def _registry() -> dict:
                 "edge_thesis": "Derivative stress.",
                 "regime_fit": "Funding pressure.",
                 "trade_logic": "Observe-only.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "derivatives review",
                 "risk_gaps": {},
             },
@@ -329,8 +351,6 @@ def _registry() -> dict:
                 "edge_thesis": "Session structure.",
                 "regime_fit": "Opening range.",
                 "trade_logic": "Observe-only.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "session review",
                 "risk_gaps": {},
             },
@@ -341,8 +361,6 @@ def _registry() -> dict:
                 "edge_thesis": "Theme momentum.",
                 "regime_fit": "Equity-like perpetual momentum.",
                 "trade_logic": "Shadow review.",
-                "actionable_now": False,
-                "actionable_now_reason": "observe_only",
                 "required_next_evidence": "theme review",
                 "risk_gaps": {},
             },
@@ -379,32 +397,36 @@ def _mpg_replay_corpus() -> dict:
     }
 
 
-def test_quality_closure_wave_builds_priority_packets_and_owner_cards():
+def test_quality_closure_wave_builds_priority_artifacts_and_owner_policy_items():
     module = _load_module()
 
-    packet = module.build_quality_closure_wave(
+    artifact = module.build_quality_closure_wave(
         capture_gap_audit=_capture_gap_audit(),
-        decision_ledger=_decision_ledger(),
+        strategy_asset_state_source=_strategy_asset_state_source(),
         registry=_registry(),
         tier_policy=_tier_policy(),
         mpg_replay_corpus=_mpg_replay_corpus(),
     )
 
-    assert packet["status"] == "quality_closure_wave_ready"
-    assert packet["priority_1_capture_closure"]["status"] == "ready_for_owner_review"
+    assert artifact["status"] == "quality_closure_wave_ready"
+    assert artifact["priority_1_capture_closure"]["status"] == "ready_for_owner_review"
     priority_rows = {
         row["strategy_group_id"]: row
-        for row in packet["priority_1_capture_closure"]["rows"]
+        for row in artifact["priority_1_capture_closure"]["rows"]
     }
-    assert priority_rows["BTPC-001"]["ledger_decision"] == "revise"
+    assert priority_rows["BTPC-001"]["strategy_asset_current_decision"] == "revise"
+    assert "decision_source" not in priority_rows["BTPC-001"]
+    assert "ledger_decision" not in priority_rows["BTPC-001"]
     assert priority_rows["BTPC-001"]["missed_no_action_forward_positive_count"] == 152
     assert priority_rows["LSR-001"]["would_enter_forward_positive_count"] == 2
-    assert priority_rows["BRF-001"]["owner_policy_decision_after_packet"] is True
+    assert priority_rows["BRF-001"]["owner_policy_confirmation_after_review"] is True
+    assert "owner_policy_confirmation_after_packet" not in priority_rows["BRF-001"]
+    assert "packet" not in artifact["closed_engineering_problem"]
 
-    wave_1 = packet["wave_1_strategy_explainer"]
+    wave_1 = artifact["wave_1_strategy_explainer"]
     assert wave_1["status"] == "ready"
-    assert wave_1["missing_required_cards"] == []
-    wave_1_cards = {row["strategy_group_id"]: row for row in wave_1["cards"]}
+    assert wave_1["missing_required_policy_items"] == []
+    wave_1_policy_items = {row["strategy_group_id"]: row for row in wave_1["policy_items"]}
     for group in (
         "MPG-001",
         "BTPC-001",
@@ -417,27 +439,142 @@ def test_quality_closure_wave_builds_priority_packets_and_owner_cards():
         "VCB-001",
         "TEQ-001",
     ):
-        assert group in wave_1_cards
-        assert wave_1_cards[group]["actionable_now"] is False
-        assert wave_1_cards[group]["live_permission_change_recommended_now"] is False
-        assert wave_1_cards[group]["owner_can_decide"]
-        assert wave_1_cards[group]["system_auto_action"]
+        assert group in wave_1_policy_items
+        assert "actionable_now" not in wave_1_policy_items[group]
+        assert wave_1_policy_items[group]["live_permission_change_recommended_now"] is False
+        assert wave_1_policy_items[group]["owner_policy_review_scope"]
+        assert wave_1_policy_items[group]["strategy_review_checkpoint"]
 
-    cards = {
+    policy_items = {
         row["strategy_group_id"]: row
-        for row in packet["priority_2_owner_cards_v1"]["cards"]
+        for row in artifact["priority_2_owner_policy_items_v1"]["policy_items"]
     }
-    assert cards["MPG-001"]["owner_label"] == "动量延续"
-    assert cards["MPG-001"]["actionable_now"] is False
-    assert cards["BRF-001"]["live_permission_change_recommended_now"] is False
+    assert policy_items["MPG-001"]["owner_label"] == "动量延续"
+    assert "actionable_now" not in policy_items["MPG-001"]
+    assert policy_items["BRF-001"]["live_permission_change_recommended_now"] is False
+
+
+def test_quality_closure_wave_uses_strategy_asset_state_before_injected_legacy_rows():
+    module = _load_module()
+
+    artifact = module.build_quality_closure_wave(
+        capture_gap_audit=_capture_gap_audit(),
+        strategy_asset_state_source=_strategy_asset_state_source_with_conflict(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        mpg_replay_corpus=_mpg_replay_corpus(),
+    )
+
+    assert artifact["strategy_asset_state_source"] == {
+        "source": "strategy_asset_state.asset_rows",
+        "row_count": 8,
+        "missing_current_decision_count": 0,
+    }
+    priority_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_1_capture_closure"]["rows"]
+    }
+    assert priority_rows["BTPC-001"]["strategy_asset_current_decision"] == "park"
+    assert "ledger_decision" not in priority_rows["BTPC-001"]
+    assert "decision" not in priority_rows["BTPC-001"]
+    assert priority_rows["BTPC-001"]["next_checkpoint"] == "strategy_asset_state_checkpoint"
+
+
+def test_quality_closure_wave_does_not_default_missing_strategy_asset_decision():
+    module = _load_module()
+
+    artifact = module.build_quality_closure_wave(
+        capture_gap_audit=_capture_gap_audit(),
+        strategy_asset_state_source=_strategy_asset_state_source_with_missing_decision(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        mpg_replay_corpus=_mpg_replay_corpus(),
+    )
+
+    assert artifact["strategy_asset_state_source"] == {
+        "source": "strategy_asset_state.asset_rows",
+        "row_count": 8,
+        "missing_current_decision_count": 1,
+    }
+    priority_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_1_capture_closure"]["rows"]
+    }
+    assert priority_rows["BTPC-001"]["strategy_asset_current_decision"] == "unknown"
+    assert priority_rows["BTPC-001"]["strategy_asset_current_decision"] != "keep_observing"
+    assert "ledger_decision" not in priority_rows["BTPC-001"]
+    owner_policy_items = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_2_owner_policy_items_v1"]["policy_items"]
+    }
+    assert owner_policy_items["BTPC-001"]["review_recommendation"] == "unknown"
+    wave_2_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["wave_2_capture_quality_closure"]["rows"]
+    }
+    assert wave_2_rows["BTPC-001"]["review_outcome"] == "revise"
+    assert wave_2_rows["BTPC-001"]["strategy_asset_current_decision"] == "unknown"
+    assert wave_2_rows["BTPC-001"]["strategy_asset_current_decision"] != "revise"
+    forward_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_5_forward_outcome_no_action_ledger_extension"]["rows"]
+    }
+    assert forward_rows["BTPC-001"]["strategy_asset_current_decision"] == "unknown"
+    assert forward_rows["BTPC-001"]["strategy_asset_current_decision"] != "keep_observing"
+    assert "ledger_decision" not in forward_rows["BTPC-001"]
+
+
+def test_quality_closure_wave_fails_closed_without_strategy_asset_state():
+    module = _load_module()
+    strategy_asset_state_source = _strategy_asset_state_source()
+    strategy_asset_state_source.pop("strategy_asset_state")
+
+    artifact = module.build_quality_closure_wave(
+        capture_gap_audit=_capture_gap_audit(),
+        strategy_asset_state_source=strategy_asset_state_source,
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        mpg_replay_corpus=_mpg_replay_corpus(),
+    )
+
+    assert artifact["strategy_asset_state_source"] == {
+        "source": "missing_strategy_asset_state",
+        "row_count": 0,
+        "missing_current_decision_count": 0,
+    }
+    priority_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_1_capture_closure"]["rows"]
+    }
+    assert priority_rows["BTPC-001"]["strategy_asset_current_decision"] == "unknown"
+    assert "ledger_decision" not in priority_rows["BTPC-001"]
+    owner_policy_items = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_2_owner_policy_items_v1"]["policy_items"]
+    }
+    assert owner_policy_items["BTPC-001"]["review_recommendation"] == "unknown"
+    identity_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_3_identity_review"]["rows"]
+    }
+    assert identity_rows["MI-001"]["strategy_asset_current_decision"] == "unknown"
+    assert identity_rows["MI-001"]["strategy_asset_current_decision"] != "revise"
+    assert "ledger_decision" not in identity_rows["MI-001"]
+    forward_rows = {
+        row["strategy_group_id"]: row
+        for row in artifact["priority_5_forward_outcome_no_action_ledger_extension"]["rows"]
+    }
+    assert forward_rows["BTPC-001"]["strategy_asset_current_decision"] == "unknown"
+    assert forward_rows["BTPC-001"]["strategy_asset_current_decision"] != "keep_observing"
+    assert "ledger_decision" not in forward_rows["BTPC-001"]
 
 
 def test_quality_closure_wave_keeps_identity_and_mpg_member_review_policy_only():
     module = _load_module()
 
-    packet = module.build_quality_closure_wave(
+    artifact = module.build_quality_closure_wave(
         capture_gap_audit=_capture_gap_audit(),
-        decision_ledger=_decision_ledger(),
+        strategy_asset_state_source=_strategy_asset_state_source(),
         registry=_registry(),
         tier_policy=_tier_policy(),
         mpg_replay_corpus=_mpg_replay_corpus(),
@@ -445,46 +582,64 @@ def test_quality_closure_wave_keeps_identity_and_mpg_member_review_policy_only()
 
     identity = {
         row["strategy_group_id"]: row
-        for row in packet["priority_3_identity_review"]["rows"]
+        for row in artifact["priority_3_identity_review"]["rows"]
     }
     assert identity["MI-001"]["would_enter_count"] == 23
-    assert identity["MI-001"]["owner_policy_decision_required"] is True
-    assert "promote_to_formal_candidate_review" in identity["MI-001"]["owner_decision_options"]
+    assert identity["MI-001"]["owner_policy_confirmation_required"] is True
+    assert identity["MI-001"]["system_recommendation"] == (
+        "prepare_registry_identity_review_no_tier_change"
+    )
+    assert "packet_only" not in identity["MI-001"]["system_recommendation"]
+    assert "promote_to_formal_candidate_review" in identity["MI-001"]["owner_policy_options"]
     assert identity["CPM-RO-001"]["would_enter_forward_positive_count"] == 13
+    assert identity["CPM-RO-001"]["system_recommendation"] == (
+        "prepare_registry_identity_review_no_tier_change"
+    )
 
-    wave_2 = packet["wave_2_capture_quality_closure"]
+    wave_2 = artifact["wave_2_capture_quality_closure"]
     assert wave_2["status"] == "ready_for_owner_review"
     assert wave_2["done_when"]["btpc_lsr_brf_have_closure_rows"] is True
     assert wave_2["done_when"]["vcb_rbr_are_not_hidden_in_forward_rollup"] is True
     assert wave_2["done_when"]["all_rows_are_review_only"] is True
     wave_2_rows = {row["strategy_group_id"]: row for row in wave_2["rows"]}
     assert set(wave_2_rows) == {"BTPC-001", "LSR-001", "BRF-001", "VCB-001", "RBR-001"}
-    assert wave_2_rows["VCB-001"]["review_decision"] == "keep_observing_or_revise"
+    assert "review_decision" not in wave_2_rows["VCB-001"]
+    assert wave_2_rows["VCB-001"]["review_outcome"] == "keep_observing_or_revise"
     assert wave_2_rows["VCB-001"]["would_enter_forward_positive_count"] == 2
-    assert wave_2_rows["RBR-001"]["review_decision"] == "park_unless_new_edge"
+    assert "review_decision" not in wave_2_rows["RBR-001"]
+    assert wave_2_rows["RBR-001"]["review_outcome"] == "park_unless_new_edge"
     assert wave_2_rows["RBR-001"]["would_enter_count"] == 6
 
-    mpg_review = packet["priority_4_mpg_member_tiering_exit_decay_review"]
+    mpg_review = artifact["priority_4_mpg_member_tiering_exit_decay_review"]
     assert mpg_review["status"] == "ready_for_owner_review"
     assert mpg_review["replay_sample_count"] == 2
     assert len(mpg_review["member_rows"]) == 6
-    assert mpg_review["owner_policy_decision_required"] is True
+    assert mpg_review["owner_policy_confirmation_required"] is True
     assert mpg_review["live_permission_change_recommended_now"] is False
 
-    wave_3 = packet["wave_3_mpg_member_deepening"]
+    wave_3 = artifact["wave_3_mpg_member_deepening"]
     assert wave_3["status"] == "ready_for_owner_review"
     assert wave_3["done_when"]["six_member_roles_present"] is True
     assert wave_3["done_when"]["exit_horizons_present"] is True
     assert wave_3["done_when"]["decay_controls_present"] is True
     assert wave_3["done_when"]["no_live_scope_expansion"] is True
-    assert wave_3["owner_policy_decision_required"] is True
+    assert wave_3["owner_policy_confirmation_required"] is True
     assert wave_3["live_permission_change_recommended_now"] is False
+
+    checkpoint = {
+        row["strategy_group_id"]: row
+        for row in artifact["owner_confirmation_checkpoint"]["decisions"]
+    }
+    assert checkpoint["MI-001"]["current_recommendation"] == (
+        "prepare_registry_identity_review_no_tier_change"
+    )
+    assert "packet_only" not in checkpoint["MI-001"]["current_recommendation"]
 
 
 def test_quality_closure_wave_safety_invariants_and_cli(tmp_path, capsys):
     module = _load_module()
     capture_path = tmp_path / "capture.json"
-    ledger_path = tmp_path / "ledger.json"
+    strategy_asset_state_path = tmp_path / "strategy-asset-state.json"
     registry_path = tmp_path / "registry.json"
     tier_path = tmp_path / "tier.json"
     replay_path = tmp_path / "replay.json"
@@ -492,7 +647,7 @@ def test_quality_closure_wave_safety_invariants_and_cli(tmp_path, capsys):
     output_md = tmp_path / "wave.md"
     for path, payload in (
         (capture_path, _capture_gap_audit()),
-        (ledger_path, _decision_ledger()),
+        (strategy_asset_state_path, _strategy_asset_state_source()),
         (registry_path, _registry()),
         (tier_path, _tier_policy()),
         (replay_path, _mpg_replay_corpus()),
@@ -503,8 +658,8 @@ def test_quality_closure_wave_safety_invariants_and_cli(tmp_path, capsys):
         [
             "--capture-gap-audit-json",
             str(capture_path),
-            "--decision-ledger-json",
-            str(ledger_path),
+            "--strategy-asset-state-json",
+            str(strategy_asset_state_path),
             "--registry-json",
             str(registry_path),
             "--tier-policy-json",
@@ -520,15 +675,19 @@ def test_quality_closure_wave_safety_invariants_and_cli(tmp_path, capsys):
 
     assert exit_code == 0
     stdout_payload = json.loads(capsys.readouterr().out)
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
     assert stdout_payload["status"] == "quality_closure_wave_ready"
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["safety_invariants"]["real_order_authority"] is False
-    assert packet["safety_invariants"]["tier_policy_changed"] is False
-    assert packet["safety_invariants"]["live_profile_changed"] is False
-    assert packet["owner_confirmation_checkpoint"]["owner_confirmation_required"] is True
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert "real_order_authority" not in artifact["safety_invariants"]
+    assert artifact["safety_invariants"]["tier_policy_changed"] is False
+    assert artifact["safety_invariants"]["live_profile_changed"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]
+    assert artifact["owner_confirmation_checkpoint"]["owner_confirmation_required"] is True
     md = output_md.read_text(encoding="utf-8")
     assert "StrategyGroup Quality Closure Wave" in md
     assert "Wave 1 Strategy Explainer" in md
     assert "Wave 2 Capture Quality Closure" in md
     assert "Wave 3 MPG Member Deepening" in md
+    assert "owner_policy_confirmation_after_packet" not in artifact["priority_1_capture_closure"]["rows"][0]
+    assert "review packet" not in md
+    assert "evidence packet" not in md

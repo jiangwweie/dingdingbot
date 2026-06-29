@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from scripts.refresh_strategygroup_runtime_product_state_packets import refresh_packets
-from scripts import refresh_strategygroup_runtime_product_state_packets as refresh_script
+from scripts.refresh_strategygroup_runtime_product_state_artifacts import refresh_product_state_artifacts
+from scripts import refresh_strategygroup_runtime_product_state_artifacts as refresh_script
 
 
 class _FakeResponse:
@@ -20,7 +20,7 @@ class _FakeResponse:
         return json.dumps(self._payload).encode("utf-8")
 
 
-def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path):
+def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side_effects(tmp_path):
     calls = []
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
@@ -66,7 +66,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         path = request.full_url.replace("http://unit", "")
         return _FakeResponse(payloads[path])
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=tmp_path,
         label="unit",
@@ -76,25 +76,27 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         generated_at_ms=1,
     )
 
-    assert packet["status"] == "refreshed"
-    assert [item["status"] for item in packet["packets"]] == [
+    assert artifact["status"] == "refreshed"
+    assert [item["status"] for item in artifact["artifacts"]] == [
         "strategy_group_observe_ready_candidate_prerequisites_pending",
         "ready",
         "waiting_for_market",
     ]
+    assert "packets" not in artifact
+    assert "source_readiness_fallback" not in artifact
     assert (tmp_path / "strategy-group-live-facts-readiness.json").exists()
     assert (tmp_path / "owner-console-source-readiness.json").exists()
     assert (tmp_path / "strategygroup-runtime-pilot-status.json").exists()
     assert all(call[1] == 7 for call in calls)
     assert all(call[2] == "session=test" for call in calls)
-    assert packet["safety_invariants"] == {
+    assert artifact["safety_invariants"] == {
         "readmodel_refresh_only": True,
         "optional_signed_get_live_facts_precollect": False,
         "optional_dry_run_audit_chain_refresh": False,
         "optional_chain_closure_status_refresh": False,
         "optional_live_closure_evidence_refresh": False,
         "optional_goal_status_refresh": False,
-        "optional_source_readiness_fallback": False,
+        "optional_source_readiness_unavailable_evidence": False,
         "exchange_write_called": False,
         "order_created": False,
         "order_lifecycle_called": False,
@@ -106,7 +108,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
     }
 
 
-def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_path):
+def test_refresh_product_state_artifacts_can_precollect_live_facts_before_readmodel_refresh(tmp_path):
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
             "freshness_status": "fresh",
@@ -152,7 +154,7 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
             },
         }
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=tmp_path,
         label="unit",
@@ -170,24 +172,24 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
     live_facts_path = tmp_path / "strategy-group-live-facts-input.json"
     assert live_facts_path.exists()
     assert json.loads(live_facts_path.read_text())["status"] == "ready"
-    assert packet["status"] == "refreshed"
-    assert packet["live_facts_precollect"] == {
+    assert artifact["status"] == "refreshed"
+    assert artifact["live_facts_precollect"] == {
         "enabled": True,
         "status": "ready",
         "output_json": str(live_facts_path),
         "collector_error_count": 0,
         "signed_get_only": True,
     }
-    assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
-    assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
-    assert packet["safety_invariants"]["optional_live_closure_evidence_refresh"] is False
-    assert packet["safety_invariants"]["optional_goal_status_refresh"] is False
-    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
+    assert artifact["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
+    assert artifact["safety_invariants"]["optional_live_closure_evidence_refresh"] is False
+    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is False
+    assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp_path):
+def test_refresh_product_state_artifacts_passes_selected_strategygroup_scope_to_pilot_status(tmp_path):
     calls = []
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
@@ -231,7 +233,7 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
         path = request.full_url.replace("http://unit", "")
         return _FakeResponse(payloads[path])
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=tmp_path,
         label="unit",
@@ -244,8 +246,8 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
         stale_after_seconds=240,
     )
 
-    assert packet["status"] == "refreshed"
-    assert packet["selected_scope_config"] == {
+    assert artifact["status"] == "refreshed"
+    assert artifact["selected_scope_config"] == {
         "selected_strategy_group_id": "SOR-001",
         "max_symbols": 2,
         "stale_after_seconds": 240,
@@ -261,7 +263,7 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
     )
 
 
-def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
+def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp_path):
     events = []
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
@@ -313,18 +315,18 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
             "scope": "strategygroup_runtime_goal_status",
             "status": "waiting_for_signal",
             "ready_for_real_order_action": False,
-            "next_safe_checkpoint": "continue_watcher_observation",
+            "non_authority_checkpoint": "continue_watcher_observation",
             "checks": {
                 "runtime_dry_run_audit_passed": True,
                 "ready_for_real_order_action": True,
             },
-            "owner_state": {"next_safe_checkpoint": "continue_watcher_observation"},
+            "owner_state": {"non_authority_checkpoint": "continue_watcher_observation"},
             "real_order_boundary": {"ready_for_real_order_action": True},
         }
 
     def chain_closure_status_builder(**kwargs):
         events.append("chain_closure")
-        assert kwargs["audit_packet"]["scope"] == "runtime_dry_run_audit_chain"
+        assert kwargs["audit_artifact"]["scope"] == "runtime_dry_run_audit_chain"
         return {
             "scope": "runtime_execution_chain_closure_status",
             "status": "non_market_execution_chain_ready",
@@ -358,7 +360,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
             },
         }
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=tmp_path,
         label="unit",
@@ -382,7 +384,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         goal_status_builder=goal_status_builder,
     )
 
-    assert packet["status"] == "refreshed"
+    assert artifact["status"] == "refreshed"
     assert events == [
         "dry_run",
         "chain_closure",
@@ -395,7 +397,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     assert events.index("goal_status") < events.index(
         "api:/api/trading-console/owner-console-source-readiness"
     )
-    assert packet["dry_run_audit_refresh"] == {
+    assert artifact["dry_run_audit_refresh"] == {
         "enabled": True,
         "status": "passed",
         "output_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
@@ -404,7 +406,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "scenario_count": 14,
         "dangerous_effects_absent": True,
     }
-    assert packet["chain_closure_status_refresh"] == {
+    assert artifact["chain_closure_status_refresh"] == {
         "enabled": True,
         "status": "non_market_execution_chain_ready",
         "output_json": str(tmp_path / "runtime-execution-chain-closure-status.json"),
@@ -412,7 +414,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "real_order_allowed": False,
         "missing_live_proof_count": 2,
     }
-    assert packet["live_closure_evidence_refresh"] == {
+    assert artifact["live_closure_evidence_refresh"] == {
         "enabled": True,
         "status": "live_closure_refresh_not_started",
         "output_json": str(tmp_path / "runtime-live-closure-evidence.json"),
@@ -428,28 +430,28 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "real_order_closure_proven": False,
         "reject_reasons": [],
     }
-    assert packet["goal_status_refresh"] == {
+    assert artifact["goal_status_refresh"] == {
         "enabled": True,
         "status": "waiting_for_signal",
         "output_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
-        "fallback_input_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
-        "next_safe_checkpoint": "continue_watcher_observation",
+        "goal_status_input_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
+        "non_authority_checkpoint": "continue_watcher_observation",
         "runtime_dry_run_audit_passed": True,
         "ready_for_real_order_action": False,
     }
     assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
     assert (tmp_path / "runtime-execution-chain-closure-status.json").exists()
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
-    assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
-    assert packet["safety_invariants"]["optional_chain_closure_status_refresh"] is True
-    assert packet["safety_invariants"]["optional_live_closure_evidence_refresh"] is True
-    assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
-    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
+    assert artifact["safety_invariants"]["optional_chain_closure_status_refresh"] is True
+    assert artifact["safety_invariants"]["optional_live_closure_evidence_refresh"] is True
+    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is True
+    assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
+def test_refresh_product_state_artifacts_mirrors_external_dry_run_artifact_for_goal_status(
     tmp_path,
     monkeypatch,
 ):
@@ -481,7 +483,7 @@ def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
 
     monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=output_dir,
         label="unit",
@@ -501,22 +503,23 @@ def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
     assert mirrored_dry_run_json.exists()
     assert external_goal_status_json.exists()
     assert mirrored_goal_status_json.exists()
-    assert packet["dry_run_audit_refresh"]["output_json"] == str(external_dry_run_json)
-    assert packet["dry_run_audit_refresh"]["goal_status_input_json"] == str(
+    assert artifact["dry_run_audit_refresh"]["output_json"] == str(external_dry_run_json)
+    assert artifact["dry_run_audit_refresh"]["goal_status_input_json"] == str(
         mirrored_dry_run_json
     )
-    assert packet["goal_status_refresh"]["output_json"] == str(external_goal_status_json)
-    assert packet["goal_status_refresh"]["fallback_input_json"] == str(
+    assert artifact["goal_status_refresh"]["output_json"] == str(external_goal_status_json)
+    assert artifact["goal_status_refresh"]["goal_status_input_json"] == str(
         mirrored_goal_status_json
     )
-    assert packet["dry_run_audit_refresh"]["status"] == "passed"
-    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
-    assert packet["source_readiness_fallback"]["goal_status_included"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert "fallback_input_json" not in artifact["goal_status_refresh"]
+    assert artifact["dry_run_audit_refresh"]["status"] == "passed"
+    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["source_readiness_unavailable_evidence"]["goal_status_included"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
+def test_refresh_product_state_artifacts_auth_missing_does_not_block_local_audit_refresh(
     tmp_path,
     monkeypatch,
 ):
@@ -542,7 +545,7 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
             "status": "missing_fact",
             "checks": {"runtime_dry_run_audit_passed": True},
             "owner_state": {
-                "next_safe_checkpoint": "refresh_or_repair_owner_console_source_readiness"
+                "non_authority_checkpoint": "refresh_or_repair_owner_console_source_readiness"
             },
             "real_order_boundary": {"ready_for_real_order_action": False},
         }
@@ -560,7 +563,7 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         encoding="utf-8",
     )
 
-    packet = refresh_packets(
+    artifact = refresh_product_state_artifacts(
         api_base="http://unit",
         output_dir=tmp_path,
         label="unit",
@@ -575,21 +578,22 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         goal_status_builder=goal_status_builder,
     )
 
-    assert packet["status"] == "refresh_blocked"
-    assert packet["dry_run_audit_refresh"]["status"] == "passed"
-    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
-    assert packet["source_readiness_fallback"] == {
+    assert artifact["status"] == "refresh_blocked"
+    assert artifact["dry_run_audit_refresh"]["status"] == "passed"
+    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["source_readiness_unavailable_evidence"] == {
         "enabled": True,
         "status": "source_unavailable",
         "output_json": str(tmp_path / "owner-console-source-readiness.json"),
         "reason": "operator_cookie_unavailable",
         "goal_status_included": True,
     }
-    assert "operator_cookie_unavailable:RuntimeError" in packet["blockers"]
+    assert "source_readiness_fallback" not in artifact
+    assert "operator_cookie_unavailable:RuntimeError" in artifact["blockers"]
     assert (
         "owner-console-source-readiness.json:refresh_skipped:"
         "operator_cookie_unavailable"
-    ) in packet["blockers"]
+    ) in artifact["blockers"]
     assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
     source_readiness = json.loads(
@@ -599,6 +603,10 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     )
     assert source_readiness["status"] == "source_unavailable"
     assert source_readiness["owner_state"]["status"] == "temporarily_unavailable"
+    assert "next_safe_checkpoint" not in source_readiness["owner_state"]
+    assert source_readiness["owner_state"]["non_authority_checkpoint"] == (
+        "refresh_or_repair_owner_console_source_readiness"
+    )
     assert source_readiness["source_health"]["runtime_source"]["status"] == "unavailable"
     assert source_readiness["source_health"]["watcher"]["status"] == "unavailable"
     assert source_readiness["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
@@ -613,13 +621,29 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         source_readiness["raw_status_refs"]["strategygroup_runtime_goal_status"]
         == "missing_fact"
     )
+    assert (
+        source_readiness["raw_status_refs"]["source_unavailable_reason"]
+        == "operator_cookie_unavailable"
+    )
+    assert "fallback_reason" not in source_readiness["raw_status_refs"]
     assert source_readiness["raw_status_refs"]["tokyo_deploy_channel_blockers"] == [
         "tokyo_ssh_publickey_denied"
     ]
-    assert source_readiness["safety_invariants"]["fallback_packet_only"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is True
+    assert (
+        source_readiness["safety_invariants"][
+            "source_readiness_unavailable_evidence_only"
+        ]
+        is True
+    )
+    assert (
+        "source_readiness_fallback_evidence_only"
+        not in source_readiness["safety_invariants"]
+    )
+    assert "fallback_packet_only" not in source_readiness["safety_invariants"]
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is True
+    assert "optional_source_readiness_fallback" not in artifact["safety_invariants"]
 
 
 def test_deploy_channel_status_wins_over_docs_only_readonly_head_mismatch(tmp_path):
@@ -648,7 +672,7 @@ def test_deploy_channel_status_wins_over_docs_only_readonly_head_mismatch(tmp_pa
         encoding="utf-8",
     )
 
-    deploy_channel = refresh_script._deploy_channel_fallback_source(tmp_path)
+    deploy_channel = refresh_script._deploy_channel_status_evidence(tmp_path)
 
     assert deploy_channel == {
         "status": "ready",
@@ -673,7 +697,7 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
 
     monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
 
-    output_json = tmp_path / "product-state-refresh-packet.json"
+    output_json = tmp_path / "product-state-refresh-artifact.json"
     exit_code = refresh_script.main(
         [
             "--output-dir",
@@ -695,23 +719,24 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
     assert exit_code == 0
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert payload["cli_exit_policy"] == packet["cli_exit_policy"]
-    assert packet["status"] == "refresh_blocked"
-    assert packet["cli_exit_policy"] == {
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["cli_exit_policy"] == artifact["cli_exit_policy"]
+    assert artifact["status"] == "refresh_blocked"
+    assert artifact["cli_exit_policy"] == {
         "status": "degraded_local_refresh_continuable",
         "exit_code": 0,
         "reason": "operator_cookie_unavailable_with_local_audit_refresh_complete",
     }
-    assert packet["dry_run_audit_refresh"]["status"] == "passed"
-    assert packet["dry_run_audit_refresh"]["scenario_count"] == 14
-    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
-    assert packet["source_readiness_fallback"]["reason"] == (
+    assert artifact["dry_run_audit_refresh"]["status"] == "passed"
+    assert artifact["dry_run_audit_refresh"]["scenario_count"] == 14
+    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["source_readiness_unavailable_evidence"]["reason"] == (
         "operator_cookie_unavailable"
     )
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert list(tmp_path.glob(".product-state-refresh-packet.json.*.tmp")) == []
+    assert "source_readiness_fallback" not in artifact
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert list(tmp_path.glob(".product-state-refresh-artifact.json.*.tmp")) == []
     assert list(tmp_path.glob(".runtime-dry-run-audit-chain.json.*.tmp")) == []
     assert list(tmp_path.glob(".strategygroup-runtime-goal-status.json.*.tmp")) == []
 
@@ -742,8 +767,8 @@ def test_cli_keeps_default_blocked_exit_for_degraded_refresh(
     )
 
     assert exit_code == 2
-    packet = json.loads(capsys.readouterr().out)
-    assert packet["status"] == "refresh_blocked"
-    assert "cli_exit_policy" not in packet
-    assert packet["dry_run_audit_refresh"]["status"] == "passed"
-    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    artifact = json.loads(capsys.readouterr().out)
+    assert artifact["status"] == "refresh_blocked"
+    assert "cli_exit_policy" not in artifact
+    assert artifact["dry_run_audit_refresh"]["status"] == "passed"
+    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True

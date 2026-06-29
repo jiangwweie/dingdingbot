@@ -19,8 +19,20 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from src.domain.required_facts_readiness import (  # noqa: E402
+    read_only_required_fact_authority_boundary,
+)
+
+from strategygroup_non_executing_projection import (  # noqa: E402
+    non_executing_interaction,
+    non_executing_safety_invariants,
+)
 
 DEFAULT_SOURCE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-live-market-strategy-preview.json"
@@ -44,32 +56,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-json")
     parser.add_argument(
         "--strategy-source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
-        default="local_sqlite_fallback",
+        choices=["sample", "local_sqlite_read_only", "live_market"],
+        default="local_sqlite_read_only",
     )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    source_packet, source_path = _load_source_packet(
+    source_artifact, source_path = _load_source_artifact(
         source_json=args.source_json,
         strategy_source=args.strategy_source,
     )
-    packet = build_brf2_runtime_signal_facts(
-        source_packet=source_packet,
+    artifact = build_brf2_runtime_signal_facts(
+        source_artifact=source_artifact,
         source_path=source_path,
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
-    _write_json(output_json, packet)
-    _write_text(output_md, _markdown(packet, output_json))
+    _write_json(output_json, artifact)
+    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_id": packet["strategy_group_id"],
-                "fact_input_present": packet["fact_input_present"],
-                "watcher_tick_present": packet["watcher_tick_present"],
+                "status": artifact["status"],
+                "strategy_group_id": artifact["strategy_group_id"],
+                "fact_input_present": artifact["fact_input_present"],
+                "watcher_tick_present": artifact["watcher_tick_present"],
                 "output_json": str(output_json),
             },
             ensure_ascii=False,
@@ -81,33 +93,33 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_brf2_runtime_signal_facts(
     *,
-    source_packet: dict[str, Any],
+    source_artifact: dict[str, Any],
     source_path: Path | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
-    explicit_facts = _explicit_brf2_facts(source_packet)
-    source_row = _source_brf2_row(source_packet)
+    explicit_facts = _explicit_brf2_facts(source_artifact)
+    source_row = _source_brf2_row(source_artifact)
     derived_facts = _derived_brf2_facts(source_row)
-    fact_packet = explicit_facts or derived_facts
-    fact_input_present = bool(fact_packet)
+    fact_artifact = explicit_facts or derived_facts
+    fact_input_present = bool(fact_artifact)
     watcher_tick_present = fact_input_present or bool(source_row)
     source_is_brf_reference_row = _is_brf_reference_row(source_row)
     fact_authority = _fact_authority(
-        fact_packet=fact_packet,
+        fact_artifact=fact_artifact,
         source_is_brf_reference_row=source_is_brf_reference_row,
     )
-    source_signal_context = _signal_context(fact_packet, source_row)
+    source_signal_context = _signal_context(fact_artifact, source_row)
     first_blocker = (
         {
             "class": "none",
             "owner": "runtime",
-            "next_action": "run_brf2_runtime_signal_capture",
+            "repair_checkpoint": "run_brf2_runtime_signal_capture",
         }
         if fact_input_present
         else {
             "class": "brf2_watcher_fact_input_missing",
             "owner": "engineering",
-            "next_action": "attach_brf2_watcher_fact_input_producer",
+            "repair_checkpoint": "attach_brf2_watcher_fact_input_producer",
         }
     )
     return {
@@ -119,7 +131,7 @@ def build_brf2_runtime_signal_facts(
         "strategy_group_id": "BRF2-001",
         "fact_input_present": fact_input_present,
         "watcher_tick_present": watcher_tick_present,
-        "source_status": str(source_packet.get("status") or "missing"),
+        "source_status": str(source_artifact.get("status") or "missing"),
         "source_path": str(source_path or ""),
         "source_signal_context": source_signal_context,
         "signal_context": source_signal_context,
@@ -128,9 +140,9 @@ def build_brf2_runtime_signal_facts(
             fact_authority=fact_authority,
             source_is_brf_reference_row=source_is_brf_reference_row,
         ),
-        "facts": _facts(fact_packet),
+        "facts": _facts(fact_artifact),
         "first_blocker": first_blocker,
-        "next_action": first_blocker["next_action"],
+        "fact_input_checkpoint": first_blocker["repair_checkpoint"],
         "checks": {
             "fact_input_present": fact_input_present,
             "watcher_tick_present": watcher_tick_present,
@@ -138,33 +150,29 @@ def build_brf2_runtime_signal_facts(
             "source_strategy_group_id": str(source_row.get("strategy_group_id") or ""),
             "source_is_brf_reference_row": source_is_brf_reference_row,
             "missing_watcher_input": not fact_input_present,
-            "actionable_now": False,
-            "real_order_authority": False,
-            "action_time_required_facts_satisfied": False,
             "derived_proxy_not_action_time_authority": (
                 fact_authority == READONLY_PROXY_FACT_AUTHORITY
             ),
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
         },
         "interaction": _interaction(),
         "safety_invariants": _safety_invariants(),
     }
 
 
-def _explicit_brf2_facts(packet: dict[str, Any]) -> dict[str, Any]:
-    direct = _as_dict(packet.get("brf2_runtime_signal_facts"))
+def _explicit_brf2_facts(source_artifact: dict[str, Any]) -> dict[str, Any]:
+    direct = _as_dict(source_artifact.get("brf2_runtime_signal_facts"))
     if direct:
         return direct
-    if packet.get("strategy_group_id") == "BRF2-001" and _as_dict(packet.get("facts")):
-        return packet
+    if (
+        source_artifact.get("strategy_group_id") == "BRF2-001"
+        and _as_dict(source_artifact.get("facts"))
+    ):
+        return source_artifact
     return {}
 
 
-def _source_brf2_row(packet: dict[str, Any]) -> dict[str, Any]:
-    preview = _as_dict(packet.get("preview"))
+def _source_brf2_row(source_artifact: dict[str, Any]) -> dict[str, Any]:
+    preview = _as_dict(source_artifact.get("preview"))
     for key in ("current_signals", "signal_history"):
         for row in preview.get(key) or []:
             item = _as_dict(row)
@@ -177,7 +185,7 @@ def _source_brf2_row(packet: dict[str, Any]) -> dict[str, Any]:
         "current_signals",
         "high_priority_no_action_signals",
     ):
-        for row in packet.get(key) or []:
+        for row in source_artifact.get(key) or []:
             item = _as_dict(row)
             if _is_brf2_or_brf_source_row(item):
                 return item
@@ -202,8 +210,8 @@ def _is_brf_reference_row(row: dict[str, Any]) -> bool:
     )
 
 
-def _facts(packet: dict[str, Any]) -> dict[str, Any]:
-    facts = _as_dict(packet.get("facts"))
+def _facts(fact_artifact: dict[str, Any]) -> dict[str, Any]:
+    facts = _as_dict(fact_artifact.get("facts"))
     return {str(key): _as_dict(value) for key, value in facts.items()}
 
 
@@ -338,14 +346,14 @@ def _closed_5m_fact(five_minute: list[dict[str, Any]], row: dict[str, Any]) -> d
 
 def _fact_authority(
     *,
-    fact_packet: dict[str, Any],
+    fact_artifact: dict[str, Any],
     source_is_brf_reference_row: bool,
 ) -> str:
-    if not fact_packet:
+    if not fact_artifact:
         return ""
     if source_is_brf_reference_row:
         return READONLY_PROXY_FACT_AUTHORITY
-    return str(fact_packet.get("fact_authority") or RUNTIME_READONLY_FACT_AUTHORITY)
+    return str(fact_artifact.get("fact_authority") or RUNTIME_READONLY_FACT_AUTHORITY)
 
 
 def _fact_authority_boundary(
@@ -353,30 +361,17 @@ def _fact_authority_boundary(
     fact_authority: str,
     source_is_brf_reference_row: bool,
 ) -> dict[str, Any]:
-    if not fact_authority:
-        return {
-            "action_time_required_facts_satisfied": False,
-            "usable_for_armed_observation": False,
-            "usable_for_finalgate": False,
-            "usable_for_operation_layer": False,
-            "usable_for_exchange_write": False,
-        }
-    return {
-        "fact_authority": fact_authority,
-        "source_is_brf_reference_row": source_is_brf_reference_row,
-        "usable_for_armed_observation": True,
-        "usable_for_market_wait_classification": True,
-        "action_time_required_facts_satisfied": False,
-        "usable_for_finalgate": False,
-        "usable_for_operation_layer": False,
-        "usable_for_exchange_write": False,
-        "notes": (
+    return read_only_required_fact_authority_boundary(
+        fact_authority=fact_authority,
+        source_is_proxy_reference=source_is_brf_reference_row,
+        proxy_note=(
             "BRF reference rows are read-only observation proxies; action-time "
             "RequiredFacts must be rebuilt from live runtime/exchange facts."
-            if source_is_brf_reference_row
-            else "Runtime read-only facts can arm observation but do not satisfy action-time submit authority."
         ),
-    }
+        read_only_note=(
+            "Runtime read-only facts can arm observation but do not satisfy action-time submit authority."
+        ),
+    ).as_read_model()
 
 
 def _fact(
@@ -402,7 +397,7 @@ def _derived_signal_context(row: dict[str, Any]) -> dict[str, Any]:
         else ""
     )
     return {
-        "signal_packet_id": str(
+        "signal_observation_id": str(
             row.get("record_id")
             or row.get("candidate_id")
             or f"brf2-derived:{timestamp_ms}"
@@ -420,14 +415,14 @@ def _derived_signal_context(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _signal_context(packet: dict[str, Any], source_row: dict[str, Any]) -> dict[str, str]:
-    context = _as_dict(packet.get("signal_context"))
+def _signal_context(fact_artifact: dict[str, Any], source_row: dict[str, Any]) -> dict[str, str]:
+    context = _as_dict(fact_artifact.get("signal_context"))
     return {
-        "signal_packet_id": str(context.get("signal_packet_id") or ""),
+        "signal_observation_id": str(context.get("signal_observation_id") or ""),
         "runtime_instance_id": str(context.get("runtime_instance_id") or ""),
         "symbol": str(
             context.get("symbol")
-            or packet.get("symbol")
+            or fact_artifact.get("symbol")
             or source_row.get("symbol")
             or ""
         ),
@@ -452,23 +447,23 @@ def _signal_context(packet: dict[str, Any], source_row: dict[str, Any]) -> dict[
     }
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
-    first_blocker = _as_dict(packet.get("first_blocker"))
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
+    first_blocker = _as_dict(artifact.get("first_blocker"))
     lines = [
         "## BRF2 Runtime Signal Facts",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Generated: `{packet['generated_at_utc']}`",
+        f"- Status: `{artifact['status']}`",
+        f"- Generated: `{artifact['generated_at_utc']}`",
         f"- Output JSON: `{output_json}`",
-        f"- Fact input present: `{_yes_no(packet['fact_input_present'])}`",
-        f"- Watcher tick present: `{_yes_no(packet['watcher_tick_present'])}`",
+        f"- Fact input present: `{_yes_no(artifact['fact_input_present'])}`",
+        f"- Watcher tick present: `{_yes_no(artifact['watcher_tick_present'])}`",
         f"- First blocker: `{first_blocker.get('class', 'missing')}` / `{first_blocker.get('owner', 'unknown')}`",
-        f"- Fact authority: `{packet.get('fact_authority') or 'none'}`",
+        f"- Fact authority: `{artifact.get('fact_authority') or 'none'}`",
         "- Action-time RequiredFacts satisfied: `否`",
         "",
         "## Boundary",
         "",
-        "- This packet is local/read-only and non-executing.",
+        "- This artifact is local/read-only and non-executing.",
         "- BRF reference derived facts are observation proxies, not action-time live RequiredFacts.",
         "- Missing watcher fact input is an engineering gap, not a market signal absence.",
         "- It does not call FinalGate, Operation Layer, exchange write, or order creation.",
@@ -477,32 +472,16 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_brf2_runtime_signal_facts",
-        "remote_interaction_count": 0,
-        "mutates_remote_files": False,
-        "approaches_real_order": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-    }
+    return non_executing_interaction("L0_local_brf2_runtime_signal_facts")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "actionable_now": False,
-        "real_order_authority": False,
-        "authorization_evidence_created": False,
-        "execution_intent_created": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "withdrawal_or_transfer_created": False,
-    }
+    return non_executing_safety_invariants(
+        (
+            "authorization_evidence_created",
+        ),
+        include_authority_mirrors=False,
+    )
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -516,7 +495,7 @@ def _read_optional_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _load_source_packet(
+def _load_source_artifact(
     *,
     source_json: str | None,
     strategy_source: str,
@@ -526,11 +505,11 @@ def _load_source_packet(
         return _read_optional_json(path), path
     try:
         from scripts.preview_strategy_group_readonly_observation import (
-            build_preview_packet,
+            build_preview_artifact,
         )
 
-        packet = build_preview_packet(source_name=strategy_source)  # type: ignore[arg-type]
-        return packet, Path(f"generated:{strategy_source}:strategy_group_preview")
+        artifact = build_preview_artifact(source_name=strategy_source)  # type: ignore[arg-type]
+        return artifact, Path(f"generated:{strategy_source}:strategy_group_preview")
     except Exception as exc:
         return {
             "status": "preview_source_unavailable",

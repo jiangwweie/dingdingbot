@@ -12,24 +12,20 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-DEFAULT_CAPTURE_GAP_AUDIT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/strategy-capture-gap-audit-20260622.json"
+from strategygroup_non_executing_projection import (  # noqa: E402
+    review_only_interaction,
+    review_only_safety_invariants,
 )
-DEFAULT_REVIEW_DEEP_DIVE_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json"
-)
-DEFAULT_OWNER_DECISION_PACKAGE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-owner-decision-package.json"
-)
-DEFAULT_QUALITY_CLOSURE_WAVE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-quality-closure-wave.json"
-)
+
 DEFAULT_TIER_POLICY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
@@ -82,7 +78,6 @@ FORBIDDEN_EFFECTS = (
     "places_order",
     "exchange_write_called",
     "calls_exchange_write",
-    "real_order_authority",
     "preview_or_replay_treated_as_live_signal",
 )
 
@@ -92,13 +87,13 @@ POLICY_DECISION_STAGES = {
     "park",
 }
 
-DEFAULT_NEXT_ACTIONS = {
+DEFAULT_REVIEW_CHECKPOINTS = {
     "MPG-001": "keep_p0_standby_and_complete_member_role_exit_decay_review",
     "BRF-001": "build_brf_squeeze_requiredfacts_forward_outcome_v2",
     "BTPC-001": "attach_btpc_live_fact_sources_then_rerun_false_negative_review",
     "LSR-001": "build_lsr_short_revival_v2_range_context_fixture",
-    "MI-001": "build_mi_identity_overlap_concentration_registry_packet",
-    "CPM-RO-001": "build_cpm_ro_merge_target_and_quality_comparison_packet",
+    "MI-001": "open_mi_identity_overlap_symbol_concentration_review",
+    "CPM-RO-001": "open_cpm_ro_semantic_source_merge_quality_review",
     "FBS-001": "run_fbs_derivatives_fact_coverage_visibility_review",
     "SOR-001": "run_sor_session_no_action_visibility_review",
     "VCB-001": "run_vcb_false_breakout_classifier_review",
@@ -121,19 +116,10 @@ OWNER_LABEL_FALLBACKS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--capture-gap-audit-json", default=str(DEFAULT_CAPTURE_GAP_AUDIT_JSON)
-    )
-    parser.add_argument(
-        "--review-deep-dive-json", default=str(DEFAULT_REVIEW_DEEP_DIVE_JSON)
-    )
-    parser.add_argument(
-        "--owner-decision-package-json",
-        default=str(DEFAULT_OWNER_DECISION_PACKAGE_JSON),
-    )
-    parser.add_argument(
-        "--quality-closure-wave-json", default=str(DEFAULT_QUALITY_CLOSURE_WAVE_JSON)
-    )
+    parser.add_argument("--capture-gap-audit-json", required=True)
+    parser.add_argument("--review-deep-dive-json")
+    parser.add_argument("--owner-policy-package-json")
+    parser.add_argument("--quality-closure-wave-json")
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
     parser.add_argument(
         "--registry-baseline-json", default=str(DEFAULT_REGISTRY_BASELINE_JSON)
@@ -143,13 +129,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-trial-pool-md", default=str(DEFAULT_TRIAL_POOL_MD))
     args = parser.parse_args(argv)
 
-    packet = build_strategygroup_portfolio_board(
+    board_artifact = build_strategygroup_portfolio_board(
         capture_gap_audit=_load_json_object(Path(args.capture_gap_audit_json)),
-        review_deep_dive=_read_optional_json(Path(args.review_deep_dive_json)),
-        owner_decision_package=_read_optional_json(
-            Path(args.owner_decision_package_json)
-        ),
-        quality_closure_wave=_read_optional_json(Path(args.quality_closure_wave_json)),
+        review_deep_dive=_read_optional_json(Path(args.review_deep_dive_json))
+        if args.review_deep_dive_json
+        else None,
+        owner_policy_package=_read_optional_json(
+            Path(args.owner_policy_package_json)
+        )
+        if args.owner_policy_package_json
+        else None,
+        quality_closure_wave=_read_optional_json(Path(args.quality_closure_wave_json))
+        if args.quality_closure_wave_json
+        else None,
         tier_policy=_read_optional_json(Path(args.tier_policy_json)),
         registry_baseline=_read_optional_json(Path(args.registry_baseline_json)),
     )
@@ -159,21 +151,21 @@ def main(argv: list[str] | None = None) -> int:
     output_trial_pool = Path(args.output_trial_pool_md)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(board_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    output_md.write_text(_portfolio_markdown(packet, output_json), encoding="utf-8")
+    output_md.write_text(_portfolio_markdown(board_artifact, output_json), encoding="utf-8")
     output_trial_pool.write_text(
-        _trial_pool_markdown(packet, output_trial_pool), encoding="utf-8"
+        _trial_pool_markdown(board_artifact, output_trial_pool), encoding="utf-8"
     )
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "portfolio_row_count": packet["portfolio_summary"][
+                "status": board_artifact["status"],
+                "portfolio_row_count": board_artifact["portfolio_summary"][
                     "portfolio_row_count"
                 ],
-                "trial_candidate_count": packet["trial_candidate_pool"][
+                "trial_candidate_count": board_artifact["trial_candidate_pool"][
                     "candidate_count"
                 ],
                 "output_json": str(output_json),
@@ -188,42 +180,42 @@ def build_strategygroup_portfolio_board(
     *,
     capture_gap_audit: dict[str, Any],
     review_deep_dive: dict[str, Any] | None = None,
-    owner_decision_package: dict[str, Any] | None = None,
+    owner_policy_package: dict[str, Any] | None = None,
     quality_closure_wave: dict[str, Any] | None = None,
     tier_policy: dict[str, Any] | None = None,
     registry_baseline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _validate_safety("capture_gap_audit", capture_gap_audit)
-    for name, packet in (
+    for name, source_artifact in (
         ("review_deep_dive", review_deep_dive),
-        ("owner_decision_package", owner_decision_package),
+        ("owner_policy_package", owner_policy_package),
         ("quality_closure_wave", quality_closure_wave),
         ("tier_policy", tier_policy),
         ("registry_baseline", registry_baseline),
     ):
-        if packet:
-            _validate_safety(name, packet)
+        if source_artifact:
+            _validate_safety(name, source_artifact)
 
     audit_rows = {
         str(row.get("strategy_group_id")): row
         for row in _dict_rows(capture_gap_audit.get("strategy_expectation_rows"))
         if row.get("strategy_group_id")
     }
-    audit_decisions = {
+    capture_gap_recommendations = {
         str(row.get("strategy_group_id")): row
-        for row in _dict_rows(capture_gap_audit.get("decision_recommendations"))
+        for row in _dict_rows(capture_gap_audit.get("observation_recommendations"))
         if row.get("strategy_group_id")
     }
     registry_rows = _registry_rows_by_id(registry_baseline or {})
     tier_rows = _tier_rows_by_id(tier_policy or {})
     deep_dive_rows = _deep_dive_rows_by_id(review_deep_dive or {})
-    owner_cards = _owner_cards_by_id(owner_decision_package or {})
+    owner_policy_items = _owner_policy_items_by_id(owner_policy_package or {})
     quality_index = _quality_index_by_id(quality_closure_wave or {})
 
     source_gaps = _source_gaps(
         capture_gap_audit=capture_gap_audit,
         review_deep_dive=review_deep_dive,
-        owner_decision_package=owner_decision_package,
+        owner_policy_package=owner_policy_package,
         quality_closure_wave=quality_closure_wave,
         tier_policy=tier_policy,
         registry_baseline=registry_baseline,
@@ -233,12 +225,12 @@ def build_strategygroup_portfolio_board(
         _portfolio_row(
             strategy_group_id=strategy_group_id,
             audit_row=audit_rows.get(strategy_group_id, {}),
-            audit_decision=audit_decisions.get(strategy_group_id, {}),
+            capture_gap_recommendation=capture_gap_recommendations.get(strategy_group_id, {}),
             registry_row=registry_rows.get(strategy_group_id, {}),
             tier_row=tier_rows.get(strategy_group_id, {}),
             tier_policy=tier_policy or {},
             deep_dive_row=deep_dive_rows.get(strategy_group_id, {}),
-            owner_card=owner_cards.get(strategy_group_id, {}),
+            owner_policy_item=owner_policy_items.get(strategy_group_id, {}),
             quality_row=quality_index.get(strategy_group_id, {}),
         )
         for strategy_group_id in ACTIVE_REVIEW_ORDER
@@ -249,8 +241,8 @@ def build_strategygroup_portfolio_board(
         for row in portfolio_rows
         if row["engineering_continue"] is True
     ]
-    owner_decision_queue = [
-        _owner_decision_queue_item(row)
+    owner_policy_queue = [
+        _owner_policy_queue_item(row)
         for row in portfolio_rows
         if row["owner_policy_required"] is True
     ]
@@ -280,13 +272,13 @@ def build_strategygroup_portfolio_board(
             "evidence_stage_counts": _count_by(portfolio_rows, "evidence_stage"),
             "execution_tier_counts": _count_by(portfolio_rows, "execution_tier"),
             "engineering_continuation_count": len(engineering_queue),
-            "owner_policy_decision_count": len(owner_decision_queue),
+            "owner_policy_queue_count": len(owner_policy_queue),
             "trial_candidate_count": trial_candidate_pool["candidate_count"],
         },
         "portfolio_rows": portfolio_rows,
         "trial_candidate_pool": trial_candidate_pool,
         "engineering_continuation_queue": engineering_queue,
-        "owner_policy_decision_queue": owner_decision_queue,
+        "owner_policy_queue": owner_policy_queue,
         "registry_context": {
             "registry_row_count": len(registry_rows),
             "registry_only_rows": registry_only_rows,
@@ -297,23 +289,23 @@ def build_strategygroup_portfolio_board(
         },
         "owner_progress_projection": {
             "p0_state": runtime_posture["p0_state"],
-            "p0_5_state": "portfolio_screening_active",
+            "p0_state_source": runtime_posture["p0_state_source"],
+            "signal_observation_state": "portfolio_screening_active",
             "owner_summary": (
-                "P0 waits for a real executable signal; P0.5 has an active "
-                "StrategyGroup portfolio board, engineering evidence queue, "
-                "and review-only trial-candidate pool; no live permission changed."
+                "P0 waits for a real executable signal; Signal Observation "
+                "has an active StrategyGroup portfolio board, engineering "
+                "evidence queue, and review-only trial-candidate pool; no "
+                "live permission changed."
             ),
             "owner_intervention_required": False,
-            "owner_policy_decision_required_later": bool(owner_decision_queue),
+            "owner_policy_confirmation_required_later": bool(owner_policy_queue),
             "no_live_permission": True,
         },
         "source_status": {
             "capture_gap_audit": str(capture_gap_audit.get("status") or "unknown"),
-            "review_deep_dive": str(
-                (review_deep_dive or {}).get("status") or "missing"
-            ),
-            "owner_decision_package": str(
-                (owner_decision_package or {}).get("status") or "missing"
+            "review_deep_dive": _review_deep_dive_source_status(review_deep_dive),
+            "owner_policy_package": str(
+                (owner_policy_package or {}).get("status") or "missing"
             ),
             "quality_closure_wave": str(
                 (quality_closure_wave or {}).get("status") or "missing"
@@ -333,12 +325,12 @@ def _portfolio_row(
     *,
     strategy_group_id: str,
     audit_row: dict[str, Any],
-    audit_decision: dict[str, Any],
+    capture_gap_recommendation: dict[str, Any],
     registry_row: dict[str, Any],
     tier_row: dict[str, Any],
     tier_policy: dict[str, Any],
     deep_dive_row: dict[str, Any],
-    owner_card: dict[str, Any],
+    owner_policy_item: dict[str, Any],
     quality_row: dict[str, Any],
 ) -> dict[str, Any]:
     execution_tier, execution_tier_source = _execution_tier(
@@ -350,17 +342,16 @@ def _portfolio_row(
     evidence_stage, stage_reasons = _evidence_stage(
         strategy_group_id=strategy_group_id,
         audit_row=audit_row,
-        audit_decision=audit_decision,
         registry_row=registry_row,
         execution_tier=execution_tier,
         deep_dive_row=deep_dive_row,
+        quality_row=quality_row,
     )
-    next_action = (
-        str(audit_decision.get("next_checkpoint") or "")
-        or str(deep_dive_row.get("next_system_action_if_approved") or "")
-        or str(owner_card.get("next_if_approved") or "")
-        or str(quality_row.get("next_checkpoint") or "")
-        or DEFAULT_NEXT_ACTIONS[strategy_group_id]
+    strategy_review_checkpoint = (
+        str(quality_row.get("next_checkpoint") or "")
+        or str(deep_dive_row.get("strategy_review_checkpoint_if_approved") or "")
+        or str(owner_policy_item.get("next_if_approved") or "")
+        or DEFAULT_REVIEW_CHECKPOINTS[strategy_group_id]
     )
     evidence_gaps = _evidence_gaps(
         strategy_group_id=strategy_group_id,
@@ -381,11 +372,9 @@ def _portfolio_row(
     ):
         owner_policy_required = False
     trial_eligible = registry_row.get("trial_eligible") is True
-    actionable_now = False
-
     return {
         "strategy_group_id": strategy_group_id,
-        "owner_label": _owner_label(strategy_group_id, registry_row, owner_card),
+        "owner_label": _owner_label(strategy_group_id, registry_row, owner_policy_item),
         "execution_tier": execution_tier,
         "execution_tier_source": execution_tier_source,
         "evidence_stage": evidence_stage,
@@ -409,9 +398,15 @@ def _portfolio_row(
         "forward_outcome_summary": audit_row.get("would_enter_forward_outcome_summary")
         if isinstance(audit_row.get("would_enter_forward_outcome_summary"), dict)
         else {"event_count": 0, "by_window": {}},
-        "audit_decision": str(audit_decision.get("decision") or "none"),
+        "capture_gap_recommendation_provenance": {
+            "recommendation": str(
+                capture_gap_recommendation.get("observation_recommendation") or "none"
+            ),
+            "next_checkpoint": str(capture_gap_recommendation.get("next_checkpoint") or ""),
+            "source_role": "capture_gap_observation_provenance",
+        },
         "registry_decision_ref": str(registry_row.get("current_decision_ref") or ""),
-        "next_system_action": next_action,
+        "strategy_review_checkpoint": strategy_review_checkpoint,
         "engineering_continue": _engineering_continue(
             evidence_stage=evidence_stage,
             evidence_gaps=evidence_gaps,
@@ -419,17 +414,11 @@ def _portfolio_row(
         "evidence_gaps": evidence_gaps,
         "owner_policy_required": owner_policy_required,
         "owner_policy_required_now": False,
-        "owner_policy_decision_source": _owner_policy_decision_source(
+        "owner_policy_source": _owner_policy_source(
             owner_policy_required, evidence_stage, deep_dive_row
         ),
         "trial_eligible": trial_eligible,
         "trial_eligible_source": "registry_baseline" if trial_eligible else "not_registry_trial_eligible",
-        "actionable_now": actionable_now,
-        "actionable_now_reason": (
-            "review_only_portfolio_board; requires real fresh signal, live facts, "
-            "candidate authorization, action-time FinalGate, official Operation "
-            "Layer, protection, reconciliation, and Owner-approved policy scope"
-        ),
         "live_permission_change": False,
         "live_permission_change_recommended_now": False,
         "does_not_authorize_live_execution": True,
@@ -474,10 +463,10 @@ def _evidence_stage(
     *,
     strategy_group_id: str,
     audit_row: dict[str, Any],
-    audit_decision: dict[str, Any],
     registry_row: dict[str, Any],
     execution_tier: str,
     deep_dive_row: dict[str, Any],
+    quality_row: dict[str, Any],
 ) -> tuple[str, list[str]]:
     if (
         strategy_group_id == "MPG-001"
@@ -490,22 +479,34 @@ def _evidence_stage(
             "selected_p0_lane=true",
         ]
 
-    decision = str(audit_decision.get("decision") or "")
+    decision = str(quality_row.get("strategy_asset_current_decision") or "")
+    if decision and decision != "unknown":
+        return _normalize_decision_stage(decision), [
+            f"strategy_asset_current_decision={decision}"
+        ]
     if decision:
-        return _normalize_decision_stage(decision), [f"audit_decision={decision}"]
+        return "insufficient_evidence", [
+            "strategy_asset_current_decision=unknown"
+        ]
 
     registry_decision = str(registry_row.get("current_decision_ref") or "")
     if registry_decision == "park":
         return "park", ["registry_current_decision_ref=park"]
 
-    recommendation = str(deep_dive_row.get("recommended_owner_decision") or "")
-    decision_type = str(deep_dive_row.get("decision_type") or "")
-    if "promote_review" in recommendation or "promote" in decision_type:
-        return "promote_review", [f"deep_dive_decision_type={decision_type}"]
-    if "registry_identity" in decision_type:
-        return "identity_review", [f"deep_dive_decision_type={decision_type}"]
-    if "revise" in recommendation or "rewrite" in decision_type:
-        return "revise", [f"deep_dive_decision_type={decision_type}"]
+    recommendation = str(
+        deep_dive_row.get("recommended_owner_policy") or ""
+    )
+    owner_policy_type = str(
+        deep_dive_row.get("owner_policy_type")
+        or deep_dive_row.get("decision_type")
+        or ""
+    )
+    if "promote_review" in recommendation or "promote" in owner_policy_type:
+        return "promote_review", [f"deep_dive_owner_policy_type={owner_policy_type}"]
+    if "registry_identity" in owner_policy_type:
+        return "identity_review", [f"deep_dive_owner_policy_type={owner_policy_type}"]
+    if "revise" in recommendation or "rewrite" in owner_policy_type:
+        return "revise", [f"deep_dive_owner_policy_type={owner_policy_type}"]
 
     blockers = {str(row.get("key")) for row in _dict_rows(audit_row.get("dominant_blocker_classes"))}
     would_enter = _int(audit_row.get("would_enter_count"))
@@ -525,6 +526,8 @@ def _evidence_stage(
 def _normalize_decision_stage(decision: str) -> str:
     if decision == "keep_observing":
         return "observe"
+    if decision == "promote_review_only":
+        return "promote_review"
     if decision in {
         "promote_review",
         "revise",
@@ -621,7 +624,7 @@ def _owner_policy_required(
     return False
 
 
-def _owner_policy_decision_source(
+def _owner_policy_source(
     owner_policy_required: bool,
     evidence_stage: str,
     deep_dive_row: dict[str, Any],
@@ -629,7 +632,7 @@ def _owner_policy_decision_source(
     if not owner_policy_required:
         return "none"
     if deep_dive_row:
-        return "review_only_deep_dive_owner_decision"
+        return "review_only_deep_dive_owner_policy"
     return f"evidence_stage:{evidence_stage}"
 
 
@@ -680,7 +683,6 @@ def _trial_candidate_pool(portfolio_rows: list[dict[str, Any]]) -> dict[str, Any
                     "execution_tier": row["execution_tier"],
                     "evidence_stage": stage,
                     "trial_eligible": row["trial_eligible"],
-                    "actionable_now": False,
                     "live_permission_change": False,
                     "trial_blockers": _dedupe(
                         [
@@ -693,7 +695,7 @@ def _trial_candidate_pool(portfolio_rows: list[dict[str, Any]]) -> dict[str, Any
                             else "",
                         ]
                     ),
-                    "next_system_action": row["next_system_action"],
+                    "strategy_review_checkpoint": row["strategy_review_checkpoint"],
                 }
             )
         else:
@@ -701,14 +703,13 @@ def _trial_candidate_pool(portfolio_rows: list[dict[str, Any]]) -> dict[str, Any
                 {
                     "strategy_group_id": row["strategy_group_id"],
                     "reason": f"not_trial_pool_stage:{stage}",
-                    "next_system_action": row["next_system_action"],
+                    "strategy_review_checkpoint": row["strategy_review_checkpoint"],
                 }
             )
     return {
         "status": "trial_candidate_pool_ready",
         "candidate_count": len(candidates),
         "eligible_now_count": sum(1 for row in candidates if row["trial_eligible"]),
-        "actionable_now_count": 0,
         "live_permission_change_count": 0,
         "rows": candidates,
         "excluded_rows": excluded,
@@ -723,10 +724,16 @@ def _trial_candidate_pool(portfolio_rows: list[dict[str, Any]]) -> dict[str, Any
 def _runtime_posture(capture_gap_audit: dict[str, Any]) -> dict[str, Any]:
     owner_state = _as_dict(capture_gap_audit.get("owner_visibility_state"))
     runtime = _as_dict(capture_gap_audit.get("runtime_baseline"))
+    p0_state = str(owner_state.get("p0_state") or "")
     return {
-        "p0_state": str(owner_state.get("p0_state") or "waiting_for_market"),
-        "p0_5_state": str(
-            owner_state.get("p0_5_observation_state") or "portfolio_screening_active"
+        "p0_state": p0_state or "unknown_runtime_state",
+        "p0_state_source": (
+            "strategy_capture_gap_audit.owner_visibility_state.p0_state"
+            if p0_state
+            else "missing_capture_gap_owner_visibility_state_p0_state"
+        ),
+        "signal_observation_state": str(
+            owner_state.get("signal_observation_state") or "portfolio_screening_active"
         ),
         "p0_safe_standby": runtime.get("blockers") in ([], None),
         "observation_active": owner_state.get("observation_active") is True,
@@ -740,10 +747,10 @@ def _engineering_queue_item(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "strategy_group_id": row["strategy_group_id"],
         "evidence_stage": row["evidence_stage"],
-        "next_system_action": row["next_system_action"],
+        "strategy_review_checkpoint": row["strategy_review_checkpoint"],
         "evidence_gaps": row["evidence_gaps"],
         "blocked_until": (
-            "owner_policy_decision"
+            "owner_policy_confirmation"
             if row["owner_policy_required"] and row["evidence_stage"] in {"park"}
             else "engineering_evidence_closure"
         ),
@@ -751,20 +758,20 @@ def _engineering_queue_item(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _owner_decision_queue_item(row: dict[str, Any]) -> dict[str, Any]:
+def _owner_policy_queue_item(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "strategy_group_id": row["strategy_group_id"],
         "evidence_stage": row["evidence_stage"],
-        "decision_source": row["owner_policy_decision_source"],
-        "decision_kind": _decision_kind(row),
-        "next_system_action_before_decision": row["next_system_action"],
+        "policy_source": row["owner_policy_source"],
+        "policy_kind": _policy_kind(row),
+        "strategy_review_checkpoint_before_policy": row["strategy_review_checkpoint"],
         "runtime_owner_intervention_required": False,
         "live_permission_change": False,
         "does_not_authorize_live_execution": True,
     }
 
 
-def _decision_kind(row: dict[str, Any]) -> str:
+def _policy_kind(row: dict[str, Any]) -> str:
     if row["evidence_stage"] == "identity_review":
         return "formal_candidate_vs_sub_capability_vs_observe_or_park"
     if row["evidence_stage"] == "promote_review":
@@ -796,7 +803,7 @@ def _source_gaps(
     *,
     capture_gap_audit: dict[str, Any],
     review_deep_dive: dict[str, Any] | None,
-    owner_decision_package: dict[str, Any] | None,
+    owner_policy_package: dict[str, Any] | None,
     quality_closure_wave: dict[str, Any] | None,
     tier_policy: dict[str, Any] | None,
     registry_baseline: dict[str, Any] | None,
@@ -806,8 +813,8 @@ def _source_gaps(
         gaps.append("capture_gap_audit_not_ready")
     if not review_deep_dive:
         gaps.append("review_deep_dive_missing")
-    if not owner_decision_package:
-        gaps.append("owner_decision_package_missing")
+    if not owner_policy_package:
+        gaps.append("owner_policy_package_missing")
     if not quality_closure_wave:
         gaps.append("quality_closure_wave_missing")
     if not tier_policy:
@@ -817,10 +824,17 @@ def _source_gaps(
     return gaps
 
 
+def _review_deep_dive_source_status(artifact: dict[str, Any] | None) -> str:
+    status = str((artifact or {}).get("status") or "missing")
+    if status == "review_only_deep_dive_ready_for_owner_policy":
+        return "review_only_deep_dive_ready_for_owner_policy"
+    return status
+
+
 def _owner_label(
-    strategy_group_id: str, registry_row: dict[str, Any], owner_card: dict[str, Any]
+    strategy_group_id: str, registry_row: dict[str, Any], owner_policy_item: dict[str, Any]
 ) -> str:
-    for payload in (registry_row, owner_card):
+    for payload in (registry_row, owner_policy_item):
         value = payload.get("owner_label")
         if isinstance(value, str) and value:
             return value
@@ -841,16 +855,16 @@ def _last_evidence_ref(
     return f"missing_evidence_ref:{strategy_group_id}"
 
 
-def _registry_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _registry_rows_by_id(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(row.get("strategy_group_id")): row
-        for row in _dict_rows(packet.get("rows"))
+        for row in _dict_rows(artifact.get("rows"))
         if row.get("strategy_group_id")
     }
 
 
-def _tier_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = packet.get("current_strategy_groups")
+def _tier_rows_by_id(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = artifact.get("current_strategy_groups")
     if not isinstance(rows, dict):
         return {}
     return {
@@ -860,37 +874,39 @@ def _tier_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
-def _deep_dive_rows_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _deep_dive_rows_by_id(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = _dict_rows(artifact.get("deep_dive_artifacts"))
     return {
         str(row.get("strategy_group_id")): row
-        for row in _dict_rows(packet.get("deep_dive_packets"))
+        for row in rows
         if row.get("strategy_group_id")
     }
 
 
-def _owner_cards_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _owner_policy_items_by_id(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    policy_items = _dict_rows(artifact.get("owner_policy_items"))
     return {
         str(row.get("strategy_group_id")): row
-        for row in _dict_rows(packet.get("owner_decision_cards"))
+        for row in policy_items
         if row.get("strategy_group_id")
     }
 
 
-def _quality_index_by_id(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _quality_index_by_id(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for section_key in (
         "priority_1_capture_closure",
         "priority_3_identity_review",
     ):
-        section = _as_dict(packet.get(section_key))
+        section = _as_dict(artifact.get(section_key))
         for row in _dict_rows(section.get("rows")):
             if row.get("strategy_group_id"):
                 rows[str(row["strategy_group_id"])] = row
     return rows
 
 
-def _validate_safety(name: str, packet: dict[str, Any]) -> None:
-    safety = _as_dict(packet.get("safety_invariants"))
+def _validate_safety(name: str, artifact: dict[str, Any]) -> None:
+    safety = _as_dict(artifact.get("safety_invariants"))
     forbidden = _forbidden_effects(safety)
     if forbidden:
         raise ValueError(f"{name} has forbidden effects: {forbidden}")
@@ -901,61 +917,33 @@ def _forbidden_effects(safety: dict[str, Any]) -> list[str]:
 
 
 def _interaction() -> dict[str, Any]:
-    return {
-        "level": "L0_local_strategygroup_portfolio_board",
-        "remote_interaction_count": 0,
-        "server_files_mutated": False,
-        "calls_finalgate": False,
-        "calls_operation_layer": False,
-        "calls_exchange_write": False,
-        "places_order": False,
-        "approaches_real_order": False,
-    }
+    return review_only_interaction("L0_local_strategygroup_portfolio_board")
 
 
 def _safety_invariants() -> dict[str, bool]:
-    return {
-        "local_review_only": True,
-        "server_interaction": False,
-        "server_files_mutated": False,
-        "strategy_parameters_changed": False,
-        "registry_authority_changed": False,
-        "tier_policy_changed": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "mpg_member_live_scope_expanded": False,
-        "l4_real_order_scope_expanded": False,
-        "shadow_candidate_created": False,
-        "execution_intent_created": False,
-        "final_gate_called": False,
-        "operation_layer_called": False,
-        "order_created": False,
-        "exchange_write_called": False,
-        "real_order_authority": False,
-        "preview_or_replay_treated_as_live_signal": False,
-    }
+    return review_only_safety_invariants(include_order_sizing_changed=True)
 
 
-def _portfolio_markdown(packet: dict[str, Any], output_json: Path) -> str:
+def _portfolio_markdown(board_artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
         "## StrategyGroup Portfolio Board v0",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Portfolio rows: `{packet['portfolio_summary']['portfolio_row_count']}`",
+        f"- Status: `{board_artifact['status']}`",
+        f"- Portfolio rows: `{board_artifact['portfolio_summary']['portfolio_row_count']}`",
         "- P0 state: "
-        + f"`{packet['runtime_posture']['p0_state']}`",
-        "- P0.5 state: "
-        + f"`{packet['runtime_posture']['p0_5_state']}`",
+        + f"`{board_artifact['runtime_posture']['p0_state']}`",
+        "- Signal Observation state: "
+        + f"`{board_artifact['runtime_posture']['signal_observation_state']}`",
         "- Runtime Owner intervention required: 否",
         "- Live permission change: 否",
         f"- Output: `{output_json}`",
         "",
         "## Portfolio Rows",
         "",
-        "| StrategyGroup | Tier | Evidence stage | Opportunities | Cost-after result | Next system action |",
+        "| StrategyGroup | Tier | Evidence stage | Opportunities | Cost-after result | Strategy review checkpoint |",
         "| --- | --- | --- | ---: | --- | --- |",
     ]
-    for row in packet["portfolio_rows"]:
+    for row in board_artifact["portfolio_rows"]:
         lines.append(
             "| "
             + " | ".join(
@@ -965,7 +953,7 @@ def _portfolio_markdown(packet: dict[str, Any], output_json: Path) -> str:
                     f"`{row['evidence_stage']}`",
                     str(row["recent_opportunity_count"]),
                     _result_cell(row["cost_after_result_summary"]),
-                    f"`{row['next_system_action']}`",
+                    f"`{row['strategy_review_checkpoint']}`",
                 ]
             )
             + " |"
@@ -975,18 +963,18 @@ def _portfolio_markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
             "## Engineering Continuation Queue",
             "",
-            "| StrategyGroup | Stage | Next action | Evidence gaps |",
+            "| StrategyGroup | Stage | Review checkpoint | Evidence gaps |",
             "| --- | --- | --- | --- |",
         ]
     )
-    for item in packet["engineering_continuation_queue"]:
+    for item in board_artifact["engineering_continuation_queue"]:
         lines.append(
             "| "
             + " | ".join(
                 [
                     f"`{item['strategy_group_id']}`",
                     f"`{item['evidence_stage']}`",
-                    f"`{item['next_system_action']}`",
+                    f"`{item['strategy_review_checkpoint']}`",
                     _list_or_none([str(value) for value in item["evidence_gaps"]]),
                 ]
             )
@@ -1004,22 +992,21 @@ def _portfolio_markdown(packet: dict[str, Any], output_json: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _trial_pool_markdown(packet: dict[str, Any], output_path: Path) -> str:
-    pool = packet["trial_candidate_pool"]
+def _trial_pool_markdown(board_artifact: dict[str, Any], output_path: Path) -> str:
+    pool = board_artifact["trial_candidate_pool"]
     lines = [
         "## StrategyGroup Trial Candidate Pool v0",
         "",
         f"- Status: `{pool['status']}`",
         f"- Candidate count: `{pool['candidate_count']}`",
         f"- Trial eligible count: `{pool['eligible_now_count']}`",
-        "- Actionable now count: `0`",
         "- Live permission change count: `0`",
         f"- Output: `{output_path}`",
         "",
         "## Candidates",
         "",
-        "| StrategyGroup | Pool stage | Tier | Evidence stage | Trial eligible | Actionable now | Next system action |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| StrategyGroup | Pool stage | Tier | Evidence stage | Trial eligible | Strategy review checkpoint |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for row in pool["rows"]:
         lines.append(
@@ -1031,8 +1018,7 @@ def _trial_pool_markdown(packet: dict[str, Any], output_path: Path) -> str:
                     f"`{row['execution_tier']}`",
                     f"`{row['evidence_stage']}`",
                     _yes_no(bool(row["trial_eligible"])),
-                    _yes_no(bool(row["actionable_now"])),
-                    f"`{row['next_system_action']}`",
+                    f"`{row['strategy_review_checkpoint']}`",
                 ]
             )
             + " |"

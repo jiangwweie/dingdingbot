@@ -14,7 +14,9 @@ from src.domain.right_tail_review import (
     RightTailTradeClassification,
     review_right_tail_trade_path,
 )
-from src.domain.runtime_semantic_review_packet import build_runtime_semantic_review_packet
+from src.domain.runtime_semantic_review_artifact import (
+    build_runtime_semantic_review_artifact,
+)
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
 
@@ -124,7 +126,7 @@ class RuntimeClosedTradeLifecycleReviewService:
         entry_order_id: str,
         exit_order_id: str,
         authorization_id: str | None = None,
-        review_decision: Literal["auto", "promote", "revise", "park"] = "auto",
+        review_outcome: Literal["auto", "promote", "revise", "park"] = "auto",
         apply: bool = False,
         now_ms: int | None = None,
     ) -> RuntimeClosedTradeLifecycleReviewResult:
@@ -243,10 +245,10 @@ class RuntimeClosedTradeLifecycleReviewService:
                 exchange_read_only=reconciliation["exchange_read_only"],
             )
 
-        final_review_decision = (
-            _auto_review_decision(right_tail_review.classification)
-            if review_decision == "auto"
-            else review_decision
+        final_review_outcome = (
+            _auto_review_outcome(right_tail_review.classification)
+            if review_outcome == "auto"
+            else review_outcome
         )
         record = BrcLiveLifecycleReviewRecord(
             review_id=review_id,
@@ -306,7 +308,7 @@ class RuntimeClosedTradeLifecycleReviewService:
             ],
             metadata={
                 "ledger_write_path": "runtime_closed_trade_lifecycle_review_service",
-                "review_decision": final_review_decision,
+                "review_outcome": final_review_outcome,
                 "strategy_outcome": right_tail_review.classification.value,
                 "close_reason": _close_reason(exit_order),
                 "cleanup_evidence_ref": reconciliation["evidence_ref"],
@@ -324,8 +326,8 @@ class RuntimeClosedTradeLifecycleReviewService:
             created_at_ms=now_ms,
             updated_at_ms=now_ms,
         )
-        packet = build_runtime_semantic_review_packet(record)
-        if packet.right_tail_review_status != "reviewed":
+        artifact = build_runtime_semantic_review_artifact(record)
+        if artifact.right_tail_review_status != "reviewed":
             return self._result(
                 status="blocked",
                 runtime_instance_id=runtime.runtime_instance_id,
@@ -335,8 +337,8 @@ class RuntimeClosedTradeLifecycleReviewService:
                 authorization_id=authorization_id,
                 symbol=runtime.symbol,
                 side=runtime.side,
-                blockers=["runtime_semantic_review_packet_not_reviewed"],
-                warnings=_dedupe(warnings + packet.warnings),
+                blockers=["runtime_semantic_review_artifact_not_reviewed"],
+                warnings=_dedupe(warnings + artifact.warnings),
                 exchange_read_only=reconciliation["exchange_read_only"],
             )
 
@@ -432,8 +434,8 @@ class RuntimeClosedTradeLifecycleReviewService:
         local_state_mutated: bool = False,
         live_lifecycle_review_written: bool = False,
     ) -> RuntimeClosedTradeLifecycleReviewResult:
-        packet = build_runtime_semantic_review_packet(record)
-        review = packet.right_tail_review
+        artifact = build_runtime_semantic_review_artifact(record)
+        review = artifact.right_tail_review
         return self._result(
             status=status,
             runtime_instance_id=runtime.runtime_instance_id,
@@ -450,9 +452,9 @@ class RuntimeClosedTradeLifecycleReviewService:
             attempt_continuation_quality=(
                 review.attempt_continuation_quality.value if review is not None else None
             ),
-            semantic_trace_complete=packet.semantic_trace_complete,
+            semantic_trace_complete=artifact.semantic_trace_complete,
             blockers=blockers,
-            warnings=_dedupe(warnings + packet.warnings),
+            warnings=_dedupe(warnings + artifact.warnings),
             exchange_read_only=exchange_read_only,
             local_state_mutated=local_state_mutated,
             live_lifecycle_review_written=live_lifecycle_review_written,
@@ -754,7 +756,7 @@ def _runner_preserved(exit_order: Order, realized_pnl: Decimal) -> bool:
     return exit_order.order_role not in {OrderRole.TP1, OrderRole.TP2}
 
 
-def _auto_review_decision(
+def _auto_review_outcome(
     classification: RightTailTradeClassification,
 ) -> Literal["promote", "revise", "park"]:
     if classification == RightTailTradeClassification.RIGHT_TAIL_WIN:

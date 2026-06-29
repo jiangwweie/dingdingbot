@@ -16,7 +16,7 @@ review. Neither creates tier promotion authority by itself, and neither blocks a
 bounded experiment-worthy candidate by itself.
 
 Tradeability evaluation follows
-`docs/current/TRADEABILITY_VERDICT_CONTRACT.md`: a candidate that is not yet in
+`docs/current/TRADEABILITY_DECISION_CONTRACT.md`: a candidate that is not yet in
 the registry or runtime tier policy is blocked by asset admission, not by the
 market. `waiting_for_market` is only accurate after final-owned admission,
 scoped policy, armed observation, and non-live readiness are closed.
@@ -26,7 +26,7 @@ scoped policy, armed observation, and non-live readiness are closed.
 | Tier | Name | Meaning | Real order |
 | --- | --- | --- | --- |
 | `L0` | `catalog_only` | Visible in the StrategyGroup catalog only | No |
-| `L1` | `observe_only` | May record read-only observations and no-action packets | No |
+| `L1` | `observe_only` | May record read-only observations and no-action evidence | No |
 | `L2` | `shadow_candidate` | May prepare non-executing shadow candidate and authorization evidence after fresh signal and facts pass | No |
 | `L3` | `armed_observation` | May run armed observation and action-time rehearsal, but cannot place a real order unless separately promoted to `L4` | No |
 | `L4` | `tiny_real_order_eligible` | May place an allocated-subaccount bounded-aggressive real order only after the full official runtime chain passes. The mode name is a legacy compatibility label, not a de-risking instruction. | Yes, bounded |
@@ -97,8 +97,9 @@ StrategyGroup tiers do not bypass:
 
 ## StrategyGroup Decision Review
 
-StrategyGroup tier movement should now be driven by the minimal StrategyGroup
-Decision Ledger plus replay-to-review evidence, not by isolated reports.
+StrategyGroup tier movement should now be driven by Strategy Asset State
+pre-live evidence plus replay-to-review evidence. Isolated reports do not drive
+tier movement.
 
 | Tier decision | Required pre-live evidence |
 | --- | --- |
@@ -120,9 +121,9 @@ movement:
 
 Return anchors and leverage scenarios may prioritize review, but they do not
 replace the tier evidence path. A `tiny_live_intake_candidate` is an intake
-asset, not `tiny_live_ready` and not `actionable_now`.
+asset, not `tiny_live_ready` and not runtime trade/order authority.
 
-The decision ledger is not a promotion authority by itself. It records why a
-StrategyGroup should be kept, revised, promoted, parked, killed, reviewed for
-go-live, rejected for go-live, or blocked for safety. Routine observations and
-raw replay samples stay as lower-level evidence.
+Strategy Asset State evidence is not a promotion authority by itself. It
+records why a StrategyGroup should be kept, revised, promoted, parked, killed,
+reviewed for go-live, rejected for go-live, or blocked for safety. Routine
+observations and raw replay samples stay as lower-level evidence.

@@ -24,26 +24,29 @@ def _load_module():
     return module
 
 
-def test_preview_packet_uses_sample_source_without_side_effects():
+def test_preview_artifact_uses_sample_source_without_side_effects():
     module = _load_module()
 
-    packet = module.build_preview_packet(source_name="sample")
+    artifact = module.build_preview_artifact(source_name="sample")
 
-    assert packet["status"] == "preview_built"
-    assert packet["source_requested"] == "sample"
-    assert packet["checks"]["candidate_count"] >= 8
-    assert packet["checks"]["current_signal_count"] >= 8
-    assert packet["checks"]["forbidden_effects"] == []
-    assert packet["safety_invariants"]["database_connected"] is False
-    assert packet["safety_invariants"]["pg_observation_written"] is False
-    assert packet["safety_invariants"]["shadow_candidate_created"] is False
-    assert packet["safety_invariants"]["execution_intent_created"] is False
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["operator_command_plan"]["records_observation"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
-    for row in packet["would_enter_signals"]:
+    assert artifact["status"] == "preview_built"
+    assert artifact["source_requested"] == "sample"
+    assert artifact["checks"]["candidate_count"] >= 8
+    assert artifact["checks"]["current_signal_count"] >= 8
+    assert artifact["checks"]["forbidden_effects"] == []
+    assert artifact["safety_invariants"]["database_connected"] is False
+    assert artifact["safety_invariants"]["pg_observation_written"] is False
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is False
+    assert artifact["safety_invariants"]["execution_intent_created"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["interaction"]["preview_only"] is True
+    assert artifact["interaction"]["not_execution_authority"] is True
+    assert artifact["safety_invariants"]["pg_observation_written"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    for row in artifact["would_enter_signals"]:
         assert row["not_order"] is True
         assert row["not_execution_intent"] is True
         assert row["no_execution_permission"] is True

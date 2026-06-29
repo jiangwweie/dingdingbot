@@ -2,7 +2,7 @@
 """Run bounded active-runtime observation cycles without live submit.
 
 This loop is the durable version of the overnight operator wrapper: it invokes
-``runtime_active_observation_monitor`` repeatedly, writes one auditable packet
+``runtime_active_observation_monitor`` repeatedly, writes one auditable artifact
 per cycle, updates a latest summary, and stops as soon as a runtime leaves the
 plain waiting-for-signal state.
 """
@@ -25,7 +25,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_active_observation_monitor as active_monitor  # noqa: E402
-from scripts.runtime_active_observation_status import build_status_packet  # noqa: E402
+from scripts.runtime_active_observation_status import build_status_artifact  # noqa: E402
 
 
 WAITING_STATUS = "waiting_for_signal"
@@ -43,21 +43,21 @@ def _utc_cycle_name(*, iteration: int) -> str:
     return f"{timestamp}-iter-{iteration:03d}"
 
 
-def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict[str, Any]:
-    safety = packet.get("safety_invariants")
+def _summary(
+    artifact: dict[str, Any], *, iteration: int, cycle_dir: Path
+) -> dict[str, Any]:
+    safety = artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
-    plan = packet.get("operator_command_plan")
-    if not isinstance(plan, dict):
-        plan = {}
+    plan = _plan_projection(artifact, "observation_monitor_plan")
     return {
         "iteration": iteration,
         "cycle_dir": str(cycle_dir),
-        "status": str(packet.get("status") or "unknown"),
-        "active_runtime_count": packet.get("active_runtime_count"),
-        "monitored_runtime_count": packet.get("monitored_runtime_count"),
+        "status": str(artifact.get("status") or "unknown"),
+        "active_runtime_count": artifact.get("active_runtime_count"),
+        "monitored_runtime_count": artifact.get("monitored_runtime_count"),
         "selected_runtime_instance_ids": list(
-            packet.get("selected_runtime_instance_ids") or []
+            artifact.get("selected_runtime_instance_ids") or []
         ),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
@@ -75,7 +75,7 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
             safety.get("executable_execution_intent_created")
         ),
         "ready_for_final_gate_preflight": (
-            packet.get("status") == "ready_for_final_gate_preflight"
+            artifact.get("status") == "ready_for_final_gate_preflight"
         ),
         "creates_shadow_candidate": bool(plan.get("creates_shadow_candidate")),
         "creates_execution_intent": bool(plan.get("creates_execution_intent")),
@@ -89,33 +89,33 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         "withdrawal_or_transfer_created": bool(
             safety.get("withdrawal_or_transfer_created")
         ),
-        "blockers": list(packet.get("blockers") or []),
-        "warnings": list(packet.get("warnings") or []),
-        "signal_input_json": _signal_input_json(packet),
-        "prepared_authorization_id": _prepared_authorization_id(packet),
-        "runtime_signal_summaries": _runtime_signal_summaries(packet),
+        "blockers": list(artifact.get("blockers") or []),
+        "warnings": list(artifact.get("warnings") or []),
+        "signal_input_json": _signal_input_json(artifact),
+        "prepared_authorization_id": _prepared_authorization_id(artifact),
+        "runtime_signal_summaries": _runtime_signal_summaries(artifact),
     }
 
 
-def _signal_input_json(packet: dict[str, Any]) -> str | None:
+def _signal_input_json(artifact: dict[str, Any]) -> str | None:
     for candidate in (
-        packet.get("signal_input_json"),
-        _nested_get(packet, ("operator_command_plan", "signal_input_json")),
-        _nested_get(packet, ("latest_packet", "signal_input_json")),
-        _nested_get(packet, ("latest_packet", "operator_command_plan", "signal_input_json")),
+        artifact.get("signal_input_json"),
+        _nested_get(artifact, ("observation_monitor_plan", "signal_input_json")),
+        _nested_get(artifact, ("latest_artifact", "signal_input_json")),
+        _nested_get(artifact, ("latest_artifact", "observation_cycle_plan", "signal_input_json")),
     ):
         text = str(candidate or "").strip()
         if text:
             return text
 
-    for item in packet.get("runtime_summaries") or []:
+    for item in artifact.get("runtime_summaries") or []:
         if not isinstance(item, dict):
             continue
         for candidate in (
             item.get("signal_input_json"),
-            _nested_get(item, ("operator_command_plan", "signal_input_json")),
-            _nested_get(item, ("latest_packet", "signal_input_json")),
-            _nested_get(item, ("latest_packet", "operator_command_plan", "signal_input_json")),
+            _nested_get(item, ("observation_monitor_plan", "signal_input_json")),
+            _nested_get(item, ("latest_artifact", "signal_input_json")),
+            _nested_get(item, ("latest_artifact", "observation_cycle_plan", "signal_input_json")),
         ):
             text = str(candidate or "").strip()
             if text:
@@ -123,28 +123,33 @@ def _signal_input_json(packet: dict[str, Any]) -> str | None:
     return None
 
 
-def _prepared_authorization_id(packet: dict[str, Any]) -> str | None:
-    plan = packet.get("operator_command_plan")
-    if isinstance(plan, dict):
-        text = str(plan.get("prepared_authorization_id") or "").strip()
-        if text:
-            return text
+def _prepared_authorization_id(artifact: dict[str, Any]) -> str | None:
+    for plan_key in ("observation_monitor_plan",):
+        plan = artifact.get(plan_key)
+        if isinstance(plan, dict):
+            text = str(plan.get("prepared_authorization_id") or "").strip()
+            if text:
+                return text
 
-    for item in packet.get("runtime_summaries") or []:
+    for item in artifact.get("runtime_summaries") or []:
         if not isinstance(item, dict):
             continue
         for candidate in (
             item.get("prepared_authorization_id"),
-            _nested_get(item, ("operator_command_plan", "prepared_authorization_id")),
-            _nested_get(item, ("latest_packet", "operator_command_plan", "prepared_authorization_id")),
-            _nested_get(item, ("latest_packet", "prepare_packet", "operator_command_plan", "prepared_authorization_id")),
-            _nested_get(item, ("latest_packet", "prepare_packet", "ids", "authorization_id")),
-            _nested_get(item, ("latest_packet", "prepare_packet", "first_real_submit_prepare_report", "ids", "authorization_id")),
+            _nested_get(item, ("observation_monitor_plan", "prepared_authorization_id")),
+            _nested_get(item, ("latest_artifact", "observation_cycle_plan", "prepared_authorization_id")),
+            _nested_get(item, ("latest_artifact", "prepare_evidence", "ids", "authorization_id")),
+            _nested_get(item, ("latest_artifact", "prepare_evidence", "first_real_submit_prepare_report", "ids", "authorization_id")),
         ):
             text = str(candidate or "").strip()
             if text:
                 return text
     return None
+
+
+def _plan_projection(artifact: dict[str, Any], preferred_key: str) -> dict[str, Any]:
+    plan = artifact.get(preferred_key)
+    return plan if isinstance(plan, dict) else {}
 
 
 def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
@@ -156,8 +161,8 @@ def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
     return current
 
 
-def _runtime_signal_summaries(packet: dict[str, Any]) -> list[dict[str, Any]]:
-    summaries = packet.get("runtime_summaries")
+def _runtime_signal_summaries(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries = artifact.get("runtime_summaries")
     if not isinstance(summaries, list):
         return []
     result: list[dict[str, Any]] = []
@@ -192,19 +197,19 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _build_loop_packet(
+def _build_loop_artifact(
     args: argparse.Namespace,
     *,
-    packet_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
+    artifact_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     cycle_name_builder: Callable[[int], str] | None = None,
 ) -> dict[str, Any]:
-    builder = packet_builder or active_monitor._build_packet
+    builder = artifact_builder or active_monitor._build_monitor_artifact
     cycle_name = cycle_name_builder or (lambda iteration: _utc_cycle_name(iteration=iteration))
     max_iterations = max(int(args.max_iterations or 1), 1)
     root = Path(args.output_dir).expanduser()
     summaries: list[dict[str, Any]] = []
-    packets: list[dict[str, Any]] = []
+    cycle_artifacts: list[dict[str, Any]] = []
 
     final_status = "not_started"
     stop_reason = "max_iterations_exhausted"
@@ -215,31 +220,31 @@ def _build_loop_packet(
         cycle_args.output_json = str(cycle_dir / "active-monitor.json")
 
         try:
-            packet = _build_cycle_packet_with_timeout(
+            cycle_artifact = _build_cycle_artifact_with_timeout(
                 builder,
                 cycle_args,
                 timeout_seconds=float(getattr(args, "cycle_timeout_seconds", 0) or 0),
             )
         except RuntimeError as exc:
-            packet = _blocked_cycle_packet(
+            cycle_artifact = _blocked_cycle_artifact(
                 reason=str(exc),
                 output_json=str(cycle_dir / "active-monitor.json"),
             )
         except Exception as exc:
-            packet = _blocked_cycle_packet(
+            cycle_artifact = _blocked_cycle_artifact(
                 reason=_cycle_failure_reason(exc),
                 output_json=str(cycle_dir / "active-monitor.json"),
             )
-        status = str(packet.get("status") or "unknown")
-        summary = _summary(packet, iteration=iteration, cycle_dir=cycle_dir)
-        _write_json(cycle_dir / "active-monitor.json", packet)
+        status = str(cycle_artifact.get("status") or "unknown")
+        summary = _summary(cycle_artifact, iteration=iteration, cycle_dir=cycle_dir)
+        _write_json(cycle_dir / "active-monitor.json", cycle_artifact)
         _write_json(cycle_dir / "summary.json", summary)
         _write_json(root / "latest-summary.json", summary)
         (root / "latest-status.txt").write_text(status + "\n", encoding="utf-8")
 
         summaries.append(summary)
-        if args.include_packets:
-            packets.append(packet)
+        if args.include_artifacts:
+            cycle_artifacts.append(cycle_artifact)
 
         final_status = status
         should_stop = status in STOP_STATUSES or status != WAITING_STATUS
@@ -250,11 +255,11 @@ def _build_loop_packet(
             interim_stop_reason = stop_reason
             if not should_stop and iteration < max_iterations:
                 interim_stop_reason = "running"
-            _write_loop_and_status_packets(
+            _write_loop_and_status_artifacts(
                 args,
                 root=root,
                 summaries=summaries,
-                packets=packets,
+                cycle_artifacts=cycle_artifacts,
                 final_status=final_status,
                 stop_reason=interim_stop_reason,
                 max_iterations=max_iterations,
@@ -265,50 +270,50 @@ def _build_loop_packet(
         if iteration < max_iterations:
             sleeper(float(args.loop_interval_seconds or 0))
 
-    return _loop_packet(
+    return _loop_artifact(
         args,
         root=root,
         summaries=summaries,
-        packets=packets,
+        cycle_artifacts=cycle_artifacts,
         final_status=final_status,
         stop_reason=stop_reason,
         max_iterations=max_iterations,
     )
 
 
-def _write_loop_and_status_packets(
+def _write_loop_and_status_artifacts(
     args: argparse.Namespace,
     *,
     root: Path,
     summaries: list[dict[str, Any]],
-    packets: list[dict[str, Any]],
+    cycle_artifacts: list[dict[str, Any]],
     final_status: str,
     stop_reason: str,
     max_iterations: int,
 ) -> None:
     _write_json(
         Path(args.loop_output_json).expanduser(),
-        _loop_packet(
+        _loop_artifact(
             args,
             root=root,
             summaries=summaries,
-            packets=packets,
+            cycle_artifacts=cycle_artifacts,
             final_status=final_status,
             stop_reason=stop_reason,
             max_iterations=max_iterations,
         ),
     )
     if getattr(args, "status_output_json", None):
-        status_packet = build_status_packet(
+        status_artifact = build_status_artifact(
             root,
             stale_after_seconds=float(
                 getattr(args, "status_stale_after_seconds", 900.0) or 900.0
             ),
         )
-        _write_json(Path(args.status_output_json).expanduser(), status_packet)
+        _write_json(Path(args.status_output_json).expanduser(), status_artifact)
 
 
-def _build_cycle_packet_with_timeout(
+def _build_cycle_artifact_with_timeout(
     builder: Callable[[argparse.Namespace], dict[str, Any]],
     cycle_args: argparse.Namespace,
     *,
@@ -340,18 +345,18 @@ def _build_cycle_packet_with_timeout(
             signal.setitimer(signal.ITIMER_REAL, *previous_timer)
 
 
-def _blocked_cycle_packet(*, reason: str, output_json: str) -> dict[str, Any]:
+def _blocked_cycle_artifact(*, reason: str, output_json: str) -> dict[str, Any]:
     return {
         "scope": "runtime_active_observation_monitor",
         "status": "blocked",
         "active_runtime_count": None,
         "monitored_runtime_count": 0,
         "runtime_summaries": [],
-        "runtime_packets": [],
+        "runtime_artifacts": [],
         "blockers": [reason],
         "warnings": [],
         "output_json": output_json,
-        "operator_command_plan": {
+        "observation_monitor_plan": {
             "next_step": "inspect_active_observation_cycle_timeout",
             "not_executed": True,
             "creates_shadow_candidate": False,
@@ -395,12 +400,12 @@ def _cycle_failure_reason(exc: Exception) -> str:
     return f"active_observation_cycle_failed:{type(exc).__name__}:{message}"
 
 
-def _loop_packet(
+def _loop_artifact(
     args: argparse.Namespace,
     *,
     root: Path,
     summaries: list[dict[str, Any]],
-    packets: list[dict[str, Any]],
+    cycle_artifacts: list[dict[str, Any]],
     final_status: str,
     stop_reason: str,
     max_iterations: int,
@@ -415,8 +420,8 @@ def _loop_packet(
         "output_dir": str(root),
         "latest_summary": summaries[-1] if summaries else {},
         "cycle_summaries": summaries,
-        "cycle_packets": packets,
-        "operator_command_plan": {
+        "cycle_artifacts": cycle_artifacts,
+        "observation_loop_plan": {
             "not_executed": True,
             "next_step": _next_step(final_status),
             "creates_execution_intent": False,
@@ -485,14 +490,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     loop_parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
     loop_parser.add_argument(
         "--loop-output-json",
-        help="Optional path for the aggregate loop packet. Stdout remains JSON.",
+        help="Optional path for the aggregate loop artifact. Stdout remains JSON.",
     )
     loop_parser.add_argument(
         "--status-output-json",
-        help="Optional path for a refreshed read-only status packet.",
+        help="Optional path for a refreshed read-only status artifact.",
     )
     loop_parser.add_argument("--status-stale-after-seconds", type=float, default=900.0)
-    loop_parser.add_argument("--include-packets", action="store_true", default=False)
+    loop_parser.add_argument("--include-artifacts", action="store_true", default=False)
     loop_args, monitor_argv = loop_parser.parse_known_args(argv)
     monitor_args = active_monitor._parse_args(monitor_argv)
     return argparse.Namespace(
@@ -502,7 +507,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         loop_output_json=loop_args.loop_output_json,
         status_output_json=loop_args.status_output_json,
         status_stale_after_seconds=loop_args.status_stale_after_seconds,
-        include_packets=loop_args.include_packets,
+        include_artifacts=loop_args.include_artifacts,
         output_dir=monitor_args.output_dir,
         monitor_args=monitor_args,
     )
@@ -511,12 +516,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_loop_packet(args)
-    output = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        artifact = _build_loop_artifact(args)
+    output = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.loop_output_json:
-        _write_json(Path(args.loop_output_json).expanduser(), packet)
+        _write_json(Path(args.loop_output_json).expanduser(), artifact)
     print(output)
-    return 0 if packet["status"] in {
+    return 0 if artifact["status"] in {
         "waiting_for_signal",
         "ready_for_prepare",
         "ready_for_final_gate_preflight",

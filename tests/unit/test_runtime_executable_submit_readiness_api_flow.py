@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 from scripts import runtime_executable_submit_readiness_api_flow
 
 
@@ -29,13 +31,13 @@ class _Client:
         return {"http_status": self.http_status, "body": self.body}
 
 
-def _strategy_packet():
+def _strategy_artifact():
     return {
-        "packet_id": "strategy-plan-1",
+        "artifact_id": "strategy-plan-1",
         "runtime_instance_id": "runtime-1",
         "source_authorization_id": "consumed-auth-1",
-        "post_submit_finalize_packet_id": "post-submit-1",
-        "source_release_packet_id": "release-1",
+        "post_submit_finalize_payload_id": "post-submit-1",
+        "source_release_evidence_id": "release-1",
         "status": "ready_for_final_gate_preflight",
         "next_attempt_gate_status": "ready_for_fresh_signal",
         "signal_evaluation_id": "signal-eval-1",
@@ -45,7 +47,7 @@ def _strategy_packet():
         "order_candidate_id": "order-candidate-1",
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {},
+        "strategy_planning_plan": {},
         "consumed_authorization_replay_only": True,
         "requires_fresh_strategy_signal": True,
         "requires_fresh_authorization_before_submit": True,
@@ -88,7 +90,7 @@ def _evidence():
 def _write_inputs(tmp_path):
     strategy_path = tmp_path / "strategy.json"
     evidence_path = tmp_path / "evidence.json"
-    strategy_path.write_text(json.dumps(_strategy_packet()), encoding="utf-8")
+    strategy_path.write_text(json.dumps(_strategy_artifact()), encoding="utf-8")
     evidence_path.write_text(json.dumps(_evidence()), encoding="utf-8")
     return strategy_path, evidence_path
 
@@ -97,9 +99,9 @@ def _args(tmp_path, **overrides):
     strategy_path, evidence_path = _write_inputs(tmp_path)
     values = {
         "runtime_instance_id": "runtime-1",
-        "strategy_planning_packet_json": str(strategy_path),
+        "strategy_planning_artifact_json": str(strategy_path),
         "evidence_json": str(evidence_path),
-        "first_real_submit_packet_json": None,
+        "first_real_submit_evidence_json": None,
         "additional_warning": None,
         "additional_blocker": None,
         "env_file": None,
@@ -112,7 +114,7 @@ def _args(tmp_path, **overrides):
 def test_executable_submit_readiness_api_flow_posts_readiness_request(tmp_path):
     client = _Client()
 
-    packet = runtime_executable_submit_readiness_api_flow._build_packet(
+    packet = runtime_executable_submit_readiness_api_flow._build_artifact(
         _args(tmp_path),
         client=client,
     )
@@ -127,7 +129,8 @@ def test_executable_submit_readiness_api_flow_posts_readiness_request(tmp_path):
         "/api/trading-console/strategy-runtimes/runtime-1/"
         "executable-submit-readiness-previews"
     )
-    assert call["body"]["strategy_planning_packet"]["packet_id"] == "strategy-plan-1"
+    assert call["body"]["strategy_planning_artifact"]["artifact_id"] == "strategy-plan-1"
+    assert "strategy_planning_packet" not in call["body"]
     assert call["body"]["evidence"]["final_gate_preview_id"] == "final-gate-preview-1"
     assert call["body"]["metadata"][
         "runtime_executable_submit_readiness_api_flow"
@@ -136,7 +139,7 @@ def test_executable_submit_readiness_api_flow_posts_readiness_request(tmp_path):
 
 
 def test_executable_submit_readiness_api_flow_keeps_http_errors(tmp_path):
-    packet = runtime_executable_submit_readiness_api_flow._build_packet(
+    packet = runtime_executable_submit_readiness_api_flow._build_artifact(
         _args(tmp_path),
         client=_Client(http_status=400, body={"detail": "bad"}),
     )
@@ -151,14 +154,48 @@ def test_executable_submit_readiness_api_flow_cli_stdout_is_json_only(
     monkeypatch,
     capsys,
 ):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy readiness api flow")
         return {"status": "blocked", "ok": True}
 
     monkeypatch.setattr(
         runtime_executable_submit_readiness_api_flow,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "runtime_executable_submit_readiness_api_flow.py",
+            "--runtime-instance-id",
+            "runtime-1",
+            "--strategy-planning-artifact-json",
+            "strategy.json",
+            "--evidence-json",
+            "evidence.json",
+        ],
+    )
+
+    assert runtime_executable_submit_readiness_api_flow.main() == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("{")
+    assert "inner noisy readiness api flow" not in captured.out
+    assert "inner noisy readiness api flow" in captured.err
+
+
+def test_executable_submit_readiness_api_flow_rejects_legacy_packet_cli_alias(
+    monkeypatch,
+    capsys,
+):
+    def fake_build_artifact(args):
+        return {"status": "blocked", "ok": True}
+
+    monkeypatch.setattr(
+        runtime_executable_submit_readiness_api_flow,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,
@@ -174,9 +211,9 @@ def test_executable_submit_readiness_api_flow_cli_stdout_is_json_only(
         ],
     )
 
-    assert runtime_executable_submit_readiness_api_flow.main() == 0
+    with pytest.raises(SystemExit) as exc:
+        runtime_executable_submit_readiness_api_flow.main()
 
     captured = capsys.readouterr()
-    assert captured.out.startswith("{")
-    assert "inner noisy readiness api flow" not in captured.out
-    assert "inner noisy readiness api flow" in captured.err
+    assert exc.value.code == 2
+    assert captured.out == ""

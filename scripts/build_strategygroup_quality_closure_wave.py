@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the StrategyGroup quality closure wave packet.
+"""Build the StrategyGroup quality closure wave artifact.
 
-This command turns current StrategyGroup capture-audit and decision-ledger
-evidence into review packets, Owner cards, identity-review packets, MPG member
-review rows, and forward/no-action ledger rollups. It is local/read-only
+This command turns current StrategyGroup capture-audit and Strategy Asset State
+evidence into review artifacts, Owner policy_items, identity-review artifacts,
+MPG member review rows, and forward/no-action rollups. It is local/read-only
 decision support and never creates live authority.
 """
 
@@ -14,15 +14,22 @@ from collections import Counter
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from strategygroup_non_executing_projection import non_executing_interaction  # noqa: E402
+
 DEFAULT_CAPTURE_GAP_AUDIT_JSON = (
     REPO_ROOT / "output/runtime-monitor/strategy-capture-gap-audit-20260622.json"
 )
-DEFAULT_DECISION_LEDGER_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+DEFAULT_STRATEGY_ASSET_STATE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-asset-state.json"
 )
 DEFAULT_REGISTRY_JSON = (
     REPO_ROOT / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
@@ -66,27 +73,27 @@ WAVE_2_CAPTURE_SPECS = {
     "BTPC-001": {
         "current_problem": "169/169 windows are attributed to stale gate or fact-source blocking.",
         "closure_action": "review_stale_gate_fact_source_classifier_attribution",
-        "review_decision": "revise",
+        "review_outcome": "revise",
     },
     "LSR-001": {
         "current_problem": "side-specific short-revival has would-enter evidence but needs range-context review.",
         "closure_action": "side_specific_short_revival_range_context_review",
-        "review_decision": "revise",
+        "review_outcome": "revise",
     },
     "BRF-001": {
         "current_problem": "bear-rally failure short structure appeared, but squeeze and RequiredFacts review are incomplete.",
         "closure_action": "forward_outcome_squeeze_classifier_requiredfacts_review",
-        "review_decision": "promote_review",
+        "review_outcome": "promote_review",
     },
     "VCB-001": {
         "current_problem": "breakout structure appeared but true/false breakout quality is not strong enough for promotion.",
         "closure_action": "true_false_breakout_classifier_review",
-        "review_decision": "keep_observing_or_revise",
+        "review_outcome": "keep_observing_or_revise",
     },
     "RBR-001": {
         "current_problem": "positive observe-only samples exist, but the lane remains parked without materially new edge evidence.",
         "closure_action": "material_new_edge_review_before_reactivation",
-        "review_decision": "park_unless_new_edge",
+        "review_outcome": "park_unless_new_edge",
     },
 }
 
@@ -137,8 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_CAPTURE_GAP_AUDIT_JSON),
     )
     parser.add_argument(
-        "--decision-ledger-json",
-        default=str(DEFAULT_DECISION_LEDGER_JSON),
+        "--strategy-asset-state-json",
+        dest="strategy_asset_state_source_json",
+        metavar="STRATEGY_ASSET_STATE_JSON",
+        default=str(DEFAULT_STRATEGY_ASSET_STATE_JSON),
     )
     parser.add_argument("--registry-json", default=str(DEFAULT_REGISTRY_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
@@ -150,9 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-md", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_quality_closure_wave(
+    artifact = build_quality_closure_wave(
         capture_gap_audit=_load_json_object(Path(args.capture_gap_audit_json)),
-        decision_ledger=_load_json_object(Path(args.decision_ledger_json)),
+        strategy_asset_state_source=_load_json_object(
+            Path(args.strategy_asset_state_source_json)
+        ),
         registry=_load_json_object(Path(args.registry_json)),
         tier_policy=_load_json_object(Path(args.tier_policy_json)),
         mpg_replay_corpus=_load_json_object(Path(args.mpg_replay_corpus_json)),
@@ -162,18 +173,18 @@ def main(argv: list[str] | None = None) -> int:
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    output_md.write_text(_markdown(packet, output_json, output_md), encoding="utf-8")
-    print(json.dumps({"status": packet["status"], "output_json": str(output_json)}, ensure_ascii=False))
+    output_md.write_text(_markdown(artifact, output_json, output_md), encoding="utf-8")
+    print(json.dumps({"status": artifact["status"], "output_json": str(output_json)}, ensure_ascii=False))
     return 0
 
 
 def build_quality_closure_wave(
     *,
     capture_gap_audit: dict[str, Any],
-    decision_ledger: dict[str, Any],
+    strategy_asset_state_source: dict[str, Any],
     registry: dict[str, Any],
     tier_policy: dict[str, Any],
     mpg_replay_corpus: dict[str, Any],
@@ -182,10 +193,9 @@ def build_quality_closure_wave(
         str(row.get("strategy_group_id")): row
         for row in _dict_rows(registry.get("rows"))
     }
-    ledger_by_group = {
-        str(row.get("strategy_group_id")): row
-        for row in _dict_rows(decision_ledger.get("ledger_rows"))
-    }
+    strategy_asset_by_group, strategy_asset_state_source_info = (
+        _strategy_asset_rows_by_group(strategy_asset_state_source)
+    )
     audit_by_group = {
         str(row.get("strategy_group_id")): row
         for row in _dict_rows(capture_gap_audit.get("strategy_expectation_rows"))
@@ -198,28 +208,28 @@ def build_quality_closure_wave(
             group,
             audit_by_group=audit_by_group,
             closure_by_group=closure_by_group,
-            ledger_by_group=ledger_by_group,
+            strategy_asset_by_group=strategy_asset_by_group,
             registry_by_group=registry_by_group,
             current_tiers=current_tiers,
         )
         for group in PRIORITY_CAPTURE_GROUPS
     ]
-    owner_cards = [
-        _owner_card(
+    owner_policy_items = [
+        _owner_policy_item(
             group,
             registry_row=registry_by_group.get(group, {}),
-            ledger_row=ledger_by_group.get(group, {}),
+            strategy_asset_row=strategy_asset_by_group.get(group, {}),
             audit_row=audit_by_group.get(group, {}),
             current_tier=current_tiers.get(group, "unknown"),
         )
-        for group in sorted(set(registry_by_group) | set(ledger_by_group))
+        for group in sorted(set(registry_by_group) | set(strategy_asset_by_group))
     ]
-    identity_review_packets = [
+    identity_review_rows = [
         _identity_review_row(
             group,
             audit_row=audit_by_group.get(group, {}),
             closure_row=closure_by_group.get(group, {}),
-            ledger_row=ledger_by_group.get(group, {}),
+            strategy_asset_row=strategy_asset_by_group.get(group, {}),
         )
         for group in IDENTITY_REVIEW_GROUPS
     ]
@@ -227,11 +237,11 @@ def build_quality_closure_wave(
         registry_by_group.get("MPG-001", {}),
         mpg_replay_corpus,
     )
-    wave_1_strategy_explainer = _wave_1_strategy_explainer(owner_cards)
+    wave_1_strategy_explainer = _wave_1_strategy_explainer(owner_policy_items)
     wave_2_capture_quality_closure = _wave_2_capture_quality_closure(
         audit_by_group=audit_by_group,
         closure_by_group=closure_by_group,
-        ledger_by_group=ledger_by_group,
+        strategy_asset_by_group=strategy_asset_by_group,
         registry_by_group=registry_by_group,
         current_tiers=current_tiers,
     )
@@ -240,11 +250,11 @@ def build_quality_closure_wave(
     )
     forward_no_action_ledger_extension = _forward_no_action_ledger_extension(
         capture_gap_audit,
-        ledger_by_group,
+        strategy_asset_by_group,
     )
     owner_confirmation_checkpoint = _owner_confirmation_checkpoint(
         priority_capture_closure,
-        identity_review_packets,
+        identity_review_rows,
         mpg_member_tiering_review,
     )
 
@@ -256,7 +266,7 @@ def build_quality_closure_wave(
         "closed_engineering_problem": (
             "Strategy capture findings, identity ambiguity, Owner explanation, "
             "MPG member review, and forward/no-action evidence are now projected "
-            "from current audit/ledger sources into one comparable packet."
+            "from current audit/ledger sources into one comparable review artifact."
         ),
         "capability_unlocked": (
             "Owner can review strategy-quality decisions without reading raw "
@@ -268,17 +278,19 @@ def build_quality_closure_wave(
         ),
         "source_status": {
             "capture_gap_audit": capture_gap_audit.get("status"),
-            "decision_ledger": decision_ledger.get("status"),
+            "strategy_asset_state": strategy_asset_state_source.get("status"),
+            "strategy_asset_state_source": strategy_asset_state_source_info,
             "registry": registry.get("status"),
             "tier_policy_groups": len(current_tiers),
             "mpg_replay_sample_count": len(_dict_rows(mpg_replay_corpus.get("replay_samples"))),
         },
+        "strategy_asset_state_source": strategy_asset_state_source_info,
         "priority_order": [
             "wave_1_strategy_explainer",
             "wave_2_capture_quality_closure",
             "wave_3_mpg_member_deepening",
             "priority_1_btpc_lsr_brf_capture_closure",
-            "priority_2_owner_cards_v1_from_ledger",
+            "priority_2_owner_policy_items_v1_from_ledger",
             "priority_3_mi_cpm_registry_identity_review",
             "priority_4_mpg_member_tiering_exit_decay_review",
             "priority_5_forward_outcome_no_action_ledger_extension",
@@ -290,28 +302,21 @@ def build_quality_closure_wave(
             "status": "ready_for_owner_review",
             "rows": priority_capture_closure,
         },
-        "priority_2_owner_cards_v1": {
+        "priority_2_owner_policy_items_v1": {
             "status": "ready",
-            "card_count": len(owner_cards),
-            "cards": owner_cards,
+            "policy_item_count": len(owner_policy_items),
+            "policy_items": owner_policy_items,
         },
         "priority_3_identity_review": {
             "status": "ready_for_owner_review",
-            "rows": identity_review_packets,
+            "rows": identity_review_rows,
         },
         "priority_4_mpg_member_tiering_exit_decay_review": mpg_member_tiering_review,
         "priority_5_forward_outcome_no_action_ledger_extension": forward_no_action_ledger_extension,
         "owner_confirmation_checkpoint": owner_confirmation_checkpoint,
-        "interaction": {
-            "level": "L0_local_strategy_quality_closure",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_strategy_quality_closure"
+        ),
         "safety_invariants": {
             "local_review_only": True,
             "server_interaction": False,
@@ -322,63 +327,61 @@ def build_quality_closure_wave(
             "live_profile_changed": False,
             "l4_real_order_scope_expanded": False,
             "shadow_candidate_created": False,
-            "execution_intent_created": False,
             "final_gate_called": False,
             "operation_layer_called": False,
             "order_created": False,
             "exchange_write_called": False,
-            "real_order_authority": False,
             "preview_or_replay_treated_as_live_signal": False,
         },
     }
 
 
-def _wave_1_strategy_explainer(owner_cards: list[dict[str, Any]]) -> dict[str, Any]:
-    cards_by_group = {str(card.get("strategy_group_id")): card for card in owner_cards}
+def _wave_1_strategy_explainer(owner_policy_items: list[dict[str, Any]]) -> dict[str, Any]:
+    policy_items_by_group = {str(policy_item.get("strategy_group_id")): policy_item for policy_item in owner_policy_items}
     required_groups = list(WAVE_1_REQUIRED_GROUPS)
     visibility_groups = list(WAVE_1_VISIBILITY_GROUPS)
     required_missing = [
-        group for group in required_groups + visibility_groups if group not in cards_by_group
+        group for group in required_groups + visibility_groups if group not in policy_items_by_group
     ]
-    cards = [
-        _wave_1_card(cards_by_group[group])
+    policy_items = [
+        _wave_1_policy_item(policy_items_by_group[group])
         for group in required_groups + visibility_groups
-        if group in cards_by_group
+        if group in policy_items_by_group
     ]
     return {
-        "status": "ready" if not required_missing else "incomplete_missing_cards",
+        "status": "ready" if not required_missing else "incomplete_missing_policy_items",
         "purpose": "turn StrategyGroup ids into Owner-readable strategy assets",
         "required_groups": required_groups,
         "visibility_groups": visibility_groups,
-        "card_count": len(cards),
-        "missing_required_cards": required_missing,
+        "policy_item_count": len(policy_items),
+        "missing_required_policy_items": required_missing,
         "done_when": {
             "strategy_assets_are_owner_readable": not required_missing,
-            "cards_explain_why_not_live": all(card["why_not_live"] for card in cards),
-            "cards_separate_owner_decision_from_system_action": all(
-                card["owner_can_decide"] and card["system_auto_action"]
-                for card in cards
+            "policy_items_explain_why_not_live": all(policy_item["why_not_live"] for policy_item in policy_items),
+            "policy_items_separate_owner_policy_from_system_action": all(
+                policy_item["owner_policy_review_scope"]
+                and policy_item["strategy_review_checkpoint"]
+                for policy_item in policy_items
             ),
         },
-        "cards": cards,
+        "policy_items": policy_items,
         "authority_boundary": _review_only_boundary(),
     }
 
 
-def _wave_1_card(card: dict[str, Any]) -> dict[str, Any]:
+def _wave_1_policy_item(policy_item: dict[str, Any]) -> dict[str, Any]:
     return {
-        "strategy_group_id": card["strategy_group_id"],
-        "owner_label": card["owner_label"],
-        "current_tier": card["current_tier"],
-        "eats_market_structure": card["market_opportunity"],
-        "trade_logic": card["trade_logic"],
-        "why_not_live": card["why_not_live"],
-        "current_risk": card["main_risks"] or ["strategy_quality_or_identity_risk_not_yet_closed"],
-        "missing_facts": card["missing_evidence"],
-        "owner_can_decide": _owner_decision_surface(card),
-        "system_auto_action": card["system_next_action"],
-        "next_evidence": card["missing_evidence"],
-        "actionable_now": False,
+        "strategy_group_id": policy_item["strategy_group_id"],
+        "owner_label": policy_item["owner_label"],
+        "current_tier": policy_item["current_tier"],
+        "eats_market_structure": policy_item["market_opportunity"],
+        "trade_logic": policy_item["trade_logic"],
+        "why_not_live": policy_item["why_not_live"],
+        "current_risk": policy_item["main_risks"] or ["strategy_quality_or_identity_risk_not_yet_closed"],
+        "missing_facts": policy_item["missing_evidence"],
+        "owner_policy_review_scope": _owner_policy_review_scope(policy_item),
+        "strategy_review_checkpoint": policy_item["strategy_review_checkpoint"],
+        "next_evidence": policy_item["missing_evidence"],
         "live_permission_change_recommended_now": False,
     }
 
@@ -387,7 +390,7 @@ def _wave_2_capture_quality_closure(
     *,
     audit_by_group: dict[str, dict[str, Any]],
     closure_by_group: dict[str, dict[str, Any]],
-    ledger_by_group: dict[str, dict[str, Any]],
+    strategy_asset_by_group: dict[str, dict[str, Any]],
     registry_by_group: dict[str, dict[str, Any]],
     current_tiers: dict[str, str],
 ) -> dict[str, Any]:
@@ -396,7 +399,7 @@ def _wave_2_capture_quality_closure(
             group,
             audit_row=audit_by_group.get(group, {}),
             closure_row=closure_by_group.get(group, {}),
-            ledger_row=ledger_by_group.get(group, {}),
+            strategy_asset_row=strategy_asset_by_group.get(group, {}),
             registry_row=registry_by_group.get(group, {}),
             current_tier=current_tiers.get(group, "unknown"),
         )
@@ -430,20 +433,22 @@ def _wave_2_capture_row(
     *,
     audit_row: dict[str, Any],
     closure_row: dict[str, Any],
-    ledger_row: dict[str, Any],
+    strategy_asset_row: dict[str, Any],
     registry_row: dict[str, Any],
     current_tier: str,
 ) -> dict[str, Any]:
     spec = WAVE_2_CAPTURE_SPECS[group]
-    ledger_decision = str(ledger_row.get("decision") or spec["review_decision"])
+    strategy_asset_current_decision = str(
+        strategy_asset_row.get("current_decision") or "unknown"
+    )
     return {
         "strategy_group_id": group,
         "owner_label": registry_row.get("owner_label") or group,
         "current_tier": current_tier,
         "current_problem": spec["current_problem"],
         "closure_action": spec["closure_action"],
-        "review_decision": spec["review_decision"],
-        "ledger_decision": ledger_decision,
+        "review_outcome": spec["review_outcome"],
+        "strategy_asset_current_decision": strategy_asset_current_decision,
         "would_enter_count": _int(audit_row.get("would_enter_count") or closure_row.get("would_enter_count")),
         "no_action_count": _int(audit_row.get("no_action_count") or closure_row.get("no_action_count")),
         "high_priority_no_action_count": _int(
@@ -459,10 +464,11 @@ def _wave_2_capture_row(
             or closure_row.get("missed_no_action_forward_positive_count")
         ),
         "dominant_blocker_classes": audit_row.get("dominant_blocker_classes", []),
-        "next_checkpoint": ledger_row.get("next_checkpoint")
+        "next_checkpoint": strategy_asset_row.get("next_checkpoint")
         or registry_row.get("required_next_evidence")
         or spec["closure_action"],
-        "owner_policy_decision_required_later": ledger_decision in {"promote", "park", "kill"},
+        "owner_policy_confirmation_required_later": strategy_asset_current_decision
+        in {"promote", "park", "kill"},
         "live_permission_change_recommended_now": False,
         "authority_boundary": _review_only_boundary(),
     }
@@ -499,7 +505,7 @@ def _wave_3_mpg_member_deepening(
             )
             is False,
         },
-        "owner_policy_decision_required": True,
+        "owner_policy_confirmation_required": True,
         "live_permission_change_recommended_now": False,
         "authority_boundary": _review_only_boundary(),
     }
@@ -510,13 +516,13 @@ def _priority_capture_row(
     *,
     audit_by_group: dict[str, dict[str, Any]],
     closure_by_group: dict[str, dict[str, Any]],
-    ledger_by_group: dict[str, dict[str, Any]],
+    strategy_asset_by_group: dict[str, dict[str, Any]],
     registry_by_group: dict[str, dict[str, Any]],
     current_tiers: dict[str, str],
 ) -> dict[str, Any]:
     audit = audit_by_group.get(group, {})
     closure = closure_by_group.get(group, {})
-    ledger = ledger_by_group.get(group, {})
+    strategy_asset_row = strategy_asset_by_group.get(group, {})
     registry = registry_by_group.get(group, {})
     diagnosis = {
         "BTPC-001": "stale_fact_source_classifier_attribution_is_too_coarse",
@@ -526,8 +532,14 @@ def _priority_capture_row(
     return {
         "strategy_group_id": group,
         "current_tier": current_tiers.get(group, "unknown"),
-        "ledger_decision": ledger.get("decision", "unknown"),
-        "owner_review_label": OWNER_REVIEW_LABEL.get(str(ledger.get("decision")), "待复盘"),
+        "strategy_asset_current_decision": strategy_asset_row.get(
+            "current_decision",
+            "unknown",
+        ),
+        "owner_review_label": OWNER_REVIEW_LABEL.get(
+            str(strategy_asset_row.get("current_decision")),
+            "待复盘",
+        ),
         "would_enter_count": _int(audit.get("would_enter_count") or closure.get("would_enter_count")),
         "high_priority_no_action_count": _int(
             audit.get("high_priority_no_action_count") or closure.get("high_priority_no_action_count")
@@ -542,46 +554,52 @@ def _priority_capture_row(
         ),
         "dominant_blocker_classes": audit.get("dominant_blocker_classes", []),
         "diagnosis": diagnosis,
-        "required_next_evidence": ledger.get(
+        "required_next_evidence": strategy_asset_row.get(
             "required_next_evidence",
             registry.get("required_next_evidence", "continue_review"),
         ),
-        "next_checkpoint": ledger.get("next_checkpoint", "continue_review"),
-        "owner_decision_required_now": False,
-        "owner_policy_decision_after_packet": group in {"BRF-001"},
+        "next_checkpoint": strategy_asset_row.get(
+            "next_checkpoint",
+            "continue_review",
+        ),
+        "owner_policy_confirmation_required_now": False,
+        "owner_policy_confirmation_after_review": group in {"BRF-001"},
         "live_permission_change_recommended_now": False,
         "authority_boundary": _review_only_boundary(),
     }
 
 
-def _owner_card(
+def _owner_policy_item(
     group: str,
     *,
     registry_row: dict[str, Any],
-    ledger_row: dict[str, Any],
+    strategy_asset_row: dict[str, Any],
     audit_row: dict[str, Any],
     current_tier: str,
 ) -> dict[str, Any]:
-    decision = str(ledger_row.get("decision") or "keep_observing")
+    decision = str(strategy_asset_row.get("current_decision") or "unknown")
     risk_gaps = _risk_gap_items(registry_row)
     return {
         "strategy_group_id": group,
         "owner_label": registry_row.get("owner_label") or group,
-        "one_line": registry_row.get("edge_thesis") or _fallback_one_line(group, decision),
+        "one_line": registry_row.get("edge_thesis") or _default_one_line(group, decision),
         "market_opportunity": registry_row.get("regime_fit") or "current registry identity is incomplete",
         "trade_logic": registry_row.get("trade_logic") or "review-only strategy identity; no execution authority",
         "current_tier": current_tier,
-        "actionable_now": False,
         "owner_visible_status": _owner_visible_status(decision),
         "review_recommendation": decision,
         "owner_review_label": OWNER_REVIEW_LABEL.get(decision, "待复盘"),
-        "why_not_live": _why_not_live(registry_row, ledger_row),
-        "missing_evidence": ledger_row.get("required_next_evidence")
+        "why_not_live": _why_not_live(registry_row, strategy_asset_row),
+        "missing_evidence": strategy_asset_row.get("required_next_evidence")
         or registry_row.get("required_next_evidence")
         or "strategy identity or evidence still needs review",
         "main_risks": risk_gaps[:5],
-        "system_next_action": ledger_row.get("next_checkpoint", "continue_strategy_review"),
-        "owner_decision_later": decision in {"promote", "park", "kill", "revise"},
+        "strategy_review_checkpoint": strategy_asset_row.get(
+            "next_checkpoint",
+            "continue_strategy_review",
+        ),
+        "owner_policy_confirmation_later": decision
+        in {"promote", "park", "kill", "revise"},
         "live_permission_change_recommended_now": False,
     }
 
@@ -591,7 +609,7 @@ def _identity_review_row(
     *,
     audit_row: dict[str, Any],
     closure_row: dict[str, Any],
-    ledger_row: dict[str, Any],
+    strategy_asset_row: dict[str, Any],
 ) -> dict[str, Any]:
     would_enter = _int(audit_row.get("would_enter_count") or closure_row.get("would_enter_count"))
     forward_positive = _int(
@@ -617,15 +635,18 @@ def _identity_review_row(
         "strategy_group_id": group,
         "would_enter_count": would_enter,
         "would_enter_forward_positive_count": forward_positive,
-        "ledger_decision": ledger_row.get("decision", "revise"),
+        "strategy_asset_current_decision": strategy_asset_row.get(
+            "current_decision",
+            "unknown",
+        ),
         "identity_problem": (
             "strong_would_enter_but_smoke_or_member_identity_unclear"
             if group == "MI-001"
             else "would_enter_present_but_registry_scope_unclear"
         ),
-        "owner_decision_options": options,
-        "system_recommendation": "prepare_identity_packet_only_no_tier_change",
-        "owner_policy_decision_required": True,
+        "owner_policy_options": options,
+        "system_recommendation": "prepare_registry_identity_review_no_tier_change",
+        "owner_policy_confirmation_required": True,
         "live_permission_change_recommended_now": False,
         "authority_boundary": _review_only_boundary(),
     }
@@ -657,7 +678,7 @@ def _mpg_member_tiering_review(
                 "post_right_tail_giveback_control",
             ],
         },
-        "owner_policy_decision_required": True,
+        "owner_policy_confirmation_required": True,
         "live_permission_change_recommended_now": False,
         "authority_boundary": _review_only_boundary(),
     }
@@ -665,7 +686,7 @@ def _mpg_member_tiering_review(
 
 def _forward_no_action_ledger_extension(
     capture_gap_audit: dict[str, Any],
-    ledger_by_group: dict[str, dict[str, Any]],
+    strategy_asset_by_group: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     rows = []
     for row in _dict_rows(capture_gap_audit.get("strategy_expectation_rows")):
@@ -678,7 +699,9 @@ def _forward_no_action_ledger_extension(
                 "high_priority_no_action_count": _int(row.get("high_priority_no_action_count")),
                 "would_enter_forward_positive_count": _int(row.get("would_enter_forward_positive_count")),
                 "missed_no_action_forward_positive_count": _int(row.get("missed_no_action_forward_positive_count")),
-                "ledger_decision": _as_dict(ledger_by_group.get(group)).get("decision", "keep_observing"),
+                "strategy_asset_current_decision": _as_dict(
+                    strategy_asset_by_group.get(group)
+                ).get("current_decision", "unknown"),
                 "ledger_extension_class": _ledger_extension_class(row),
             }
         )
@@ -701,20 +724,20 @@ def _forward_no_action_ledger_extension(
 
 def _owner_confirmation_checkpoint(
     priority_capture_closure: list[dict[str, Any]],
-    identity_review_packets: list[dict[str, Any]],
+    identity_review_rows: list[dict[str, Any]],
     mpg_member_tiering_review: dict[str, Any],
 ) -> dict[str, Any]:
     decisions = []
     for row in priority_capture_closure:
-        if row.get("owner_policy_decision_after_packet"):
+        if row.get("owner_policy_confirmation_after_review"):
             decisions.append(
                 {
                     "strategy_group_id": row["strategy_group_id"],
                     "decision_type": "promote_or_keep_l1_review",
-                    "current_recommendation": row["ledger_decision"],
+                    "current_recommendation": row["strategy_asset_current_decision"],
                 }
             )
-    for row in identity_review_packets:
+    for row in identity_review_rows:
         decisions.append(
             {
                 "strategy_group_id": row["strategy_group_id"],
@@ -742,8 +765,8 @@ def _owner_confirmation_checkpoint(
     }
 
 
-def _closure_rows_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    closure = _as_dict(packet.get("priority_line_closure"))
+def _closure_rows_by_group(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    closure = _as_dict(artifact.get("priority_line_closure"))
     rows: list[dict[str, Any]] = []
     for key in (
         "phase2_priority_strategy_lines",
@@ -778,16 +801,16 @@ def _ledger_extension_class(row: dict[str, Any]) -> str:
     return "visibility_only_or_no_recent_structure"
 
 
-def _owner_decision_surface(card: dict[str, Any]) -> str:
-    decision = str(card.get("review_recommendation") or "keep_observing")
-    if card.get("strategy_group_id") in {"MI-001", "CPM-RO-001"}:
-        return "decide registry identity after review packet"
-    if card.get("strategy_group_id") == "MPG-001":
-        return "decide member tiering and exit-decay policy after review packet"
+def _owner_policy_review_scope(policy_item: dict[str, Any]) -> str:
+    decision = str(policy_item.get("review_recommendation") or "unknown")
+    if policy_item.get("strategy_group_id") in {"MI-001", "CPM-RO-001"}:
+        return "decide registry identity from review artifact"
+    if policy_item.get("strategy_group_id") == "MPG-001":
+        return "decide member tiering and exit-decay policy from review artifact"
     if decision == "promote":
-        return "decide promote review outcome after evidence packet"
+        return "decide promote review outcome from review evidence"
     if decision == "revise":
-        return "approve or reject revised strategy direction after evidence packet"
+        return "approve or reject revised strategy direction from review evidence"
     if decision == "park":
         return "confirm park decision or request materially new evidence"
     if decision == "kill":
@@ -807,11 +830,14 @@ def _owner_visible_status(decision: str) -> str:
     return "等待机会"
 
 
-def _why_not_live(registry_row: dict[str, Any], ledger_row: dict[str, Any]) -> str:
-    if registry_row.get("actionable_now") is False:
-        return str(registry_row.get("actionable_now_reason") or "runtime_state_only")
-    if ledger_row:
-        return "decision-ledger evidence is review-only and cannot authorize execution"
+def _why_not_live(
+    registry_row: dict[str, Any],
+    strategy_asset_row: dict[str, Any],
+) -> str:
+    if registry_row:
+        return "registry-baseline rows are strategy assets only and cannot authorize execution"
+    if strategy_asset_row:
+        return "strategy-asset-state evidence is review-only and cannot authorize execution"
     return "no current runtime authority"
 
 
@@ -823,8 +849,8 @@ def _risk_gap_items(registry_row: dict[str, Any]) -> list[str]:
     return output
 
 
-def _fallback_one_line(group: str, decision: str) -> str:
-    return f"{group} is currently {decision} in the StrategyGroup Decision Ledger."
+def _default_one_line(group: str, decision: str) -> str:
+    return f"{group} is currently {decision} in Strategy Asset State."
 
 
 def _review_only_boundary() -> str:
@@ -834,34 +860,33 @@ def _review_only_boundary() -> str:
     )
 
 
-def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str:
+def _markdown(artifact: dict[str, Any], output_json: Path, output_md: Path) -> str:
     lines = [
         "# StrategyGroup Quality Closure Wave",
         "",
         "## Summary",
         "",
-        f"- Status: `{packet['status']}`",
-        f"- Closed problem: {packet['closed_engineering_problem']}",
-        f"- Capability unlocked: {packet['capability_unlocked']}",
-        f"- Next bottleneck: {packet['next_engineering_bottleneck']}",
-        "- Real order authority: `false`",
+        f"- Status: `{artifact['status']}`",
+        f"- Closed problem: {artifact['closed_engineering_problem']}",
+        f"- Capability unlocked: {artifact['capability_unlocked']}",
+        f"- Next bottleneck: {artifact['next_engineering_bottleneck']}",
         "- Live permission change: `false`",
         "",
         "## Wave 1 Strategy Explainer",
         "",
-        "| StrategyGroup | Label | Tier | Eats structure | Why not live | Owner can decide | System action |",
+        "| StrategyGroup | Label | Tier | Eats structure | Why not live | Owner can decide | Strategy checkpoint |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for card in packet["wave_1_strategy_explainer"]["cards"]:
+    for policy_item in artifact["wave_1_strategy_explainer"]["policy_items"]:
         lines.append(
             "| `{}` | {} | `{}` | {} | `{}` | {} | `{}` |".format(
-                card["strategy_group_id"],
-                card["owner_label"],
-                card["current_tier"],
-                card["eats_market_structure"],
-                card["why_not_live"],
-                card["owner_can_decide"],
-                card["system_auto_action"],
+                policy_item["strategy_group_id"],
+                policy_item["owner_label"],
+                policy_item["current_tier"],
+                policy_item["eats_market_structure"],
+                policy_item["why_not_live"],
+                policy_item["owner_policy_review_scope"],
+                policy_item["strategy_review_checkpoint"],
             )
         )
     lines.extend(
@@ -869,17 +894,17 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "",
             "## Wave 2 Capture Quality Closure",
             "",
-            "| StrategyGroup | Problem | Action | Review | Would enter | High-priority no_action | WE positive | Missed NA positive |",
+            "| StrategyGroup | Problem | Checkpoint | Review | Would enter | High-priority no_action | WE positive | Missed NA positive |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
         ]
     )
-    for row in packet["wave_2_capture_quality_closure"]["rows"]:
+    for row in artifact["wave_2_capture_quality_closure"]["rows"]:
         lines.append(
             "| `{}` | {} | `{}` | `{}` | {} | {} | {} | {} |".format(
                 row["strategy_group_id"],
                 row["current_problem"],
                 row["closure_action"],
-                row["review_decision"],
+                row["review_outcome"],
                 row["would_enter_count"],
                 row["high_priority_no_action_count"],
                 row["would_enter_forward_positive_count"],
@@ -895,7 +920,7 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "| --- | --- | --- | --- |",
         ]
     )
-    for row in packet["wave_3_mpg_member_deepening"]["member_rows"]:
+    for row in artifact["wave_3_mpg_member_deepening"]["member_rows"]:
         lines.append(
             "| `{}` | `{}` | `{}` | `{}` |".format(
                 row["member_id"],
@@ -909,16 +934,16 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "",
         "## Priority 1 Capture Closure",
         "",
-        "| StrategyGroup | Tier | Decision | Would enter | High-priority no_action | Forward positives | Next |",
+        "| StrategyGroup | Tier | Strategy Asset decision | Would enter | High-priority no_action | Forward positives | Next |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
         ]
     )
-    for row in packet["priority_1_capture_closure"]["rows"]:
+    for row in artifact["priority_1_capture_closure"]["rows"]:
         lines.append(
             "| `{}` | `{}` | `{}` | {} | {} | {} / {} | `{}` |".format(
                 row["strategy_group_id"],
                 row["current_tier"],
-                row["ledger_decision"],
+                row["strategy_asset_current_decision"],
                 row["would_enter_count"],
                 row["high_priority_no_action_count"],
                 row["would_enter_forward_positive_count"],
@@ -929,21 +954,21 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
     lines.extend(
         [
             "",
-            "## Priority 2 Owner Cards",
+            "## Priority 2 Owner Policy items",
             "",
             "| StrategyGroup | Label | Tier | Owner status | Review | Missing evidence |",
             "| --- | --- | --- | --- | --- | --- |",
         ]
     )
-    for card in packet["priority_2_owner_cards_v1"]["cards"]:
+    for policy_item in artifact["priority_2_owner_policy_items_v1"]["policy_items"]:
         lines.append(
             "| `{}` | {} | `{}` | {} | `{}` | `{}` |".format(
-                card["strategy_group_id"],
-                card["owner_label"],
-                card["current_tier"],
-                card["owner_visible_status"],
-                card["review_recommendation"],
-                card["missing_evidence"],
+                policy_item["strategy_group_id"],
+                policy_item["owner_label"],
+                policy_item["current_tier"],
+                policy_item["owner_visible_status"],
+                policy_item["review_recommendation"],
+                policy_item["missing_evidence"],
             )
         )
     lines.extend(
@@ -955,14 +980,14 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "| --- | ---: | ---: | --- | --- |",
         ]
     )
-    for row in packet["priority_3_identity_review"]["rows"]:
+    for row in artifact["priority_3_identity_review"]["rows"]:
         lines.append(
             "| `{}` | {} | {} | `{}` | {} |".format(
                 row["strategy_group_id"],
                 row["would_enter_count"],
                 row["would_enter_forward_positive_count"],
                 row["identity_problem"],
-                ", ".join(f"`{item}`" for item in row["owner_decision_options"]),
+                ", ".join(f"`{item}`" for item in row["owner_policy_options"]),
             )
         )
     lines.extend(
@@ -974,7 +999,7 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "| --- | --- | --- | --- |",
         ]
     )
-    for row in packet["priority_4_mpg_member_tiering_exit_decay_review"]["member_rows"]:
+    for row in artifact["priority_4_mpg_member_tiering_exit_decay_review"]["member_rows"]:
         lines.append(
             "| `{}` | `{}` | `{}` | `{}` |".format(
                 row["member_id"],
@@ -992,7 +1017,7 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
-    for row in packet["priority_5_forward_outcome_no_action_ledger_extension"]["rows"]:
+    for row in artifact["priority_5_forward_outcome_no_action_ledger_extension"]["rows"]:
         lines.append(
             "| `{}` | `{}` | {} | {} | {} | {} | {} |".format(
                 row["strategy_group_id"],
@@ -1004,7 +1029,7 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
                 row["missed_no_action_forward_positive_count"],
             )
         )
-    checkpoint = packet["owner_confirmation_checkpoint"]
+    checkpoint = artifact["owner_confirmation_checkpoint"]
     lines.extend(
         [
             "",
@@ -1021,7 +1046,7 @@ def _markdown(packet: dict[str, Any], output_json: Path, output_md: Path) -> str
             "| --- | --- |",
         ]
     )
-    for key, value in packet["safety_invariants"].items():
+    for key, value in artifact["safety_invariants"].items():
         lines.append(f"| `{key}` | `{str(value).lower()}` |")
     lines.extend(
         [
@@ -1040,6 +1065,70 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError(f"JSON object required: {path}")
     return payload
+
+
+def _strategy_asset_rows_by_group(
+    strategy_asset_state_source: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    strategy_asset_state = _as_dict(
+        strategy_asset_state_source.get("strategy_asset_state")
+    )
+    asset_rows = _dict_rows(strategy_asset_state.get("asset_rows"))
+    if asset_rows:
+        rows = [
+            _strategy_asset_row_from_strategy_asset_state(row)
+            for row in asset_rows
+        ]
+        return _rows_by_group(rows), {
+            "source": "strategy_asset_state.asset_rows",
+            "row_count": len(rows),
+            "missing_current_decision_count": _missing_current_decision_count(asset_rows),
+        }
+    return {}, {
+        "source": "missing_strategy_asset_state",
+        "row_count": 0,
+        "missing_current_decision_count": 0,
+    }
+
+
+def _strategy_asset_row_from_strategy_asset_state(
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    promotion_target = str(row.get("promotion_target") or "not_applicable")
+    decision = str(row.get("current_decision") or "unknown")
+    return {
+        "strategy_group_id": str(row.get("strategy_group_id") or "unknown"),
+        "tier": str(row.get("current_tier") or "unknown"),
+        "current_decision": _display_decision(decision, promotion_target),
+        "promotion_scope": _display_promotion_scope(row),
+        "promotion_target": promotion_target,
+        "required_next_evidence": str(row.get("required_next_evidence") or ""),
+        "next_checkpoint": str(row.get("next_checkpoint") or ""),
+        "reason": str(row.get("reason") or ""),
+    }
+
+
+def _display_decision(decision: str, promotion_target: str) -> str:
+    if decision == "promote" and promotion_target == "promotion_evidence_review_only":
+        return "promote_review_only"
+    return decision
+
+
+def _display_promotion_scope(row: dict[str, Any]) -> str:
+    scope = str(row.get("promotion_scope") or "")
+    if scope:
+        return scope
+    if row.get("trial_eligible") is True:
+        return "trial_eligible"
+    return "not_applicable"
+
+
+def _missing_current_decision_count(rows: list[dict[str, Any]]) -> int:
+    return sum(1 for row in rows if not str(row.get("current_decision") or "").strip())
+
+
+def _rows_by_group(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(row.get("strategy_group_id")): row for row in rows}
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

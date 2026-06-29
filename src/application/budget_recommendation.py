@@ -35,7 +35,7 @@ class BlockerRecord(BudgetRecommendationModel):
     path: str
     evidence: str
     severity: Literal["hard_blocker", "warning", "deferred"]
-    bridge: str
+    recovery_action: str
     retry_condition: str
 
 
@@ -92,7 +92,7 @@ class BudgetEnvelope(BudgetRecommendationModel):
     not_execution_permission: Literal[True] = True
     grants_trading_permission: Literal[False] = False
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     action_allowed: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -154,7 +154,7 @@ class BudgetedActionSizing(BudgetRecommendationModel):
     owner_confirmation_required: Literal[True] = True
     action_allowed: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
 
@@ -186,7 +186,7 @@ class BudgetRecommendation(BudgetRecommendationModel):
     action_allowed: Literal[False] = False
     grants_trading_permission: Literal[False] = False
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     no_action_guarantee: dict[str, bool] = Field(
         default_factory=lambda: {
             "creates_authorization": False,
@@ -280,7 +280,7 @@ def build_symbol_recommendations(
                     path="TradingConsole -> BudgetEnvelope -> SymbolRecommendation",
                     evidence=f"{symbol} is outside the current budget allowed_symbols list.",
                     severity="hard_blocker",
-                    bridge="blocked_symbol_recommendation",
+                    recovery_action="blocked_symbol_recommendation",
                     retry_condition="Owner selects a symbol in BudgetEnvelope.allowed_symbols or updates allowed scope through governance.",
                 )
             )
@@ -461,7 +461,7 @@ def build_account_capacity(
                 path="TradingConsole -> AccountCapacity",
                 evidence="Readable account equity and available balance are missing.",
                 severity="hard_blocker",
-                bridge="degraded_budget_recommendation_contract",
+                recovery_action="degraded_budget_recommendation_contract",
                 retry_condition="Rerun with readable fresh account facts from the official read-only account path.",
             )
         )
@@ -473,7 +473,7 @@ def build_account_capacity(
                 path="TradingConsole -> AccountCapacity",
                 evidence=f"Account facts freshness is {freshness.get('freshness_status')}.",
                 severity="hard_blocker",
-                bridge="degraded_budget_recommendation_contract",
+                recovery_action="degraded_budget_recommendation_contract",
                 retry_condition="Rerun after fresh account, exposure, and open-order reads are available.",
             )
         )
@@ -491,7 +491,7 @@ def build_account_capacity(
                     path="AccountCapacity -> BudgetEnvelope",
                     evidence="Current exposure/open-order reserve consumes conservative account capacity.",
                     severity="hard_blocker",
-                    bridge="blocked_budget_envelope",
+                    recovery_action="blocked_budget_envelope",
                     retry_condition="Existing exposure/open orders are cleared or account facts show positive conservative headroom.",
                 )
             )
@@ -598,7 +598,7 @@ def build_budget_envelope(*, capacity: AccountCapacity, risk_tier: RiskTier) -> 
                     path="AccountCapacity -> RiskTier -> BudgetEnvelope",
                     evidence="Risk tier and account capacity produce no positive usable budget.",
                     severity="hard_blocker",
-                    bridge="blocked_budget_envelope",
+                    recovery_action="blocked_budget_envelope",
                     retry_condition="Readable positive capacity and a non-zero risk tier budget are available.",
                 )
             )
@@ -720,7 +720,7 @@ def _budget_examples(*, envelope: BudgetEnvelope) -> list[BudgetRecommendationEx
             "sizing_source": "budget_envelope_recommendation",
             "owner_confirmation_required": True,
             "may_execute_live": False,
-            "frontend_action_enabled": False,
+            "owner_action_enabled": False,
             "places_order": False,
         }
         examples.append(
@@ -899,7 +899,7 @@ def _owner_selection_blocker(
         path="TradingConsole -> OwnerSelection -> BudgetEnvelope",
         evidence=evidence,
         severity="hard_blocker",
-        bridge="owner_selection_budget_policy_validation",
+        recovery_action="owner_selection_budget_policy_validation",
         retry_condition=retry_condition,
     )
 

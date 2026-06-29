@@ -139,7 +139,7 @@ async def build_rehearsal_report() -> dict[str, Any]:
         ),
     )
     result = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=_InMemoryObservationRepository(),
         runtime_resolver=StrategyRuntimeObservationResolver(

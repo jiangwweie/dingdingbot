@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plan or execute StrategyGroup runtime pilot bootstrap.
 
-This script bridges the Owner-facing StrategyGroup picker to the existing
+This script connects the Owner-facing StrategyGroup picker to the existing
 official runtime bootstrap API flow. Default mode is plan-only. With
 ``--execute`` it may create StrategyFamily / Admission / TrialBinding /
 shadow StrategyRuntimeInstance records through official API surfaces. It never
@@ -26,9 +26,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.build_strategy_group_handoff_intake_packet import (  # noqa: E402
+from scripts.build_strategy_group_handoff_intake_artifact import (  # noqa: E402
     DEFAULT_HANDOFF_DIR,
-    build_packet as build_handoff_intake_packet,
+    build_artifact as build_handoff_intake_artifact,
 )
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     DEFAULT_API_BASE,
@@ -41,7 +41,7 @@ from scripts.runtime_live_bootstrap_api_flow import (  # noqa: E402
 
 
 DEFAULT_OUTPUT_JSON = (
-    ROOT_DIR / "output/strategygroup-runtime-pilot/runtime-bootstrap-packet.json"
+    ROOT_DIR / "output/strategygroup-runtime-pilot/runtime-bootstrap-artifact.json"
 )
 DEFAULT_PLAYBOOK_ID = "PB-BRC-STRATEGYGROUP-RUNTIME-PILOT-V1"
 DEFAULT_MAX_SYMBOLS_PER_GROUP = 1
@@ -160,14 +160,6 @@ def _runtime_rows_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
         watcher = data.get("watcher")
         if isinstance(watcher, dict):
             candidates.append(watcher.get("runtime_signal_summaries"))
-    status_packet = payload.get("status_packet")
-    if isinstance(status_packet, dict):
-        candidates.extend(
-            [
-                status_packet.get("runtime_summaries"),
-                status_packet.get("runtime_signal_summaries"),
-            ]
-        )
     for candidate in candidates:
         if isinstance(candidate, list):
             return [item for item in candidate if isinstance(item, dict)]
@@ -227,10 +219,10 @@ def _decimal_from(value: Any, default: str) -> Decimal:
         return Decimal(default)
 
 
-def _readiness_by_group(packet: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _readiness_by_group(readiness_artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(item.get("strategy_group_id")): item
-        for item in packet.get("readiness") or []
+        for item in readiness_artifact.get("readiness") or []
         if isinstance(item, dict) and item.get("strategy_group_id")
     }
 
@@ -459,10 +451,10 @@ def _target_row(
     }
 
 
-def build_packet(
+def build_artifact(
     *,
     config: RuntimePilotBootstrapConfig,
-    intake_packet: dict[str, Any],
+    intake_artifact: dict[str, Any],
     live_facts_readiness: dict[str, Any],
     active_runtimes: list[dict[str, Any]],
     active_inventory_blockers: list[str] | None = None,
@@ -485,7 +477,7 @@ def build_packet(
     total_new = 0
 
     groups = [
-        item for item in intake_packet.get("strategy_picker") or []
+        item for item in intake_artifact.get("strategy_picker") or []
         if isinstance(item, dict)
     ]
     groups.sort(
@@ -770,15 +762,6 @@ def _active_inventory_counts(payload: dict[str, Any]) -> dict[str, Any]:
         "active_runtime_count": payload.get("active_runtime_count"),
         "monitored_runtime_count": payload.get("monitored_runtime_count"),
     }
-    status_packet = payload.get("status_packet")
-    if isinstance(status_packet, dict):
-        counts["active_runtime_count"] = (
-            counts["active_runtime_count"] or status_packet.get("active_runtime_count")
-        )
-        counts["monitored_runtime_count"] = (
-            counts["monitored_runtime_count"]
-            or status_packet.get("monitored_runtime_count")
-        )
     data = payload.get("data")
     if isinstance(data, dict):
         watcher = data.get("watcher")
@@ -826,7 +809,7 @@ def main(argv: list[str] | None = None) -> int:
     intake = (
         _read_json(args.intake_json)
         if args.intake_json
-        else build_handoff_intake_packet(handoff_dir=Path(args.handoff_dir))
+        else build_handoff_intake_artifact(handoff_dir=Path(args.handoff_dir))
     )
     live_facts_readiness = _read_json(args.live_facts_readiness_json)
     if args.active_runtimes_json:
@@ -842,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
             "active_runtime_count": len(active_runtimes),
             "monitored_runtime_count": None,
         }
-    packet = build_packet(
+    artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
             api_base=args.api_base,
             execute=args.execute,
@@ -858,16 +841,16 @@ def main(argv: list[str] | None = None) -> int:
             renew_exhausted_runtimes=args.renew_exhausted_runtimes,
             renewal_batch_id=args.renewal_batch_id,
         ),
-        intake_packet=intake,
+        intake_artifact=intake,
         live_facts_readiness=live_facts_readiness,
         active_runtimes=active_runtimes,
         active_inventory_blockers=active_blockers,
         active_inventory_counts=active_counts,
         client=client,
     )
-    _write_json(args.output_json, packet)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if not packet["blockers"] else 2
+    _write_json(args.output_json, artifact)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if not artifact["blockers"] else 2
 
 
 if __name__ == "__main__":

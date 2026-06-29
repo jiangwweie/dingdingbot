@@ -41,7 +41,9 @@ async def main() -> None:
     args = _parser().parse_args()
     if args.ttl_minutes <= 0:
         raise SystemExit("ttl-minutes must be positive")
-    carrier = build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
+    carrier = (
+        build_bnb_strategy_trial_architecture_governance().owner_review_artifact.carrier
+    )
     now_ms = int(time.time() * 1000)
     expires_at_ms = now_ms + args.ttl_minutes * 60 * 1000
     session_maker = get_pg_session_maker()

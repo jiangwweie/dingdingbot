@@ -8,9 +8,9 @@ from pathlib import Path
 
 from scripts.build_strategygroup_quality_wave import (
     INCLUDED_GROUPS,
-    build_quality_wave_packet,
+    build_quality_wave_artifact,
     load_inputs,
-    validate_packet,
+    validate_artifact,
 )
 
 
@@ -20,8 +20,8 @@ REGISTRY_PATH = Path(
 TIER_REVIEW_PATH = Path(
     "docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json"
 )
-DECISION_LEDGER_PATH = Path(
-    "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+STRATEGY_ASSET_STATE_PATH = Path(
+    "output/runtime-monitor/latest-strategy-asset-state.json"
 )
 TIER_POLICY_PATH = Path(
     "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
@@ -32,31 +32,62 @@ REQUIRED_FACTS_PATH = Path(
 LOCAL_MONITOR_PATH = Path("output/runtime-monitor/latest-local-monitor-sequence.json")
 
 
-def _packet():
+def _artifact():
     inputs = load_inputs(
         REGISTRY_PATH,
         TIER_REVIEW_PATH,
-        DECISION_LEDGER_PATH,
+        STRATEGY_ASSET_STATE_PATH,
         TIER_POLICY_PATH,
         REQUIRED_FACTS_PATH,
         LOCAL_MONITOR_PATH,
     )
-    return build_quality_wave_packet(*inputs)
+    return build_quality_wave_artifact(*inputs)
 
 
 def test_quality_wave_has_one_source_derived_row_per_included_group() -> None:
-    packet = _packet()
+    artifact = _artifact()
 
-    assert packet["schema"] == "brc.strategygroup_quality_wave.v1"
-    assert [row["strategy_group_id"] for row in packet["rows"]] == INCLUDED_GROUPS
-    assert len(packet["rows"]) == 5
-    assert validate_packet(packet) == []
+    assert artifact["schema"] == "brc.strategygroup_quality_wave.v1"
+    assert artifact["scope"] == "signal_observation_strategygroup_quality_wave"
+    assert [row["strategy_group_id"] for row in artifact["rows"]] == INCLUDED_GROUPS
+    assert len(artifact["rows"]) == 5
+    assert validate_artifact(artifact) == []
+
+
+def test_quality_wave_is_strategy_asset_provenance_not_primary_state() -> None:
+    artifact = _artifact()
+
+    assert artifact["readmodel_boundary"] == {
+        "runtime_truth": False,
+        "owner_supervision": True,
+        "audit_evidence": True,
+        "presentation_only": False,
+    }
+    provenance = artifact["strategy_asset_state_provenance"]
+    assert provenance["state_family"] == "Strategy Asset State"
+    assert provenance["source_role"] == "quality_evidence_provenance"
+    assert provenance["primary_judgment_source"] is False
+    assert (
+        provenance["primary_judgment_source_name"] == "strategy_asset_state"
+    )
+    assert provenance["row_count"] == len(artifact["rows"])
+    assert {row["strategy_group_id"] for row in provenance["rows"]} == set(
+        INCLUDED_GROUPS
+    )
+    assert all("actionable_now" not in row for row in provenance["rows"])
+    assert all("real_order_authority" not in row for row in provenance["rows"])
+    assert artifact["strategy_asset_state_source"]["source"] == (
+        "strategy_asset_state.asset_rows"
+    )
+    assert artifact["strategy_asset_state_source"]["row_count"] >= len(
+        artifact["strategy_asset_state_provenance"]["rows"]
+    )
 
 
 def test_quality_wave_records_required_source_coverage() -> None:
-    packet = _packet()
+    artifact = _artifact()
 
-    coverage = packet["source_coverage"]
+    coverage = artifact["source_coverage"]
     assert coverage["BTPC-001"]["handoff_pack"] is True
     assert coverage["BTPC-001"]["replay_corpus"] is True
     assert coverage["BTPC-001"]["required_facts_mapping"] is True
@@ -67,14 +98,18 @@ def test_quality_wave_records_required_source_coverage() -> None:
     for group in INCLUDED_GROUPS:
         assert coverage[group]["registry_baseline_row"] is True
         assert coverage[group]["tier_review_row"] is True
-        assert coverage[group]["decision_ledger_row"] is True
+        assert coverage[group]["strategy_asset_state_row"] is True
+        assert "strategy_asset_state_source_row" not in coverage[group]
         assert coverage[group]["local_monitor_entrypoint"]
 
 
 def test_quality_wave_classifies_current_gap_matrix() -> None:
-    packet = _packet()
-    rows = {row["strategy_group_id"]: row for row in packet["rows"]}
+    artifact = _artifact()
+    rows = {row["strategy_group_id"]: row for row in artifact["rows"]}
 
+    assert "decision_counts" not in artifact
+    assert artifact["quality_wave_decision_counts"]["revise"] == 2
+    assert artifact["quality_wave_decision_counts"]["promote_review_only"] == 1
     assert rows["BTPC-001"]["primary_gap_class"] == "fact_source_gap"
     assert rows["BTPC-001"]["secondary_gap_class"] == "classifier_gap"
     assert rows["VCB-001"]["primary_gap_class"] == "stale_or_missing_artifact_gap"
@@ -85,21 +120,89 @@ def test_quality_wave_classifies_current_gap_matrix() -> None:
 
 
 def test_quality_wave_keeps_brf_promote_review_scoped() -> None:
-    packet = _packet()
-    rows = {row["strategy_group_id"]: row for row in packet["rows"]}
+    artifact = _artifact()
+    rows = {row["strategy_group_id"]: row for row in artifact["rows"]}
     brf = rows["BRF-001"]
 
     assert brf["current_decision"] == "promote_review_only"
     assert brf["promotion_scope"] == "review_only"
     assert brf["promotion_target"] == "promotion_evidence_review_only"
-    assert brf["actionable_now"] is False
-    assert brf["real_order_authority"] is False
+    assert "actionable_now" not in brf
+    assert "real_order_authority" not in brf
+
+
+def test_quality_wave_uses_strategy_asset_state_before_injected_legacy_rows() -> None:
+    inputs = list(
+        load_inputs(
+            REGISTRY_PATH,
+            TIER_REVIEW_PATH,
+            STRATEGY_ASSET_STATE_PATH,
+            TIER_POLICY_PATH,
+            REQUIRED_FACTS_PATH,
+            LOCAL_MONITOR_PATH,
+        )
+    )
+    tier_review = deepcopy(inputs[1])
+    strategy_asset_state_source = deepcopy(inputs[2])
+    for row in tier_review["rows"]:
+        if row["strategy_group_id"] == "BTPC-001":
+            row["current_decision"] = "revise"
+            row["required_next_evidence"] = "tier_review_should_not_win"
+            row["do_not_promote_reason"] = "tier review should not win"
+    for row in strategy_asset_state_source["strategy_asset_state"]["asset_rows"]:
+        if row["strategy_group_id"] == "BTPC-001":
+            row["current_decision"] = "park"
+            row["required_next_evidence"] = "asset_state_evidence_wins"
+            row["reason"] = "asset state wins"
+    inputs[1] = tier_review
+    inputs[2] = strategy_asset_state_source
+
+    artifact = build_quality_wave_artifact(*inputs)
+    rows = {row["strategy_group_id"]: row for row in artifact["rows"]}
+
+    assert rows["BTPC-001"]["current_decision"] == "park"
+    assert "decision" not in rows["BTPC-001"]
+    assert rows["BTPC-001"]["required_next_evidence"] == "asset_state_evidence_wins"
+    assert rows["BTPC-001"]["do_not_promote_reason"] == "asset state wins"
+
+
+def test_quality_wave_fails_closed_without_strategy_asset_state_rows() -> None:
+    inputs = list(
+        load_inputs(
+            REGISTRY_PATH,
+            TIER_REVIEW_PATH,
+            STRATEGY_ASSET_STATE_PATH,
+            TIER_POLICY_PATH,
+            REQUIRED_FACTS_PATH,
+            LOCAL_MONITOR_PATH,
+        )
+    )
+    strategy_asset_state_source = deepcopy(inputs[2])
+    strategy_asset_state_source.pop("strategy_asset_state")
+    inputs[2] = strategy_asset_state_source
+
+    artifact = build_quality_wave_artifact(*inputs)
+
+    errors = validate_artifact(artifact)
+    assert artifact["strategy_asset_state_source"] == {
+        "source": "strategy_asset_state.asset_rows",
+        "row_count": 0,
+    }
+    assert "BTPC-001.strategy_asset_state_row_missing" in errors
+    assert (
+        "BTPC-001.missing_strategy_asset_state_field:current_decision"
+        in errors
+    )
+    assert (
+        "BTPC-001.missing_strategy_asset_state_field:required_next_evidence"
+        in errors
+    )
 
 
 def test_gap_closures_span_three_findings_and_two_groups_with_shared_guard() -> None:
-    packet = _packet()
+    artifact = _artifact()
 
-    closures = packet["closures"]
+    closures = artifact["closures"]
     assert len(closures) >= 3
     groups = {closure["strategy_group_id"] for closure in closures}
     assert len(groups - {""}) >= 2
@@ -111,49 +214,60 @@ def test_gap_closures_span_three_findings_and_two_groups_with_shared_guard() -> 
 
 
 def test_owner_risk_acceptance_never_sets_static_actionability() -> None:
-    packet = _packet()
+    artifact = _artifact()
 
-    assert packet["global_authority_model"][
-        "owner_risk_acceptance_cannot_set_actionable_now_true"
+    assert artifact["global_authority_model"][
+        "owner_risk_acceptance_cannot_grant_runtime_authority"
     ] is True
-    assert packet["safety_invariants"]["actionable_now"] is False
-    assert all(row["actionable_now"] is False for row in packet["rows"])
-    assert all(row["owner_policy_action_required"] is False for row in packet["rows"])
+    assert artifact["global_authority_model"]["runtime_authority_sources"] == [
+        "Tradeability Decision",
+        "Runtime Safety State",
+    ]
+    assert "runtime_decides" not in artifact["global_authority_model"]
+    assert "owner_risk_acceptance_cannot_set_actionable_now_true" not in artifact[
+        "global_authority_model"
+    ]
+    assert "actionable_now" not in artifact["safety_invariants"]
+    assert all("actionable_now" not in row for row in artifact["rows"])
+    assert all(row["owner_policy_action_required"] is False for row in artifact["rows"])
 
 
-def test_negative_actionable_now_true_is_rejected() -> None:
-    packet = _packet()
-    packet["rows"][0]["actionable_now"] = True
+def test_negative_legacy_authority_mirror_is_rejected() -> None:
+    artifact = _artifact()
+    artifact["rows"][0]["actionable_now"] = True
 
-    errors = validate_packet(packet)
+    errors = validate_artifact(artifact)
 
-    assert "BTPC-001.actionable_now_true" in errors
+    assert (
+        "BTPC-001.quality_row_legacy_authority_mirror_present:actionable_now"
+        in errors
+    )
 
 
 def test_negative_owner_operator_requirement_is_rejected() -> None:
-    packet = _packet()
-    packet["rows"][1]["owner_policy_action_required"] = True
+    artifact = _artifact()
+    artifact["rows"][1]["owner_policy_action_required"] = True
 
-    errors = validate_packet(packet)
+    errors = validate_artifact(artifact)
 
     assert "VCB-001.unexpected_owner_operator_requirement" in errors
 
 
 def test_negative_missing_shared_closure_is_rejected() -> None:
-    packet = _packet()
-    for closure in packet["closures"]:
+    artifact = _artifact()
+    for closure in artifact["closures"]:
         closure["shared_infrastructure"] = False
 
-    errors = validate_packet(packet)
+    errors = validate_artifact(artifact)
 
     assert "missing_shared_infrastructure_closure" in errors
 
 
 def test_negative_unknown_gap_class_is_rejected() -> None:
-    packet = _packet()
-    packet["rows"][0]["primary_gap_class"] = "unknown_gap"
+    artifact = _artifact()
+    artifact["rows"][0]["primary_gap_class"] = "unknown_gap"
 
-    errors = validate_packet(packet)
+    errors = validate_artifact(artifact)
 
     assert "BTPC-001.primary_gap_class_unknown:unknown_gap" in errors
 
@@ -163,7 +277,7 @@ def test_contradiction_detection_reports_registry_tier_drift() -> None:
         load_inputs(
             REGISTRY_PATH,
             TIER_REVIEW_PATH,
-            DECISION_LEDGER_PATH,
+            STRATEGY_ASSET_STATE_PATH,
             TIER_POLICY_PATH,
             REQUIRED_FACTS_PATH,
             LOCAL_MONITOR_PATH,
@@ -175,18 +289,26 @@ def test_contradiction_detection_reports_registry_tier_drift() -> None:
             row["default_tier"] = "L1"
     inputs[0] = registry
 
-    packet = build_quality_wave_packet(*inputs)
+    artifact = build_quality_wave_artifact(*inputs)
 
     assert any(
         item["strategy_group_id"] == "BTPC-001"
-        and item["source"] in {"tier_review", "decision_ledger", "tier_policy"}
-        for item in packet["contradictions"]
+        and item["source"] in {"tier_review", "strategy_asset_state", "tier_policy"}
+        for item in artifact["contradictions"]
     )
 
 
 def test_check_mode_passes_against_generated_files() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts/build_strategygroup_quality_wave.py", "--check"],
+        [
+            sys.executable,
+            "scripts/build_strategygroup_quality_wave.py",
+            "--strategy-asset-state-json",
+            str(STRATEGY_ASSET_STATE_PATH),
+            "--local-monitor-json",
+            str(LOCAL_MONITOR_PATH),
+            "--check",
+        ],
         check=False,
         text=True,
         capture_output=True,
@@ -198,3 +320,44 @@ def test_check_mode_passes_against_generated_files() -> None:
     assert report["row_count"] == 5
     assert report["closure_count"] >= 3
     assert report["contradiction_count"] == 0
+
+
+def test_quality_wave_cli_omitted_local_monitor_stays_missing(tmp_path: Path) -> None:
+    output_json = tmp_path / "quality-wave.json"
+    output_md = tmp_path / "quality-wave.md"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/build_strategygroup_quality_wave.py",
+            "--strategy-asset-state-json",
+            str(STRATEGY_ASSET_STATE_PATH),
+            "--output-json",
+            str(output_json),
+            "--output-md",
+            str(output_md),
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert (
+        artifact["source_authority"]["strategy_asset_state"]
+        == "caller_supplied_strategy_asset_state"
+    )
+    assert artifact["source_authority"]["local_monitor_sequence"] == "caller_supplied"
+
+
+def test_quality_wave_cli_requires_strategy_asset_state_source() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/build_strategygroup_quality_wave.py"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert "--strategy-asset-state-json" in result.stderr

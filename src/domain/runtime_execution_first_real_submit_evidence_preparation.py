@@ -7,9 +7,9 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.domain.runtime_execution_first_real_submit_enablement_packet import (
-    RuntimeExecutionFirstRealSubmitEnablementPacket,
-    RuntimeExecutionFirstRealSubmitEnablementPacketStatus,
+from src.domain.runtime_execution_first_real_submit_enablement_evidence import (
+    RuntimeExecutionFirstRealSubmitEnablementEvidence,
+    RuntimeExecutionFirstRealSubmitEnablementEvidenceStatus,
 )
 
 
@@ -18,10 +18,10 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationModel(BaseModel):
 
 
 class RuntimeExecutionFirstRealSubmitEvidencePreparationStatus(str, Enum):
-    BLOCKED_BEFORE_PACKET = "blocked_before_packet"
-    PREPARED_PACKET_BLOCKED = "prepared_packet_blocked"
-    PREPARED_PACKET_READY_FOR_OWNER_FINAL_REVIEW = (
-        "prepared_packet_ready_for_owner_final_review"
+    BLOCKED_BEFORE_EVIDENCE = "blocked_before_evidence"
+    PREPARED_EVIDENCE_BLOCKED = "prepared_evidence_blocked"
+    PREPARED_EVIDENCE_READY_FOR_OWNER_FINAL_REVIEW = (
+        "prepared_evidence_ready_for_owner_final_review"
     )
 
 
@@ -36,7 +36,9 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparation(
     skipped_evidence: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    packet: Optional[RuntimeExecutionFirstRealSubmitEnablementPacket] = None
+    enablement_evidence: Optional[
+        RuntimeExecutionFirstRealSubmitEnablementEvidence
+    ] = None
     not_live_action_authorization: Literal[True] = True
     not_exchange_submit_authority: Literal[True] = True
     not_order_lifecycle_authority: Literal[True] = True
@@ -59,16 +61,16 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparation(
             self.status
             == (
                 RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
-                .PREPARED_PACKET_READY_FOR_OWNER_FINAL_REVIEW
+                .PREPARED_EVIDENCE_READY_FOR_OWNER_FINAL_REVIEW
             )
-            and self.packet is not None
-            and self.packet.status
+            and self.enablement_evidence is not None
+            and self.enablement_evidence.status
             != (
-                RuntimeExecutionFirstRealSubmitEnablementPacketStatus
+                RuntimeExecutionFirstRealSubmitEnablementEvidenceStatus
                 .READY_FOR_OWNER_FINAL_REVIEW
             )
         ):
-            raise ValueError("ready evidence preparation requires ready packet")
+            raise ValueError("ready evidence preparation requires ready evidence")
         if (
             self.execution_intent_status_changed
             or self.runtime_state_mutated
@@ -88,7 +90,7 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparation(
 def build_runtime_execution_first_real_submit_evidence_preparation(
     *,
     authorization_id: str,
-    packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None,
+    enablement_evidence: RuntimeExecutionFirstRealSubmitEnablementEvidence | None,
     prepared_evidence_ids: dict[str, str] | None = None,
     available_evidence_ids: dict[str, str] | None = None,
     skipped_evidence: list[str] | None = None,
@@ -97,23 +99,23 @@ def build_runtime_execution_first_real_submit_evidence_preparation(
     now_ms: int,
 ) -> RuntimeExecutionFirstRealSubmitEvidencePreparation:
     normalized_blockers = _dedupe(blockers or [])
-    if packet is None:
+    if enablement_evidence is None:
         status = (
             RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
-            .BLOCKED_BEFORE_PACKET
+            .BLOCKED_BEFORE_EVIDENCE
         )
-    elif packet.status == (
-        RuntimeExecutionFirstRealSubmitEnablementPacketStatus
+    elif enablement_evidence.status == (
+        RuntimeExecutionFirstRealSubmitEnablementEvidenceStatus
         .READY_FOR_OWNER_FINAL_REVIEW
     ):
         status = (
             RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
-            .PREPARED_PACKET_READY_FOR_OWNER_FINAL_REVIEW
+            .PREPARED_EVIDENCE_READY_FOR_OWNER_FINAL_REVIEW
         )
     else:
         status = (
             RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
-            .PREPARED_PACKET_BLOCKED
+            .PREPARED_EVIDENCE_BLOCKED
         )
     return RuntimeExecutionFirstRealSubmitEvidencePreparation(
         preparation_id=(
@@ -127,7 +129,7 @@ def build_runtime_execution_first_real_submit_evidence_preparation(
         skipped_evidence=_dedupe(skipped_evidence or []),
         blockers=normalized_blockers,
         warnings=_dedupe(warnings or []),
-        packet=packet,
+        enablement_evidence=enablement_evidence,
         created_at_ms=now_ms,
         metadata={
             "scope": "runtime_execution_first_real_submit_evidence_preparation",

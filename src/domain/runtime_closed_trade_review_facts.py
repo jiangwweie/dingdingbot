@@ -1,8 +1,9 @@
 """Resolve closed-trade review inputs from runtime order facts.
 
-This packet is deliberately read-only. It bridges the practical gap between a
-runtime reduce-only close and the existing closed-trade review writer by
-identifying the entry/exit order IDs that should be passed to the review step.
+This artifact is deliberately read-only. It resolves the lifecycle review
+inputs between a runtime reduce-only close and the existing closed-trade review
+writer by identifying the entry/exit order IDs that should be passed to the
+review step.
 """
 
 from __future__ import annotations
@@ -33,10 +34,10 @@ class RuntimeClosedTradeReviewFactsStatus(str, Enum):
     READY_FOR_CLOSED_REVIEW = "ready_for_closed_review"
 
 
-class RuntimeClosedTradeReviewFactsPacket(BaseModel):
+class RuntimeClosedTradeReviewFactsArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    packet_id: str = Field(min_length=1, max_length=320)
+    artifact_id: str = Field(min_length=1, max_length=320)
     status: RuntimeClosedTradeReviewFactsStatus
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
@@ -46,11 +47,11 @@ class RuntimeClosedTradeReviewFactsPacket(BaseModel):
     exit_order_id: Optional[str] = Field(default=None, max_length=128)
     authorization_id: Optional[str] = Field(default=None, max_length=220)
     review_command_args: list[str] = Field(default_factory=list)
-    recommended_next_action: str
+    recommended_review_checkpoint: str
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    packet_only: Literal[True] = True
+    closed_trade_review_facts_evidence_only: Literal[True] = True
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
     not_execution_authority: Literal[True] = True
@@ -67,25 +68,25 @@ class RuntimeClosedTradeReviewFactsPacket(BaseModel):
     created_at_ms: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def _status_contract(self) -> "RuntimeClosedTradeReviewFactsPacket":
+    def _status_contract(self) -> "RuntimeClosedTradeReviewFactsArtifact":
         if self.status == RuntimeClosedTradeReviewFactsStatus.BLOCKED and not self.blockers:
-            raise ValueError("blocked review facts packet requires blockers")
+            raise ValueError("blocked review facts artifact requires blockers")
         if self.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW:
             if not self.entry_order_id or not self.exit_order_id:
-                raise ValueError("ready review facts packet requires entry and exit order IDs")
+                raise ValueError("ready review facts artifact requires entry and exit order IDs")
             if not self.review_command_args:
-                raise ValueError("ready review facts packet requires review command args")
+                raise ValueError("ready review facts artifact requires review command args")
         return self
 
 
-def build_runtime_closed_trade_review_facts_packet(
+def build_runtime_closed_trade_review_facts_artifact(
     *,
     runtime: StrategyRuntimeInstance,
     orders: list[Order],
     active_positions: list[Position],
     open_orders: list[Order],
     now_ms: int,
-) -> RuntimeClosedTradeReviewFactsPacket:
+) -> RuntimeClosedTradeReviewFactsArtifact:
     active_positions = _runtime_positions(runtime, active_positions)
     open_orders = _runtime_orders(runtime, open_orders)
     scoped_orders = _runtime_orders(runtime, orders)
@@ -134,8 +135,8 @@ def build_runtime_closed_trade_review_facts_packet(
     if not scoped_orders:
         warnings.append("runtime_scoped_orders_empty")
 
-    return RuntimeClosedTradeReviewFactsPacket(
-        packet_id=f"runtime-closed-review-facts-{runtime.runtime_instance_id}-{now_ms}",
+    return RuntimeClosedTradeReviewFactsArtifact(
+        artifact_id=f"runtime-closed-review-facts-{runtime.runtime_instance_id}-{now_ms}",
         status=status,
         runtime_instance_id=runtime.runtime_instance_id,
         symbol=runtime.symbol,
@@ -145,7 +146,7 @@ def build_runtime_closed_trade_review_facts_packet(
         exit_order_id=exit_order.id if exit_order is not None else None,
         authorization_id=authorization_id,
         review_command_args=command_args,
-        recommended_next_action=recommended,
+        recommended_review_checkpoint=recommended,
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
         metadata={

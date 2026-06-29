@@ -68,6 +68,7 @@ from src.application.strategy_trial_controlled_testnet_carrier import (
     get_strategy_trial_controlled_testnet_carrier,
     strategy_trial_controlled_testnet_carriers,
 )
+from src.interfaces.review_outcome_projection import review_outcome_storage_projection
 
 logger = logging.getLogger(__name__)
 
@@ -538,10 +539,10 @@ class BrcOperatorActionRunRequest(BaseModel):
     confirmed_by: str = Field(default="owner", max_length=128)
 
 
-class BrcReviewDecisionRequest(BaseModel):
+class BrcReviewOutcomeRequest(BaseModel):
     campaign_id: str = Field(max_length=128)
     source_action_id: Optional[str] = Field(default=None, max_length=128)
-    decision: BrcReviewDecision
+    review_outcome: BrcReviewDecision
     reason_text: str = Field(min_length=1, max_length=2048)
     next_recommended_task: str = Field(min_length=1, max_length=256)
     created_by: str = Field(default="owner", max_length=128)
@@ -574,7 +575,7 @@ class StrategyTrialCarrierListResponse(BaseModel):
 
 class StrategyTrialCarrierEntryResponse(BaseModel):
     carrier_id: str
-    readiness_verdict: Literal[
+    readiness_status: Literal[
         "testnet_rehearsal_completed",
         "testnet_rehearsal_blocked_with_explicit_reasons",
     ]
@@ -594,7 +595,7 @@ class StrategyTrialCarrierEntryResponse(BaseModel):
 
 class StrategyTrialCarrierCloseResponse(BaseModel):
     carrier_id: str
-    readiness_verdict: Literal[
+    readiness_status: Literal[
         "testnet_rehearsal_closed",
         "testnet_rehearsal_completed_with_valid_protection",
     ]
@@ -623,7 +624,7 @@ class BrcCampaignResponse(BaseModel):
 
 
 class BrcSwitchPlaybookResponse(BaseModel):
-    decision: dict
+    switch_result: dict
     campaign: dict
     live_ready: Literal[False] = False
 
@@ -650,8 +651,8 @@ class BrcEvidenceResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
-class BrcReviewPacketResponse(BaseModel):
-    review_packet: dict
+class BrcReviewArtifactResponse(BaseModel):
+    review_artifact: dict
     inventory: Phase5EInventoryResponse
     live_ready: Literal[False] = False
     access_boundary: str = (
@@ -710,17 +711,17 @@ class BrcOperatorActionListResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
-class BrcReviewDecisionResponse(BaseModel):
-    review_decision: dict
+class BrcReviewOutcomeResponse(BaseModel):
+    review_outcome_record: dict
     live_ready: Literal[False] = False
     access_boundary: str = (
-        "BRC review decision ledger only. This endpoint does not create "
+        "BRC review outcome evidence only. This endpoint does not create "
         "campaigns, place orders, transfer, withdraw, or authorize real live."
     )
 
 
-class BrcReviewDecisionListResponse(BaseModel):
-    review_decisions: list[dict]
+class BrcReviewOutcomeListResponse(BaseModel):
+    review_outcome_records: list[dict]
     live_ready: Literal[False] = False
 
 
@@ -1167,7 +1168,7 @@ async def _require_strategy_trial_carrier_preflight(
         raise HTTPException(
             status_code=409,
             detail={
-                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "readiness_status": "testnet_rehearsal_blocked_with_explicit_reasons",
                 "blockers": deduped,
                 "facts": facts,
                 "live_ready": False,
@@ -2478,7 +2479,7 @@ async def switch_brc_playbook(
     api_module, _ = _require_brc_mutation_gates(request)
     service = _get_brc_campaign_service(api_module)
     try:
-        decision = await service.switch_playbook(
+        switch_result = await service.switch_playbook(
             new_playbook_id=body.new_playbook_id,
             reason_category=body.reason_category,
             reason_text=body.reason_text,
@@ -2489,7 +2490,7 @@ async def switch_brc_playbook(
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return BrcSwitchPlaybookResponse(
-        decision=decision.model_dump(mode="json"),
+        switch_result=switch_result.model_dump(mode="json"),
         campaign=campaign.model_dump(mode="json"),
     )
 
@@ -2537,7 +2538,7 @@ async def execute_strategy_trial_carrier_controlled_entry(
         raise HTTPException(
             status_code=409,
             detail={
-                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "readiness_status": "testnet_rehearsal_blocked_with_explicit_reasons",
                 "blockers": ["operation_layer_cap_below_min_notional"],
                 "reason": f"min_notional {feasibility.min_notional} exceeds cap {feasibility.max_notional}",
                 "live_ready": False,
@@ -2547,7 +2548,7 @@ async def execute_strategy_trial_carrier_controlled_entry(
         raise HTTPException(
             status_code=409,
             detail={
-                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "readiness_status": "testnet_rehearsal_blocked_with_explicit_reasons",
                 "blockers": ["testnet_notional_below_min_notional"],
                 "reason": f"notional {feasibility.notional} below min_notional {feasibility.min_notional}",
                 "live_ready": False,
@@ -2557,7 +2558,7 @@ async def execute_strategy_trial_carrier_controlled_entry(
         raise HTTPException(
             status_code=409,
             detail={
-                "readiness_verdict": "testnet_rehearsal_blocked_with_explicit_reasons",
+                "readiness_status": "testnet_rehearsal_blocked_with_explicit_reasons",
                 "blockers": ["operation_layer_cap_exceeded"],
                 "reason": f"notional {feasibility.notional} above cap {feasibility.max_notional}",
                 "live_ready": False,
@@ -2573,7 +2574,7 @@ async def execute_strategy_trial_carrier_controlled_entry(
         raise HTTPException(
             status_code=409,
             detail={
-                "readiness_verdict": "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size",
+                "readiness_status": "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size",
                 "blockers": [protection_plan.blocked_reason or "blocked_unprotectable_size"],
                 "protection_plan": protection_plan.model_dump(mode="json"),
                 "live_ready": False,
@@ -2724,14 +2725,14 @@ async def execute_strategy_trial_carrier_controlled_entry(
     )
     campaign = await service.require_current_campaign()
     entry_status = entry.status
-    readiness_verdict = (
+    readiness_status = (
         "testnet_rehearsal_blocked_with_explicit_reasons"
         if entry_status in {"blocked", "failed"}
         else "testnet_rehearsal_completed"
     )
     return StrategyTrialCarrierEntryResponse(
         carrier_id=carrier.carrier_id,
-        readiness_verdict=readiness_verdict,
+        readiness_status=readiness_status,
         campaign=campaign.model_dump(mode="json"),
         switch_decision=decision.model_dump(mode="json"),
         attempt=attempt.model_dump(mode="json"),
@@ -2848,7 +2849,7 @@ async def execute_strategy_trial_carrier_controlled_close(
         symbol=spec.symbol,
     )
     campaign = await service.require_current_campaign()
-    readiness_verdict = "testnet_rehearsal_closed"
+    readiness_status = "testnet_rehearsal_closed"
     try:
         remaining_positions = await position_repo.list_active(symbol=spec.symbol, limit=10)
     except Exception:
@@ -2867,10 +2868,10 @@ async def execute_strategy_trial_carrier_controlled_close(
             reason=f"Strategy trial carrier completed with valid protection cleanup: {carrier.carrier_id}",
             final_flat=True,
         )
-        readiness_verdict = "testnet_rehearsal_completed_with_valid_protection"
+        readiness_status = "testnet_rehearsal_completed_with_valid_protection"
     return StrategyTrialCarrierCloseResponse(
         carrier_id=carrier.carrier_id,
-        readiness_verdict=readiness_verdict,
+        readiness_status=readiness_status,
         close=close_response,
         campaign=campaign.model_dump(mode="json"),
     )
@@ -3429,7 +3430,7 @@ async def get_brc_evidence(request: Request) -> BrcEvidenceResponse:
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
     try:
-        evidence = await service.build_evidence_packet()
+        evidence = await service.build_evidence_artifact()
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     inventory = await _build_controlled_inventory(
@@ -3441,9 +3442,9 @@ async def get_brc_evidence(request: Request) -> BrcEvidenceResponse:
     return BrcEvidenceResponse(evidence=evidence, inventory=inventory)
 
 
-@router.get("/test/brc/review-packet", response_model=BrcReviewPacketResponse)
-async def get_brc_review_packet(request: Request) -> BrcReviewPacketResponse:
-    """Return a read-only BRC review packet for the latest campaign."""
+@router.get("/test/brc/review-artifact", response_model=BrcReviewArtifactResponse)
+async def get_brc_review_artifact(request: Request) -> BrcReviewArtifactResponse:
+    """Return a read-only BRC review artifact for the latest campaign."""
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
     inventory = await _build_controlled_inventory(
@@ -3452,13 +3453,13 @@ async def get_brc_review_packet(request: Request) -> BrcReviewPacketResponse:
         symbols=_BRC_ALLOWED_SYMBOLS,
     )
     try:
-        review_packet = await service.build_review_packet(
+        review_artifact = await service.build_review_artifact(
             final_inventory=inventory.model_dump(mode="json"),
         )
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return BrcReviewPacketResponse(
-        review_packet=review_packet.model_dump(mode="json"),
+    return BrcReviewArtifactResponse(
+        review_artifact=review_artifact.model_dump(mode="json"),
         inventory=inventory,
     )
 
@@ -3608,19 +3609,19 @@ async def run_brc_operator_action(
     )
 
 
-@router.post("/test/brc/review-decisions", response_model=BrcReviewDecisionResponse)
-async def create_brc_review_decision(
+@router.post("/test/brc/review-outcomes", response_model=BrcReviewOutcomeResponse)
+async def create_brc_review_outcome(
     request: Request,
-    body: BrcReviewDecisionRequest,
-) -> BrcReviewDecisionResponse:
-    """Persist an Owner review decision without mutating runtime or exchange state."""
+    body: BrcReviewOutcomeRequest,
+) -> BrcReviewOutcomeResponse:
+    """Persist an Owner review outcome without mutating runtime or exchange state."""
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
     try:
-        review_decision = await service.record_review_decision(
+        stored_review = await service.record_review_decision(
             campaign_id=body.campaign_id,
             source_action_id=body.source_action_id,
-            decision=body.decision,
+            decision=body.review_outcome,
             reason_text=body.reason_text,
             next_recommended_task=body.next_recommended_task,
             created_by=body.created_by,
@@ -3628,39 +3629,50 @@ async def create_brc_review_decision(
         )
     except BrcRuleViolation as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return BrcReviewDecisionResponse(
-        review_decision=review_decision.model_dump(mode="json"),
+    return BrcReviewOutcomeResponse(
+        review_outcome_record=review_outcome_storage_projection(
+            stored_review,
+            result_source_role="review_outcome_persistence_projection",
+        ),
     )
 
 
-@router.get("/test/brc/review-decisions/latest", response_model=BrcReviewDecisionResponse)
-async def get_latest_brc_review_decision(request: Request) -> BrcReviewDecisionResponse:
-    """Read the latest persisted BRC review decision."""
+@router.get("/test/brc/review-outcomes/latest", response_model=BrcReviewOutcomeResponse)
+async def get_latest_brc_review_outcome(request: Request) -> BrcReviewOutcomeResponse:
+    """Read the latest persisted BRC review outcome."""
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
-    review_decision = await service.get_latest_review_decision()
-    if review_decision is None:
-        raise HTTPException(status_code=404, detail="No BRC review decision found")
-    return BrcReviewDecisionResponse(review_decision=review_decision.model_dump(mode="json"))
+    stored_review = await service.get_latest_review_decision()
+    if stored_review is None:
+        raise HTTPException(status_code=404, detail="No BRC review outcome found")
+    return BrcReviewOutcomeResponse(
+        review_outcome_record=review_outcome_storage_projection(
+            stored_review,
+            result_source_role="review_outcome_persistence_projection",
+        )
+    )
 
 
-@router.get("/test/brc/review-decisions", response_model=BrcReviewDecisionListResponse)
-async def list_brc_review_decisions(
+@router.get("/test/brc/review-outcomes", response_model=BrcReviewOutcomeListResponse)
+async def list_brc_review_outcomes(
     request: Request,
     campaign_id: Optional[str] = Query(default=None, max_length=128),
     limit: int = Query(default=50, ge=1, le=200),
-) -> BrcReviewDecisionListResponse:
-    """List persisted BRC review decisions."""
+) -> BrcReviewOutcomeListResponse:
+    """List persisted BRC review outcomes."""
     api_module, _ = _require_brc_read_gates(request)
     service = _get_brc_campaign_service(api_module)
-    review_decisions = await service.list_review_decisions(
+    stored_reviews = await service.list_review_decisions(
         campaign_id=campaign_id,
         limit=limit,
     )
-    return BrcReviewDecisionListResponse(
-        review_decisions=[
-            review_decision.model_dump(mode="json")
-            for review_decision in review_decisions
+    return BrcReviewOutcomeListResponse(
+        review_outcome_records=[
+            review_outcome_storage_projection(
+                stored_review,
+                result_source_role="review_outcome_persistence_projection",
+            )
+            for stored_review in stored_reviews
         ],
     )
 
@@ -3848,7 +3860,10 @@ async def _execute_brc_fixed_testnet_rehearsal(
                 evidence_refs=["BRC-Operation-fixed-testnet-rehearsal"],
             ),
         )
-        await _step("playbook_switched", {"decision_result": switch.decision["decision_result"]})
+        await _step(
+            "playbook_switched",
+            {"decision_result": switch.switch_result["decision_result"]},
+        )
 
         await gks_svc.set_state(
             active=False,
@@ -3929,8 +3944,8 @@ async def _execute_brc_fixed_testnet_rehearsal(
         await _step(
             "loss_locked_switch_recorded",
             {
-                "decision_result": blocked_switch.decision["decision_result"],
-                "blocked_reason": blocked_switch.decision.get("blocked_reason"),
+                "decision_result": blocked_switch.switch_result["decision_result"],
+                "blocked_reason": blocked_switch.switch_result.get("blocked_reason"),
             },
         )
 
@@ -3943,7 +3958,7 @@ async def _execute_brc_fixed_testnet_rehearsal(
         )
         await _step("finalized", final.campaign)
 
-        review_decision = await service.record_review_decision(
+        stored_review = await service.record_review_decision(
             campaign_id=campaign_id,
             decision=BrcReviewDecision.TESTNET_REHEARSAL_AUTHORIZED,
             reason_text="Owner confirmed BRC Operation fixed testnet rehearsal",
@@ -3954,12 +3969,18 @@ async def _execute_brc_fixed_testnet_rehearsal(
                 "workflow_carrier_role": "internal_ref_only",
             },
         )
-        await _step("review_decision", review_decision.model_dump(mode="json"))
+        await _step(
+            "review_recorded",
+            review_outcome_storage_projection(
+                stored_review,
+                result_source_role="review_outcome_persistence_projection",
+            ),
+        )
 
-        evidence = await get_brc_review_packet(request)
+        evidence = await get_brc_review_artifact(request)
         result["campaign_id"] = campaign_id
         result["final_inventory"] = evidence.inventory.model_dump(mode="json")
-        result["review_packet"] = evidence.review_packet
+        result["review_artifact"] = evidence.review_artifact
         return result
     except Exception as exc:
         try:

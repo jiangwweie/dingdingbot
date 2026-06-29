@@ -14,20 +14,18 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_PORTFOLIO_BOARD_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-portfolio-board.json"
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    LEGACY_AUTHORITY_MIRROR_KEYS,
 )
-DEFAULT_TRIAL_CANDIDATE_POOL_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md"
-)
-DEFAULT_CAPTURE_GAP_AUDIT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/strategy-capture-gap-audit-20260622.json"
-)
+
 DEFAULT_REGISTRY_BASELINE_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
@@ -39,15 +37,6 @@ DEFAULT_TIER_POLICY_JSON = (
 DEFAULT_REQUIRED_FACTS_MAP_MD = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-required-facts-map.md"
-)
-DEFAULT_GOAL_PROGRESS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
-)
-DEFAULT_LOCAL_MONITOR_SEQUENCE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
-)
-DEFAULT_DECISION_LEDGER_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
@@ -224,8 +213,6 @@ REGISTRY_ONLY_NOTES = {
 }
 
 SAFETY_INVARIANTS = {
-    "real_order_authority": False,
-    "actionable_now": False,
     "calls_finalgate": False,
     "calls_operation_layer": False,
     "calls_exchange_write": False,
@@ -239,36 +226,46 @@ SAFETY_INVARIANTS = {
 
 FORBIDDEN_TRUE_KEYS = tuple(SAFETY_INVARIANTS)
 
+LEGACY_AUTHORITY_MIRROR_TRUE_KEYS = LEGACY_AUTHORITY_MIRROR_KEYS
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--portfolio-board-json", default=str(DEFAULT_PORTFOLIO_BOARD_JSON))
-    parser.add_argument(
-        "--trial-candidate-pool-md", default=str(DEFAULT_TRIAL_CANDIDATE_POOL_MD)
-    )
-    parser.add_argument("--capture-gap-audit-json", default=str(DEFAULT_CAPTURE_GAP_AUDIT_JSON))
+    parser.add_argument("--portfolio-board-json", required=True)
+    parser.add_argument("--trial-candidate-pool-md", required=True)
+    parser.add_argument("--capture-gap-audit-json", required=True)
     parser.add_argument("--registry-baseline-json", default=str(DEFAULT_REGISTRY_BASELINE_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
     parser.add_argument("--required-facts-map-md", default=str(DEFAULT_REQUIRED_FACTS_MAP_MD))
-    parser.add_argument("--goal-progress-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
+    parser.add_argument("--goal-progress-json")
+    parser.add_argument("--local-monitor-sequence-json")
     parser.add_argument(
-        "--local-monitor-sequence-json", default=str(DEFAULT_LOCAL_MONITOR_SEQUENCE_JSON)
+        "--strategy-asset-state-json",
+        dest="strategy_asset_state_source_json",
+        metavar="STRATEGY_ASSET_STATE_JSON",
     )
-    parser.add_argument("--decision-ledger-json", default=str(DEFAULT_DECISION_LEDGER_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-md", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
-    packet = build_regime_role_coverage_map(
+    artifact = build_regime_role_coverage_map(
         portfolio_board=_load_json_object(Path(args.portfolio_board_json)),
         trial_candidate_pool_md=_load_text(Path(args.trial_candidate_pool_md)),
         capture_gap_audit=_load_json_object(Path(args.capture_gap_audit_json)),
         registry_baseline=_load_json_object(Path(args.registry_baseline_json)),
         tier_policy=_load_json_object(Path(args.tier_policy_json)),
         required_facts_map_md=_load_text(Path(args.required_facts_map_md)),
-        goal_progress=_read_optional_json(Path(args.goal_progress_json)),
-        local_monitor_sequence=_read_optional_json(Path(args.local_monitor_sequence_json)),
-        decision_ledger=_read_optional_json(Path(args.decision_ledger_json)),
+        goal_progress=_read_optional_json(Path(args.goal_progress_json))
+        if args.goal_progress_json
+        else None,
+        local_monitor_sequence=_read_optional_json(Path(args.local_monitor_sequence_json))
+        if args.local_monitor_sequence_json
+        else None,
+        strategy_asset_state_source=_read_optional_json(
+            Path(args.strategy_asset_state_source_json)
+        )
+        if args.strategy_asset_state_source_json
+        else None,
         git_log_oneline_8=_git_lines(["log", "--oneline", "-8"]),
         git_status_short=_git_lines(["status", "--short"]),
     )
@@ -277,16 +274,16 @@ def main(argv: list[str] | None = None) -> int:
     output_md = Path(args.output_md)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    output_md.write_text(_markdown(packet, output_json), encoding="utf-8")
+    output_md.write_text(_markdown(artifact, output_json), encoding="utf-8")
     print(
         json.dumps(
             {
-                "status": packet["status"],
-                "strategy_group_count": len(packet["strategy_group_rows"]),
-                "role_bucket_count": len(packet["role_buckets"]),
+                "status": artifact["status"],
+                "strategy_group_count": len(artifact["strategy_group_rows"]),
+                "role_bucket_count": len(artifact["role_buckets"]),
                 "output_json": str(output_json),
                 "output_md": str(output_md),
             },
@@ -306,22 +303,22 @@ def build_regime_role_coverage_map(
     required_facts_map_md: str,
     goal_progress: dict[str, Any] | None = None,
     local_monitor_sequence: dict[str, Any] | None = None,
-    decision_ledger: dict[str, Any] | None = None,
+    strategy_asset_state_source: dict[str, Any] | None = None,
     git_log_oneline_8: list[str] | None = None,
     git_status_short: list[str] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
-    for name, packet in (
+    for name, source_artifact in (
         ("portfolio_board", portfolio_board),
         ("capture_gap_audit", capture_gap_audit),
         ("registry_baseline", registry_baseline),
         ("tier_policy", tier_policy),
         ("goal_progress", goal_progress),
         ("local_monitor_sequence", local_monitor_sequence),
-        ("decision_ledger", decision_ledger),
+        ("strategy_asset_state", strategy_asset_state_source),
     ):
-        if packet:
-            _validate_review_only_safety(name, packet)
+        if source_artifact:
+            _validate_review_only_safety(name, source_artifact)
 
     portfolio_rows = {
         str(row.get("strategy_group_id")): row
@@ -365,13 +362,13 @@ def build_regime_role_coverage_map(
         required_facts_map_md=required_facts_map_md,
         goal_progress=goal_progress,
         local_monitor_sequence=local_monitor_sequence,
-        decision_ledger=decision_ledger,
+        strategy_asset_state_source=strategy_asset_state_source,
         active_review_group_contract=active_review_group_contract,
         git_log_oneline_8=git_log_oneline_8 or [],
         git_status_short=git_status_short or [],
     )
 
-    packet = {
+    artifact = {
         "schema": SCHEMA,
         "status": "regime_role_coverage_map_ready",
         "scope": "local_review_only",
@@ -392,7 +389,7 @@ def build_regime_role_coverage_map(
         "registry_only_notes": registry_only,
         "safety_invariants": dict(SAFETY_INVARIANTS),
     }
-    return packet
+    return artifact
 
 
 def _strategy_group_row(
@@ -414,10 +411,10 @@ def _strategy_group_row(
         or registry_row.get("default_tier")
         or "unknown"
     )
-    current_next_action = (
-        portfolio_row.get("next_system_action")
-        or spec.get("current_next_action")
-        or "no_next_action_recorded"
+    current_review_checkpoint = (
+        portfolio_row.get("strategy_review_checkpoint")
+        or spec.get("current_review_checkpoint")
+        or "no_review_checkpoint_recorded"
     )
     return {
         "strategy_group_id": group_id,
@@ -446,10 +443,9 @@ def _strategy_group_row(
         "dominant_blocker_classes": blockers,
         "gap_classes": list(spec["gap_classes"]),
         "gap_reason": spec["gap_reason"],
-        "current_next_action": current_next_action,
+        "current_review_checkpoint": current_review_checkpoint,
         "trial_pool_status": trial_pool_status,
         "trial_eligible": bool(portfolio_row.get("trial_eligible", False)),
-        "actionable_now": bool(portfolio_row.get("actionable_now", False)),
         "live_permission_change": bool(
             portfolio_row.get("live_permission_change", False)
         ),
@@ -537,7 +533,7 @@ def _research_escalation(role_buckets: list[dict[str, Any]]) -> list[dict[str, A
             {
                 "role_bucket": bucket["bucket"],
                 "meaning": bucket["meaning"],
-                "decision": bucket["strategy_research_need"],
+                "research_escalation_result": bucket["strategy_research_need"],
                 "reason": _research_reason_for_bucket(bucket),
                 "final_before_research": bucket["final_engineering_need"],
             }
@@ -548,11 +544,15 @@ def _research_escalation(role_buckets: list[dict[str, Any]]) -> list[dict[str, A
 def _active_review_group_contract(portfolio_board: dict[str, Any]) -> dict[str, Any]:
     summary = portfolio_board.get("portfolio_summary") or {}
     raw_groups = summary.get("active_review_strategy_groups")
-    fallback_used = not isinstance(raw_groups, list)
-    active_groups = _dedupe_non_empty_strings(raw_groups if isinstance(raw_groups, list) else [])
+    if not isinstance(raw_groups, list):
+        raise ValueError(
+            "portfolio_board.portfolio_summary.active_review_strategy_groups must be supplied"
+        )
+    active_groups = _dedupe_non_empty_strings(raw_groups)
     if not active_groups:
-        fallback_used = True
-        active_groups = list(ACTIVE_REVIEW_ORDER)
+        raise ValueError(
+            "portfolio_board.portfolio_summary.active_review_strategy_groups must not be empty"
+        )
 
     spec_groups = list(STRATEGY_ROLE_SPECS)
     known_active_groups = [group for group in active_groups if group in STRATEGY_ROLE_SPECS]
@@ -560,7 +560,6 @@ def _active_review_group_contract(portfolio_board: dict[str, Any]) -> dict[str, 
     extra_in_specs = [group for group in spec_groups if group not in active_groups]
     return {
         "source": ACTIVE_REVIEW_GROUP_SOURCE,
-        "fallback_used": fallback_used,
         "active_review_strategy_groups": active_groups,
         "known_active_groups": known_active_groups,
         "strategy_role_spec_groups": spec_groups,
@@ -587,7 +586,9 @@ def _market_regime_assessment(
         "p0_state": owner_visibility.get("p0_state")
         or (capture_gap_audit.get("runtime_baseline") or {}).get("status")
         or "unknown",
-        "p0_5_state": owner_visibility.get("p0_5_observation_state", "unknown"),
+        "signal_observation_state": owner_visibility.get(
+            "signal_observation_state", "unknown"
+        ),
         "strategy_capture_gap": strategy_capture_gap,
         "strategy_capture_gap_evidence_field": evidence_field,
         "active_review_strategy_groups": active_review_group_contract[
@@ -598,7 +599,7 @@ def _market_regime_assessment(
         ],
         "interpretation": (
             "The latest local artifacts show no P0 executable fresh signal, "
-            "but P0.5 strategy observation is active. Recent opportunity evidence "
+            "but Signal Observation review evidence is active. Recent opportunity evidence "
             "is concentrated in MI and CPM long/rebound structures, while short, "
             "range, and derivatives-stress roles are covered mainly by immature "
             "or fact/classifier-blocked StrategyGroups."
@@ -652,7 +653,6 @@ def _trial_pool_implications(
     return {
         "trial_candidate_count": pool.get("candidate_count", 5),
         "trial_eligible_count": pool.get("trial_eligible_count", 1),
-        "actionable_now_count": pool.get("actionable_now_count", 0),
         "current_bias_risk": (
             "The current trial pool is useful, but opportunity evidence is skewed "
             "toward MI/CPM and MPG-style long or rebound momentum. Weak-market "
@@ -663,7 +663,7 @@ def _trial_pool_implications(
         "no_new_trial_candidate_now": True,
         "new_candidate_trigger_conditions": [
             "RBR replacement or revision shows repeatable positive range-reversion outcomes after costs",
-            "FBS derivatives RequiredFacts are attached and produce reviewable stress/squeeze packets",
+            "FBS derivatives RequiredFacts are attached and produce reviewable stress/squeeze evidence",
             "BTPC stale/fact-source blockers are resolved and false-negative review remains positive",
             "BRF forward outcome plus squeeze classifier supports L2 review without live scope expansion",
         ],
@@ -680,7 +680,7 @@ def _source_status(
     required_facts_map_md: str,
     goal_progress: dict[str, Any] | None,
     local_monitor_sequence: dict[str, Any] | None,
-    decision_ledger: dict[str, Any] | None,
+    strategy_asset_state_source: dict[str, Any] | None,
     active_review_group_contract: dict[str, Any],
     git_log_oneline_8: list[str],
     git_status_short: list[str],
@@ -688,12 +688,12 @@ def _source_status(
     return {
         "required_inputs": {
             "portfolio_board_json": {
-                "path": str(DEFAULT_PORTFOLIO_BOARD_JSON),
+                "path": "caller_supplied",
                 "status": portfolio_board.get("status"),
                 "active_review_group_contract": active_review_group_contract,
             },
             "trial_candidate_pool_md": {
-                "path": str(DEFAULT_TRIAL_CANDIDATE_POOL_MD),
+                "path": "caller_supplied",
                 "read": bool(trial_candidate_pool_md.strip()),
                 "candidate_lines": [
                     line
@@ -702,7 +702,7 @@ def _source_status(
                 ],
             },
             "capture_gap_audit_json": {
-                "path": str(DEFAULT_CAPTURE_GAP_AUDIT_JSON),
+                "path": "caller_supplied",
                 "status": capture_gap_audit.get("status"),
             },
             "registry_baseline_json": {
@@ -727,7 +727,9 @@ def _source_status(
             "local_monitor_sequence_json_status": (
                 local_monitor_sequence or {}
             ).get("status"),
-            "decision_ledger_json_status": (decision_ledger or {}).get("status"),
+            "strategy_asset_state_json_status": (
+                strategy_asset_state_source or {}
+            ).get("status"),
         },
     }
 
@@ -854,13 +856,18 @@ def _best_tradable_forward_count(summary: dict[str, Any]) -> int:
     return best
 
 
-def _validate_review_only_safety(name: str, packet: dict[str, Any]) -> None:
-    invariants = packet.get("safety_invariants")
+def _validate_review_only_safety(name: str, source_artifact: dict[str, Any]) -> None:
+    invariants = source_artifact.get("safety_invariants")
     if not isinstance(invariants, dict):
         return
     for key in FORBIDDEN_TRUE_KEYS:
         if invariants.get(key) is True:
             raise ValueError(f"{name} has unsafe invariant {key}=true")
+    for key in LEGACY_AUTHORITY_MIRROR_TRUE_KEYS:
+        if invariants.get(key) is True:
+            raise ValueError(
+                f"{name} has legacy_authority_mirror_present:{key}"
+            )
     aliases = {
         "places_order": "order_created",
         "calls_finalgate": "calls_finalgate",
@@ -919,7 +926,7 @@ def _git_lines(args: list[str]) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def _markdown(packet: dict[str, Any], output_json: Path) -> str:
+def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
         "# StrategyGroup Regime Role Coverage Map",
         "",
@@ -932,31 +939,32 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
         "## 已知客观事实",
         "",
         f"- **输出 JSON**: `{output_json}`",
-        f"- **Schema**: `{packet['schema']}`",
-        f"- **Scope**: `{packet['scope']}`",
-        f"- **Active review groups**: `{len(packet['strategy_group_rows'])}`",
-        f"- **Active review group source**: `{packet['active_review_group_contract']['source']}`",
-        f"- **Missing in specs**: `{', '.join(packet['active_review_group_contract']['missing_in_specs']) or '[]'}`",
-        f"- **Extra in specs**: `{', '.join(packet['active_review_group_contract']['extra_in_specs']) or '[]'}`",
-        f"- **Role buckets**: `{len(packet['role_buckets'])}`",
-        f"- **External market refresh**: `{packet['market_regime_assessment']['external_market_data_refreshed']}`",
+        f"- **Schema**: `{artifact['schema']}`",
+        f"- **Scope**: `{artifact['scope']}`",
+        f"- **Active review groups**: `{len(artifact['strategy_group_rows'])}`",
+        f"- **Active review group source**: `{artifact['active_review_group_contract']['source']}`",
+        f"- **Missing in specs**: `{', '.join(artifact['active_review_group_contract']['missing_in_specs']) or '[]'}`",
+        f"- **Extra in specs**: `{', '.join(artifact['active_review_group_contract']['extra_in_specs']) or '[]'}`",
+        f"- **Role buckets**: `{len(artifact['role_buckets'])}`",
+        f"- **External market refresh**: `{artifact['market_regime_assessment']['external_market_data_refreshed']}`",
         "",
         "## 当前市场 regime 判断",
         "",
-        f"- **P0 状态**: `{packet['market_regime_assessment']['p0_state']}`",
-        f"- **P0.5 状态**: `{packet['market_regime_assessment']['p0_5_state']}`",
-        f"- **Strategy Capture Gap**: `{packet['market_regime_assessment']['strategy_capture_gap']}`",
-        f"- **Gap 证据字段**: `{packet['market_regime_assessment']['strategy_capture_gap_evidence_field']}`",
-        f"- **判断来源**: `{packet['market_regime_assessment']['assessment_source']}`",
-        f"- **解释**: {packet['market_regime_assessment']['interpretation']}",
-        f"- **限制**: {packet['market_regime_assessment']['limitation']}",
+        f"- **P0 状态**: `{artifact['market_regime_assessment']['p0_state']}`",
+        "- **Signal Observation 状态**: "
+        f"`{artifact['market_regime_assessment']['signal_observation_state']}`",
+        f"- **Strategy Capture Gap**: `{artifact['market_regime_assessment']['strategy_capture_gap']}`",
+        f"- **Gap 证据字段**: `{artifact['market_regime_assessment']['strategy_capture_gap_evidence_field']}`",
+        f"- **判断来源**: `{artifact['market_regime_assessment']['assessment_source']}`",
+        f"- **解释**: {artifact['market_regime_assessment']['interpretation']}",
+        f"- **限制**: {artifact['market_regime_assessment']['limitation']}",
         "",
         "## StrategyGroup 角色覆盖表",
         "",
-        "| StrategyGroup | Owner Label | Tier | Evidence | Role | Buckets | Recent | Tradable | Blocker | Trial Pool | Next |",
+        "| StrategyGroup | Owner Label | Tier | Evidence | Role | Buckets | Recent | Tradable | Blocker | Trial Pool | Checkpoint |",
         "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
     ]
-    for row in packet["strategy_group_rows"]:
+    for row in artifact["strategy_group_rows"]:
         lines.append(
             "| `{strategy_group_id}` | **{owner_label}** | `{execution_tier}` | `{evidence_stage}` | {portfolio_role} | `{buckets}` | {recent} | {tradable} | `{blocker}` | `{trial}` | `{next}` |".format(
                 strategy_group_id=row["strategy_group_id"],
@@ -969,7 +977,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
                 tradable=row["tradable_forward_count"],
                 blocker=row["dominant_blocker"],
                 trial=row["trial_pool_status"],
-                next=row["current_next_action"],
+                next=row["current_review_checkpoint"],
             )
         )
 
@@ -982,7 +990,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
-    for bucket in packet["role_buckets"]:
+    for bucket in artifact["role_buckets"]:
         lines.append(
             "| `{bucket}` | **{meaning}** | `{coverage}` | `{groups}` | `{gaps}` | {final_need} | `{research_need}` |".format(
                 bucket=bucket["bucket"],
@@ -1002,9 +1010,9 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
         ]
     )
-    for row in packet["strategy_group_rows"]:
+    for row in artifact["strategy_group_rows"]:
         lines.append(
-            f"- **{row['strategy_group_id']}**: {row['current_next_action']}。缺口：`{', '.join(row['gap_classes'])}`。"
+            f"- **{row['strategy_group_id']}**: {row['current_review_checkpoint']}。缺口：`{', '.join(row['gap_classes'])}`。"
         )
 
     lines.extend(
@@ -1012,13 +1020,13 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
             "## 哪些需要 strategy-research bounded lane",
             "",
-            "| Role Bucket | Decision | Reason |",
+            "| Role Bucket | Research Escalation Result | Reason |",
             "| --- | --- | --- |",
         ]
     )
-    for item in packet["research_escalation_recommendations"]:
+    for item in artifact["research_escalation_recommendations"]:
         lines.append(
-            f"| `{item['role_bucket']}` | `{item['decision']}` | {item['reason']} |"
+            f"| `{item['role_bucket']}` | `{item['research_escalation_result']}` | {item['reason']} |"
         )
 
     lines.extend(
@@ -1026,14 +1034,13 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
             "## 对 Trial Candidate Pool 的影响",
             "",
-            f"- **Trial candidate count**: `{packet['trial_pool_implications']['trial_candidate_count']}`",
-            f"- **Trial eligible count**: `{packet['trial_pool_implications']['trial_eligible_count']}`",
-            f"- **Actionable now count**: `{packet['trial_pool_implications']['actionable_now_count']}`",
-            f"- **结论**: {packet['trial_pool_implications']['current_bias_risk']}",
+            f"- **Trial candidate count**: `{artifact['trial_pool_implications']['trial_candidate_count']}`",
+            f"- **Trial eligible count**: `{artifact['trial_pool_implications']['trial_eligible_count']}`",
+            f"- **结论**: {artifact['trial_pool_implications']['current_bias_risk']}",
             "- **新增候选触发条件**:",
         ]
     )
-    for condition in packet["trial_pool_implications"]["new_candidate_trigger_conditions"]:
+    for condition in artifact["trial_pool_implications"]["new_candidate_trigger_conditions"]:
         lines.append(f"  - {condition}")
 
     lines.extend(
@@ -1045,7 +1052,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "| --- | --- |",
         ]
     )
-    for key, value in packet["safety_invariants"].items():
+    for key, value in artifact["safety_invariants"].items():
         lines.append(f"| `{key}` | `{str(value).lower()}` |")
 
     lines.extend(
@@ -1055,7 +1062,7 @@ def _markdown(packet: dict[str, Any], output_json: Path) -> str:
             "",
         ]
     )
-    for note in packet["registry_only_notes"]:
+    for note in artifact["registry_only_notes"]:
         lines.append(
             f"- **{note['strategy_group_id']}** / **{note['owner_label']}**: {note['note']}"
         )
