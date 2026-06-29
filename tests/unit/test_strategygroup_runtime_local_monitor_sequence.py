@@ -4276,6 +4276,23 @@ def test_local_monitor_sequence_tradeability_decision_projection_preserves_shape
                 "after_next_state": "armed_observation",
             },
         ],
+        "july_bullish_rebound_trade_path_closure": {
+            "status": "july_bullish_rebound_trade_path_closure_ready",
+            "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
+            "machine_consumption_surface": "tradeability_decision",
+            "summary": {
+                "machine_consumed_path_count": 5,
+                "long_side_path_count": 3,
+                "short_side_guard_path_count": 2,
+                "rbr_exit_decision_count": 2,
+            },
+            "checks": {
+                "required_path_ids_present": True,
+                "cpm_mapping_gap_removed_from_first_blockers": True,
+                "rbr_observe_only_has_exit_decision": True,
+                "capital_scope_uses_action_time_exchange_available_balance": True,
+            },
+        },
         "checks": {"owner_intervention_required": False},
     }
 
@@ -4285,6 +4302,18 @@ def test_local_monitor_sequence_tradeability_decision_projection_preserves_shape
     assert projection.row_count_matches_decision_rows is True
     assert projection.top_decision == "not_tradable_market_wait"
     assert projection.top_blocker_owner == "market"
+    july = projection.as_dict()["july_bullish_rebound_trade_path_closure"]
+    assert july["status"] == "july_bullish_rebound_trade_path_closure_ready"
+    assert july["machine_consumed_path_count"] == 5
+    assert july["long_side_path_count"] == 3
+    assert july["short_side_guard_path_count"] == 2
+    assert july["rbr_exit_decision_count"] == 2
+    assert july["required_path_ids_present"] is True
+    assert july["cpm_mapping_gap_removed_from_first_blockers"] is True
+    assert july["rbr_observe_only_has_exit_decision"] is True
+    assert (
+        july["capital_scope_uses_action_time_exchange_available_balance"] is True
+    )
     assert "actionable_now" not in projection.as_dict()
     assert "real_order_authority" not in projection.as_dict()
     assert "runtime_authority_row_counts" not in projection.as_dict()

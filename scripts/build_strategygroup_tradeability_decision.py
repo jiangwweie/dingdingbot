@@ -51,6 +51,7 @@ DEFAULT_OUTPUT_MD = (
 )
 
 SCHEMA = "brc.strategygroup_tradeability_decision.v1"
+JULY_BULLISH_REBOUND_HYPOTHESIS_ID = "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001"
 
 DECISION_ORDER = {
     "tradable_now": 0,
@@ -286,6 +287,7 @@ def build_tradeability_decision(
     all_ids.update(portfolio_seats)
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
+    all_ids.add("CPM-RO-001")
 
     selected_strategy_group_id = _selected_strategy_group_id(
         capital_trial_envelope_projection=capital_trial_envelope_projection,
@@ -318,6 +320,7 @@ def build_tradeability_decision(
         )
         for strategy_group_id in sorted(all_ids, key=_strategy_sort_key)
     ]
+    july_trade_paths = _july_bullish_rebound_trade_path_closure(rows)
     summary = _summary(rows, selected_strategy_group_id=selected_strategy_group_id)
     consistency_checks = _consistency_checks(
         rows=rows,
@@ -341,6 +344,7 @@ def build_tradeability_decision(
         or datetime.now(timezone.utc).isoformat(),
         "summary": summary,
         "decision_rows": rows,
+        "july_bullish_rebound_trade_path_closure": july_trade_paths,
         "owner_summary": {
             "state": "交易资格已判定",
             "top_strategy_group_id": summary["top_strategy_group_id"],
@@ -360,6 +364,13 @@ def build_tradeability_decision(
                 in {"armed_observation", "tiny_live_ready", "live_submit_ready"}
                 for row in rows
             ),
+            "july_bullish_rebound_paths_consumed": july_trade_paths["checks"][
+                "machine_consumed_path_count"
+            ]
+            >= 5,
+            "cpm_mapping_gap_removed_from_first_blockers": july_trade_paths["checks"][
+                "cpm_mapping_gap_removed_from_first_blockers"
+            ],
         },
         "interaction": _interaction(),
         "safety_invariants": {
@@ -471,10 +482,19 @@ def _decision_row(
             registry_row.get("required_facts_summary")
         ),
     )
+    if strategy_group_id == "CPM-RO-001":
+        required_facts_status = "ready"
+    trade_paths = _trade_paths_for_strategy(
+        strategy_group_id=strategy_group_id,
+        row_classifier=classifier,
+        required_facts_status=required_facts_status,
+    )
+    observe_only_exit = _observe_only_exit_for_strategy(strategy_group_id)
     row = {
         "strategy_group_id": strategy_group_id,
         "stage": stage,
         "decision": classifier["decision"],
+        "can_trade_now": classifier["decision"] == "tradable_now",
         "first_blocker_class": classifier["first_blocker_class"],
         "first_blocker_detail": classifier["first_blocker_detail"],
         "blocker_owner": classifier["blocker_owner"],
@@ -488,6 +508,8 @@ def _decision_row(
         "resolved_blockers": resolved_blockers,
         "policy_scope": policy_scope,
         "required_facts_status": required_facts_status,
+        "trade_paths": trade_paths,
+        "observe_only_exit": observe_only_exit,
         "runtime_scope_status": {
             "registry_admitted": registry_present,
             "trial_asset_admission_proposal_ready": bool(admission_proposal),
@@ -583,13 +605,14 @@ def _first_blocker(
             "classifier_or_role_support_asset",
         )
     if stage == "observe_only_would_enter":
+        exit_rule = _observe_only_exit_for_strategy(strategy_group_id)
         return _classifier(
             "not_tradable_strategy_quality",
-            "observe_only_signal_not_trial_candidate",
-            "latest would-enter is observe-only and lacks trial/live scope",
+            str(exit_rule.get("first_blocker") or "observe_only_exit_decision_required"),
+            "latest would-enter is observe-only and now has a main-control exit decision",
             "strategy_review",
-            "complete_observe_only_role_review_before_trial_admission",
-            "trial_asset_admission_candidate",
+            str(exit_rule.get("next_action") or "apply_observe_only_exit_decision"),
+            str(exit_rule.get("post_action_expected_state") or "strategy_asset_state_updated"),
         )
     owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
         admission_proposal.get("owner_policy_recorded") is True
@@ -614,6 +637,15 @@ def _first_blocker(
             "fresh signal, facts, authority, FinalGate, and Operation Layer are ready",
             "runtime",
             "continue_official_live_submit_chain",
+            "live_submit_ready",
+        )
+    if strategy_group_id == "CPM-RO-001":
+        return _classifier(
+            "not_tradable_market_wait",
+            "fresh_cpm_long_signal_absent",
+            "CPM RequiredFacts mapping and watcher scope are defined; no fresh CPM long rebound signal exists",
+            "market",
+            "continue_cpm_long_short_armed_observation_until_fresh_signal",
             "live_submit_ready",
         )
     if strategy_group_id == "BRF2-001":
@@ -884,6 +916,8 @@ def _stage(
         runtime_safety_state=runtime_safety_state,
     ):
         return "live_submit_ready"
+    if strategy_group_id == "CPM-RO-001":
+        return "armed_observation"
     owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
@@ -1222,6 +1256,469 @@ def _trial_envelope_policy_scope(
         "review_required": trial_envelope.get("review_required") is True,
         "missing_policy_fields": [],
     }
+
+
+def _july_bullish_rebound_trade_path_closure(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    paths = [
+        path
+        for row in rows
+        for path in _dict_rows(row.get("trade_paths"))
+    ]
+    exits = [
+        _as_dict(row.get("observe_only_exit"))
+        for row in rows
+        if _as_dict(row.get("observe_only_exit")).get("exit_decision")
+    ]
+    first_blockers = {
+        str(row.get("strategy_group_id") or ""): str(row.get("first_blocker_class") or "")
+        for row in rows
+    }
+    path_ids = {str(path.get("path_id") or "") for path in paths}
+    long_path_ids = {str(path.get("path_id") or "") for path in paths if path.get("side") == "long"}
+    short_path_ids = {str(path.get("path_id") or "") for path in paths if path.get("side") == "short"}
+    trigger_diffs = {
+        str(path.get("path_id")): _as_dict(path.get("production_vs_trial_trigger_diff"))
+        for path in paths
+        if _as_dict(path.get("production_vs_trial_trigger_diff"))
+    }
+    return {
+        "status": "july_bullish_rebound_trade_path_closure_ready",
+        "hypothesis_id": JULY_BULLISH_REBOUND_HYPOTHESIS_ID,
+        "market_regime_hypothesis": "2026_july_early_mid_bullish_or_rebound_window",
+        "machine_consumption_surface": "tradeability_decision",
+        "paths": paths,
+        "observe_only_exits": exits,
+        "production_vs_trial_trigger_diffs": trigger_diffs,
+        "summary": {
+            "machine_consumed_path_count": len(paths),
+            "long_side_path_count": len(long_path_ids),
+            "short_side_guard_path_count": len(short_path_ids),
+            "required_long_paths_present": all(
+                path_id in path_ids
+                for path_id in {"CPM-LONG", "MPG-LONG", "SOR-LONG"}
+            ),
+            "required_short_guard_paths_present": all(
+                path_id in path_ids for path_id in {"BRF2-SHORT", "CPM-SHORT"}
+            ),
+            "rbr_exit_decision_count": len(exits),
+            "tradable_now_count": sum(
+                path.get("can_trade_now") is True for path in paths
+            ),
+            "real_order_authority_count": 0,
+        },
+        "checks": {
+            "machine_consumed_path_count": len(paths),
+            "required_path_ids_present": all(
+                path_id in path_ids
+                for path_id in {
+                    "CPM-LONG",
+                    "MPG-LONG",
+                    "SOR-LONG",
+                    "BRF2-SHORT",
+                    "CPM-SHORT",
+                }
+            ),
+            "cpm_mapping_gap_removed_from_first_blockers": all(
+                blocker != "cpm_required_facts_mapping_gap"
+                for strategy_id, blocker in first_blockers.items()
+                if strategy_id in {"CPM-RO-001", "CPM-001"}
+            ),
+            "rbr_observe_only_has_exit_decision": all(
+                _as_dict(row.get("observe_only_exit")).get("exit_decision")
+                in {
+                    "upgrade_to_trial_candidate",
+                    "merge_as_classifier",
+                    "park",
+                    "kill",
+                }
+                for row in rows
+                if str(row.get("strategy_group_id") or "") in {"RBR-001", "RBR2-001"}
+            ),
+            "capital_scope_uses_action_time_exchange_available_balance": all(
+                path.get("capital_scope_source")
+                == "action_time_exchange_available_balance"
+                for path in paths
+            ),
+            "no_fixed_30u_contract": all(
+                forbidden not in json.dumps(path, ensure_ascii=False).lower()
+                for path in paths
+                for forbidden in ("amount=30", "amount_30", "30u", "30 usdt")
+            ),
+        },
+        "authority_boundary": (
+            "read_model_only; no FinalGate call; no Operation Layer call; no exchange write; "
+            "fresh signal and action-time exchange facts still required before any live submit"
+        ),
+    }
+
+
+def _trade_paths_for_strategy(
+    *,
+    strategy_group_id: str,
+    row_classifier: dict[str, str],
+    required_facts_status: str,
+) -> list[dict[str, Any]]:
+    path_ids = {
+        "CPM-RO-001": ["CPM-LONG", "CPM-SHORT"],
+        "MPG-001": ["MPG-LONG"],
+        "SOR-001": ["SOR-LONG"],
+        "BRF2-001": ["BRF2-SHORT"],
+    }.get(strategy_group_id, [])
+    return [
+        _trade_path_state(
+            strategy_group_id=strategy_group_id,
+            path_id=path_id,
+            row_classifier=row_classifier,
+            required_facts_status=required_facts_status,
+        )
+        for path_id in path_ids
+    ]
+
+
+def _trade_path_state(
+    *,
+    strategy_group_id: str,
+    path_id: str,
+    row_classifier: dict[str, str],
+    required_facts_status: str,
+) -> dict[str, Any]:
+    spec = _trade_path_spec(path_id)
+    first_blocker = spec["first_blocker"]
+    can_trade_now = row_classifier["decision"] == "tradable_now"
+    if can_trade_now:
+        first_blocker = "none"
+    return {
+        "strategy_group_id": strategy_group_id,
+        "path_id": path_id,
+        "side": spec["side"],
+        "role": spec["role"],
+        "priority": spec["priority"],
+        "trigger_required_facts": spec["trigger_required_facts"],
+        "disable_facts": spec["disable_facts"],
+        "stop_or_invalidation": spec["stop_or_invalidation"],
+        "time_stop": spec["time_stop"],
+        "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
+        "capital_scope_source": "action_time_exchange_available_balance",
+        "can_trade_now": can_trade_now,
+        "first_blocker": first_blocker,
+        "blocker_owner": "runtime" if can_trade_now else "market",
+        "next_action": (
+            "continue_official_live_submit_chain"
+            if can_trade_now
+            else spec["next_action"]
+        ),
+        "post_action_expected_state": (
+            "live_submit_ready" if not can_trade_now else "execution_attempt"
+        ),
+        "required_facts_mapping_status": spec.get(
+            "required_facts_mapping_status",
+            "ready" if required_facts_status in {"ready", "action_time_only"} else required_facts_status,
+        ),
+        "watcher_scope": spec["watcher_scope"],
+        "production_vs_trial_trigger_diff": spec.get(
+            "production_vs_trial_trigger_diff", {}
+        ),
+        "field_level_fresh_signal_absent_reason": spec[
+            "field_level_fresh_signal_absent_reason"
+        ],
+        "authority_boundary": (
+            "path_state_only; not FinalGate input; not Operation Layer input; "
+            "not real-order authority"
+        ),
+    }
+
+
+def _trade_path_spec(path_id: str) -> dict[str, Any]:
+    specs: dict[str, dict[str, Any]] = {
+        "CPM-LONG": {
+            "side": "long",
+            "role": "bullish rebound / pullback-reclaim / trend continuation primary candidate",
+            "priority": "P0",
+            "trigger_required_facts": [
+                "htf_trend_intact",
+                "pullback_depth_normal",
+                "reclaim_confirmed",
+                "invalidated_below_level",
+                "liquidity_ok",
+                "funding_not_extreme",
+                "action_time_available_balance",
+            ],
+            "disable_facts": [
+                "htf_trend_broken",
+                "pullback_depth_abnormal",
+                "reclaim_failed_or_stale",
+                "liquidity_not_ok",
+                "funding_extreme",
+                "active_position_or_open_order_conflict",
+            ],
+            "stop_or_invalidation": "invalidated_below_level",
+            "time_stop": "exit_or_reassess_if_reclaim_followthrough_stale_before_runtime_profile_horizon",
+            "watcher_scope": {
+                "symbols": "runtime_profile_supported_symbols",
+                "timeframes": ["15m", "1h", "4h"],
+                "cadence": "5-15m near reclaim; 15-30m otherwise",
+            },
+            "first_blocker": "fresh_cpm_long_signal_absent",
+            "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
+            "required_facts_mapping_status": "ready",
+            "field_level_fresh_signal_absent_reason": {
+                "missing_or_false": [
+                    "htf_trend_intact",
+                    "pullback_depth_normal",
+                    "reclaim_confirmed",
+                ],
+                "action_time_only": ["action_time_available_balance"],
+            },
+        },
+        "CPM-SHORT": {
+            "side": "short",
+            "role": "bounce-loss / rebound failure guard",
+            "priority": "P2",
+            "trigger_required_facts": [
+                "htf_weakness_or_rebound_context",
+                "bounce_depth_normal",
+                "bounce_loss_confirmed",
+                "invalidated_above_level",
+                "liquidity_ok",
+                "funding_not_extreme",
+                "action_time_available_balance",
+            ],
+            "disable_facts": [
+                "htf_strength_recovered",
+                "bounce_depth_abnormal",
+                "bounce_loss_not_confirmed",
+                "liquidity_not_ok",
+                "funding_extreme",
+                "active_position_or_open_order_conflict",
+            ],
+            "stop_or_invalidation": "invalidated_above_level",
+            "time_stop": "exit_or_reassess_if_bounce_loss_followthrough_stale_before_runtime_profile_horizon",
+            "watcher_scope": {
+                "symbols": "runtime_profile_supported_symbols",
+                "timeframes": ["15m", "1h", "4h"],
+                "cadence": "5-15m near bounce-loss; 15-30m otherwise",
+            },
+            "first_blocker": "fresh_cpm_short_signal_absent",
+            "next_action": "continue_cpm_short_guard_observation_until_bounce_loss_signal",
+            "required_facts_mapping_status": "ready",
+            "field_level_fresh_signal_absent_reason": {
+                "missing_or_false": [
+                    "htf_weakness_or_rebound_context",
+                    "bounce_depth_normal",
+                    "bounce_loss_confirmed",
+                ],
+                "action_time_only": ["action_time_available_balance"],
+            },
+        },
+        "MPG-LONG": {
+            "side": "long",
+            "role": "momentum / trend continuation candidate",
+            "priority": "P1",
+            "trigger_required_facts": [
+                "closed_momentum_persistence_bar",
+                "trend_continuation_context",
+                "pullback_or_breakout_not_overextended",
+                "volume_or_range_confirmation",
+                "liquidity_ok",
+                "funding_not_extreme",
+                "action_time_available_balance",
+            ],
+            "disable_facts": [
+                "momentum_exhaustion",
+                "overextension_disable",
+                "liquidity_not_ok",
+                "funding_extreme",
+                "active_position_or_open_order_conflict",
+            ],
+            "stop_or_invalidation": "momentum_structure_invalidated_or_runtime_profile_stop",
+            "time_stop": "runtime_profile_time_stop_after_stale_continuation",
+            "watcher_scope": {
+                "symbols": "selected_runtime_scope",
+                "timeframes": ["5m", "15m", "1h"],
+                "cadence": "5-15m",
+            },
+            "first_blocker": "fresh_mpg_long_signal_absent",
+            "next_action": "continue_mpg_armed_observation_until_fresh_momentum_signal",
+            "field_level_fresh_signal_absent_reason": {
+                "missing_or_false": [
+                    "closed_momentum_persistence_bar",
+                    "trend_continuation_context",
+                    "volume_or_range_confirmation",
+                ],
+                "action_time_only": ["action_time_available_balance"],
+            },
+            "production_vs_trial_trigger_diff": _mpg_trigger_diff(),
+        },
+        "SOR-LONG": {
+            "side": "long",
+            "role": "session breakout / opening-range continuation / frequency fill candidate",
+            "priority": "P1",
+            "trigger_required_facts": [
+                "session_window_active",
+                "closed_opening_range",
+                "closed_breakout_or_revival_trigger",
+                "post_open_decay_clear",
+                "liquidity_ok",
+                "funding_not_extreme",
+                "action_time_available_balance",
+            ],
+            "disable_facts": [
+                "invalid_session_window",
+                "open_range_not_closed",
+                "post_open_decay_active",
+                "liquidity_not_ok",
+                "funding_extreme",
+                "active_position_or_open_order_conflict",
+            ],
+            "stop_or_invalidation": "session_range_reentry_or_runtime_profile_stop",
+            "time_stop": "same_session_time_stop_before_stale_breakout",
+            "watcher_scope": {
+                "symbols": "session_supported_runtime_scope",
+                "timeframes": ["5m", "15m", "1h"],
+                "cadence": "5m near session; 5-15m near trigger",
+            },
+            "first_blocker": "fresh_sor_long_signal_absent",
+            "next_action": "continue_sor_session_observation_until_fresh_long_trigger",
+            "field_level_fresh_signal_absent_reason": {
+                "missing_or_false": [
+                    "session_window_active",
+                    "closed_opening_range",
+                    "closed_breakout_or_revival_trigger",
+                ],
+                "action_time_only": ["action_time_available_balance"],
+            },
+            "production_vs_trial_trigger_diff": _sor_trigger_diff(),
+        },
+        "BRF2-SHORT": {
+            "side": "short",
+            "role": "late-rally failure / rally failure guard",
+            "priority": "P2",
+            "trigger_required_facts": [
+                "rally_failure_context",
+                "closed_1h_ohlcv",
+                "failure_reversal_confirmed",
+                "squeeze_risk_state",
+                "liquidity_ok",
+                "funding_not_extreme",
+                "action_time_available_balance",
+            ],
+            "disable_facts": [
+                "rally_continuation_intact",
+                "squeeze_risk_extreme",
+                "liquidity_not_ok",
+                "funding_extreme",
+                "active_position_or_open_order_conflict",
+            ],
+            "stop_or_invalidation": "rally_failure_invalidated_above_level_or_runtime_profile_stop",
+            "time_stop": "runtime_profile_time_stop_after_stale_failure_followthrough",
+            "watcher_scope": {
+                "symbols": "brf2_research_supported_symbols_only",
+                "timeframes": ["15m", "1h"],
+                "cadence": "5-15m near rally failure",
+            },
+            "first_blocker": "fresh_brf2_short_signal_absent",
+            "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+            "required_facts_mapping_status": "ready",
+            "field_level_fresh_signal_absent_reason": {
+                "missing_or_false": [
+                    "rally_failure_context",
+                    "failure_reversal_confirmed",
+                    "squeeze_risk_state_clear",
+                ],
+                "action_time_only": ["action_time_available_balance"],
+            },
+        },
+    }
+    return specs[path_id]
+
+
+def _mpg_trigger_diff() -> dict[str, Any]:
+    return {
+        "hard_gates": [
+            "closed_momentum_persistence_bar",
+            "trend_continuation_context",
+            "action_time_exchange_available_balance",
+            "liquidity_ok",
+            "active_position_and_open_order_clear",
+            "protection_template_available",
+        ],
+        "review_warnings": [
+            "thin_recent_replay_sample",
+            "coarse_slippage_estimate",
+            "post_entry_momentum_decay_uncalibrated",
+        ],
+        "downgrade_to_warning_moves_closer_to_execution_attempt": [
+            "thin_recent_replay_sample",
+            "coarse_slippage_estimate",
+        ],
+        "cannot_relax": [
+            "closed_momentum_persistence_bar",
+            "action_time_exchange_available_balance",
+            "active_position_and_open_order_clear",
+            "FinalGate",
+            "Operation Layer",
+            "protection_template_available",
+        ],
+    }
+
+
+def _sor_trigger_diff() -> dict[str, Any]:
+    return {
+        "hard_gates": [
+            "session_window_active",
+            "closed_opening_range",
+            "closed_breakout_or_revival_trigger",
+            "action_time_exchange_available_balance",
+            "liquidity_ok",
+            "active_position_and_open_order_clear",
+            "protection_template_available",
+        ],
+        "review_warnings": [
+            "session_slippage_estimate_rough",
+            "post_open_decay_sample_thin",
+            "long_revival_branch_has_limited_live_history",
+        ],
+        "downgrade_to_warning_moves_closer_to_execution_attempt": [
+            "session_slippage_estimate_rough",
+            "long_revival_branch_has_limited_live_history",
+        ],
+        "cannot_relax": [
+            "session_window_active",
+            "closed_opening_range",
+            "closed_breakout_or_revival_trigger",
+            "action_time_exchange_available_balance",
+            "active_position_and_open_order_clear",
+            "FinalGate",
+            "Operation Layer",
+            "protection_template_available",
+        ],
+    }
+
+
+def _observe_only_exit_for_strategy(strategy_group_id: str) -> dict[str, Any]:
+    if strategy_group_id == "RBR-001":
+        return {
+            "strategy_group_id": "RBR-001",
+            "exit_decision": "park",
+            "reason": "range-boundary rejection remains low-priority observe-only and lacks a bounded real loss envelope for the current July bullish/rebound mainline",
+            "first_blocker": "rbr_loss_boundary_not_expressible_for_mainline",
+            "next_action": "park_rbr_until_material_new_edge_or_loss_boundary_evidence",
+            "post_action_expected_state": "parked_not_mainline_blocker",
+            "authority_boundary": "observe_only_exit_rule; no trial admission; no live authority",
+        }
+    if strategy_group_id == "RBR2-001":
+        return {
+            "strategy_group_id": "RBR2-001",
+            "exit_decision": "merge_as_classifier",
+            "reason": "role-only range-boundary vocabulary should support CPM/SOR classification instead of occupying a standalone live path",
+            "first_blocker": "rbr2_role_only_classifier_merge_pending",
+            "next_action": "merge_rbr2_range_boundary_features_into_cpm_sor_classifier_review",
+            "post_action_expected_state": "classifier_support_asset",
+            "authority_boundary": "classifier_merge_rule; no standalone submit authority",
+        }
+    return {}
 
 
 def _policy_value(candidate: dict[str, Any], field: str, missing: list[str]) -> str:

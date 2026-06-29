@@ -3104,6 +3104,7 @@ class _TradeabilityDecisionProjection:
     top_blocker_owner: str
     top_after_next_state: str
     owner_intervention_required: bool
+    july_bullish_rebound_trade_path_closure: dict[str, Any]
 
     _TOP_NEXT_ACTION_FIELD = "top_next_" + "action"
 
@@ -3125,6 +3126,11 @@ class _TradeabilityDecisionProjection:
                 top_row = row
                 break
         row_count = _int(summary.get("row_count"))
+        july_closure = _as_dict(
+            artifact.get("july_bullish_rebound_trade_path_closure")
+        )
+        july_summary = _as_dict(july_closure.get("summary"))
+        july_checks = _as_dict(july_closure.get("checks"))
         return cls(
             status=status,
             active=status == "tradeability_decision_ready",
@@ -3152,6 +3158,41 @@ class _TradeabilityDecisionProjection:
                 "owner_intervention_required"
             )
             is True,
+            july_bullish_rebound_trade_path_closure={
+                "status": str(july_closure.get("status") or "missing"),
+                "hypothesis_id": str(july_closure.get("hypothesis_id") or ""),
+                "machine_consumption_surface": str(
+                    july_closure.get("machine_consumption_surface") or ""
+                ),
+                "machine_consumed_path_count": _int(
+                    july_summary.get("machine_consumed_path_count")
+                ),
+                "long_side_path_count": _int(
+                    july_summary.get("long_side_path_count")
+                ),
+                "short_side_guard_path_count": _int(
+                    july_summary.get("short_side_guard_path_count")
+                ),
+                "rbr_exit_decision_count": _int(
+                    july_summary.get("rbr_exit_decision_count")
+                ),
+                "required_path_ids_present": (
+                    july_checks.get("required_path_ids_present") is True
+                ),
+                "cpm_mapping_gap_removed_from_first_blockers": (
+                    july_checks.get("cpm_mapping_gap_removed_from_first_blockers")
+                    is True
+                ),
+                "rbr_observe_only_has_exit_decision": (
+                    july_checks.get("rbr_observe_only_has_exit_decision") is True
+                ),
+                "capital_scope_uses_action_time_exchange_available_balance": (
+                    july_checks.get(
+                        "capital_scope_uses_action_time_exchange_available_balance"
+                    )
+                    is True
+                ),
+            },
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -3176,6 +3217,9 @@ class _TradeabilityDecisionProjection:
             "top_blocker_owner": self.top_blocker_owner,
             "top_after_next_state": self.top_after_next_state,
             "owner_intervention_required": self.owner_intervention_required,
+            "july_bullish_rebound_trade_path_closure": (
+                self.july_bullish_rebound_trade_path_closure
+            ),
         }
 
 

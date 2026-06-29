@@ -853,6 +853,96 @@ def test_tradeability_decision_moves_brf2_to_market_wait_after_mapping():
     assert packet["checks"]["market_wait_only_after_admission"] is True
 
 
+def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    closure = packet["july_bullish_rebound_trade_path_closure"]
+    paths = {path["path_id"]: path for path in closure["paths"]}
+    exits = {
+        row["strategy_group_id"]: row for row in closure["observe_only_exits"]
+    }
+
+    assert packet["checks"]["july_bullish_rebound_paths_consumed"] is True
+    assert packet["checks"]["cpm_mapping_gap_removed_from_first_blockers"] is True
+    assert closure["summary"]["required_long_paths_present"] is True
+    assert closure["summary"]["required_short_guard_paths_present"] is True
+    assert closure["summary"]["long_side_path_count"] == 3
+    assert closure["summary"]["short_side_guard_path_count"] == 2
+    assert closure["checks"]["capital_scope_uses_action_time_exchange_available_balance"]
+    assert closure["checks"]["no_fixed_30u_contract"] is True
+
+    assert rows["CPM-RO-001"]["first_blocker_class"] == (
+        "fresh_cpm_long_signal_absent"
+    )
+    assert rows["CPM-RO-001"]["stage"] == "armed_observation"
+    assert "cpm_required_facts_mapping_gap" not in {
+        row["first_blocker_class"] for row in packet["decision_rows"]
+    }
+
+    assert paths["CPM-LONG"]["trigger_required_facts"] == [
+        "htf_trend_intact",
+        "pullback_depth_normal",
+        "reclaim_confirmed",
+        "invalidated_below_level",
+        "liquidity_ok",
+        "funding_not_extreme",
+        "action_time_available_balance",
+    ]
+    assert paths["CPM-SHORT"]["trigger_required_facts"] == [
+        "htf_weakness_or_rebound_context",
+        "bounce_depth_normal",
+        "bounce_loss_confirmed",
+        "invalidated_above_level",
+        "liquidity_ok",
+        "funding_not_extreme",
+        "action_time_available_balance",
+    ]
+    assert paths["CPM-LONG"]["first_blocker"] == "fresh_cpm_long_signal_absent"
+    assert paths["CPM-SHORT"]["first_blocker"] == "fresh_cpm_short_signal_absent"
+    assert paths["BRF2-SHORT"]["required_facts_mapping_status"] == "ready"
+    assert paths["BRF2-SHORT"]["first_blocker"] == "fresh_brf2_short_signal_absent"
+    assert paths["MPG-LONG"]["first_blocker"] == "fresh_mpg_long_signal_absent"
+    assert paths["SOR-LONG"]["first_blocker"] == "fresh_sor_long_signal_absent"
+
+    mpg_diff = paths["MPG-LONG"]["production_vs_trial_trigger_diff"]
+    sor_diff = paths["SOR-LONG"]["production_vs_trial_trigger_diff"]
+    assert "closed_momentum_persistence_bar" in mpg_diff["hard_gates"]
+    assert "thin_recent_replay_sample" in mpg_diff["review_warnings"]
+    assert "FinalGate" in mpg_diff["cannot_relax"]
+    assert "session_window_active" in sor_diff["hard_gates"]
+    assert "session_slippage_estimate_rough" in sor_diff["review_warnings"]
+    assert "Operation Layer" in sor_diff["cannot_relax"]
+
+    assert exits["RBR-001"]["exit_decision"] == "park"
+    assert exits["RBR2-001"]["exit_decision"] == "merge_as_classifier"
+    for path in paths.values():
+        assert path["can_trade_now"] is False
+        assert path["capital_scope_source"] == (
+            "action_time_exchange_available_balance"
+        )
+        assert path["first_blocker"]
+        assert path["next_action"]
+        assert path["post_action_expected_state"]
+        assert "actionable_now" not in path
+        assert "real_order_authority" not in path
+
+
 def test_tradeability_decision_does_not_default_portfolio_blocker_to_market_wait():
     module = _load_module()
     portfolio = _three_strategy_portfolio_with_brf2_armed_observation()
