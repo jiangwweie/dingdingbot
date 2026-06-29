@@ -5,10 +5,10 @@
 | Field | Value |
 | --- | --- |
 | audit_status | `directionally_accepted_staging_closeout_pending` |
-| branch | `codex/system-refactor-20260623` |
-| worktree | `/Users/jiangwei/Documents/final-system-refactor-20260623` |
-| head | current local `HEAD`; verify with `git rev-parse --short HEAD` |
-| upstream_sync | no behind commits against `origin/codex/owner-runtime-console-v1` after latest fetch; verify with `git rev-list --left-right --count HEAD...origin/codex/owner-runtime-console-v1` |
+| branch | `codex/system-refactor-merge-20260629-lean-v2` |
+| worktree | `/Users/jiangwei/Documents/final-system-refactor-merge-20260629-lean-v2` |
+| head | `89eb96ef`; verify with `git rev-parse --short HEAD` |
+| upstream_sync | local `HEAD` is ahead `9` and behind `0` against `origin/codex/owner-runtime-console-v1` at the 2026-06-29 handoff check |
 | latest_batch | `BATCH_1095_EVIDENCE.md` |
 | merge_readiness | `MERGE_READINESS_PACKET.md` |
 | goal_status | `in_progress_not_completed` |
@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | System refactor must compress the business chain, reduce glue, and unify status models. | `FINAL_EVIDENCE_PACKET.md`, `MERGE_READINESS_PACKET.md`, batch evidence through `BATCH_1093_EVIDENCE.md`; commit-split core slimming gate remains `561 files changed, 32709 insertions(+), 63363 deletions(-)`. Current total branch diff is evidence/generated-artifact heavy and is not used as the core-code-size metric. | `proven_for_current_branch` |
 | Do not create a new mega abstraction layer, master ledger, or dashboard schema. | Branch evidence records deletion/demotion of packet/bridge/report/monitor authority and no new super-ledger as final authority. | `proven_for_current_branch` |
-| Pure frontend contract / UI projection semantics can be deleted or renamed. | `docs/current/OWNER_RUNTIME_CONSOLE_PRODUCT_PROJECTION_CONTRACT.md` deleted; Batch 1041 current frontend/static scan returns `0` and Quality Wave uses `presentation_only=false` instead of UI projection wording. | `proven_for_current_branch` |
+| Pure frontend contract / UI projection semantics can be deleted, renamed, or retained only as a non-mainline supplement. | `docs/current/OWNER_RUNTIME_CONSOLE_PRODUCT_PROJECTION_CONTRACT.md` remains tracked as a `CURRENT_PILOT_SUPPLEMENT`; it is not listed as a current source-map authority in `PROJECT_INFORMATION_ARCHITECTURE.md`. Batch 1041 current frontend/static scan returns `0` and Quality Wave uses `presentation_only=false` instead of UI projection wording. | `proven_for_current_branch` |
 | Readmodel is not frontend; runtime/Owner/audit/monitor/API readmodels must be retained or renamed rather than blindly deleted. | `Tradeability Decision`, `Runtime Safety State`, `Strategy Asset State`, `Review Outcome State`, and Owner/runtime projections remain classified as core readmodels. | `proven_for_current_branch` |
 | Packet / bridge / report / monitor artifacts are only lifecycle projections or evidence. | `NEXT_QUEUE.md` and `FINAL_EVIDENCE_PACKET.md` classify old packet/bridge/report/monitor authority as demoted to projections/evidence; Batch 1042 deletes the final active packet-named product-state refresh shim and leaves active packet/bridge/verdict script scan `0`. | `proven_for_current_branch` |
 | Post-submit reconciliation must not fabricate lifecycle entry. | Batch 1043 makes orphan entry import fail-closed: `IMPORTED_TO_DB` is emitted only after `order_repository.import_order(...)` executes; missing Signal synthesis remains non-authority evidence. | `proven_for_current_branch` |

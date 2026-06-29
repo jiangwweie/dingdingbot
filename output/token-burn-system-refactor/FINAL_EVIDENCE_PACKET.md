@@ -6,9 +6,9 @@
 | --- | --- |
 | packet_status | `in_progress_not_completed` |
 | reason_not_completed | Objective file requires at least 3 fully proven long refactor cycles and final convergence proof; current evidence proves the latest current-boundary closeout slice, not total objective completion. |
-| branch | `codex/system-refactor-20260623` |
-| worktree | `/Users/jiangwei/Documents/final-system-refactor-20260623` |
-| upstream_sync | no behind commits against `origin/codex/owner-runtime-console-v1` after latest fetch; verify exact local ahead count with `git rev-list --left-right --count HEAD...origin/codex/owner-runtime-console-v1` |
+| branch | `codex/system-refactor-merge-20260629-lean-v2` |
+| worktree | `/Users/jiangwei/Documents/final-system-refactor-merge-20260629-lean-v2` |
+| upstream_sync | local `HEAD` is ahead `9` and behind `0` against `origin/codex/owner-runtime-console-v1` at the 2026-06-29 handoff check |
 | main_worktree_touched | `false` |
 | latest_batch | `BATCH_1095_EVIDENCE.md` |
 
@@ -16,7 +16,7 @@
 
 | Area | Evidence |
 | --- | --- |
-| Pure frontend contract / UI projection cleanup | `docs/current/OWNER_RUNTIME_CONSOLE_PRODUCT_PROJECTION_CONTRACT.md` deleted; frontend naming migrated to backend/Owner vocabulary; deploy/static frontend publish semantics removed in prior batches. |
+| Pure frontend contract / UI projection cleanup | `docs/current/OWNER_RUNTIME_CONSOLE_PRODUCT_PROJECTION_CONTRACT.md` remains tracked as a `CURRENT_PILOT_SUPPLEMENT`; it is not listed as a current source-map authority in `PROJECT_INFORMATION_ARCHITECTURE.md`, and frontend naming migrated to backend/Owner vocabulary with deploy/static frontend publish semantics removed in prior batches. |
 | Packet / bridge / report authority demotion | `NEXT_QUEUE.md`, `PROGRESS_LEDGER.md`, and batch evidence through `BATCH_1047_EVIDENCE.md` show old packet/bridge/report/monitor fields demoted to lifecycle projections or evidence. |
 | Tradeability authority migration | `Tradeability Decision` remains the can-trade readmodel; old verdict/current-output aliases were removed or downgraded in prior batches. |
 | Runtime Safety authority migration | `Runtime Safety State` remains the live-submit readiness / safety source; old submit-readiness bridge fields were removed or downgraded. |

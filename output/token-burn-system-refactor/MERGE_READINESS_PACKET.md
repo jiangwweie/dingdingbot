@@ -5,11 +5,11 @@
 | Field | Value |
 | --- | --- |
 | packet_status | `directionally_accepted_staging_closeout_pending` |
-| branch | `codex/system-refactor-20260623` |
-| worktree | `/Users/jiangwei/Documents/final-system-refactor-20260623` |
+| branch | `codex/system-refactor-merge-20260629-lean-v2` |
+| worktree | `/Users/jiangwei/Documents/final-system-refactor-merge-20260629-lean-v2` |
 | upstream | `origin/codex/owner-runtime-console-v1` |
-| head | current local `HEAD`; verify with `git rev-parse --short HEAD` |
-| upstream_sync | no behind commits after latest fetch; verify with `git rev-list --left-right --count HEAD...origin/codex/owner-runtime-console-v1` |
+| head | `89eb96ef`; verify with `git rev-parse --short HEAD` |
+| upstream_sync | local `HEAD` is ahead `9` and behind `0` against `origin/codex/owner-runtime-console-v1` at the 2026-06-29 handoff check |
 | main_worktree_write_scope | `none_from_this_closeout_pass` |
 | push | `not_performed` |
 | deploy | `not_performed` |
@@ -32,10 +32,10 @@ review.
 
 | Metric | Value |
 | --- | --- |
-| tracked_diff | `722 files changed, 78503 insertions(+), 38518 deletions(-)` against upstream; evidence/generated-artifact heavy |
+| tracked_diff | `717 files changed, 79910 insertions(+), 38361 deletions(-)` against upstream; evidence/generated-artifact heavy |
 | core_slimming_gate | tracked-core rehearsal remains `561 files changed, 32709 insertions(+), 63363 deletions(-)` |
-| porcelain_status_groups | `402 M`, `91 D`, `165 ??`, `69 MM`, `17 RM`, `14 MD`, `11 M `, `1 D ` |
-| top_changed_roots | `tests=269`, `scripts=244`, `output=102`, `src=100`, `docs=48`, `migrations=5`, `deploy=1`, `AGENTS.md=1` |
+| porcelain_status_groups | clean worktree at 2026-06-29 handoff check |
+| top_changed_roots | `tests=239`, `scripts=204`, `output=125`, `src=96`, `docs=47`, `migrations=4`, `deploy=1`, `AGENTS.md=1` |
 
 ## Chain Completion Evidence
 
@@ -62,7 +62,7 @@ review.
 | --- | --- |
 | `python3 -m compileall src scripts tests migrations -q` | passed |
 | `git diff --check` | passed |
-| `python3 -m pytest tests/unit -q` | latest Batch 1094 clean integration worktree `3124 passed, 1 skipped, 1 warning in 60.50s`; earlier Batch 1091 clean merged worktree `3124 passed, 1 skipped, 1 warning in 63.50s`; earlier Batch 1088 source-branch closeout `3124 passed, 1 skipped, 1 warning in 56.13s` |
+| `python3 -m pytest tests/unit -q` | 2026-06-29 handoff check in this worktree `3122 passed, 1 skipped, 1 warning in 56.83s`; latest Batch 1094 clean integration worktree `3124 passed, 1 skipped, 1 warning in 60.50s`; earlier Batch 1091 clean merged worktree `3124 passed, 1 skipped, 1 warning in 63.50s`; earlier Batch 1088 source-branch closeout `3124 passed, 1 skipped, 1 warning in 56.13s` |
 | `python3 -m pytest tests/unit/test_config_repository_kv_import.py -q` | `3 passed in 0.18s` |
 | config focused slice | `17 passed in 0.35s` |
 | `python3 -m pytest tests/unit/test_brc_operation_layer.py -q` | `184 passed in 10.89s` |
