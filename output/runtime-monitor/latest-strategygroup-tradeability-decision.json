@@ -499,7 +499,16 @@
       "first_blocker_class": "role_only_or_classifier_asset_not_trial_candidate",
       "first_blocker_detail": "candidate is useful for role/classifier review, not a trade candidate",
       "next_action": "complete_role_merge_or_classifier_review",
-      "observe_only_exit": {},
+      "observe_only_exit": {
+        "authority_boundary": "strategy_asset_state_exit_projection; no standalone submit authority",
+        "evidence_source": "explicit_candidate_strategy_asset_decision",
+        "exit_decision": "merge_as_classifier",
+        "first_blocker": "rbr2_explicit_asset_state_decision_present",
+        "next_action": "apply_rbr2_explicit_strategy_asset_state_decision",
+        "post_action_expected_state": "strategy_asset_state_updated",
+        "reason": "RBR2 exit decision is projected only from explicit Strategy Asset State or candidate review outcome",
+        "strategy_group_id": "RBR2-001"
+      },
       "policy_scope": {
         "attempt_cap": 3,
         "capital_scope": "owner_policy_required",
@@ -1060,11 +1069,11 @@
       "trade_paths": []
     },
     {
-      "after_next_state": "trial_asset_admission_candidate",
+      "after_next_state": "live_submit_ready",
       "authority_boundary": "tradeability_decision_is_read_model; runtime_safety_state_controls_live_submit_readiness; no_finalgate_no_operation_layer",
-      "blocker_owner": "engineering",
+      "blocker_owner": "market",
       "can_trade_now": false,
-      "decision": "not_tradable_asset_admission",
+      "decision": "not_tradable_market_wait",
       "evidence_snapshot": {
         "candidate_status": "identity_review_before_trial_prepare",
         "latest_observe_only_side": "",
@@ -1075,9 +1084,9 @@
         "trial_recommendation": "defer_until_identity_or_merge_review_closed",
         "would_enter_forward_positive_count": 13
       },
-      "first_blocker_class": "cpm_registry_identity_gap",
-      "first_blocker_detail": "CPM is visible as an observation/review asset, but registry identity or tier scope is not closed",
-      "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+      "first_blocker_class": "fresh_cpm_long_signal_absent",
+      "first_blocker_detail": "CPM identity, policy, RequiredFacts mapping, and watcher scope are closed; no fresh CPM long rebound signal exists",
+      "next_action": "continue_cpm_long_short_armed_observation_until_fresh_signal",
       "observe_only_exit": {},
       "policy_scope": {
         "attempt_cap": "owner_policy_required",
@@ -1100,7 +1109,7 @@
           "ETH/USDT:USDT"
         ]
       },
-      "required_facts_status": "missing",
+      "required_facts_status": "ready",
       "resolved_blockers": [],
       "runtime_safety_reference": {
         "execution_attempt_required_for_lifecycle_entry": true,
@@ -1169,13 +1178,13 @@
         "strategy_group_id": "CPM-RO-001",
         "trial_grade_audit_ready": false
       },
-      "stage": "trial_asset_admission_candidate",
+      "stage": "armed_observation",
       "strategy_group_id": "CPM-RO-001",
       "trade_paths": [
         {
           "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
           "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-          "blocker_owner": "engineering",
+          "blocker_owner": "market",
           "can_trade_now": false,
           "capital_scope_source": "action_time_exchange_available_balance",
           "disable_facts": [
@@ -1196,10 +1205,10 @@
               "reclaim_confirmed"
             ]
           },
-          "first_blocker": "cpm_registry_identity_gap",
-          "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+          "first_blocker": "fresh_cpm_long_signal_absent",
+          "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
           "path_id": "CPM-LONG",
-          "post_action_expected_state": "trial_asset_admission_candidate",
+          "post_action_expected_state": "live_submit_ready",
           "priority": "P0",
           "production_vs_trial_trigger_diff": {},
           "required_facts_mapping_status": "ready",
@@ -1230,7 +1239,7 @@
         {
           "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
           "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-          "blocker_owner": "engineering",
+          "blocker_owner": "market",
           "can_trade_now": false,
           "capital_scope_source": "action_time_exchange_available_balance",
           "disable_facts": [
@@ -1251,10 +1260,10 @@
               "bounce_loss_confirmed"
             ]
           },
-          "first_blocker": "cpm_registry_identity_gap",
-          "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+          "first_blocker": "fresh_cpm_short_signal_absent",
+          "next_action": "continue_cpm_short_guard_observation_until_bounce_loss_signal",
           "path_id": "CPM-SHORT",
-          "post_action_expected_state": "trial_asset_admission_candidate",
+          "post_action_expected_state": "live_submit_ready",
           "priority": "P2",
           "production_vs_trial_trigger_diff": {},
           "required_facts_mapping_status": "ready",
@@ -1689,7 +1698,7 @@
       "trade_paths": []
     }
   ],
-  "generated_at_utc": "2026-06-29T14:05:38.525781+00:00",
+  "generated_at_utc": "2026-06-29T14:12:30.386565+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -1707,7 +1716,7 @@
       "cpm_non_market_blocker_preserved": true,
       "machine_consumed_path_count": 5,
       "no_fixed_30u_contract": true,
-      "rbr_observe_only_has_exit_decision": false,
+      "rbr_observe_only_has_exit_decision": true,
       "required_path_ids_present": true
     },
     "hypothesis_id": "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001",
@@ -1723,6 +1732,16 @@
         "post_action_expected_state": "parked_not_mainline_blocker",
         "reason": "latest observe-only row exists, but range-boundary rejection remains L1/observe-only and lacks a bounded real loss envelope for the current July bullish/rebound mainline",
         "strategy_group_id": "RBR-001"
+      },
+      {
+        "authority_boundary": "strategy_asset_state_exit_projection; no standalone submit authority",
+        "evidence_source": "explicit_candidate_strategy_asset_decision",
+        "exit_decision": "merge_as_classifier",
+        "first_blocker": "rbr2_explicit_asset_state_decision_present",
+        "next_action": "apply_rbr2_explicit_strategy_asset_state_decision",
+        "post_action_expected_state": "strategy_asset_state_updated",
+        "reason": "RBR2 exit decision is projected only from explicit Strategy Asset State or candidate review outcome",
+        "strategy_group_id": "RBR2-001"
       }
     ],
     "paths": [
@@ -1862,7 +1881,7 @@
       {
         "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
         "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-        "blocker_owner": "engineering",
+        "blocker_owner": "market",
         "can_trade_now": false,
         "capital_scope_source": "action_time_exchange_available_balance",
         "disable_facts": [
@@ -1883,10 +1902,10 @@
             "reclaim_confirmed"
           ]
         },
-        "first_blocker": "cpm_registry_identity_gap",
-        "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
         "path_id": "CPM-LONG",
-        "post_action_expected_state": "trial_asset_admission_candidate",
+        "post_action_expected_state": "live_submit_ready",
         "priority": "P0",
         "production_vs_trial_trigger_diff": {},
         "required_facts_mapping_status": "ready",
@@ -1917,7 +1936,7 @@
       {
         "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
         "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-        "blocker_owner": "engineering",
+        "blocker_owner": "market",
         "can_trade_now": false,
         "capital_scope_source": "action_time_exchange_available_balance",
         "disable_facts": [
@@ -1938,10 +1957,10 @@
             "bounce_loss_confirmed"
           ]
         },
-        "first_blocker": "cpm_registry_identity_gap",
-        "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+        "first_blocker": "fresh_cpm_short_signal_absent",
+        "next_action": "continue_cpm_short_guard_observation_until_bounce_loss_signal",
         "path_id": "CPM-SHORT",
-        "post_action_expected_state": "trial_asset_admission_candidate",
+        "post_action_expected_state": "live_submit_ready",
         "priority": "P2",
         "production_vs_trial_trigger_diff": {},
         "required_facts_mapping_status": "ready",
@@ -2117,10 +2136,10 @@
     "summary": {
       "long_side_path_count": 3,
       "machine_consumed_path_count": 5,
-      "rbr_exit_decision_count": 1,
+      "rbr_exit_decision_count": 2,
       "real_order_authority_count": 0,
       "required_long_paths_present": true,
-      "required_rbr_exit_rows_present": false,
+      "required_rbr_exit_rows_present": true,
       "required_short_guard_paths_present": true,
       "short_side_guard_path_count": 2,
       "tradable_now_count": 0
@@ -2147,19 +2166,19 @@
   "status": "tradeability_decision_ready",
   "summary": {
     "by_blocker_owner": {
-      "engineering": 5,
-      "market": 3,
+      "engineering": 4,
+      "market": 4,
       "strategy_review": 5
     },
     "by_decision": {
-      "not_tradable_asset_admission": 2,
+      "not_tradable_asset_admission": 1,
       "not_tradable_facts": 3,
-      "not_tradable_market_wait": 3,
+      "not_tradable_market_wait": 4,
       "not_tradable_strategy_quality": 5
     },
     "controlled_live_standby_count": 3,
-    "engineering_first_blocker_count": 5,
-    "market_first_blocker_count": 3,
+    "engineering_first_blocker_count": 4,
+    "market_first_blocker_count": 4,
     "owner_first_blocker_count": 0,
     "row_count": 13,
     "runtime_first_blocker_count": 0,

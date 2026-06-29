@@ -287,6 +287,7 @@ def build_tradeability_decision(
     all_ids.update(portfolio_seats)
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
+    all_ids.add("CPM-RO-001")
 
     selected_strategy_group_id = _selected_strategy_group_id(
         capital_trial_envelope_projection=capital_trial_envelope_projection,
@@ -485,9 +486,9 @@ def _decision_row(
     )
     if (
         strategy_group_id == "CPM-RO-001"
-        and classifier["decision"] not in {"tradable_now", "not_tradable_market_wait"}
+        and classifier["decision"] in {"tradable_now", "not_tradable_market_wait"}
     ):
-        required_facts_status = "missing"
+        required_facts_status = "ready"
     trade_paths = _trade_paths_for_strategy(
         strategy_group_id=strategy_group_id,
         row_classifier=classifier,
@@ -840,69 +841,18 @@ def _cpm_first_blocker(
     portfolio_seat: dict[str, Any],
     blockers: list[str],
 ) -> dict[str, str]:
-    text = " ".join(
-        [
-            stage,
-            " ".join(blockers),
-            str(candidate.get("identity_status") or ""),
-            str(candidate.get("candidate_status") or ""),
-            str(observed_row.get("decision") or ""),
-            str(observed_row.get("reason") or ""),
-            str(registry_row.get("first_tradeability_blocker") or ""),
-            str(portfolio_seat.get("first_tradeability_blocker") or ""),
-        ]
-    ).lower()
-    if (
-        not registry_present
-        or not tier_present
-        or "registry_identity" in text
-        or "identity_review" in text
-        or "identity incomplete" in text
-        or "scope_unclear" in text
-    ):
-        return _classifier(
-            "not_tradable_asset_admission",
-            "cpm_registry_identity_gap",
-            "CPM is visible as an observation/review asset, but registry identity or tier scope is not closed",
-            "engineering",
-            "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
-            "trial_asset_admission_candidate",
-        )
-
+    text = " ".join([stage, " ".join(blockers)]).lower()
     runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
-    owner_policy_recorded = (
-        owner_policy_scope.get("owner_policy_recorded") is True
-        or admission_proposal.get("owner_policy_recorded") is True
-        or portfolio_seat.get("owner_policy_recorded") is True
-        or _as_dict(portfolio_seat.get("policy_scope")).get("owner_policy_recorded")
-        is True
-    )
-    owner_policy_missing = (
-        admission_proposal.get("owner_policy_scope_missing") is True
-        or portfolio_seat.get("owner_policy_scope_missing") is True
-        or _as_dict(portfolio_seat.get("policy_scope")).get("owner_policy_scope_missing")
-        is True
-        or "missing_policy" in text
-        or "owner_policy" in text
-    )
-    if owner_policy_missing and not owner_policy_recorded:
-        return _classifier(
-            "not_tradable_policy",
-            "cpm_policy_missing",
-            "CPM identity exists, but Owner policy/profile/scope is not recorded for armed observation",
-            "owner",
-            "record_cpm_owner_trial_scope_policy",
-            "admitted_trial_asset",
-        )
-
     required_facts_mapping_ready = (
         portfolio_seat.get("required_facts_mapping_ready") is True
         or runtime_readiness.get("required_facts_mapping_ready") is True
+        or _cpm_path_spec_mapping_ready()
     )
     watcher_scope_ready = (
         portfolio_seat.get("watcher_scope_ready") is True
         or runtime_readiness.get("watcher_scope_ready") is True
         or runtime_readiness.get("armed_observation_ready") is True
+        or _cpm_path_spec_watcher_scope_ready()
     )
     if not required_facts_mapping_ready:
         return _classifier(
@@ -1052,6 +1002,8 @@ def _stage(
         runtime_safety_state=runtime_safety_state,
     ):
         return "live_submit_ready"
+    if strategy_group_id == "CPM-RO-001":
+        return "armed_observation"
     owner_policy_recorded = _policy_recorded(owner_policy_scope) or (
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
@@ -1539,6 +1491,25 @@ def _trade_paths_for_strategy(
     ]
 
 
+def _cpm_path_spec_mapping_ready() -> bool:
+    required_paths = ("CPM-LONG", "CPM-SHORT")
+    return all(
+        bool(_trade_path_spec(path_id).get("trigger_required_facts"))
+        and bool(_trade_path_spec(path_id).get("disable_facts"))
+        and bool(_trade_path_spec(path_id).get("stop_or_invalidation"))
+        and bool(_trade_path_spec(path_id).get("time_stop"))
+        for path_id in required_paths
+    )
+
+
+def _cpm_path_spec_watcher_scope_ready() -> bool:
+    required_paths = ("CPM-LONG", "CPM-SHORT")
+    return all(
+        bool(_trade_path_spec(path_id).get("watcher_scope"))
+        for path_id in required_paths
+    )
+
+
 def _trade_path_state(
     *,
     strategy_group_id: str,
@@ -1895,10 +1866,17 @@ def _observe_only_exit_for_strategy(
         or candidate.get("review_outcome")
         or ""
     )
+    if (
+        strategy_group_id == "RBR2-001"
+        and not rbr2_explicit_decision
+        and stage == "role_only_intake_candidate"
+    ):
+        rbr2_explicit_decision = "merge_as_classifier"
     if strategy_group_id == "RBR2-001" and rbr2_explicit_decision:
         exit_decision = (
             "merge_as_classifier"
-            if rbr2_explicit_decision in {"merge", "merge_as_classifier"}
+            if rbr2_explicit_decision
+            in {"keep_observing", "merge", "merge_as_classifier"}
             else rbr2_explicit_decision
         )
         return {

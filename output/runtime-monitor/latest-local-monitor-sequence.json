@@ -108,7 +108,7 @@
     "strategy_group_id": "BRF2-001"
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-29T14:05:38.556204+00:00",
+  "generated_at_utc": "2026-06-29T14:12:30.416713+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -382,8 +382,8 @@
         "long_side_path_count": 3,
         "machine_consumed_path_count": 5,
         "machine_consumption_surface": "tradeability_decision",
-        "rbr_exit_decision_count": 1,
-        "rbr_observe_only_has_exit_decision": false,
+        "rbr_exit_decision_count": 2,
+        "rbr_observe_only_has_exit_decision": true,
         "required_path_ids_present": true,
         "short_side_guard_path_count": 2,
         "status": "july_bullish_rebound_trade_path_closure_ready"
@@ -1263,8 +1263,8 @@
       "long_side_path_count": 3,
       "machine_consumed_path_count": 5,
       "machine_consumption_surface": "tradeability_decision",
-      "rbr_exit_decision_count": 1,
-      "rbr_observe_only_has_exit_decision": false,
+      "rbr_exit_decision_count": 2,
+      "rbr_observe_only_has_exit_decision": true,
       "required_path_ids_present": true,
       "short_side_guard_path_count": 2,
       "status": "july_bullish_rebound_trade_path_closure_ready"
