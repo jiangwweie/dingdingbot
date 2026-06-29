@@ -26,6 +26,9 @@ Do not patch code during review unless the user explicitly asks.
 - Did the change stay inside `Allowed files`?
 - Did it touch a Codex-owned core file?
 - Did it modify live profiles, real-funds permissions, or strategy parameters?
+- Did it add packet, bridge, adapter, readiness, evidence, compatibility, or
+  other glue code without proving the main abstraction is still right, naming a
+  removal/demotion condition, and deleting or downgrading an old path?
 - If it touched testnet/dev/profile-scoped execution-chain code, did it stay
   inside the allowed scoped safety gates?
 - Were tests appropriate and approved?
