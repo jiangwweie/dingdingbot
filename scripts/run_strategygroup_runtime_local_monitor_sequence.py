@@ -375,6 +375,18 @@ DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON = (
 DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.md"
 )
+DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-four-candidate-recent-live-submit-replay.json"
+)
+DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.json"
+)
+DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.md"
+)
 DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
@@ -594,6 +606,15 @@ def main(argv: list[str] | None = None) -> int:
             args.cpm_dry_run_submit_rehearsal_json
         ),
         cpm_dry_run_submit_rehearsal_md=Path(args.cpm_dry_run_submit_rehearsal_md),
+        four_candidate_recent_live_submit_replay_json=Path(
+            args.four_candidate_recent_live_submit_replay_json
+        ),
+        four_candidate_runtime_activation_closure_json=Path(
+            args.four_candidate_runtime_activation_closure_json
+        ),
+        four_candidate_runtime_activation_closure_md=Path(
+            args.four_candidate_runtime_activation_closure_md
+        ),
         strategygroup_trial_grade_signal_gate_audit_json=Path(
             args.strategygroup_trial_grade_signal_gate_audit_json
         ),
@@ -851,6 +872,15 @@ def build_local_monitor_sequence_report(
     cpm_dry_run_submit_rehearsal_md: Path = (
         DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD
     ),
+    four_candidate_recent_live_submit_replay_json: Path = (
+        DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON
+    ),
+    four_candidate_runtime_activation_closure_json: Path = (
+        DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON
+    ),
+    four_candidate_runtime_activation_closure_md: Path = (
+        DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD
+    ),
     strategygroup_trial_grade_signal_gate_audit_json: Path = (
         DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
     ),
@@ -931,6 +961,21 @@ def build_local_monitor_sequence_report(
         if cpm_dry_run_submit_rehearsal_md == DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD:
             cpm_dry_run_submit_rehearsal_md = (
                 cpm_parent / DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD.name
+            )
+        if (
+            four_candidate_runtime_activation_closure_json
+            == DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON
+        ):
+            four_candidate_runtime_activation_closure_json = (
+                cpm_parent
+                / DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON.name
+            )
+        if (
+            four_candidate_runtime_activation_closure_md
+            == DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD
+        ):
+            four_candidate_runtime_activation_closure_md = (
+                cpm_parent / DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD.name
             )
     runner = command_runner or _run_command
     steps: list[dict[str, Any]] = []
@@ -1309,6 +1354,31 @@ def build_local_monitor_sequence_report(
             "cpm_dry_run_submit_rehearsal",
             cpm_dry_run_submit_rehearsal_command,
             cpm_dry_run_submit_rehearsal_json,
+            runner,
+        )
+    )
+
+    four_candidate_runtime_activation_closure_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_four_candidate_runtime_activation_closure.py"),
+        "--replay-json",
+        str(four_candidate_recent_live_submit_replay_json),
+        "--cpm-required-facts-json",
+        str(cpm_required_facts_mapping_json),
+        "--cpm-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--cpm-rehearsal-json",
+        str(cpm_dry_run_submit_rehearsal_json),
+        "--output-json",
+        str(four_candidate_runtime_activation_closure_json),
+        "--output-owner-progress",
+        str(four_candidate_runtime_activation_closure_md),
+    ]
+    steps.append(
+        _run_step(
+            "four_candidate_runtime_activation_closure",
+            four_candidate_runtime_activation_closure_command,
+            four_candidate_runtime_activation_closure_json,
             runner,
         )
     )
@@ -2070,6 +2140,11 @@ def build_local_monitor_sequence_report(
             artifacts.get("cpm_dry_run_submit_rehearsal", {})
         )
     )
+    four_candidate_runtime_activation_closure_summary = (
+        _sequence_four_candidate_runtime_activation_closure_summary(
+            artifacts.get("four_candidate_runtime_activation_closure", {})
+        )
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         artifacts.get("three_strategy_live_trial_portfolio", {})
     )
@@ -2136,6 +2211,9 @@ def build_local_monitor_sequence_report(
                 cpm_shadow_candidate_evidence_summary
             ),
             "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
+            "four_candidate_runtime_activation_closure": (
+                four_candidate_runtime_activation_closure_summary
+            ),
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "armed_trade_candidates": armed_trade_candidate_summary,
             "tradeability_decision": tradeability_summary,
@@ -2167,6 +2245,9 @@ def build_local_monitor_sequence_report(
         "cpm_runtime_signal_capture": cpm_runtime_signal_capture_summary,
         "cpm_shadow_candidate_evidence": cpm_shadow_candidate_evidence_summary,
         "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
+        "four_candidate_runtime_activation_closure": (
+            four_candidate_runtime_activation_closure_summary
+        ),
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "armed_trade_candidates": armed_trade_candidate_summary,
         "tradeability_decision": tradeability_summary,
@@ -3616,6 +3697,50 @@ def _sequence_cpm_dry_run_submit_rehearsal_summary(
     }
 
 
+def _sequence_four_candidate_runtime_activation_closure_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    summary = _as_dict(artifact.get("summary"))
+    source = _as_dict(artifact.get("source_replay"))
+    return {
+        "status": status,
+        "active": status == "four_candidate_runtime_activation_closure_ready",
+        "p0_tasks_closed": summary.get("p0_tasks_closed") is True,
+        "p1_tasks_closed": summary.get("p1_tasks_closed") is True,
+        "scope_review_closed_count": int(summary.get("scope_review_closed_count") or 0),
+        "watcher_scope_contract_ready_count": int(
+            summary.get("watcher_scope_contract_ready_count") or 0
+        ),
+        "required_facts_contract_ready_count": int(
+            summary.get("required_facts_contract_ready_count") or 0
+        ),
+        "candidate_evidence_shape_ready_count": int(
+            summary.get("candidate_evidence_shape_ready_count") or 0
+        ),
+        "fresh_signal_rehearsal_ready_count": int(
+            summary.get("fresh_signal_rehearsal_ready_count") or 0
+        ),
+        "action_time_boundary_ready_count": int(
+            summary.get("action_time_boundary_ready_count") or 0
+        ),
+        "live_submit_allowed_count": int(
+            summary.get("live_submit_allowed_count") or 0
+        ),
+        "formal_replay_review_opened_count": int(
+            summary.get("formal_replay_review_opened_count") or 0
+        ),
+        "next_checkpoint": str(summary.get("next_checkpoint") or ""),
+        "venue_basis": str(source.get("venue_basis") or ""),
+        "execution_venue_match": source.get("execution_venue_match") is True,
+        "projection_role": "runtime_activation_contract_projection",
+        "state_source": "four_candidate_runtime_activation_closure",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
 @dataclass(frozen=True)
 class _ThreeStrategyPortfolioSummaryProjection:
     status: str
@@ -4126,6 +4251,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     cpm_runtime_signal_capture = report.get("cpm_runtime_signal_capture") or {}
     cpm_shadow_candidate_evidence = report.get("cpm_shadow_candidate_evidence") or {}
     cpm_dry_run_submit_rehearsal = report.get("cpm_dry_run_submit_rehearsal") or {}
+    four_candidate_runtime_activation_closure = (
+        report.get("four_candidate_runtime_activation_closure") or {}
+    )
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -4211,6 +4339,12 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM synthetic candidate/action-time shape: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_candidate_authorization_evidence_shape_ready') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_action_time_required_facts_declared') is True)}`",
         f"- CPM synthetic FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_operation_layer_paper_passed') is True)}`",
         f"- CPM synthetic authority fail-closed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_dangerous_authority_fields_fail_closed') is True)}`",
+        f"- Four-candidate activation closure: `{four_candidate_runtime_activation_closure.get('status', 'missing')}`",
+        f"- P0/P1 activation closed: `{_yes_no(four_candidate_runtime_activation_closure.get('p0_tasks_closed') is True)}` / `{_yes_no(four_candidate_runtime_activation_closure.get('p1_tasks_closed') is True)}`",
+        f"- Scope/watcher/facts/candidate/rehearsal/boundary ready: `{four_candidate_runtime_activation_closure.get('scope_review_closed_count', 0)}` / `{four_candidate_runtime_activation_closure.get('watcher_scope_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('required_facts_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('candidate_evidence_shape_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('fresh_signal_rehearsal_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('action_time_boundary_ready_count', 0)}`",
+        f"- MI formal replay review opened: `{four_candidate_runtime_activation_closure.get('formal_replay_review_opened_count', 0)}`",
+        f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",
+        f"- Activation next checkpoint: `{four_candidate_runtime_activation_closure.get('next_checkpoint') or 'missing'}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",
         f"- Armed trade candidate count: `{len(armed_trade_candidates)}`",
         f"- Legacy three-strategy portfolio: `{', '.join(legacy_three_strategy_groups) or 'none'}`",
@@ -4677,6 +4811,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--cpm-dry-run-submit-rehearsal-md",
         default=str(DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD),
+    )
+    parser.add_argument(
+        "--four-candidate-recent-live-submit-replay-json",
+        default=str(DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON),
+    )
+    parser.add_argument(
+        "--four-candidate-runtime-activation-closure-json",
+        default=str(DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON),
+    )
+    parser.add_argument(
+        "--four-candidate-runtime-activation-closure-md",
+        default=str(DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD),
     )
     parser.add_argument(
         "--strategygroup-trial-grade-signal-gate-audit-json",

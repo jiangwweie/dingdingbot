@@ -244,7 +244,14 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                         "amount_source": "action_time_exchange_available_balance",
                     },
                     "side_scope": ["long"],
-                    "symbol_scope": "cpm_research_supported_symbols_only",
+                    "symbol_scope": "cpm_research_supported_symbols_with_replay_v2_expansion",
+                    "watcher_symbol_scope": [
+                        "ETHUSDT",
+                        "SOLUSDT",
+                        "AVAXUSDT",
+                        "SUIUSDT",
+                    ],
+                    "primary_live_submit_symbol_scope": ["ETHUSDT"],
                     "leverage_scenario": "5x_scenario_not_authority",
                     "attempt_cap": 3,
                 },
@@ -269,7 +276,17 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                 "disable_fact_observation_specs": [{"fact_key": "htf_trend_broken"}],
                 "after_next_state": "armed_observation",
                 "first_blocker_after_mapping": "fresh_cpm_long_signal_absent",
-                "checks": {"required_fact_count": 8, "disable_fact_count": 6},
+                "watcher_scope": {
+                    "symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+                    "primary_live_submit_symbols": ["ETHUSDT"],
+                    "expanded_readonly_symbols": ["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+                },
+                "checks": {
+                    "required_fact_count": 8,
+                    "disable_fact_count": 6,
+                    "expanded_watcher_scope_symbols_mapped": True,
+                    "expanded_scope_does_not_change_live_profile": True,
+                },
                 "interaction": {
                     **base_interaction,
                     "level": "L0_local_cpm_required_facts_mapping",
@@ -310,7 +327,10 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                 "fact_input_present": True,
                 "watcher_tick_present": True,
                 "watcher_scope": {
-                    "signal_id": "cpm_long_pullback_reclaim_signal_v1"
+                    "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+                    "symbol_scope": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+                    "primary_live_submit_symbol_scope": ["ETHUSDT"],
+                    "expanded_readonly_symbol_scope": ["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
                 },
                 "signal_detector_preview": {
                     "fact_input_present": True,
@@ -410,6 +430,35 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                 "interaction": {
                     **base_interaction,
                     "level": "L0_local_cpm_dry_run_submit_rehearsal",
+                },
+            },
+        )
+        return True
+    if script == "build_four_candidate_runtime_activation_closure.py":
+        _write_output(
+            command,
+            {
+                "status": "four_candidate_runtime_activation_closure_ready",
+                "source_replay": {
+                    "venue_basis": "coinbase_spot_proxy",
+                    "execution_venue_match": False,
+                },
+                "summary": {
+                    "p0_tasks_closed": True,
+                    "p1_tasks_closed": True,
+                    "scope_review_closed_count": 4,
+                    "watcher_scope_contract_ready_count": 4,
+                    "required_facts_contract_ready_count": 3,
+                    "candidate_evidence_shape_ready_count": 3,
+                    "fresh_signal_rehearsal_ready_count": 3,
+                    "action_time_boundary_ready_count": 3,
+                    "live_submit_allowed_count": 0,
+                    "formal_replay_review_opened_count": 1,
+                    "next_checkpoint": "attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols",
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_four_candidate_runtime_activation_closure",
                 },
             },
         )
@@ -2303,6 +2352,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_cpm_runtime_signal_capture.py",
         "build_cpm_shadow_candidate_evidence.py",
         "build_cpm_dry_run_submit_rehearsal.py",
+        "build_four_candidate_runtime_activation_closure.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_runtime_replay_lab.py",

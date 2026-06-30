@@ -174,10 +174,17 @@ def build_cpm_required_facts_mapping(
         ],
         "disable_fact_observation_specs": disable_specs,
         "watcher_scope": {
-            "symbols": "cpm_research_supported_symbols_only",
+            "symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "primary_live_submit_symbols": ["ETHUSDT"],
+            "expanded_readonly_symbols": ["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
             "timeframes": ["15m", "1h", "4h"],
             "cadence": "5-15m near reclaim; 15-30m otherwise",
             "signal_rule": "cpm_long_pullback_reclaim_signal_v1",
+            "scope_boundary": (
+                "expanded symbols are read-only watcher scope until Binance USD-M "
+                "contract, mark, funding, spread, minNotional, qtyStep, leverage, "
+                "position, and open-order facts pass action-time checks"
+            ),
         },
         "checks": {
             "owner_policy_recorded": policy_ready,
@@ -185,6 +192,8 @@ def build_cpm_required_facts_mapping(
             "disable_fact_count": len(DISABLE_FACTS),
             "action_time_available_balance_mapped": True,
             "active_position_or_open_order_clear_mapped": True,
+            "expanded_watcher_scope_symbols_mapped": policy_ready,
+            "expanded_scope_does_not_change_live_profile": True,
         },
         "interaction": non_executing_interaction("L0_local_cpm_required_facts_mapping"),
         "safety_invariants": non_executing_safety_invariants(

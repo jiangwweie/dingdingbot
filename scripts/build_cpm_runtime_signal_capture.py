@@ -157,11 +157,17 @@ def build_cpm_runtime_signal_capture(
         "watcher_scope": {
             "strategy_group_id": STRATEGY_GROUP_ID,
             "signal_id": "cpm_long_pullback_reclaim_signal_v1",
-            "symbol_scope": "cpm_research_supported_symbols_only",
+            "symbol_scope": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "primary_live_submit_symbol_scope": ["ETHUSDT"],
+            "expanded_readonly_symbol_scope": ["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
             "side_scope": ["long"],
             "timeframes": ["15m", "1h", "4h"],
             "cadence": "5-15m near reclaim; 15-30m otherwise",
             "source_mode": "runtime_watcher_read_only_fact_input",
+            "live_submit_scope_boundary": (
+                "read-only expanded watcher symbols cannot submit until action-time "
+                "Binance USD-M facts and official runtime gates pass"
+            ),
         },
         "fact_authority": str(fact_input.get("fact_authority") or ""),
         "fact_authority_boundary": _as_dict(fact_input.get("fact_authority_boundary")),
@@ -190,6 +196,8 @@ def build_cpm_runtime_signal_capture(
         "checks": {
             "mapping_ready": mapping_ready,
             "watcher_scope_ready": mapping_ready,
+            "expanded_watcher_scope_ready": mapping_ready,
+            "primary_live_submit_symbol_scope_unchanged": True,
             "fresh_signal_present": fresh_signal_present,
             "missing_required_fact_count": len(missing_required),
             "action_time_pending_fact_count": len(action_time_pending),

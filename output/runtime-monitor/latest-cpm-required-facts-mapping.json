@@ -5,6 +5,8 @@
     "action_time_available_balance_mapped": true,
     "active_position_or_open_order_clear_mapped": true,
     "disable_fact_count": 6,
+    "expanded_scope_does_not_change_live_profile": true,
+    "expanded_watcher_scope_symbols_mapped": true,
     "owner_policy_recorded": true,
     "required_fact_count": 8
   },
@@ -134,7 +136,7 @@
       "4h_closed"
     ]
   },
-  "generated_at_utc": "2026-06-30T06:41:28.543244+00:00",
+  "generated_at_utc": "2026-06-30T09:24:10.978384+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -312,8 +314,22 @@
   "strategy_group_id": "CPM-RO-001",
   "watcher_scope": {
     "cadence": "5-15m near reclaim; 15-30m otherwise",
+    "expanded_readonly_symbols": [
+      "SOLUSDT",
+      "AVAXUSDT",
+      "SUIUSDT"
+    ],
+    "primary_live_submit_symbols": [
+      "ETHUSDT"
+    ],
+    "scope_boundary": "expanded symbols are read-only watcher scope until Binance USD-M contract, mark, funding, spread, minNotional, qtyStep, leverage, position, and open-order facts pass action-time checks",
     "signal_rule": "cpm_long_pullback_reclaim_signal_v1",
-    "symbols": "cpm_research_supported_symbols_only",
+    "symbols": [
+      "ETHUSDT",
+      "SOLUSDT",
+      "AVAXUSDT",
+      "SUIUSDT"
+    ],
     "timeframes": [
       "15m",
       "1h",
