@@ -150,6 +150,7 @@
     "submit_rehearsal_shape_ready": true,
     "synthetic_action_time_required_facts_declared": true,
     "synthetic_candidate_authorization_evidence_shape_ready": true,
+    "synthetic_dangerous_authority_fields_fail_closed": true,
     "synthetic_execution_attempt_rehearsal_ready": true,
     "synthetic_finalgate_dry_run_passed": true,
     "synthetic_fresh_signal_fixture_ready": true,
@@ -276,7 +277,7 @@
     "strategy_group_id": "CPM-RO-001"
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-30T04:02:17.797518+00:00",
+  "generated_at_utc": "2026-06-30T05:59:38.346354+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -457,6 +458,7 @@
       "submit_rehearsal_shape_ready": true,
       "synthetic_action_time_required_facts_declared": true,
       "synthetic_candidate_authorization_evidence_shape_ready": true,
+      "synthetic_dangerous_authority_fields_fail_closed": true,
       "synthetic_execution_attempt_rehearsal_ready": true,
       "synthetic_finalgate_dry_run_passed": true,
       "synthetic_fresh_signal_fixture_ready": true,

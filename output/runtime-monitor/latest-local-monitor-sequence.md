@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T04:02:17.797518+00:00
+- 报告时间: 2026-06-30T05:59:38.346354+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -59,6 +59,7 @@
 - CPM synthetic fresh-signal rehearsal passed: `是`
 - CPM synthetic candidate/action-time shape: `是` / `是`
 - CPM synthetic FinalGate/Operation Layer paper: `是` / `是`
+- CPM synthetic authority fail-closed: `是`
 - Armed trade candidates: `MPG-001, BRF2-001, SOR-001, CPM-RO-001`
 - Armed trade candidate count: `4`
 - Legacy three-strategy portfolio: `MPG-001, BRF2-001, SOR-001`

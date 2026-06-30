@@ -45,6 +45,14 @@ DEFAULT_OUTPUT_MD = (
 PASSED_STATUS = "cpm_dry_run_submit_rehearsal_passed"
 SHAPE_READY_STATUS = "cpm_dry_run_submit_rehearsal_shape_ready"
 BLOCKED_STATUS = "cpm_dry_run_submit_rehearsal_blocked"
+SYNTHETIC_DANGEROUS_AUTHORITY_FIELDS = (
+    "calls_finalgate",
+    "calls_operation_layer",
+    "calls_exchange_write",
+    "places_order",
+    "exchange_write",
+    "order_created",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -207,6 +215,9 @@ def build_cpm_dry_run_submit_rehearsal(
             "synthetic_fresh_signal_present": synthetic_rehearsal[
                 "fresh_signal_present"
             ],
+            "synthetic_dangerous_authority_fields_fail_closed": synthetic_rehearsal[
+                "dangerous_authority_fields_fail_closed"
+            ],
             "synthetic_shadow_candidate_evidence_ready": synthetic_rehearsal[
                 "shadow_candidate_evidence_ready"
             ],
@@ -310,6 +321,10 @@ def _synthetic_fresh_signal_rehearsal(
     authority_boundary = _as_dict(fixture.get("authority_boundary"))
 
     fixture_ready = fixture.get("status") == "cpm_synthetic_fresh_signal_fixture_ready"
+    dangerous_authority_fields_fail_closed = all(
+        authority_boundary.get(field) is False
+        for field in SYNTHETIC_DANGEROUS_AUTHORITY_FIELDS
+    )
     fresh_signal_present = source_signal.get("fresh_signal_present") is True
     shadow_ready = shadow.get("shadow_candidate_evidence_ready") is True
     candidate_shape_ready = (
@@ -327,6 +342,7 @@ def _synthetic_fresh_signal_rehearsal(
         and fresh_signal_present
         and candidate_shape_ready
         and action_time_declared
+        and dangerous_authority_fields_fail_closed
         and finalgate.get("input_shape_complete") is True
         and finalgate.get("passed") is True
     )
@@ -347,6 +363,9 @@ def _synthetic_fresh_signal_rehearsal(
         "fixture_id": str(fixture.get("fixture_id") or ""),
         "fixture_ready": fixture_ready,
         "fresh_signal_present": fresh_signal_present,
+        "dangerous_authority_fields_fail_closed": (
+            dangerous_authority_fields_fail_closed
+        ),
         "shadow_candidate_evidence_ready": shadow_ready,
         "candidate_authorization_evidence_shape_ready": candidate_shape_ready,
         "action_time_required_facts_declared": action_time_declared,

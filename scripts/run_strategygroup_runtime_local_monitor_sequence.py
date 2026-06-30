@@ -3567,6 +3567,11 @@ def _sequence_cpm_dry_run_submit_rehearsal_summary(
         )
         is True
         or synthetic.get("fresh_signal_present") is True,
+        "synthetic_dangerous_authority_fields_fail_closed": checks.get(
+            "synthetic_dangerous_authority_fields_fail_closed"
+        )
+        is True
+        or synthetic.get("dangerous_authority_fields_fail_closed") is True,
         "synthetic_shadow_candidate_evidence_ready": checks.get(
             "synthetic_shadow_candidate_evidence_ready"
         )
@@ -4205,6 +4210,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM synthetic fresh-signal rehearsal passed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_fresh_signal_submit_rehearsal_passed') is True)}`",
         f"- CPM synthetic candidate/action-time shape: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_candidate_authorization_evidence_shape_ready') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_action_time_required_facts_declared') is True)}`",
         f"- CPM synthetic FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_operation_layer_paper_passed') is True)}`",
+        f"- CPM synthetic authority fail-closed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_dangerous_authority_fields_fail_closed') is True)}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",
         f"- Armed trade candidate count: `{len(armed_trade_candidates)}`",
         f"- Legacy three-strategy portfolio: `{', '.join(legacy_three_strategy_groups) or 'none'}`",

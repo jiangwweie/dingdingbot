@@ -80,6 +80,12 @@ def _synthetic_fresh_signal_fixture() -> dict:
         "authority_boundary": {
             "not_live_market_signal": True,
             "not_execution_authority": True,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+            "exchange_write": False,
+            "order_created": False,
         },
     }
 
@@ -144,6 +150,7 @@ def test_cpm_synthetic_fresh_signal_rehearses_submit_shape_without_live_authorit
     assert checks["synthetic_execution_attempt_rehearsal_ready"] is True
     synthetic = artifact["synthetic_fresh_signal_rehearsal"]
     assert synthetic["fresh_signal_submit_rehearsal_passed"] is True
+    assert synthetic["dangerous_authority_fields_fail_closed"] is True
     assert synthetic["not_live_market_signal"] is True
     assert synthetic["not_execution_authority"] is True
     assert synthetic["calls_finalgate"] is False
@@ -152,6 +159,42 @@ def test_cpm_synthetic_fresh_signal_rehearses_submit_shape_without_live_authorit
     assert synthetic["order_created"] is False
     assert "real_order_authority" not in checks
     assert "real_order_authority" not in artifact["safety_invariants"]
+
+
+def test_cpm_synthetic_rehearsal_fails_closed_when_fixture_declares_authority():
+    module = _load_module()
+    fixture = _synthetic_fresh_signal_fixture()
+    fixture["authority_boundary"]["calls_operation_layer"] = True
+
+    artifact = module.build_cpm_dry_run_submit_rehearsal(
+        required_facts_mapping=_required_facts_mapping_ready(),
+        runtime_signal_capture={
+            "status": "cpm_runtime_signal_capture_ready",
+            "signal_detector_preview": {
+                "current_signal_state": "fresh_signal_absent",
+                "fresh_signal_present": False,
+                "action_time_pending_fact_keys": [
+                    "active_position_or_open_order_clear",
+                    "action_time_available_balance",
+                ],
+            },
+        },
+        shadow_candidate_evidence=_shadow_candidate_evidence(ready=False),
+        synthetic_fresh_signal_fixture=fixture,
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    checks = artifact["checks"]
+    synthetic = artifact["synthetic_fresh_signal_rehearsal"]
+    assert checks["synthetic_dangerous_authority_fields_fail_closed"] is False
+    assert checks["synthetic_finalgate_dry_run_passed"] is False
+    assert checks["synthetic_operation_layer_paper_passed"] is False
+    assert checks["synthetic_execution_attempt_rehearsal_ready"] is False
+    assert synthetic["fresh_signal_submit_rehearsal_passed"] is False
+    assert synthetic["dangerous_authority_fields_fail_closed"] is False
+    assert synthetic["calls_operation_layer"] is False
+    assert synthetic["exchange_write"] is False
+    assert synthetic["order_created"] is False
 
 
 def test_cpm_dry_run_passes_only_with_fresh_signal_and_shadow_evidence_ready():

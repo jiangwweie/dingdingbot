@@ -383,6 +383,7 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                     "execution_attempt_rehearsal_ready": False,
                     "synthetic_fresh_signal_fixture_ready": True,
                     "synthetic_fresh_signal_present": True,
+                    "synthetic_dangerous_authority_fields_fail_closed": True,
                     "synthetic_shadow_candidate_evidence_ready": True,
                     "synthetic_candidate_authorization_evidence_shape_ready": True,
                     "synthetic_action_time_required_facts_declared": True,
@@ -402,6 +403,7 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                     "operation_layer_paper_passed": True,
                     "execution_attempt_rehearsal_ready": True,
                     "fresh_signal_submit_rehearsal_passed": True,
+                    "dangerous_authority_fields_fail_closed": True,
                     "not_live_market_signal": True,
                     "not_execution_authority": True,
                 },
@@ -5015,6 +5017,7 @@ def test_local_monitor_sequence_cpm_projection_preserves_armed_observation_chain
                 "execution_attempt_rehearsal_ready": False,
                 "synthetic_fresh_signal_fixture_ready": True,
                 "synthetic_fresh_signal_present": True,
+                "synthetic_dangerous_authority_fields_fail_closed": True,
                 "synthetic_shadow_candidate_evidence_ready": True,
                 "synthetic_candidate_authorization_evidence_shape_ready": True,
                 "synthetic_action_time_required_facts_declared": True,
@@ -5034,6 +5037,7 @@ def test_local_monitor_sequence_cpm_projection_preserves_armed_observation_chain
                 "operation_layer_paper_passed": True,
                 "execution_attempt_rehearsal_ready": True,
                 "fresh_signal_submit_rehearsal_passed": True,
+                "dangerous_authority_fields_fail_closed": True,
                 "not_live_market_signal": True,
                 "not_execution_authority": True,
             },
@@ -5060,6 +5064,7 @@ def test_local_monitor_sequence_cpm_projection_preserves_armed_observation_chain
     assert rehearsal["operation_layer_paper_passed"] is False
     assert rehearsal["synthetic_fresh_signal_fixture_ready"] is True
     assert rehearsal["synthetic_fresh_signal_present"] is True
+    assert rehearsal["synthetic_dangerous_authority_fields_fail_closed"] is True
     assert rehearsal["synthetic_candidate_authorization_evidence_shape_ready"] is True
     assert rehearsal["synthetic_action_time_required_facts_declared"] is True
     assert rehearsal["synthetic_finalgate_dry_run_passed"] is True
