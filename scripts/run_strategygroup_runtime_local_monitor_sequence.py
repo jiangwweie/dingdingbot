@@ -379,6 +379,22 @@ DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-four-candidate-recent-live-submit-replay.json"
 )
+DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
+)
+DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-mpg-runtime-activation-evidence.json"
+)
+DEFAULT_SOR_RUNTIME_ACTIVATION_EVIDENCE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-runtime-activation-evidence.json"
+)
+DEFAULT_FOUR_CANDIDATE_SCOPE_REVIEW_DECISION_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-four-candidate-scope-review-decision.json"
+)
+DEFAULT_CPM_FRESH_SIGNAL_LIVE_PATH_READINESS_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-cpm-fresh-signal-live-path-readiness.json"
+)
 DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.json"
@@ -977,6 +993,23 @@ def build_local_monitor_sequence_report(
             four_candidate_runtime_activation_closure_md = (
                 cpm_parent / DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD.name
             )
+        binance_usdm_public_facts_json = (
+            cpm_parent / DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON.name
+        )
+        mpg_runtime_activation_evidence_json = (
+            cpm_parent / DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON.name
+        )
+        sor_runtime_activation_evidence_json = (
+            cpm_parent / DEFAULT_SOR_RUNTIME_ACTIVATION_EVIDENCE_JSON.name
+        )
+    else:
+        binance_usdm_public_facts_json = DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON
+        mpg_runtime_activation_evidence_json = (
+            DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON
+        )
+        sor_runtime_activation_evidence_json = (
+            DEFAULT_SOR_RUNTIME_ACTIVATION_EVIDENCE_JSON
+        )
     runner = command_runner or _run_command
     steps: list[dict[str, Any]] = []
 
@@ -1358,6 +1391,27 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    four_candidate_runtime_activation_evidence_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_four_candidate_runtime_activation_evidence.py"),
+        "--public-facts-json",
+        str(binance_usdm_public_facts_json),
+        "--replay-json",
+        str(four_candidate_recent_live_submit_replay_json),
+        "--cpm-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--output-dir",
+        str(four_candidate_runtime_activation_closure_json.parent),
+    ]
+    steps.append(
+        _run_step(
+            "four_candidate_runtime_activation_evidence",
+            four_candidate_runtime_activation_evidence_command,
+            mpg_runtime_activation_evidence_json,
+            runner,
+        )
+    )
+
     four_candidate_runtime_activation_closure_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_four_candidate_runtime_activation_closure.py"),
@@ -1369,6 +1423,10 @@ def build_local_monitor_sequence_report(
         str(cpm_runtime_signal_capture_json),
         "--cpm-rehearsal-json",
         str(cpm_dry_run_submit_rehearsal_json),
+        "--mpg-runtime-artifact-json",
+        str(mpg_runtime_activation_evidence_json),
+        "--sor-runtime-artifact-json",
+        str(sor_runtime_activation_evidence_json),
         "--output-json",
         str(four_candidate_runtime_activation_closure_json),
         "--output-owner-progress",
@@ -2024,6 +2082,13 @@ def build_local_monitor_sequence_report(
         step["name"]: step.get("artifact") if isinstance(step.get("artifact"), dict) else {}
         for step in steps
     }
+    artifact_parent = four_candidate_runtime_activation_closure_json.parent
+    artifacts["four_candidate_scope_review_decision"] = _read_json_if_exists(
+        artifact_parent / DEFAULT_FOUR_CANDIDATE_SCOPE_REVIEW_DECISION_JSON.name
+    )
+    artifacts["cpm_fresh_signal_live_path_readiness"] = _read_json_if_exists(
+        artifact_parent / DEFAULT_CPM_FRESH_SIGNAL_LIVE_PATH_READINESS_JSON.name
+    )
     status = _sequence_status(steps=steps, artifacts=artifacts)
     interaction = _sequence_interaction(steps)
     execution_blockers = [
@@ -2145,6 +2210,16 @@ def build_local_monitor_sequence_report(
             artifacts.get("four_candidate_runtime_activation_closure", {})
         )
     )
+    four_candidate_scope_review_decision_summary = (
+        _sequence_four_candidate_scope_review_decision_summary(
+            artifacts.get("four_candidate_scope_review_decision", {})
+        )
+    )
+    cpm_fresh_signal_live_path_readiness_summary = (
+        _sequence_cpm_fresh_signal_live_path_readiness_summary(
+            artifacts.get("cpm_fresh_signal_live_path_readiness", {})
+        )
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         artifacts.get("three_strategy_live_trial_portfolio", {})
     )
@@ -2214,6 +2289,12 @@ def build_local_monitor_sequence_report(
             "four_candidate_runtime_activation_closure": (
                 four_candidate_runtime_activation_closure_summary
             ),
+            "four_candidate_scope_review_decision": (
+                four_candidate_scope_review_decision_summary
+            ),
+            "cpm_fresh_signal_live_path_readiness": (
+                cpm_fresh_signal_live_path_readiness_summary
+            ),
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "armed_trade_candidates": armed_trade_candidate_summary,
             "tradeability_decision": tradeability_summary,
@@ -2247,6 +2328,12 @@ def build_local_monitor_sequence_report(
         "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
         "four_candidate_runtime_activation_closure": (
             four_candidate_runtime_activation_closure_summary
+        ),
+        "four_candidate_scope_review_decision": (
+            four_candidate_scope_review_decision_summary
+        ),
+        "cpm_fresh_signal_live_path_readiness": (
+            cpm_fresh_signal_live_path_readiness_summary
         ),
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "armed_trade_candidates": armed_trade_candidate_summary,
@@ -3757,6 +3844,56 @@ def _sequence_four_candidate_runtime_activation_closure_summary(
     }
 
 
+def _sequence_four_candidate_scope_review_decision_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    summary = _as_dict(artifact.get("summary"))
+    return {
+        "status": status,
+        "active": status == "four_candidate_scope_review_decision_ready",
+        "decision_count": int(summary.get("decision_count") or 0),
+        "readonly_watcher_scope_expansion_count": int(
+            summary.get("readonly_watcher_scope_expansion_count") or 0
+        ),
+        "primary_live_submit_scope_changed_count": int(
+            summary.get("primary_live_submit_scope_changed_count") or 0
+        ),
+        "deferred_replay_symbol_count": len(
+            summary.get("deferred_replay_symbols") or []
+        ),
+        "projection_role": "scope_review_decision_projection",
+        "state_source": "four_candidate_scope_review_decision",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
+def _sequence_cpm_fresh_signal_live_path_readiness_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    return {
+        "status": status,
+        "active": status == "cpm_fresh_signal_live_path_readiness_ready",
+        "public_fact_path_ready": artifact.get("public_fact_path_ready") is True,
+        "fresh_signal_present": artifact.get("fresh_signal_present") is True,
+        "private_action_time_facts_ready": (
+            artifact.get("private_action_time_facts_ready") is True
+        ),
+        "finalgate_called": artifact.get("finalgate_called") is True,
+        "operation_layer_called": artifact.get("operation_layer_called") is True,
+        "live_submit_allowed": artifact.get("live_submit_allowed") is True,
+        "next_blocker": str(artifact.get("next_blocker") or ""),
+        "projection_role": "cpm_fresh_signal_live_path_readiness_projection",
+        "state_source": "cpm_fresh_signal_live_path_readiness",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
 @dataclass(frozen=True)
 class _ThreeStrategyPortfolioSummaryProjection:
     status: str
@@ -4270,6 +4407,12 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     four_candidate_runtime_activation_closure = (
         report.get("four_candidate_runtime_activation_closure") or {}
     )
+    four_candidate_scope_review_decision = (
+        report.get("four_candidate_scope_review_decision") or {}
+    )
+    cpm_fresh_signal_live_path_readiness = (
+        report.get("cpm_fresh_signal_live_path_readiness") or {}
+    )
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -4360,6 +4503,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- P0/P1 runtime artifacts ready: `{_yes_no(four_candidate_runtime_activation_closure.get('p0_runtime_artifacts_ready') is True)}` / `{_yes_no(four_candidate_runtime_activation_closure.get('p1_runtime_artifacts_ready') is True)}`",
         f"- Contract/runtime/scope/watcher/facts/candidate/rehearsal/boundary ready: `{four_candidate_runtime_activation_closure.get('contract_declared_count', 0)}` / `{four_candidate_runtime_activation_closure.get('runtime_artifact_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('scope_review_closed_count', 0)}` / `{four_candidate_runtime_activation_closure.get('watcher_scope_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('required_facts_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('candidate_evidence_shape_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('fresh_signal_rehearsal_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('action_time_boundary_ready_count', 0)}`",
         f"- MI formal replay review opened: `{four_candidate_runtime_activation_closure.get('formal_replay_review_opened_count', 0)}`",
+        f"- Scope review decision: `{four_candidate_scope_review_decision.get('status', 'missing')}` / readonly expansions `{four_candidate_scope_review_decision.get('readonly_watcher_scope_expansion_count', 0)}` / live-scope changes `{four_candidate_scope_review_decision.get('primary_live_submit_scope_changed_count', 0)}`",
+        f"- CPM fresh-path public facts / fresh signal / next blocker: `{_yes_no(cpm_fresh_signal_live_path_readiness.get('public_fact_path_ready') is True)}` / `{_yes_no(cpm_fresh_signal_live_path_readiness.get('fresh_signal_present') is True)}` / `{cpm_fresh_signal_live_path_readiness.get('next_blocker') or 'missing'}`",
         f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",
         f"- Activation next checkpoint: `{four_candidate_runtime_activation_closure.get('next_checkpoint') or 'missing'}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",

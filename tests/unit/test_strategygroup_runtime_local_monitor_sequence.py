@@ -434,6 +434,69 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
             },
         )
         return True
+    if script == "build_four_candidate_runtime_activation_evidence.py":
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for name, strategy_group_id, symbols in [
+            (
+                "latest-mpg-runtime-activation-evidence.json",
+                "MPG-001",
+                ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            ),
+            (
+                "latest-sor-runtime-activation-evidence.json",
+                "SOR-001",
+                ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT"],
+            ),
+        ]:
+            (output_dir / name).write_text(
+                json.dumps(
+                    {
+                        "schema": "brc.four_candidate_runtime_activation_evidence.v1",
+                        "status": "runtime_activation_evidence_ready",
+                        "strategy_group_id": strategy_group_id,
+                        "runtime_artifact_ready": True,
+                        "watcher_scope_contract_ready": True,
+                        "required_facts_contract_ready": True,
+                        "candidate_evidence_shape_ready": True,
+                        "fresh_signal_rehearsal_ready": True,
+                        "watcher_scope": {"symbol_scope": symbols},
+                        "interaction": {
+                            **base_interaction,
+                            "level": "L0_local_runtime_activation_evidence",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+        (output_dir / "latest-four-candidate-scope-review-decision.json").write_text(
+            json.dumps(
+                {
+                    "status": "four_candidate_scope_review_decision_ready",
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_four_candidate_scope_review_decision",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (output_dir / "latest-cpm-fresh-signal-live-path-readiness.json").write_text(
+            json.dumps(
+                {
+                    "status": "cpm_fresh_signal_live_path_readiness_ready",
+                    "public_fact_path_ready": True,
+                    "fresh_signal_present": False,
+                    "live_submit_allowed": False,
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_cpm_fresh_signal_live_path_readiness",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return True
     if script == "build_four_candidate_runtime_activation_closure.py":
         _write_output(
             command,
@@ -446,18 +509,18 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                 "summary": {
                     "p0_contract_declared": True,
                     "p1_contract_declared": True,
-                    "p0_runtime_artifacts_ready": False,
+                    "p0_runtime_artifacts_ready": True,
                     "p1_runtime_artifacts_ready": False,
-                    "p0_tasks_closed": False,
+                    "p0_tasks_closed": True,
                     "p1_tasks_closed": False,
                     "contract_declared_count": 4,
-                    "runtime_artifact_ready_count": 1,
+                    "runtime_artifact_ready_count": 3,
                     "scope_review_closed_count": 4,
-                    "watcher_scope_contract_ready_count": 1,
-                    "required_facts_contract_ready_count": 1,
-                    "candidate_evidence_shape_ready_count": 1,
-                    "fresh_signal_rehearsal_ready_count": 1,
-                    "action_time_boundary_ready_count": 1,
+                    "watcher_scope_contract_ready_count": 3,
+                    "required_facts_contract_ready_count": 3,
+                    "candidate_evidence_shape_ready_count": 3,
+                    "fresh_signal_rehearsal_ready_count": 3,
+                    "action_time_boundary_ready_count": 3,
                     "live_submit_allowed_count": 0,
                     "formal_replay_review_opened_count": 1,
                     "next_checkpoint": "attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols",
@@ -2358,6 +2421,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_cpm_runtime_signal_capture.py",
         "build_cpm_shadow_candidate_evidence.py",
         "build_cpm_dry_run_submit_rehearsal.py",
+        "build_four_candidate_runtime_activation_evidence.py",
         "build_four_candidate_runtime_activation_closure.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",

@@ -86,31 +86,31 @@
     },
     {
       "action_time_boundary": {
-        "exact_next_blocker": "runtime_watcher_facts_rehearsal_artifact_missing",
+        "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
         "live_submit_allowed": false,
-        "ready": false
+        "ready": true
       },
-      "action_time_boundary_ready": false,
-      "activation_contract_ready": false,
+      "action_time_boundary_ready": true,
+      "activation_contract_ready": true,
       "authority_boundary": "read_only_watcher_and_rehearsal_contract; no live profile change; no candidate authorization; no FinalGate; no Operation Layer",
       "candidate_evidence_shape": {
         "candidate_authorization_created": false,
-        "ready": false
+        "ready": true
       },
-      "candidate_evidence_shape_ready": false,
+      "candidate_evidence_shape_ready": true,
       "contract_declared": true,
-      "exact_next_blocker": "runtime_watcher_facts_rehearsal_artifact_missing",
+      "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
       "expanded_readonly_watcher_symbols": [
         "SOLUSDT",
         "AVAXUSDT",
         "SUIUSDT"
       ],
       "fresh_signal_rehearsal": {
-        "ready": false,
+        "ready": true,
         "replay_treated_as_live_signal": false,
         "synthetic_or_replay_only": true
       },
-      "fresh_signal_rehearsal_ready": false,
+      "fresh_signal_rehearsal_ready": true,
       "live_submit_allowed": false,
       "live_submit_symbol_scope_changed": false,
       "path_id": "MPG-STRONG-SYMBOL-ROTATION",
@@ -146,22 +146,22 @@
           "action_time_available_balance"
         ],
         "binance_usdm_confirmation_required": true,
-        "ready": false,
+        "ready": true,
         "replay_proxy_facts_are_not_live_required_facts": true,
-        "runtime_artifact_source": "missing:MPG-001:runtime_watcher_facts_rehearsal_artifact"
+        "runtime_artifact_source": "brc.four_candidate_runtime_activation_evidence.v1"
       },
-      "required_facts_contract_ready": false,
-      "runtime_artifact_ready": false,
-      "runtime_artifact_source": "missing:MPG-001:runtime_watcher_facts_rehearsal_artifact",
+      "required_facts_contract_ready": true,
+      "runtime_artifact_ready": true,
+      "runtime_artifact_source": "brc.four_candidate_runtime_activation_evidence.v1",
       "scope_review_closed": true,
       "scope_review_source": "latest-four-candidate-recent-live-submit-replay",
       "strategy_group_id": "MPG-001",
       "watcher_scope_contract": {
         "expanded_symbols_are_read_only": true,
-        "ready": false,
-        "source": "missing:MPG-001:runtime_watcher_facts_rehearsal_artifact"
+        "ready": true,
+        "source": "brc.four_candidate_runtime_activation_evidence.v1"
       },
-      "watcher_scope_contract_ready": false,
+      "watcher_scope_contract_ready": true,
       "watcher_scope_symbols": [
         "BTCUSDT",
         "ETHUSDT",
@@ -172,30 +172,30 @@
     },
     {
       "action_time_boundary": {
-        "exact_next_blocker": "runtime_watcher_facts_rehearsal_artifact_missing",
+        "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
         "live_submit_allowed": false,
-        "ready": false
+        "ready": true
       },
-      "action_time_boundary_ready": false,
-      "activation_contract_ready": false,
+      "action_time_boundary_ready": true,
+      "activation_contract_ready": true,
       "authority_boundary": "read_only_watcher_and_rehearsal_contract; no live profile change; no candidate authorization; no FinalGate; no Operation Layer",
       "candidate_evidence_shape": {
         "candidate_authorization_created": false,
-        "ready": false
+        "ready": true
       },
-      "candidate_evidence_shape_ready": false,
+      "candidate_evidence_shape_ready": true,
       "contract_declared": true,
-      "exact_next_blocker": "runtime_watcher_facts_rehearsal_artifact_missing",
+      "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
       "expanded_readonly_watcher_symbols": [
         "SOLUSDT",
         "AVAXUSDT"
       ],
       "fresh_signal_rehearsal": {
-        "ready": false,
+        "ready": true,
         "replay_treated_as_live_signal": false,
         "synthetic_or_replay_only": true
       },
-      "fresh_signal_rehearsal_ready": false,
+      "fresh_signal_rehearsal_ready": true,
       "live_submit_allowed": false,
       "live_submit_symbol_scope_changed": false,
       "path_id": "SOR-SESSION-BREAKOUT",
@@ -231,22 +231,22 @@
           "action_time_available_balance"
         ],
         "binance_usdm_confirmation_required": true,
-        "ready": false,
+        "ready": true,
         "replay_proxy_facts_are_not_live_required_facts": true,
-        "runtime_artifact_source": "missing:SOR-001:runtime_watcher_facts_rehearsal_artifact"
+        "runtime_artifact_source": "brc.four_candidate_runtime_activation_evidence.v1"
       },
-      "required_facts_contract_ready": false,
-      "runtime_artifact_ready": false,
-      "runtime_artifact_source": "missing:SOR-001:runtime_watcher_facts_rehearsal_artifact",
+      "required_facts_contract_ready": true,
+      "runtime_artifact_ready": true,
+      "runtime_artifact_source": "brc.four_candidate_runtime_activation_evidence.v1",
       "scope_review_closed": true,
       "scope_review_source": "latest-four-candidate-recent-live-submit-replay",
       "strategy_group_id": "SOR-001",
       "watcher_scope_contract": {
         "expanded_symbols_are_read_only": true,
-        "ready": false,
-        "source": "missing:SOR-001:runtime_watcher_facts_rehearsal_artifact"
+        "ready": true,
+        "source": "brc.four_candidate_runtime_activation_evidence.v1"
       },
-      "watcher_scope_contract_ready": false,
+      "watcher_scope_contract_ready": true,
       "watcher_scope_symbols": [
         "BTCUSDT",
         "ETHUSDT",
@@ -355,16 +355,16 @@
   },
   "checks": {
     "live_submit_allowed_count_zero": true,
-    "mpg_runtime_artifact_ready": false,
-    "mpg_sor_not_counted_without_runtime_artifacts": true,
+    "mpg_runtime_artifact_ready": true,
+    "mpg_sor_not_counted_without_runtime_artifacts": false,
     "no_finalgate_or_operation_layer": true,
     "p0_contract_declared": true,
     "p1_contract_declared_without_live_authority": true,
     "replay_ready": true,
-    "sor_runtime_artifact_ready": false,
+    "sor_runtime_artifact_ready": true,
     "venue_is_proxy_not_execution": true
   },
-  "generated_at_utc": "2026-06-30T10:15:15.368331+00:00",
+  "generated_at_utc": "2026-06-30T11:56:26.894208+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -398,22 +398,22 @@
   },
   "status": "four_candidate_runtime_activation_contract_ready",
   "summary": {
-    "action_time_boundary_ready_count": 1,
-    "candidate_evidence_shape_ready_count": 1,
+    "action_time_boundary_ready_count": 3,
+    "candidate_evidence_shape_ready_count": 3,
     "contract_declared_count": 4,
     "formal_replay_review_opened_count": 1,
-    "fresh_signal_rehearsal_ready_count": 1,
+    "fresh_signal_rehearsal_ready_count": 3,
     "live_submit_allowed_count": 0,
     "next_checkpoint": "attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols",
     "p0_contract_declared": true,
-    "p0_runtime_artifacts_ready": false,
-    "p0_tasks_closed": false,
+    "p0_runtime_artifacts_ready": true,
+    "p0_tasks_closed": true,
     "p1_contract_declared": true,
     "p1_runtime_artifacts_ready": false,
     "p1_tasks_closed": false,
-    "required_facts_contract_ready_count": 1,
-    "runtime_artifact_ready_count": 1,
+    "required_facts_contract_ready_count": 3,
+    "runtime_artifact_ready_count": 3,
     "scope_review_closed_count": 4,
-    "watcher_scope_contract_ready_count": 1
+    "watcher_scope_contract_ready_count": 3
   }
 }
