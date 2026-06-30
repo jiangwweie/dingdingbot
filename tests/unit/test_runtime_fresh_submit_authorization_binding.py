@@ -177,26 +177,26 @@ async def test_binding_reuses_existing_resolved_fresh_authorization():
         draft_repository=_DraftRepo(),
     )
 
-    packet = await service.bind_for_handoff(
+    artifact = await service.bind_for_handoff(
         handoff=_handoff(),
         requested_fresh_submit_authorization_id="fresh-auth-1",
     )
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeFreshSubmitAuthorizationBindingStatus.BOUND_EXISTING_AUTHORIZATION
     )
-    assert packet.binding_source == (
+    assert artifact.binding_source == (
         RuntimeFreshSubmitAuthorizationBindingSource.EXISTING_RESOLUTION
     )
-    assert packet.fresh_submit_authorization_id == "fresh-auth-1"
-    assert packet.execution_intent_id == "intent-1"
-    assert packet.runtime_execution_intent_draft_id == "draft-1"
-    assert packet.ready_for_disabled_smoke_call is True
-    assert packet.creates_execution_intent is False
-    assert packet.creates_submit_authorization is False
-    assert packet.calls_official_submit_endpoint is False
-    assert packet.exchange_called is False
-    assert packet.order_lifecycle_called is False
+    assert artifact.fresh_submit_authorization_id == "fresh-auth-1"
+    assert artifact.execution_intent_id == "intent-1"
+    assert artifact.runtime_execution_intent_draft_id == "draft-1"
+    assert artifact.ready_for_disabled_smoke_call is True
+    assert artifact.creates_execution_intent is False
+    assert artifact.creates_submit_authorization is False
+    assert artifact.calls_official_submit_endpoint is False
+    assert artifact.exchange_called is False
+    assert artifact.order_lifecycle_called is False
 
 
 @pytest.mark.asyncio
@@ -211,14 +211,14 @@ async def test_binding_creates_authorization_from_existing_intent_when_missing()
         draft_repository=_DraftRepo(),
     )
 
-    packet = await service.bind_for_handoff(handoff=_handoff())
+    artifact = await service.bind_for_handoff(handoff=_handoff())
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationBindingStatus.CREATED_AUTHORIZATION
-    assert packet.binding_source == RuntimeFreshSubmitAuthorizationBindingSource.EXISTING_INTENT
-    assert packet.fresh_submit_authorization_id == "fresh-auth-from-intent"
-    assert packet.execution_intent_id == "intent-1"
-    assert packet.creates_execution_intent is False
-    assert packet.creates_submit_authorization is True
+    assert artifact.status == RuntimeFreshSubmitAuthorizationBindingStatus.CREATED_AUTHORIZATION
+    assert artifact.binding_source == RuntimeFreshSubmitAuthorizationBindingSource.EXISTING_INTENT
+    assert artifact.fresh_submit_authorization_id == "fresh-auth-from-intent"
+    assert artifact.execution_intent_id == "intent-1"
+    assert artifact.creates_execution_intent is False
+    assert artifact.creates_submit_authorization is True
     assert adapter.created_authorizations == [("intent-1", True)]
 
 
@@ -237,19 +237,19 @@ async def test_binding_creates_intent_and_authorization_from_latest_ready_draft(
         ),
     )
 
-    packet = await service.bind_for_handoff(handoff=_handoff())
+    artifact = await service.bind_for_handoff(handoff=_handoff())
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeFreshSubmitAuthorizationBindingStatus.CREATED_INTENT_AND_AUTHORIZATION
     )
-    assert packet.binding_source == (
+    assert artifact.binding_source == (
         RuntimeFreshSubmitAuthorizationBindingSource.LATEST_READY_DRAFT
     )
-    assert packet.fresh_submit_authorization_id == "fresh-auth-from-draft"
-    assert packet.execution_intent_id == "intent-from-draft-1"
-    assert packet.runtime_execution_intent_draft_id == "draft-1"
-    assert packet.creates_execution_intent is True
-    assert packet.creates_submit_authorization is True
+    assert artifact.fresh_submit_authorization_id == "fresh-auth-from-draft"
+    assert artifact.execution_intent_id == "intent-from-draft-1"
+    assert artifact.runtime_execution_intent_draft_id == "draft-1"
+    assert artifact.creates_execution_intent is True
+    assert artifact.creates_submit_authorization is True
     assert adapter.created_intent_drafts == ["draft-1"]
     assert adapter.created_authorizations == [("intent-from-draft-1", True)]
 
@@ -267,14 +267,14 @@ async def test_binding_blocks_without_authorization_intent_or_ready_draft():
         ),
     )
 
-    packet = await service.bind_for_handoff(handoff=_handoff())
+    artifact = await service.bind_for_handoff(handoff=_handoff())
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationBindingStatus.BLOCKED
-    assert "ready_runtime_execution_intent_draft_not_found" in packet.blockers
-    assert "resolution:fresh_submit_authorization_not_found" in packet.blockers
-    assert packet.ready_for_disabled_smoke_call is False
-    assert packet.creates_execution_intent is False
-    assert packet.creates_submit_authorization is False
+    assert artifact.status == RuntimeFreshSubmitAuthorizationBindingStatus.BLOCKED
+    assert "ready_runtime_execution_intent_draft_not_found" in artifact.blockers
+    assert "resolution:fresh_submit_authorization_not_found" in artifact.blockers
+    assert artifact.ready_for_disabled_smoke_call is False
+    assert artifact.creates_execution_intent is False
+    assert artifact.creates_submit_authorization is False
 
 
 class _Client:
@@ -316,7 +316,7 @@ def _args(tmp_path, **overrides):
     )
     values = {
         "runtime_instance_id": "runtime-1",
-        "handoff_json": str(handoff_path),
+        "handoff_artifact_json": str(handoff_path),
         "requested_fresh_submit_authorization_id": None,
         "allow_create_from_existing_intent": True,
         "allow_create_intent_from_latest_draft": True,
@@ -346,7 +346,7 @@ def test_binding_api_flow_posts_binding_request(tmp_path):
         "/api/trading-console/strategy-runtimes/runtime-1/"
         "official-submit-handoff-fresh-authorizations/bind"
     )
-    assert call["body"]["handoff_packet"]["handoff_id"].startswith(
+    assert call["body"]["handoff_artifact"]["handoff_id"].startswith(
         "runtime-official-submit-handoff-runtime-1"
     )
     assert call["body"]["allow_create_from_existing_intent"] is True
@@ -362,14 +362,14 @@ async def test_trading_console_binding_endpoint_rejects_runtime_mismatch():
             .runtime_official_submit_handoff_fresh_authorization_binding(
                 "other-runtime",
                 RuntimeFreshSubmitAuthorizationBindingRequest(
-                    handoff_packet=_handoff(),
+                    handoff_artifact=_handoff(),
                     no_exchange_side_effects=True,
                 ),
             )
         )
 
     assert exc.value.status_code == 400
-    assert exc.value.detail == "handoff_packet_runtime_mismatch"
+    assert exc.value.detail == "handoff_artifact_runtime_mismatch"
 
 
 @pytest.mark.asyncio
@@ -399,22 +399,22 @@ async def test_trading_console_binding_endpoint_binds_existing_authorization(
         lambda: _DraftRepo(),
     )
 
-    packet = await (
+    artifact = await (
         api_trading_console
         .runtime_official_submit_handoff_fresh_authorization_binding(
             "runtime-1",
             RuntimeFreshSubmitAuthorizationBindingRequest(
-                handoff_packet=_handoff(),
+                handoff_artifact=_handoff(),
                 requested_fresh_submit_authorization_id="fresh-auth-1",
                 no_exchange_side_effects=True,
             ),
         )
     )
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeFreshSubmitAuthorizationBindingStatus.BOUND_EXISTING_AUTHORIZATION
     )
-    assert packet.fresh_submit_authorization_id == "fresh-auth-1"
+    assert artifact.fresh_submit_authorization_id == "fresh-auth-1"
 
 
 async def _async_value(value):

@@ -143,7 +143,9 @@ def build_first_real_submit_final_review_packet(
             ),
             "postdeploy_current_head": postdeploy_current_head,
             "postdeploy_expected_head": postdeploy_expected_head,
-            "owner_packet_status": first_real_submit_owner_packet.get("status"),
+            "first_real_submit_owner_evidence_status": (
+                first_real_submit_owner_packet.get("status")
+            ),
             "owner_packet_local_head": owner_local_head,
             "owner_deployment_current_head_deployed": owner_deployment_gate_ready,
         },

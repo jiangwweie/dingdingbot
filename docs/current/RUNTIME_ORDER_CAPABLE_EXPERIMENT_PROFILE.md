@@ -39,8 +39,8 @@ simulation to close:
 - reconciliation, settlement, and Review Ledger shape.
 
 These rehearsal outputs may unlock engineering readiness. They must not set
-`actionable_now=true`, fabricate live RequiredFacts, bypass FinalGate or
-Operation Layer, or create exchange writes.
+runtime trade/order authority, fabricate live RequiredFacts, bypass FinalGate
+or Operation Layer, or create exchange writes.
 
 ## Required Server Overlay
 

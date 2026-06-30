@@ -50,7 +50,7 @@ class PgLlmAdvisoryRepository:
                 row.strategy_family_ids = list(payload["strategy_family_ids"])
                 row.dedupe_key = event.dedupe_key
                 row.occurred_at_ms = event.occurred_at_ms
-                row.context_packet = dict(payload["context_packet"])
+                row.context_artifact = dict(payload["context_artifact"])
                 row.allowed_llm_actions = list(payload["allowed_llm_actions"])
                 row.delivery_policy = list(payload["delivery_policy"])
                 row.created_at_ms = event.created_at_ms
@@ -178,7 +178,7 @@ class PgLlmAdvisoryRepository:
                 "strategy_family_ids": list(row.strategy_family_ids or []),
                 "dedupe_key": row.dedupe_key,
                 "occurred_at_ms": row.occurred_at_ms,
-                "context_packet": dict(row.context_packet or {}),
+                "context_artifact": dict(row.context_artifact or {}),
                 "allowed_llm_actions": list(row.allowed_llm_actions or []),
                 "delivery_policy": list(row.delivery_policy or []),
                 "created_at_ms": row.created_at_ms,

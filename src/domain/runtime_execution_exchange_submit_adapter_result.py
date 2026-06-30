@@ -42,7 +42,7 @@ class RuntimeExecutionExchangeSubmitAdapterResult(
     adapter_result_id: str = Field(min_length=1, max_length=520)
     enablement_decision_id: str = Field(min_length=1, max_length=500)
     gate_id: str = Field(min_length=1, max_length=460)
-    packet_preview_id: str = Field(min_length=1, max_length=460)
+    submit_preview_id: str = Field(min_length=1, max_length=460)
     binding_id: str = Field(min_length=1, max_length=460)
     local_registration_adapter_result_id: str = Field(min_length=1, max_length=420)
     authorization_id: str = Field(min_length=1, max_length=220)
@@ -196,7 +196,7 @@ def build_runtime_execution_exchange_submit_adapter_result(
         ),
         enablement_decision_id=enablement_decision.decision_id,
         gate_id=gate.gate_id,
-        packet_preview_id=gate.packet_preview_id,
+        submit_preview_id=gate.submit_preview_id,
         binding_id=gate.binding_id,
         local_registration_adapter_result_id=gate.adapter_result_id,
         authorization_id=enablement_decision.authorization_id,
@@ -287,7 +287,7 @@ def build_runtime_execution_exchange_submit_adapter_lock_result(
         ),
         enablement_decision_id=enablement_decision.decision_id,
         gate_id=gate.gate_id,
-        packet_preview_id=gate.packet_preview_id,
+        submit_preview_id=gate.submit_preview_id,
         binding_id=gate.binding_id,
         local_registration_adapter_result_id=gate.adapter_result_id,
         authorization_id=enablement_decision.authorization_id,

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Official fresh-candidate FinalGate preflight bridge proof.
+"""Official fresh-candidate FinalGate preflight lifecycle proof.
 
-RTF-090 bridges the post-submit next-attempt strategy continuation proof into
-the official FinalGate / controlled-submit preflight proof.  It proves the
+RTF-090 connects the post-submit next-attempt strategy continuation proof to
+the official FinalGate / controlled-submit preflight proof. It proves the
 fresh shadow OrderCandidate produced after a ready next-attempt gate is the same
 candidate accepted by the official prepare, FinalGate, and preflight routes.
 
@@ -47,16 +47,16 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         final_gate_report,
     )
 
-    packet = _proof_packet(
+    proof_artifact = _proof_artifact(
         continuation_report=continuation_report,
         final_gate_report=final_gate_report,
     )
     _write_json(
-        output_dir / "fresh-candidate-final-gate-preflight-packet.json",
-        packet,
+        output_dir / "fresh-candidate-final-gate-preflight-artifact.json",
+        proof_artifact,
     )
 
-    checks = dict(packet["checks"])
+    checks = dict(proof_artifact["checks"])
     report = {
         "scope": "runtime_official_fresh_candidate_final_gate_preflight_proof",
         "status": (
@@ -75,12 +75,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "controlled_submit_preflight_id": final_gate_report.get(
             "controlled_submit_preflight_id"
         ),
-        "fresh_candidate_final_gate_preflight_packet": packet,
+        "fresh_candidate_final_gate_preflight_artifact": proof_artifact,
         "rtf089_prerequisite": continuation_report,
         "rtf081_final_gate_preflight": final_gate_report,
         "checks": checks,
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "safety_invariants": proof_artifact["safety_invariants"],
+        "fresh_candidate_preflight_plan": {
             "next_step": (
                 "continue_fresh_candidate_to_submit_adapter_preview"
                 if _contract_passed(checks)
@@ -107,23 +107,23 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def _proof_packet(
+def _proof_artifact(
     *,
     continuation_report: dict[str, Any],
     final_gate_report: dict[str, Any],
 ) -> dict[str, Any]:
-    continuation_packet = continuation_report.get(
-        "next_attempt_strategy_continuation_packet"
+    continuation_artifact = continuation_report.get(
+        "next_attempt_strategy_continuation_artifact"
     ) or {}
-    final_gate_packet = final_gate_report.get("preflight_packet") or {}
+    final_gate_artifact = final_gate_report.get("preflight_artifact") or {}
     checks = _checks(
         continuation_report=continuation_report,
-        continuation_packet=continuation_packet,
+        continuation_artifact=continuation_artifact,
         final_gate_report=final_gate_report,
-        final_gate_packet=final_gate_packet,
+        final_gate_artifact=final_gate_artifact,
     )
     return {
-        "scope": "runtime_official_fresh_candidate_final_gate_preflight_packet",
+        "scope": "runtime_official_fresh_candidate_final_gate_preflight_artifact",
         "status": (
             "fresh_candidate_ready_for_controlled_submit_adapter"
             if _contract_passed(checks)
@@ -153,25 +153,25 @@ def _proof_packet(
             ],
         },
         "final_gate": {
-            "verdict": (final_gate_packet.get("final_gate") or {}).get("verdict"),
-            "status": (final_gate_packet.get("final_gate") or {}).get("status"),
+            "verdict": (final_gate_artifact.get("final_gate") or {}).get("verdict"),
+            "status": (final_gate_artifact.get("final_gate") or {}).get("status"),
             "blockers": list(
-                (final_gate_packet.get("final_gate") or {}).get("blockers") or []
+                (final_gate_artifact.get("final_gate") or {}).get("blockers") or []
             ),
         },
         "controlled_submit_preflight": {
             "status": (
-                final_gate_packet.get("controlled_submit_preflight") or {}
+                final_gate_artifact.get("controlled_submit_preflight") or {}
             ).get("status"),
             "final_gate_verdict": (
-                final_gate_packet.get("controlled_submit_preflight") or {}
+                final_gate_artifact.get("controlled_submit_preflight") or {}
             ).get("final_gate_verdict"),
             "preview_only": (
-                final_gate_packet.get("controlled_submit_preflight") or {}
+                final_gate_artifact.get("controlled_submit_preflight") or {}
             ).get("preview_only"),
             "blockers": list(
                 (
-                    final_gate_packet.get("controlled_submit_preflight") or {}
+                    final_gate_artifact.get("controlled_submit_preflight") or {}
                 ).get("blockers")
                 or []
             ),
@@ -179,9 +179,9 @@ def _proof_packet(
         "checks": checks,
         "safety_invariants": _safety_invariants(
             continuation_report=continuation_report,
-            continuation_packet=continuation_packet,
+            continuation_artifact=continuation_artifact,
             final_gate_report=final_gate_report,
-            final_gate_packet=final_gate_packet,
+            final_gate_artifact=final_gate_artifact,
         ),
     }
 
@@ -189,19 +189,19 @@ def _proof_packet(
 def _checks(
     *,
     continuation_report: dict[str, Any],
-    continuation_packet: dict[str, Any],
+    continuation_artifact: dict[str, Any],
     final_gate_report: dict[str, Any],
-    final_gate_packet: dict[str, Any],
+    final_gate_artifact: dict[str, Any],
 ) -> dict[str, bool]:
     continuation_checks = continuation_report.get("checks") or {}
     final_gate_checks = final_gate_report.get("checks") or {}
-    ready_path = continuation_packet.get("ready_path") or {}
-    ready_post_submit_gate = continuation_packet.get("ready_post_submit_gate") or {}
+    ready_path = continuation_artifact.get("ready_path") or {}
+    ready_post_submit_gate = continuation_artifact.get("ready_post_submit_gate") or {}
     safety = _safety_invariants(
         continuation_report=continuation_report,
-        continuation_packet=continuation_packet,
+        continuation_artifact=continuation_artifact,
         final_gate_report=final_gate_report,
-        final_gate_packet=final_gate_packet,
+        final_gate_artifact=final_gate_artifact,
     )
     return {
         "rtf089_prerequisite_passed": (
@@ -230,7 +230,7 @@ def _checks(
             continuation_checks.get("ready_path_requires_final_gate")
         ),
         "fresh_authorization_required_before_submit": (
-            ready_path.get("operator_command_plan", {}).get(
+            ready_path.get("strategy_planning_plan", {}).get(
                 "requires_official_final_gate"
             )
             is True
@@ -317,15 +317,15 @@ def _contract_passed(checks: dict[str, bool]) -> bool:
 def _safety_invariants(
     *,
     continuation_report: dict[str, Any],
-    continuation_packet: dict[str, Any],
+    continuation_artifact: dict[str, Any],
     final_gate_report: dict[str, Any],
-    final_gate_packet: dict[str, Any],
+    final_gate_artifact: dict[str, Any],
 ) -> dict[str, bool]:
     continuation_safety = continuation_report.get("safety_invariants") or {}
     final_gate_safety = final_gate_report.get("safety_invariants") or {}
     continuation_checks = continuation_report.get("checks") or {}
     final_gate_checks = final_gate_report.get("checks") or {}
-    preflight = final_gate_packet.get("controlled_submit_preflight") or {}
+    preflight = final_gate_artifact.get("controlled_submit_preflight") or {}
     return {
         "uses_official_fastapi_routes": True,
         "uses_fake_console_api": False,

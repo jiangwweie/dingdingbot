@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the StrategyGroup handoff-boundary closure packet.
+"""Build the StrategyGroup handoff-boundary closure artifact.
 
-This packet turns the VCB / LSR / BRF missing-handoff state from vague
+This artifact turns the VCB / LSR / BRF missing-handoff state from vague
 quality-wave text into an explicit, machine-checkable boundary. It is
 governance-only and cannot create live actionability.
 """
@@ -11,10 +11,28 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from src.domain.runtime_readiness_state import false_flag_errors  # noqa: E402
+from strategygroup_non_executing_projection import (  # noqa: E402
+    legacy_authority_mirror_present_errors,
+    non_executing_interaction,
+    review_outcome_default_next_step,
+    review_outcome_state_from,
+    review_outcome_value,
+    review_outcome_state_boundary,
+    review_outcome_state_validation_errors,
+)
+
 DEFAULT_QUALITY_WAVE_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
@@ -30,8 +48,6 @@ DEFAULT_OUTPUT_MD = (
 
 REQUIRED_EXPLICIT_MISSING_GROUPS = ["VCB-001", "LSR-001", "BRF-001"]
 SAFETY_FALSE_KEYS = [
-    "actionable_now",
-    "real_order_authority",
     "l2_shadow_authority_created",
     "l4_scope_change_recommended",
     "calls_finalgate",
@@ -79,10 +95,8 @@ def build_handoff_boundary_closure(quality_wave: dict[str, Any]) -> dict[str, An
                 ),
                 "system_can_continue": row.get("system_can_continue") is True,
                 "trial_eligibility_may_be_reviewed_by_owner_policy": True,
-                "actionable_now": False,
                 "l2_shadow_authority_created": False,
                 "l4_scope_change_recommended": False,
-                "real_order_authority": False,
                 "owner_manual_operation_required": False,
                 "next_checkpoint": next_checkpoint,
             }
@@ -93,11 +107,24 @@ def build_handoff_boundary_closure(quality_wave: dict[str, Any]) -> dict[str, An
         if row["strategy_group_id"] in REQUIRED_EXPLICIT_MISSING_GROUPS
         and row["boundary_state"] == "explicit_missing_handoff_boundary_accepted"
     )
-    errors = validate_packet(
+    review_outcome_state = review_outcome_state_boundary(
+        source_role="handoff_boundary_closure_lifecycle_evidence",
+        review_scope="handoff_boundary_closure",
+        extra={
+            "all_required_missing_boundaries_explicit": (
+                explicit_missing_count == len(REQUIRED_EXPLICIT_MISSING_GROUPS)
+            ),
+            "vcb_lsr_brf_can_continue_observe_only": True,
+            "promote_or_live_authority_created": False,
+            "default_next_step": "use_explicit_boundaries_before_tier_or_handoff_review",
+        },
+    )
+    errors = validate_artifact(
         {
             "schema": "brc.strategygroup_handoff_boundary_closure.v1",
             "status": "handoff_boundary_closure_ready",
             "rows": rows,
+            "review_outcome_state": review_outcome_state,
             "safety_invariants": {key: False for key in SAFETY_FALSE_KEYS},
         }
     )
@@ -107,16 +134,9 @@ def build_handoff_boundary_closure(quality_wave: dict[str, Any]) -> dict[str, An
         "scope": "strategygroup_handoff_boundary_closure",
         "status": status,
         "source_status": {"quality_wave": quality_wave.get("status")},
-        "interaction": {
-            "level": "L0_local_handoff_boundary_closure",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_handoff_boundary_closure"
+        ),
         "counts": {
             "row_count": len(rows),
             "explicit_missing_boundary_count": explicit_missing_count,
@@ -125,24 +145,19 @@ def build_handoff_boundary_closure(quality_wave: dict[str, Any]) -> dict[str, An
             ),
         },
         "rows": rows,
-        "decision": {
-            "all_required_missing_boundaries_explicit": (
-                explicit_missing_count == len(REQUIRED_EXPLICIT_MISSING_GROUPS)
-            ),
-            "vcb_lsr_brf_can_continue_observe_only": True,
-            "promote_or_live_authority_created": False,
-            "default_next_step": "use_explicit_boundaries_before_tier_or_handoff_review",
-        },
+        "review_outcome_state": review_outcome_state,
         "safety_invariants": {key: False for key in SAFETY_FALSE_KEYS},
         "validation_errors": errors,
     }
 
 
-def validate_packet(packet: dict[str, Any]) -> list[str]:
+def validate_artifact(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if packet.get("schema") != "brc.strategygroup_handoff_boundary_closure.v1":
+    if artifact.get("schema") != "brc.strategygroup_handoff_boundary_closure.v1":
         errors.append("schema_mismatch")
-    rows = _dict_rows(packet.get("rows"))
+    if "decision" in artifact:
+        errors.append("top_level_decision_removed")
+    rows = _dict_rows(artifact.get("rows"))
     rows_by_group = {str(row.get("strategy_group_id") or ""): row for row in rows}
     for group in REQUIRED_EXPLICIT_MISSING_GROUPS:
         row = rows_by_group.get(group)
@@ -153,24 +168,38 @@ def validate_packet(packet: dict[str, Any]) -> list[str]:
             errors.append(f"{group}.missing_handoff_boundary_not_explicit")
         if row.get("handoff_pack_present") is True:
             errors.append(f"{group}.handoff_pack_unexpectedly_present")
-        if row.get("actionable_now") is True:
-            errors.append(f"{group}.actionable_now_true")
+        errors.extend(
+            legacy_authority_mirror_present_errors(
+                row,
+                label_prefix=f"{group}.handoff_boundary_row_",
+            )
+        )
         for key in (
             "l2_shadow_authority_created",
             "l4_scope_change_recommended",
-            "real_order_authority",
             "owner_manual_operation_required",
         ):
             if row.get(key) is True:
                 errors.append(f"{group}.{key}_true")
-    safety = _as_dict(packet.get("safety_invariants"))
-    for key in SAFETY_FALSE_KEYS:
-        if safety.get(key) is not False:
-            errors.append(f"safety_invariant_not_false:{key}")
+    safety = _as_dict(artifact.get("safety_invariants"))
+    errors.extend(
+        false_flag_errors(
+            safety,
+            error_prefix="safety_invariant",
+            false_keys=tuple(SAFETY_FALSE_KEYS),
+        )
+    )
+    errors.extend(
+        review_outcome_state_validation_errors(
+            review_outcome_state_from(artifact),
+            expected_source_role="handoff_boundary_closure_lifecycle_evidence",
+            false_keys=("promote_or_live_authority_created",),
+        )
+    )
     return errors
 
 
-def build_markdown(packet: dict[str, Any]) -> str:
+def build_markdown(artifact: dict[str, Any]) -> str:
     return "\n".join(
         [
             "---",
@@ -184,18 +213,23 @@ def build_markdown(packet: dict[str, Any]) -> str:
             "",
             "## Summary",
             "",
-            f"- Status: `{packet.get('status')}`",
+            f"- Status: `{artifact.get('status')}`",
             "- Scope: VCB / LSR / BRF missing handoff boundaries are explicit.",
-            "- Actionability: `false`",
-            "- Real order authority: `false`",
+            "- Runtime safety gate required before any live action.",
             "",
             "## Rows",
             "",
-            _rows_table(_dict_rows(packet.get("rows"))),
+            _rows_table(_dict_rows(artifact.get("rows"))),
             "",
             "## Boundary",
             "",
-            "This packet is local governance evidence only. It does not promote a StrategyGroup, satisfy live RequiredFacts, call FinalGate, call Operation Layer, or authorize a real order.",
+            "This artifact is local governance evidence only. It does not promote a StrategyGroup, satisfy live RequiredFacts, call FinalGate, call Operation Layer, or authorize a real order.",
+            "",
+            "## Review Outcome State",
+            "",
+            f"- Source role: `{review_outcome_value(artifact, 'source_role')}`",
+            f"- Tradeability decision source: `{review_outcome_value(artifact, 'tradeability_decision_source')}`",
+            f"- Default next step: `{review_outcome_default_next_step(artifact)}`",
         ]
     ).rstrip() + "\n"
 
@@ -247,25 +281,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.check:
-        packet = _load_json(Path(args.output_json).expanduser())
-        errors = validate_packet(packet)
+        artifact = _load_json(Path(args.output_json).expanduser())
+        errors = validate_artifact(artifact)
         result = {
             "status": "passed" if not errors else "failed",
             "error_count": len(errors),
             "errors": errors,
-            "row_count": len(_dict_rows(packet.get("rows"))),
+            "row_count": len(_dict_rows(artifact.get("rows"))),
         }
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if not errors else 2
 
-    packet = build_handoff_boundary_closure(
+    artifact = build_handoff_boundary_closure(
         _load_json(Path(args.quality_wave_json).expanduser())
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     _write_text(Path(args.output_json).expanduser(), payload + "\n")
-    _write_text(Path(args.output_owner_progress).expanduser(), build_markdown(packet))
+    _write_text(Path(args.output_owner_progress).expanduser(), build_markdown(artifact))
     print(payload)
-    return 0 if packet["status"] == "handoff_boundary_closure_ready" else 2
+    return 0 if artifact["status"] == "handoff_boundary_closure_ready" else 2
 
 
 if __name__ == "__main__":

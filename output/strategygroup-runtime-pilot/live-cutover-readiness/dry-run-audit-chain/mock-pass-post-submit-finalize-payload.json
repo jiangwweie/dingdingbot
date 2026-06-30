@@ -1,0 +1,22 @@
+{
+  "artifact_id": "dry-run-post-submit-finalize-1",
+  "authorization_id": "dry-run-consumed-auth-1",
+  "blockers": [],
+  "next_attempt_gate": {
+    "active_positions_count": 0,
+    "attempts_remaining": 1,
+    "blockers": [],
+    "budget_remaining": "10",
+    "runtime_instance_id": "dry-run-runtime-mpg-001",
+    "status": "ready_for_fresh_signal",
+    "warnings": []
+  },
+  "post_submit_budget_settled": true,
+  "post_submit_finalize_complete": true,
+  "post_submit_reconciliation_evidence_id": "dry-run-reconciliation-1",
+  "post_submit_reconciliation_matched": true,
+  "runtime_instance_id": "dry-run-runtime-mpg-001",
+  "status": "finalized_ready_for_next_attempt",
+  "submit_outcome_review_recorded": true,
+  "warnings": []
+}

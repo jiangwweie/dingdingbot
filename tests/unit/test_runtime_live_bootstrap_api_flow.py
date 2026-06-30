@@ -61,7 +61,7 @@ class _FakeClient:
                 "body": {
                     "admission_decision_id": "decision-1",
                     "trial_constraint_snapshot_id": "constraint-1",
-                    "decision": "admit_with_constraints",
+                    "admission_result": "admit_with_constraints",
                 },
             }
         if path.endswith("/admissions/risk-acceptances"):
@@ -76,7 +76,7 @@ class _FakeClient:
                     "operation_id": "operation-1",
                     "preflight_id": "preflight-1",
                     "idempotency_key": "idem-1",
-                    "decision": "allow",
+                    "preflight_result": "allow",
                     "risk_summary": {"blockers": []},
                 },
             }
@@ -149,6 +149,21 @@ def test_bootstrap_creates_shadow_runtime_without_submit_endpoints():
     assert not any("first-real-submit-actions" in path for path in paths)
     assert not any("exchange-submit" in path for path in paths)
     assert not any("order-candidates" in path for path in paths)
+    assert all("decision" not in step for step in report["steps"])
+    preflight_steps = [
+        step
+        for step in report["steps"]
+        if step["name"] == "preflight_create_gated_trial"
+    ]
+    assert preflight_steps[0]["step_result"] == {"preflight_result": "allow"}
+    admission_steps = [
+        step
+        for step in report["steps"]
+        if step["name"] == "evaluate_admission_request"
+    ]
+    assert admission_steps[0]["step_result"] == {
+        "admission_result": "admit_with_constraints"
+    }
 
 
 def test_bootstrap_creates_strategy_version_with_selected_supported_symbols():

@@ -1,19 +1,45 @@
 #!/usr/bin/env python3
-"""Summarize active runtime observation packets without side effects."""
+"""Summarize active runtime observation artifacts without side effects."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import time
 from pathlib import Path
 from typing import Any
 
 
-PACKET_NAMES = (
-    "supervisor-packet.json",
-    "loop-packet.json",
-    "followup-packet.json",
+@dataclass(frozen=True)
+class ObservationArtifactSource:
+    role: str
+    artifact_name: str
+    path: Path
+
+    @property
+    def label(self) -> str:
+        return self.path.name
+
+    def as_dict(self, *, loaded: bool) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "artifact_name": self.artifact_name,
+            "source_path": str(self.path),
+            "loaded": loaded,
+        }
+
+
+ARTIFACT_SOURCE_SPECS = (
+    ("supervisor", "supervisor-artifact.json"),
+    ("loop", "loop-artifact.json"),
+    ("followup", "followup-artifact.json"),
+    ("latest_summary", "latest-summary.json"),
+)
+ARTIFACT_SOURCE_NAMES = (
+    "supervisor-artifact.json",
+    "loop-artifact.json",
+    "followup-artifact.json",
     "latest-summary.json",
 )
 
@@ -55,66 +81,82 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _packet_mtime_ms(path: Path) -> int | None:
+def _artifact_mtime_ms(path: Path) -> int | None:
     if not path.exists():
         return None
     return int(path.stat().st_mtime * 1000)
 
 
-def _latest_packet_path(root: Path) -> Path | None:
-    existing = [root / name for name in PACKET_NAMES if (root / name).exists()]
+def _latest_artifact_path(root: Path) -> Path | None:
+    existing = [root / name for name in ARTIFACT_SOURCE_NAMES if (root / name).exists()]
     if not existing:
         return None
     return max(existing, key=lambda path: path.stat().st_mtime)
 
 
-def _collect_forbidden_effects(*packets: dict[str, Any] | None) -> list[str]:
+def _preferred_artifact_source(
+    root: Path,
+    *,
+    role: str,
+    artifact_name: str,
+) -> ObservationArtifactSource:
+    artifact_path = root / artifact_name
+    return ObservationArtifactSource(
+        role=role,
+        artifact_name=artifact_name,
+        path=artifact_path,
+    )
+
+
+def _collect_forbidden_effects(
+    *items: tuple[ObservationArtifactSource, dict[str, Any] | None],
+) -> list[str]:
     effects: list[str] = []
-    for packet_name, packet in zip(PACKET_NAMES, packets, strict=False):
-        if not packet:
+    for source, artifact in items:
+        if not artifact:
             continue
-        safety = packet.get("safety_invariants")
+        safety = artifact.get("safety_invariants")
         if not isinstance(safety, dict):
             continue
         for flag in FORBIDDEN_SAFETY_FLAGS:
             if _allowed_operation_layer_evidence_prep_effect(
-                packet_name=packet_name,
-                packet=packet,
+                source=source,
+                artifact=artifact,
                 safety=safety,
                 flag=flag,
             ):
                 continue
             if bool(safety.get(flag)):
-                effects.append(f"{packet_name}:{flag}")
+                effects.append(f"{source.label}:{flag}")
         for effect in safety.get("forbidden_effects") or []:
-            effects.append(f"{packet_name}:{effect}")
+            effects.append(f"{source.label}:{effect}")
         for effect in safety.get("loop_forbidden_effects") or []:
-            effects.append(f"{packet_name}:loop:{effect}")
+            effects.append(f"{source.label}:loop:{effect}")
         for effect in safety.get("arm_preview_forbidden_effects") or []:
-            effects.append(f"{packet_name}:arm_preview:{effect}")
+            effects.append(f"{source.label}:arm_preview:{effect}")
         for effect in safety.get("disabled_smoke_forbidden_effects") or []:
-            effects.append(f"{packet_name}:disabled_smoke:{effect}")
+            effects.append(f"{source.label}:disabled_smoke:{effect}")
     return effects
 
 
 def _allowed_operation_layer_evidence_prep_effect(
     *,
-    packet_name: str,
-    packet: dict[str, Any],
+    source: ObservationArtifactSource,
+    artifact: dict[str, Any],
     safety: dict[str, Any],
     flag: str,
 ) -> bool:
     if (
-        packet_name != "followup-packet.json"
+        source.role != "followup"
         or flag not in ALLOWED_OPERATION_LAYER_EVIDENCE_PREP_FLAGS
         or not bool(safety.get(flag))
     ):
         return False
-    plan = packet.get("operator_command_plan")
+    plan = artifact.get("followup_plan")
     if not isinstance(plan, dict):
         plan = {}
     evidence_prep_allowed = (
-        plan.get("mutating_attempt_consumption_allowed_by_this_packet") is True
+        plan.get("mutating_attempt_consumption_allowed_by_this_artifact") is True
         or safety.get("attempt_policy_prepare_called") is True
     )
     evidence_prep_called = (
@@ -137,40 +179,40 @@ def _allowed_operation_layer_evidence_prep_effect(
 
 
 def _collect_allowed_operation_layer_evidence_prep(
-    *packets: dict[str, Any] | None,
+    *items: tuple[ObservationArtifactSource, dict[str, Any] | None],
 ) -> list[str]:
     effects: list[str] = []
-    for packet_name, packet in zip(PACKET_NAMES, packets, strict=False):
-        if not packet:
+    for source, artifact in items:
+        if not artifact:
             continue
-        safety = packet.get("safety_invariants")
+        safety = artifact.get("safety_invariants")
         if not isinstance(safety, dict):
             continue
         for flag in ALLOWED_OPERATION_LAYER_EVIDENCE_PREP_FLAGS:
             if _allowed_operation_layer_evidence_prep_effect(
-                packet_name=packet_name,
-                packet=packet,
+                source=source,
+                artifact=artifact,
                 safety=safety,
                 flag=flag,
             ):
-                effects.append(f"{packet_name}:{flag}")
+                effects.append(f"{source.label}:{flag}")
     return effects
 
 
 def _collect_allowed_prepare_records(
-    *packets: dict[str, Any] | None,
+    *artifacts: dict[str, Any] | None,
 ) -> dict[str, bool]:
     observed = {flag: False for flag in ALLOWED_PREPARE_RECORD_FLAGS}
-    for packet in packets:
-        if not packet:
+    for artifact in artifacts:
+        if not artifact:
             continue
-        safety = packet.get("safety_invariants")
+        safety = artifact.get("safety_invariants")
         if not isinstance(safety, dict):
             safety = {}
         for flag in ALLOWED_PREPARE_RECORD_FLAGS:
-            if bool(packet.get(flag)) or bool(safety.get(flag)):
+            if bool(artifact.get(flag)) or bool(safety.get(flag)):
                 observed[flag] = True
-        created = packet.get("created_records")
+        created = artifact.get("created_records")
         if isinstance(created, dict):
             if bool(created.get("shadow_candidate_created")):
                 observed["shadow_candidate_created"] = True
@@ -222,7 +264,7 @@ def _runtime_signal_summaries(summary: dict[str, Any] | None) -> list[dict[str, 
     return result
 
 
-def build_status_packet(
+def build_status_artifact(
     output_dir: str | Path,
     *,
     stale_after_seconds: float = 900.0,
@@ -231,42 +273,51 @@ def build_status_packet(
     root = Path(output_dir).expanduser()
     now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
 
-    supervisor_path = root / "supervisor-packet.json"
-    loop_path = root / "loop-packet.json"
-    followup_path = root / "followup-packet.json"
-    latest_summary_path = root / "latest-summary.json"
+    source_by_role = {
+        role: _preferred_artifact_source(
+            root,
+            role=role,
+            artifact_name=artifact_name,
+        )
+        for role, artifact_name in ARTIFACT_SOURCE_SPECS
+    }
+    supervisor_source = source_by_role["supervisor"]
+    loop_source = source_by_role["loop"]
+    followup_source = source_by_role["followup"]
+    latest_summary_source = source_by_role["latest_summary"]
 
-    supervisor = _read_json(supervisor_path)
-    loop = _read_json(loop_path)
-    followup = _read_json(followup_path)
-    latest_summary = _read_json(latest_summary_path)
+    supervisor = _read_json(supervisor_source.path)
+    loop = _read_json(loop_source.path)
+    followup = _read_json(followup_source.path)
+    latest_summary = _read_json(latest_summary_source.path)
     if latest_summary is None and isinstance(loop, dict):
         maybe_summary = loop.get("latest_summary")
         latest_summary = maybe_summary if isinstance(maybe_summary, dict) else None
+    source_items = (
+        (supervisor_source, supervisor),
+        (loop_source, loop),
+        (followup_source, followup),
+        (latest_summary_source, latest_summary),
+    )
 
-    latest_path = _latest_packet_path(root)
-    latest_mtime_ms = _packet_mtime_ms(latest_path) if latest_path else None
+    latest_path = _latest_artifact_path(root)
+    latest_mtime_ms = _artifact_mtime_ms(latest_path) if latest_path else None
     latest_age_seconds = (
         max((now_ms - latest_mtime_ms) / 1000, 0)
         if latest_mtime_ms is not None
         else None
     )
-    packet_stale = (
+    artifact_stale = (
         latest_age_seconds is None or latest_age_seconds > float(stale_after_seconds)
     )
 
     latest_status = None
-    for packet in (followup, loop, latest_summary, supervisor):
-        if isinstance(packet, dict) and packet.get("status"):
-            latest_status = packet.get("status")
+    for artifact in (followup, loop, latest_summary, supervisor):
+        if isinstance(artifact, dict) and artifact.get("status"):
+            latest_status = artifact.get("status")
             break
 
-    forbidden_effects = _collect_forbidden_effects(
-        supervisor,
-        loop,
-        followup,
-        latest_summary,
-    )
+    forbidden_effects = _collect_forbidden_effects(*source_items)
     allowed_prepare_records = _collect_allowed_prepare_records(
         supervisor,
         loop,
@@ -274,29 +325,24 @@ def build_status_packet(
         latest_summary,
     )
     allowed_operation_layer_evidence_prep_effects = (
-        _collect_allowed_operation_layer_evidence_prep(
-            supervisor,
-            loop,
-            followup,
-            latest_summary,
-        )
+        _collect_allowed_operation_layer_evidence_prep(*source_items)
     )
     blockers: list[str] = []
     warnings: list[str] = []
-    for packet in (supervisor, loop, followup, latest_summary):
-        if not isinstance(packet, dict):
+    for artifact in (supervisor, loop, followup, latest_summary):
+        if not isinstance(artifact, dict):
             continue
-        blockers.extend(str(item) for item in packet.get("blockers") or [])
-        warnings.extend(str(item) for item in packet.get("warnings") or [])
-    if packet_stale:
-        blockers.append("active_observation_packets_stale_or_missing")
+        blockers.extend(str(item) for item in artifact.get("blockers") or [])
+        warnings.extend(str(item) for item in artifact.get("warnings") or [])
+    if artifact_stale:
+        blockers.append("active_observation_artifacts_stale_or_missing")
     if forbidden_effects:
         blockers.append("active_observation_forbidden_effects_detected")
 
     status = "ok"
     if forbidden_effects:
         status = "blocked_forbidden_effect"
-    elif packet_stale:
+    elif artifact_stale:
         status = "stale"
     elif latest_status in {"blocked", "disabled_smoke_blocked", "supervisor_blocked"}:
         status = "blocked"
@@ -317,14 +363,16 @@ def build_status_packet(
     elif latest_status == "waiting_for_signal":
         status = "waiting_for_signal"
 
-    latest_summary_operator_plan = (
-        latest_summary.get("operator_command_plan")
+    latest_summary_observation_plan = (
+        latest_summary.get("observation_plan")
         if isinstance(latest_summary, dict)
         else None
     )
-    loop_operator_plan = loop.get("operator_command_plan") if isinstance(loop, dict) else None
-    followup_operator_plan = (
-        followup.get("operator_command_plan") if isinstance(followup, dict) else None
+    loop_observation_plan = (
+        loop.get("observation_loop_plan") if isinstance(loop, dict) else None
+    )
+    followup_plan = (
+        followup.get("followup_plan") if isinstance(followup, dict) else None
     )
 
     iterations_requested = (
@@ -346,10 +394,14 @@ def build_status_packet(
         "status": status,
         "output_dir": str(root),
         "latest_status": latest_status,
-        "latest_packet": str(latest_path) if latest_path else None,
-        "latest_packet_age_seconds": latest_age_seconds,
+        "latest_artifact": str(latest_path) if latest_path else None,
+        "artifact_sources": [
+            source.as_dict(loaded=artifact is not None)
+            for source, artifact in source_items
+        ],
+        "latest_artifact_age_seconds": latest_age_seconds,
         "stale_after_seconds": float(stale_after_seconds),
-        "packet_stale": packet_stale,
+        "artifact_stale": artifact_stale,
         "supervisor_status": supervisor.get("status") if isinstance(supervisor, dict) else None,
         "loop_status": loop.get("status") if isinstance(loop, dict) else None,
         "followup_status": followup.get("status") if isinstance(followup, dict) else None,
@@ -404,24 +456,20 @@ def build_status_packet(
         "allowed_operation_layer_evidence_prep_effects": (
             allowed_operation_layer_evidence_prep_effects
         ),
-        "operator_command_plan": {
-            "not_executed": True,
+        "observation_plan": {
+            "not_execution_authority": True,
             "latest_summary_next_step": (
-                latest_summary_operator_plan or {}
+                latest_summary_observation_plan or {}
             ).get("next_step"),
-            "loop_next_step": (loop_operator_plan or {}).get("next_step"),
-            "followup_next_step": (followup_operator_plan or {}).get("next_step"),
+            "loop_next_step": (loop_observation_plan or {}).get("next_step"),
+            "followup_next_step": (followup_plan or {}).get("next_step"),
             "observation_next_step": _observation_next_step(
                 status=status,
                 stop_reason=stop_reason,
             ),
-            "creates_execution_intent": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
         },
         "safety_invariants": {
-            "read_packets_only": True,
+            "read_artifacts_only": True,
             "connects_to_api": False,
             "connects_to_exchange": False,
             "creates_prepare_records": False,
@@ -464,7 +512,7 @@ def _observation_next_step(*, status: str, stop_reason: str | None) -> str:
     if stop_reason == "running":
         return "continue_active_observation_loop"
     if status == "attention":
-        return "review_non_executing_prepare_or_preview_packet"
+        return "review_non_executing_prepare_or_preview_artifact"
     if status.startswith("blocked"):
         return "resolve_active_observation_status_blocker"
     if status == "stale":
@@ -474,18 +522,18 @@ def _observation_next_step(*, status: str, stop_reason: str | None) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Summarize runtime active observation packet state."
+        description="Summarize runtime active observation artifact state."
     )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--output-json")
     parser.add_argument("--stale-after-seconds", type=float, default=900.0)
     args = parser.parse_args()
 
-    packet = build_status_packet(
+    artifact = build_status_artifact(
         args.output_dir,
         stale_after_seconds=args.stale_after_seconds,
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         path = Path(args.output_json).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,14 +1,15 @@
 """Trading Console aggregation and Owner action-entry read models.
 
-This module composes existing repositories and runtime adapters into frontend
-responses. This namespace intentionally has no mutation methods and never calls
-exchange write APIs; product actions are surfaced as official Operation Layer /
-FinalGate handoffs.
+This module composes existing repositories and runtime adapters into
+Owner-runtime responses. This namespace intentionally has no mutation methods
+and never calls exchange write APIs; product actions are surfaced as official
+Operation Layer / FinalGate handoffs.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import os
@@ -56,25 +57,35 @@ from src.domain.right_tail_review import (
     RightTailTradePathFacts,
     summarize_right_tail_reviews,
 )
-from src.domain.runtime_semantic_review_packet import (
-    summarize_runtime_semantic_review_packets,
+from src.domain.runtime_semantic_review_artifact import (
+    summarize_runtime_semantic_review_artifacts,
 )
 from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
+from src.application.readmodels.owner_projection import (
+    OwnerConsoleRealOrderReadinessProjection as _OwnerConsoleRealOrderReadinessProjection,
+    owner_console_binary_label_source as _owner_console_binary_label_source,
+    owner_console_detail_source as _owner_console_detail_source,
+    owner_console_owner_state_projection as _owner_console_owner_state_projection,
+    owner_non_authority_checkpoint as _owner_non_authority_checkpoint,
+    owner_state_source_checkpoint as _owner_state_source_checkpoint,
+    owner_state_with_explicit_action_authority as _owner_state_with_explicit_action_authority,
+    owner_state_without_legacy_input_recovery_action as _owner_state_without_legacy_input_recovery_action,
+)
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
-from scripts.build_strategy_group_handoff_intake_packet import (
+from scripts.build_strategy_group_handoff_intake_artifact import (
     DEFAULT_HANDOFF_DIR as DEFAULT_STRATEGY_GROUP_HANDOFF_DIR,
     DEFAULT_SOURCE_BRANCH as DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH,
     DEFAULT_SOURCE_COMMIT as DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT,
     DEFAULT_SOURCE_REPO as DEFAULT_STRATEGY_GROUP_HANDOFF_REPO,
-    build_packet as build_strategy_group_handoff_intake_packet,
+    build_artifact as build_strategy_group_handoff_intake_artifact,
 )
-from scripts.build_strategy_group_live_facts_readiness_packet import (
-    build_packet as build_strategy_group_live_facts_readiness_packet,
+from scripts.build_strategy_group_live_facts_readiness_artifact import (
+    build_readiness_artifact as build_strategy_group_live_facts_readiness_artifact,
 )
 from scripts.build_strategygroup_runtime_pilot_status import (
-    build_packet as build_strategygroup_runtime_pilot_status_packet,
+    build_status_artifact as build_strategygroup_runtime_pilot_status_artifact,
 )
 
 
@@ -83,9 +94,9 @@ DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
 DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
 DEFAULT_STRATEGY_GROUP_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/strategygroup-runtime-pilot"
-DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH = (
+DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "strategy-group-handoff-intake-packet.json"
+    "strategy-group-intake-evidence.json"
 )
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
@@ -113,7 +124,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
-    "scoped_pipeline_operation_layer_handoff_checked",
+    "scoped_pipeline_operation_layer_submit_projection_checked",
     "fresh_signal_fast_auto_chain_checked",
     "legacy_local_registration_probe_tolerance_checked",
     "mock_operation_layer_closed_loop_checked",
@@ -124,18 +135,18 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "post_submit_closed_loop_evidence_guard_checked",
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
-    "non_executing_prepare_auto_bridge_checked",
+    "execution_attempt_rehearsal_prepare_checked",
     "shared_runtime_pipeline_checked",
     "common_execution_chain_reuse_checked",
     "strategygroup_adapter_boundary_checked",
-    "strategy_handoff_no_execution_pipeline_fields_checked",
+    "strategy_intake_no_execution_pipeline_fields_checked",
     "runtime_tier_policy_checked",
     "only_mpg_tiny_real_order_eligible_checked",
     "new_strategygroups_default_observe_only_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
-DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
+DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_GLOB = "strategy-group-intake-evidence-*.json"
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
@@ -164,45 +175,45 @@ def _runtime_signal_watcher_owner_state(
     unsafe_flags: list[str],
     can_resume_steps_5_8: bool,
 ) -> dict[str, Any]:
-    """Translate watcher packet fields into an Owner-facing recovery summary."""
+    """Translate watcher evidence fields into an Owner-facing recovery summary."""
 
     if unsafe_flags:
         blocked_at = "watcher_safety_invariants"
         blocked_reason = "watcher_evidence_contains_forbidden_effect_flags"
-        automatic_recovery_action = "stop_resume_path_and_investigate_watcher_evidence"
+        non_authority_checkpoint = "stop_resume_path_and_investigate_watcher_evidence"
         state = {
             "status": "blocked_hard_safety_stop",
             "blocker_class": "hard_safety_stop",
             "blocked_at": blocked_at,
             "blocked_reason": blocked_reason,
             "next_recover_condition": "forbidden_effect_flags_are_absent_in_current_evidence",
-            "automatic_recovery_action": automatic_recovery_action,
+            "non_authority_checkpoint": non_authority_checkpoint,
             "downgrade_mode": "manual_review_only",
         }
     elif missing:
         blocked_at = "runtime_signal_watcher_evidence"
         blocked_reason = "watcher_evidence_missing"
-        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        non_authority_checkpoint = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
         state = {
             "status": "blocked_deployment_issue",
             "blocker_class": "deployment_issue",
             "blocked_at": blocked_at,
             "blocked_reason": blocked_reason,
             "next_recover_condition": "watcher_evidence_files_are_present",
-            "automatic_recovery_action": automatic_recovery_action,
+            "non_authority_checkpoint": non_authority_checkpoint,
             "downgrade_mode": "observe_only_no_candidate_prepare",
         }
     elif stale:
         blocked_at = "runtime_signal_watcher_evidence"
         blocked_reason = "watcher_evidence_stale"
-        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        non_authority_checkpoint = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
         state = {
             "status": "blocked_deployment_issue",
             "blocker_class": "deployment_issue",
             "blocked_at": blocked_at,
             "blocked_reason": blocked_reason,
             "next_recover_condition": "watcher_evidence_files_are_fresh",
-            "automatic_recovery_action": automatic_recovery_action,
+            "non_authority_checkpoint": non_authority_checkpoint,
             "downgrade_mode": "observe_only_no_candidate_prepare",
         }
     else:
@@ -217,13 +228,13 @@ def _runtime_signal_watcher_owner_state(
             post_signal_auto_resume.get("blocked_reason")
             or ("none" if can_resume_steps_5_8 else "no_fresh_strategy_signal")
         )
-        automatic_recovery_action = str(
-            post_signal_auto_resume.get("automatic_recovery_action")
-            or (
+        non_authority_checkpoint, checkpoint_source = _owner_state_source_checkpoint(
+            post_signal_auto_resume,
+            default=(
                 "continue_to_non_executing_prepare"
                 if can_resume_steps_5_8
                 else "continue_watcher_observation"
-            )
+            ),
         )
         blocker_class = "none"
         if blocked_reason != "none":
@@ -245,7 +256,8 @@ def _runtime_signal_watcher_owner_state(
                     else "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
                 )
             ),
-            "automatic_recovery_action": automatic_recovery_action,
+            "non_authority_checkpoint": non_authority_checkpoint,
+            "checkpoint_source": checkpoint_source,
             "downgrade_mode": str(
                 post_signal_auto_resume.get("downgrade_mode")
                 or ("armed_observation" if can_resume_steps_5_8 else "observe_only")
@@ -332,6 +344,145 @@ def _runtime_signal_watcher_action_time_resume(
     }
 
 
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherDeploymentProjection:
+    status: str
+    report_dir: Path
+    file_status: dict[str, dict[str, Any]]
+    latest_evidence_age_seconds: int | None
+    stale_after_seconds: int
+    feishu_configured: bool
+    notification_state: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "report_dir": str(self.report_dir),
+            "file_status": copy.deepcopy(self.file_status),
+            "latest_evidence_age_seconds": self.latest_evidence_age_seconds,
+            "stale_after_seconds": self.stale_after_seconds,
+            "systemd_timer": "verified_by_deployment_readiness_artifact",
+            "feishu_configured": self.feishu_configured,
+            "duplicate_suppression": (
+                "active"
+                if self.notification_state.get("last_notified_event_key")
+                else "not_yet_observed"
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherStatusProjection:
+    watcher_tick: dict[str, Any]
+    watcher_status_evidence: dict[str, Any]
+    wakeup_status: str
+    operator_status: str
+    watcher_status_evidence_status: str
+    post_signal_auto_resume: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.watcher_tick.get("status") or "unknown",
+            "wakeup_status": self.wakeup_status,
+            "operator_status": self.operator_status,
+            "watcher_status_evidence_status": self.watcher_status_evidence_status,
+            "runtime_signal_summaries": self.watcher_status_evidence.get(
+                "runtime_signal_summaries"
+            )
+            or [],
+            "blockers": (
+                self.watcher_tick.get("blockers")
+                or self.watcher_status_evidence.get("blockers")
+                or []
+            ),
+            "warnings": (
+                self.watcher_tick.get("warnings")
+                or self.watcher_status_evidence.get("warnings")
+                or []
+            ),
+            "post_signal_auto_resume": copy.deepcopy(self.post_signal_auto_resume),
+        }
+
+
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherEvidenceProjection:
+    evidence: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.evidence.get("status") or "unknown",
+            "latest_status": self.evidence.get("latest_status"),
+            "runtime_signal_summaries": self.evidence.get(
+                "runtime_signal_summaries"
+            )
+            or [],
+        }
+
+
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherNotificationProjection:
+    notification: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "required": bool(self.notification.get("required")),
+            "configured": bool(self.notification.get("configured")),
+            "attempted": bool(self.notification.get("attempted")),
+            "sent": bool(self.notification.get("sent")),
+            "duplicate_suppressed": bool(
+                self.notification.get("duplicate_suppressed")
+            ),
+            "skipped_reason": self.notification.get("skipped_reason"),
+        }
+
+
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherResumeProjection:
+    action_time_resume: dict[str, Any]
+    can_resume_steps_5_8: bool
+    post_signal_auto_resume: dict[str, Any]
+    resume_pack_path: Path
+    resume_pack_present: bool
+    raw_resume_pack_status: Any
+
+    def to_dict(self) -> dict[str, Any]:
+        status = str(self.action_time_resume.get("status") or "")
+        return {
+            "status": status,
+            "can_continue_steps_5_8": self.can_resume_steps_5_8,
+            "current_gate": (
+                "action_time_final_gate"
+                if status == "ready_for_action_time_final_gate"
+                else "waiting_for_fresh_strategy_signal"
+                if status == "waiting_for_market"
+                else "blocked"
+            ),
+            "post_signal_auto_resume": copy.deepcopy(self.post_signal_auto_resume),
+            "action_time_resume": copy.deepcopy(self.action_time_resume),
+            "resume_pack_path": str(self.resume_pack_path),
+            "resume_pack_present": self.resume_pack_present,
+            "raw_resume_pack_status": self.raw_resume_pack_status,
+        }
+
+
+@dataclass(frozen=True)
+class _RuntimeSignalWatcherSafetyProjection:
+    safety: dict[str, Any]
+    unsafe_flags: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **{
+                name: bool(self.safety.get(name))
+                for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
+            },
+            "forbidden_effect_flags": list(self.unsafe_flags),
+            "watcher_status_read_model_only": True,
+            "places_order": False,
+            "mutates_pg": False,
+        }
+
+
 class TradingConsoleReadModelResponse(BaseModel):
     """Envelope shared by all Trading Console read models."""
 
@@ -406,6 +557,15 @@ class TradingConsoleSnapshot:
     exchange: dict[str, Any]
     warnings: list[dict[str, Any]]
     unavailable: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class BudgetedAutonomyProjectionBoundary:
+    authorization: BudgetedAutonomyAuthorization
+    candidates: list[BudgetedAutonomyCandidateInput]
+    positions: list[BudgetedAutonomyPositionEvidence]
+    review_ledger: dict[str, Any]
+    max_attempts: int
 
 
 class TradingConsoleReadModelService:
@@ -943,7 +1103,7 @@ class TradingConsoleReadModelService:
             }
             for record in state.blocker_records
         ]
-        if state.scope_review.verdict != "complete_dry_run_only":
+        if state.scope_review.status != "complete_dry_run_only":
             blockers.insert(
                 0,
                 {
@@ -1126,7 +1286,7 @@ class TradingConsoleReadModelService:
             data={
                 "overall_status": overall,
                 "primary_message": overall["message"],
-                "primary_next_action": overall["primary_next_action"],
+                "primary_runtime_checkpoint": overall["primary_runtime_checkpoint"],
                 "autonomy_effective_state": autonomy.get("autonomy_effective_state"),
                 "budget_effective_state": budget.get("budget_effective_state"),
                 "budget_authorization_status": budget.get("budget_authorization_status"),
@@ -1199,7 +1359,7 @@ class TradingConsoleReadModelService:
                 "stage": item.get("stage"),
                 "path": item.get("path"),
                 "severity": item.get("severity"),
-                "bridge": item.get("bridge"),
+                "recovery_action": item.get("recovery_action"),
                 "retry_condition": item.get("retry_condition"),
             }
             for item in budget.get("blockers", [])
@@ -1544,18 +1704,18 @@ class TradingConsoleReadModelService:
         ).expanduser()
         files = {
             "watcher_tick": report_dir / "watcher-tick.json",
-            "wakeup_packet": report_dir / "wakeup-packet.json",
-            "operator_packet": report_dir / "operator-packet.json",
-            "status_packet": report_dir / "status-packet.json",
+            "wakeup_evidence": report_dir / "wakeup-evidence.json",
+            "operator_evidence": report_dir / "operator-evidence.json",
+            "watcher_status_evidence": report_dir / "status-artifact.json",
             "notification_state": report_dir / "notification-state.json",
         }
         payloads = {name: _read_json_file(path) for name, path in files.items()}
         resume_pack_path = report_dir / "post-signal-resume-pack.json"
         resume_pack = _read_json_file(resume_pack_path)
         watcher_tick = payloads["watcher_tick"]
-        wakeup_packet = payloads["wakeup_packet"]
-        operator_packet = payloads["operator_packet"]
-        status_packet = payloads["status_packet"]
+        wakeup_evidence = payloads["wakeup_evidence"]
+        operator_evidence = payloads["operator_evidence"]
+        watcher_status_evidence = payloads["watcher_status_evidence"]
         notification_state = payloads["notification_state"]
         file_status = {
             name: {
@@ -1585,16 +1745,24 @@ class TradingConsoleReadModelService:
             if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
             else {}
         )
+        post_signal_auto_resume = _owner_state_without_legacy_input_recovery_action(
+            post_signal_auto_resume
+        )
         unsafe_flags = [
             name for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
             if safety.get(name) not in {False, None}
         ]
         notification = watcher_tick.get("notification") if isinstance(watcher_tick, dict) else {}
         notification = notification if isinstance(notification, dict) else {}
-        wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_packet.get("status") or "unknown")
-        operator_status = str(watcher_tick.get("operator_status") or operator_packet.get("status") or "unknown")
-        status_packet_status = str(
-            watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown"
+        wakeup_status = str(
+            watcher_tick.get("wakeup_status") or wakeup_evidence.get("status") or "unknown"
+        )
+        operator_status = str(
+            watcher_tick.get("operator_status") or operator_evidence.get("status") or "unknown"
+        )
+        watcher_status_evidence_status = str(
+            watcher_status_evidence.get("status")
+            or "unknown"
         )
         resume_pack_can_continue = resume_pack.get("can_continue_steps_5_8")
         can_resume_steps_5_8 = (
@@ -1648,6 +1816,19 @@ class TradingConsoleReadModelService:
                 "requires_official_operation_layer",
                 bool(action_time_resume.get("requires_official_operation_layer")),
             )
+        owner_state = _owner_state_with_explicit_action_authority(
+            owner_state=owner_state,
+            action_time_resume=action_time_resume,
+        )
+        owner_checkpoint = _owner_non_authority_checkpoint(
+            owner_state,
+            default="review_current_state",
+        )
+        owner_state_projection = {
+            **_owner_state_without_legacy_input_recovery_action(owner_state),
+            "non_authority_checkpoint": owner_checkpoint,
+            "checkpoint_source": str(owner_state.get("checkpoint_source") or "owner_state"),
+        }
 
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -1690,84 +1871,47 @@ class TradingConsoleReadModelService:
             blockers=blockers,
             unavailable=[],
             data={
-                "deployment_readiness": {
-                    "status": readiness_status,
-                    "report_dir": str(report_dir),
-                    "file_status": file_status,
-                    "latest_evidence_age_seconds": age_seconds,
-                    "stale_after_seconds": stale_after_seconds,
-                    "systemd_timer": "verified_by_deployment_readiness_packet",
-                    "feishu_configured": bool(notification.get("configured")),
-                    "duplicate_suppression": "active"
-                    if notification_state.get("last_notified_event_key")
-                    else "not_yet_observed",
-                },
-                "watcher": {
-                    "status": watcher_tick.get("status") or "unknown",
-                    "wakeup_status": wakeup_status,
-                    "operator_status": operator_status,
-                    "status_packet_status": status_packet_status,
-                    "runtime_signal_summaries": status_packet.get(
-                        "runtime_signal_summaries"
-                    )
-                    or [],
-                    "blockers": watcher_tick.get("blockers") or status_packet.get("blockers") or [],
-                    "warnings": watcher_tick.get("warnings") or status_packet.get("warnings") or [],
-                    "post_signal_auto_resume": post_signal_auto_resume,
-                },
-                "status_packet": {
-                    "status": status_packet.get("status") or "unknown",
-                    "latest_status": status_packet.get("latest_status"),
-                    "runtime_signal_summaries": status_packet.get(
-                        "runtime_signal_summaries"
-                    )
-                    or [],
-                },
-                "notification": {
-                    "required": bool(notification.get("required")),
-                    "configured": bool(notification.get("configured")),
-                    "attempted": bool(notification.get("attempted")),
-                    "sent": bool(notification.get("sent")),
-                    "duplicate_suppressed": bool(notification.get("duplicate_suppressed")),
-                    "skipped_reason": notification.get("skipped_reason"),
-                },
-                "post_signal_resume": {
-                    "status": action_time_resume["status"],
-                    "can_continue_steps_5_8": can_resume_steps_5_8,
-                    "current_gate": (
-                        "action_time_final_gate"
-                        if action_time_resume["status"]
-                        == "ready_for_action_time_final_gate"
-                        else "waiting_for_fresh_strategy_signal"
-                        if action_time_resume["status"] == "waiting_for_market"
-                        else "blocked"
-                    ),
-                    "post_signal_auto_resume": post_signal_auto_resume,
-                    "action_time_resume": action_time_resume,
-                    "resume_pack_path": str(resume_pack_path),
-                    "resume_pack_present": resume_pack_path.exists(),
-                    "raw_resume_pack_status": resume_pack.get("status"),
-                    "next_chain": [
-                        "fresh candidate",
-                        "runtime grant",
-                        "fresh authorization evidence",
-                        "action-time FinalGate",
-                        "official Operation Layer gateway action",
-                        "post-submit finalize / reconciliation / budget settlement",
-                    ],
-                },
+                "deployment_readiness": _RuntimeSignalWatcherDeploymentProjection(
+                    status=readiness_status,
+                    report_dir=report_dir,
+                    file_status=file_status,
+                    latest_evidence_age_seconds=age_seconds,
+                    stale_after_seconds=stale_after_seconds,
+                    feishu_configured=bool(notification.get("configured")),
+                    notification_state=notification_state,
+                ).to_dict(),
+                "watcher": _RuntimeSignalWatcherStatusProjection(
+                    watcher_tick=watcher_tick,
+                    watcher_status_evidence=watcher_status_evidence,
+                    wakeup_status=wakeup_status,
+                    operator_status=operator_status,
+                    watcher_status_evidence_status=watcher_status_evidence_status,
+                    post_signal_auto_resume=post_signal_auto_resume,
+                ).to_dict(),
+                "watcher_status_evidence": _RuntimeSignalWatcherEvidenceProjection(
+                    evidence=watcher_status_evidence,
+                ).to_dict(),
+                "notification": _RuntimeSignalWatcherNotificationProjection(
+                    notification=notification,
+                ).to_dict(),
+                "post_signal_resume": _RuntimeSignalWatcherResumeProjection(
+                    action_time_resume=action_time_resume,
+                    can_resume_steps_5_8=can_resume_steps_5_8,
+                    post_signal_auto_resume=post_signal_auto_resume,
+                    resume_pack_path=resume_pack_path,
+                    resume_pack_present=resume_pack_path.exists(),
+                    raw_resume_pack_status=resume_pack.get("status"),
+                ).to_dict(),
                 "action_time_resume": action_time_resume,
                 "post_signal_auto_resume": post_signal_auto_resume,
-                "owner_state": owner_state,
-                "why_not_executable": owner_state["why_not_executable"],
-                "next_safe_checkpoint": owner_state["automatic_recovery_action"],
-                "safety_invariants": {
-                    **{name: bool(safety.get(name)) for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)},
-                    "forbidden_effect_flags": unsafe_flags,
-                    "watcher_status_read_model_only": True,
-                    "places_order": False,
-                    "mutates_pg": False,
-                },
+                "owner_state": owner_state_projection,
+                "why_not_executable": owner_state_projection["why_not_executable"],
+                "non_authority_checkpoint": owner_checkpoint,
+                "checkpoint_source": "owner_state",
+                "safety_invariants": _RuntimeSignalWatcherSafetyProjection(
+                    safety=safety,
+                    unsafe_flags=unsafe_flags,
+                ).to_dict(),
             },
             live_ready=False,
         )
@@ -1781,21 +1925,25 @@ class TradingConsoleReadModelService:
         source_commit: Optional[str] = None,
     ) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
-        configured_packet_path = os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH")
-        default_packet_path = Path(DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH).expanduser()
-        resolved_packet_path = (
-            Path(configured_packet_path).expanduser()
-            if configured_packet_path
-            else default_packet_path
+        configured_artifact_path = os.environ.get(
+            "BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH"
         )
-        latest_packet_path = _latest_existing_path(
+        default_artifact_path = Path(
+            DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH
+        ).expanduser()
+        resolved_artifact_path = (
+            Path(configured_artifact_path).expanduser()
+            if configured_artifact_path
+            else default_artifact_path
+        )
+        latest_artifact_path = _latest_existing_path(
             Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
-            DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB,
+            DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_GLOB,
         )
-        packet_path = (
-            resolved_packet_path
-            if resolved_packet_path.exists()
-            else latest_packet_path
+        artifact_path = (
+            resolved_artifact_path
+            if resolved_artifact_path.exists()
+            else latest_artifact_path
         )
         resolved_handoff_dir = Path(
             handoff_dir
@@ -1817,34 +1965,34 @@ class TradingConsoleReadModelService:
             or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT")
             or DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT
         )
-        if packet_path is not None and handoff_dir is None:
-            packet = _read_json_file(packet_path)
-            if packet:
-                packet["handoff_packet_source"] = {
-                    "path": str(packet_path),
+        if artifact_path is not None and handoff_dir is None:
+            artifact = _read_json_file(artifact_path)
+            if artifact:
+                artifact["intake_evidence_source"] = {
+                    "path": str(artifact_path),
                     "present": True,
-                    "source": "prebuilt_strategy_group_handoff_intake_packet",
+                    "source": "prebuilt_strategy_group_intake_evidence",
                 }
         else:
-            packet = {}
-        if not packet:
+            artifact = {}
+        if not artifact:
             try:
-                packet = build_strategy_group_handoff_intake_packet(
+                artifact = build_strategy_group_handoff_intake_artifact(
                     handoff_dir=resolved_handoff_dir,
                     source_repo=resolved_source_repo,
                     source_branch=resolved_source_branch,
                     source_commit=resolved_source_commit,
                 )
             except Exception as exc:
-                packet = {
-                    "scope": "strategy_group_handoff_main_control_intake",
-                    "status": "blocked_handoff_intake",
+                artifact = {
+                    "scope": "strategy_group_intake_main_control_projection",
+                    "status": "blocked_strategy_intake_source",
                     "generated_at_ms": generated_at_ms,
                     "source_anchor": {
                         "repo": resolved_source_repo,
                         "branch": resolved_source_branch,
                         "commit": resolved_source_commit,
-                        "handoff_dir": str(resolved_handoff_dir),
+                        "intake_source_dir": str(resolved_handoff_dir),
                     },
                     "counts": {
                         "strategy_groups": 0,
@@ -1855,9 +2003,9 @@ class TradingConsoleReadModelService:
                     "strategy_picker": [],
                     "required_facts_matrix": [],
                     "watcher_scope": [],
-                    "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                    "blockers": [f"strategy_intake_source_build_failed:{type(exc).__name__}"],
                     "safety_invariants": {
-                        "reads_research_handoff_only": True,
+                        "reads_research_intake_source_only": True,
                         "registers_runtime": False,
                         "creates_candidate": False,
                         "authorizes_execution": False,
@@ -1865,16 +2013,16 @@ class TradingConsoleReadModelService:
                         "mutates_pg": False,
                     },
                 }
-        if not packet:
-            packet = {
-                "scope": "strategy_group_handoff_main_control_intake",
-                "status": "blocked_handoff_intake",
+        if not artifact:
+            artifact = {
+                "scope": "strategy_group_intake_main_control_projection",
+                "status": "blocked_strategy_intake_source",
                 "generated_at_ms": generated_at_ms,
                 "source_anchor": {
                     "repo": resolved_source_repo,
                     "branch": resolved_source_branch,
                     "commit": resolved_source_commit,
-                    "handoff_dir": str(resolved_handoff_dir),
+                    "intake_source_dir": str(resolved_handoff_dir),
                 },
                 "counts": {
                     "strategy_groups": 0,
@@ -1885,9 +2033,9 @@ class TradingConsoleReadModelService:
                 "strategy_picker": [],
                 "required_facts_matrix": [],
                 "watcher_scope": [],
-                "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                "blockers": [f"strategy_intake_source_build_failed:{type(exc).__name__}"],
                 "safety_invariants": {
-                    "reads_research_handoff_only": True,
+                    "reads_research_intake_source_only": True,
                     "registers_runtime": False,
                     "creates_candidate": False,
                     "authorizes_execution": False,
@@ -1895,14 +2043,14 @@ class TradingConsoleReadModelService:
                     "mutates_pg": False,
                 },
             }
-        packet_blockers = list(packet.get("blockers") or [])
+        artifact_blockers = list(artifact.get("blockers") or [])
         blockers = [
             {
-                "code": "strategy_group_handoff_intake_blocked",
-                "message": "StrategyGroup handoff intake is not ready for main-control consumption.",
-                "affected_area": ",".join(packet_blockers[:8]),
+                "code": "strategy_group_intake_source_blocked",
+                "message": "StrategyGroup intake source is not ready for main-control consumption.",
+                "affected_area": ",".join(artifact_blockers[:8]),
             }
-        ] if packet_blockers else []
+        ] if artifact_blockers else []
         freshness_status = "fresh" if not blockers else "not_live_connected"
         return TradingConsoleReadModelResponse(
             read_model="strategy_group_handoff_intake",
@@ -1911,7 +2059,7 @@ class TradingConsoleReadModelService:
             warnings=[],
             blockers=blockers,
             unavailable=[],
-            data=packet,
+            data=artifact,
             live_ready=False,
         )
 
@@ -1936,27 +2084,27 @@ class TradingConsoleReadModelService:
             if latest_live_facts_path is not None:
                 resolved_live_facts_path = latest_live_facts_path
         live_facts = _read_json_file(resolved_live_facts_path)
-        packet = build_strategy_group_live_facts_readiness_packet(
-            intake_packet=intake,
+        artifact = build_strategy_group_live_facts_readiness_artifact(
+            intake_artifact=intake,
             live_facts=live_facts,
             generated_at_ms=generated_at_ms,
         )
-        packet["live_facts_source"] = {
+        artifact["live_facts_source"] = {
             "path": str(resolved_live_facts_path),
             "present": resolved_live_facts_path.exists(),
         }
         if not resolved_live_facts_path.exists():
-            packet["blockers"] = sorted(
-                set(list(packet.get("blockers") or []) + ["live_facts_path_missing"])
+            artifact["blockers"] = sorted(
+                set(list(artifact.get("blockers") or []) + ["live_facts_path_missing"])
             )
-            packet["status"] = "strategy_group_live_facts_blocked"
+            artifact["status"] = "strategy_group_live_facts_blocked"
         blockers = [
             {
                 "code": "strategy_group_live_facts_blocked",
                 "message": "StrategyGroup live facts are not ready for observation.",
-                "affected_area": ",".join(list(packet.get("blockers") or [])[:8]),
+                "affected_area": ",".join(list(artifact.get("blockers") or [])[:8]),
             }
-        ] if packet.get("blockers") else []
+        ] if artifact.get("blockers") else []
         warnings = [
             {
                 "code": "strategy_group_candidate_prerequisites_pending",
@@ -1965,9 +2113,9 @@ class TradingConsoleReadModelService:
                     "StrategyGroup observation can continue; candidate preparation "
                     "is waiting for budget, protection, or next-attempt facts."
                 ),
-                "count": len(packet.get("candidate_prepare_blockers") or []),
+                "count": len(artifact.get("candidate_prepare_blockers") or []),
             }
-        ] if packet.get("candidate_prepare_blockers") else []
+        ] if artifact.get("candidate_prepare_blockers") else []
         freshness_status = "fresh" if not blockers else "warning"
         return TradingConsoleReadModelResponse(
             read_model="strategy_group_live_facts_readiness",
@@ -1976,7 +2124,7 @@ class TradingConsoleReadModelService:
             warnings=warnings,
             blockers=blockers,
             unavailable=[],
-            data=packet,
+            data=artifact,
             live_ready=False,
         )
 
@@ -1993,15 +2141,15 @@ class TradingConsoleReadModelService:
         watcher_response = self.runtime_signal_watcher_status(
             stale_after_seconds=stale_after_seconds,
         )
-        packet = build_strategygroup_runtime_pilot_status_packet(
-            intake_packet=intake_response.data,
+        artifact = build_strategygroup_runtime_pilot_status_artifact(
+            intake_artifact=intake_response.data,
             live_facts_readiness=live_facts_response.data,
             watcher_status={"data": watcher_response.data},
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             generated_at_ms=generated_at_ms,
         )
-        blocker_class = str((packet.get("owner_state") or {}).get("blocker_class") or "")
+        blocker_class = str((artifact.get("owner_state") or {}).get("blocker_class") or "")
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
         if blocker_class in {
@@ -2014,7 +2162,7 @@ class TradingConsoleReadModelService:
                 {
                     "code": f"strategygroup_runtime_pilot_{blocker_class}",
                     "message": "StrategyGroup runtime pilot cannot safely advance to candidate preparation.",
-                    "affected_area": str((packet.get("owner_state") or {}).get("blocked_at") or "unknown"),
+                    "affected_area": str((artifact.get("owner_state") or {}).get("blocked_at") or "unknown"),
                 }
             )
         elif blocker_class in {"waiting_for_market", "missing_fact", "review_only_warning"}:
@@ -2022,7 +2170,7 @@ class TradingConsoleReadModelService:
                 {
                     "code": f"strategygroup_runtime_pilot_{blocker_class}",
                     "severity": "info" if blocker_class == "waiting_for_market" else "warning",
-                    "message": str((packet.get("owner_state") or {}).get("blocked_reason") or "pending"),
+                    "message": str((artifact.get("owner_state") or {}).get("blocked_reason") or "pending"),
                     "count": 1,
                 }
             )
@@ -2038,7 +2186,7 @@ class TradingConsoleReadModelService:
             warnings=warnings,
             blockers=blockers,
             unavailable=[],
-            data=packet,
+            data=artifact,
             live_ready=False,
         )
 
@@ -2110,14 +2258,14 @@ class TradingConsoleReadModelService:
         ).expanduser()
         readonly_probe = _read_json_file(readonly_probe_path)
         effective_deploy_channel, effective_deploy_channel_path = (
-            _owner_console_effective_deploy_channel_packet(
+            _owner_console_effective_deploy_channel_artifact(
                 deploy_channel=deploy_channel,
                 deploy_channel_path=str(deploy_channel_path),
                 readonly_probe=readonly_probe,
                 readonly_probe_path=str(readonly_probe_path),
             )
         )
-        packet = _owner_console_source_readiness_packet(
+        artifact = _owner_console_source_readiness_artifact(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
             live_facts_response=live_facts_response,
@@ -2138,17 +2286,17 @@ class TradingConsoleReadModelService:
         )
         source_statuses = [
             str(item.get("status") or "")
-            for item in (packet.get("source_health") or {}).values()
+            for item in (artifact.get("source_health") or {}).values()
             if isinstance(item, dict)
         ]
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
-        if packet.get("status") == "source_unavailable":
+        if artifact.get("status") == "source_unavailable":
             blockers.append(
                 {
                     "code": "owner_console_source_readiness_unavailable",
                     "message": "Owner Console source readiness cannot be built from current main runtime sources.",
-                    "affected_area": ",".join(packet.get("critical_unavailable_sources") or []),
+                    "affected_area": ",".join(artifact.get("critical_unavailable_sources") or []),
                 }
             )
         degraded_count = sum(1 for status in source_statuses if status == "degraded")
@@ -2175,7 +2323,7 @@ class TradingConsoleReadModelService:
             warnings=warnings,
             blockers=blockers,
             unavailable=[],
-            data=packet,
+            data=artifact,
             live_ready=False,
         )
 
@@ -2677,16 +2825,16 @@ class TradingConsoleReadModelService:
                     }
                 )
         summary = summarize_right_tail_reviews(facts).model_dump(mode="json")
-        semantic_packets = summarize_runtime_semantic_review_packets(
+        semantic_artifacts = summarize_runtime_semantic_review_artifacts(
             lifecycle_records
         ).model_dump(mode="json")
         summary["source"] = "live_lifecycle_review.metadata.right_tail_trade_path"
         summary["skipped_sources"] = skipped
-        summary["closed_trade_review_packets"] = semantic_packets["packets"]
-        summary["closed_trade_review_packet_summary"] = {
+        summary["closed_trade_review_artifacts"] = semantic_artifacts["artifacts"]
+        summary["closed_trade_review_artifact_summary"] = {
             key: value
-            for key, value in semantic_packets.items()
-            if key != "packets"
+            for key, value in semantic_artifacts.items()
+            if key != "artifacts"
         }
         summary["required_metadata_shape"] = {
             "metadata_key": "right_tail_trade_path",
@@ -3874,7 +4022,7 @@ def _apply_owner_selection_to_generic_action_specs(
         elif selection_hard_blockers:
             item["status"] = "invalid_blocked"
         item["backend_actionable"] = False
-        item["frontend_action_enabled"] = False
+        item["owner_action_enabled"] = False
         item["places_order"] = False
         result.append(item)
     return result
@@ -3902,7 +4050,7 @@ def _apply_owner_selection_to_action_candidates(
         sizing["warnings"] = list(spec.get("warnings") or [])
         sizing["action_allowed"] = False
         item["recommended_sizing"] = sizing
-        item["frontend_action_enabled"] = False
+        item["owner_action_enabled"] = False
         item["may_execute_live"] = False
         result.append(item)
     return result
@@ -4083,7 +4231,7 @@ def _action_entry_scope_review(
     }
     missing = [key for key in required_fields if required_scope.get(key) in (None, "")]
     if not provided:
-        verdict = "not_checked"
+        status = "not_checked"
         mismatches: list[dict[str, Any]] = []
     else:
         mismatches = [
@@ -4097,9 +4245,9 @@ def _action_entry_scope_review(
             and owner_scope.get(key) not in (None, "")
             and str(owner_scope.get(key)) != str(required_scope.get(key))
         ]
-        verdict = "matched" if not mismatches and not missing else "mismatch"
+        status = "matched" if not mismatches and not missing else "mismatch"
     return {
-        "verdict": verdict,
+        "status": status,
         "required_scope": required_scope,
         "provided_scope": provided,
         "missing_required_template_fields": missing,
@@ -4222,11 +4370,11 @@ def _action_entry_final_gate_result(
         "adapter_status": action_entry.get("final_gate_adapter_status"),
         "blocker_ids": [item.get("code") for item in blockers if item.get("code")],
         "retry_conditions": [
-            action_entry.get("owner_decision_text") or "Provide exact Owner scope and rerun final gate.",
+            action_entry.get("owner_review_text") or "Provide exact Owner scope and rerun final gate.",
         ],
         "evidence_status": "pre_action_evidence_required",
         "may_execute_live": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
     }
 
 
@@ -4235,9 +4383,9 @@ def _action_entry_action_state(selected_candidate: dict[str, Any]) -> dict[str, 
     action_entry = dict(selected_candidate.get("action_entry") or {})
     backend_actionable = (
         action_spec.get("may_execute_live") is True
-        and action_spec.get("frontend_action_enabled") is True
+        and action_spec.get("owner_action_enabled") is True
         and action_entry.get("may_execute_live") is True
-        and action_entry.get("frontend_action_enabled") is True
+        and action_entry.get("owner_action_enabled") is True
     )
     return {
         "action_slot": "bounded_execute",
@@ -4245,9 +4393,8 @@ def _action_entry_action_state(selected_candidate: dict[str, Any]) -> dict[str, 
         "label": "有界实盘执行",
         "disabled_reason": None if backend_actionable else _action_entry_disabled_reason(action_entry, action_spec),
         "backend_actionable": backend_actionable,
-        "backend_actionable_only": backend_actionable,
         "may_execute_live": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "creates_authorization": False,
         "creates_execution_intent": False,
         "places_order": False,
@@ -4514,8 +4661,8 @@ def _post_action_review_ledger(
             lifecycle_status=lifecycle_status,
             live_lifecycle_review=latest_live_lifecycle_review,
         ),
-        "review_decision": {
-            "status": _post_action_review_decision_status(
+        "review_outcome": {
+            "status": _post_action_review_outcome_status(
                 lifecycle_status=lifecycle_status,
                 reviews=reviews,
                 live_lifecycle_review=latest_live_lifecycle_review,
@@ -4533,8 +4680,8 @@ def _post_action_review_ledger(
                     "review_id": latest_live_lifecycle_review.get("review_id"),
                     "review_status": latest_live_lifecycle_review.get("review_status"),
                     "lifecycle_status": latest_live_lifecycle_review.get("lifecycle_status"),
-                    "review_decision": (
-                        (latest_live_lifecycle_review.get("metadata") or {}).get("review_decision")
+                    "review_outcome": (
+                        (latest_live_lifecycle_review.get("metadata") or {}).get("review_outcome")
                         if isinstance(latest_live_lifecycle_review.get("metadata"), dict)
                         else None
                     ),
@@ -4587,7 +4734,7 @@ def _post_action_strategy_outcome(
     return "pending_post_action_review"
 
 
-def _post_action_review_decision_status(
+def _post_action_review_outcome_status(
     *,
     lifecycle_status: str,
     reviews: list[dict[str, Any]],
@@ -4623,7 +4770,7 @@ def _post_action_next_attempt_gate(
                 "path": "Owner Action Flow next attempt gate",
                 "evidence": "PG open protection exists while exchange is flat/no protection.",
                 "severity": "hard_blocker",
-                "bridge": "official_reconciliation_or_hygiene_cleanup",
+                "recovery_action": "official_reconciliation_or_hygiene_cleanup",
                 "retry_condition": "Run official reconciliation/review cleanup until PG and exchange facts agree.",
             }
         )
@@ -4656,7 +4803,7 @@ def _post_action_next_attempt_gate(
                         f"exchange_open_protection_count={exchange_open_protection_count}"
                     ),
                     "severity": "hard_blocker",
-                    "bridge": "official_reconciliation_or_lifecycle_review",
+                    "recovery_action": "official_reconciliation_or_lifecycle_review",
                     "retry_condition": "PG/exchange position and order counts must be aligned and flat, or current lifecycle must be proven open-protected.",
                 }
             )
@@ -4680,7 +4827,7 @@ def _post_action_next_attempt_gate(
                 "path": "Owner Action Flow next attempt gate",
                 "evidence": "PG exit order is filled but brc_live_lifecycle_reviews has not recorded closed_reviewed.",
                 "severity": "hard_blocker",
-                "bridge": "create_runtime_closed_trade_lifecycle_review",
+                "recovery_action": "create_runtime_closed_trade_lifecycle_review",
                 "retry_condition": "Append a closed_reviewed live lifecycle review record from resolved order/position/reconciliation facts.",
             }
         )
@@ -4713,7 +4860,7 @@ def _post_action_next_attempt_gate(
                 "path": "Owner Action Flow next attempt gate",
                 "evidence": f"review_ledger.lifecycle_status={lifecycle_status}",
                 "severity": "hard_blocker",
-                "bridge": "complete_review_ledger",
+                "recovery_action": "complete_review_ledger",
                 "retry_condition": "Review Ledger lifecycle_status must be closed/reviewed, open-protected, or not-started with flat evidence.",
             }
         )
@@ -4723,13 +4870,13 @@ def _post_action_next_attempt_gate(
         "status": "blocked" if blocked else "clear_for_preflight",
         "disabled_reason": disabled_reason if blocked else None,
         "backend_owned_state": True,
-        "frontend_must_not_infer": True,
+        "consumer_must_not_infer": True,
         "lifecycle_classification": lifecycle_classification,
         "current_lifecycle_status": lifecycle_status,
         "next_attempt_allowed_by_lifecycle": not blocked,
         "action_allowed": False,
         "may_execute_live": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "requires_official_final_gate": True,
         "pg_active_position_count": pg_active_position_count,
         "pg_open_order_count": pg_open_order_count,
@@ -4739,7 +4886,7 @@ def _post_action_next_attempt_gate(
         "warnings": warnings,
         "blockers": blockers,
         "retry_condition": retry_condition,
-        "required_next_step": (
+        "non_authority_required_step": (
             "wait_for_current_tp_or_sl_then_reconcile_and_review"
             if lifecycle_gate == "current_lifecycle_open_protected"
             else "official_recovery_required"
@@ -4748,7 +4895,7 @@ def _post_action_next_attempt_gate(
             if lifecycle_gate == "closed_trade_review_required"
             else "complete_review_ledger"
             if lifecycle_gate == "review_state_incomplete"
-            else "owner_decision_and_final_gate"
+            else "owner_policy_and_final_gate"
         ),
         "blocking_scope": {
             "single_position_policy": True,
@@ -5074,7 +5221,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "capital_selection": capital_selection,
             "protection_review_readiness": protection_review,
             "backend_actionable": action_state.get("backend_actionable") is True,
-            "frontend_action_enabled": action_state.get("frontend_action_enabled") is True,
+            "owner_action_enabled": action_state.get("owner_action_enabled") is True,
             "places_order": False,
         },
         "timeline": {
@@ -5124,7 +5271,7 @@ def _apply_owner_approved_budget_window(
 def _owner_action_lifecycle_monitoring(post_action: dict[str, Any]) -> dict[str, Any]:
     gate = dict(post_action.get("next_attempt_gate") or {})
     ledger = dict(post_action.get("review_ledger") or {})
-    review_decision = dict(ledger.get("review_decision") or {})
+    review_outcome = dict(ledger.get("review_outcome") or {})
     exchange_state = dict(post_action.get("exchange_state") or {})
     return {
         "status": gate.get("lifecycle_classification") or "unknown_fail_closed",
@@ -5138,14 +5285,14 @@ def _owner_action_lifecycle_monitoring(post_action: dict[str, Any]) -> dict[str,
         "exchange_position_count": gate.get("exchange_position_count"),
         "exchange_open_protection_count": gate.get("exchange_open_protection_count"),
         "exchange_state": exchange_state.get("status"),
-        "review_status": review_decision.get("review_status") or review_decision.get("status"),
-        "review_id": review_decision.get("review_id"),
+        "review_status": review_outcome.get("review_status") or review_outcome.get("status"),
+        "review_id": review_outcome.get("review_id"),
         "next_attempt_status": gate.get("status"),
         "next_attempt_gate": gate.get("gate"),
         "disabled_reason": gate.get("disabled_reason"),
         "retry_condition": gate.get("retry_condition"),
         "action_allowed": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "places_order": False,
     }
 
@@ -5167,14 +5314,14 @@ def _owner_action_just_in_time_lifecycle_audit(
         }
     )
     if classification == "still_open_protected":
-        decision = "block_next_attempt_current_lifecycle_open"
-        next_action = "wait_for_tp_or_sl_close"
+        lifecycle_audit_result = "block_next_attempt_current_lifecycle_open"
+        lifecycle_checkpoint = "wait_for_tp_or_sl_close"
     elif classification in {"tp_filled_position_closed", "sl_filled_position_closed", "external_flat"}:
-        decision = "requires_reconciliation_before_continuing"
-        next_action = "reconcile_close_cleanup_and_record_closed_reviewed"
+        lifecycle_audit_result = "requires_reconciliation_before_continuing"
+        lifecycle_checkpoint = "reconcile_close_cleanup_and_record_closed_reviewed"
     elif classification == "review_required":
-        decision = "block_next_attempt_review_required"
-        next_action = "record_closed_trade_review"
+        lifecycle_audit_result = "block_next_attempt_review_required"
+        lifecycle_checkpoint = "record_closed_trade_review"
     elif classification in {
         "exchange_flat_pg_open",
         "pg_flat_exchange_open",
@@ -5183,18 +5330,24 @@ def _owner_action_just_in_time_lifecycle_audit(
         "inconsistent_requires_recovery",
         "unknown_fail_closed",
     }:
-        decision = "block_next_attempt_recovery_required"
-        next_action = "official_recovery_required"
+        lifecycle_audit_result = "block_next_attempt_recovery_required"
+        lifecycle_checkpoint = "official_recovery_required"
     else:
-        decision = "continue_to_owner_budget_final_gate" if can_continue else "block_next_attempt"
-        next_action = "owner_decision_and_final_gate" if can_continue else next_attempt_gate.get("required_next_step")
+        lifecycle_audit_result = (
+            "continue_to_owner_budget_final_gate" if can_continue else "block_next_attempt"
+        )
+        lifecycle_checkpoint = (
+            "owner_policy_and_final_gate"
+            if can_continue
+            else next_attempt_gate.get("non_authority_required_step")
+        )
     return {
         "audit_stage": "next_attempt_preflight",
         "audit_version": "jit_lifecycle_audit_v1",
         "backend_owned_state": True,
-        "frontend_must_not_infer": True,
+        "consumer_must_not_infer": True,
         "classification": classification,
-        "decision": decision,
+        "lifecycle_audit_result": lifecycle_audit_result,
         "can_continue_to_authorization": can_continue,
         "can_execute_live": False,
         "current_lifecycle_authorization_ids": list(
@@ -5209,13 +5362,13 @@ def _owner_action_just_in_time_lifecycle_audit(
         "next_attempt_gate": gate,
         "disabled_reason": next_attempt_gate.get("disabled_reason"),
         "retry_condition": next_attempt_gate.get("retry_condition"),
-        "next_recommended_action": next_action,
+        "non_authority_recommendation": lifecycle_checkpoint,
         "allowed_exchange_write": (
             "residual_sibling_protection_cancel_only_after_confirmed_flat"
         ),
         "active_tp_sl_cancel_allowed": False,
         "action_allowed": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "places_order": False,
     }
 
@@ -5277,7 +5430,7 @@ def _owner_action_capital_selection(
         "owner_disclosure_required": True,
         "silent_quantity_repair_allowed": False,
         "action_allowed": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "places_order": False,
     }
 
@@ -5293,9 +5446,9 @@ def _owner_action_protection_review_readiness(
     protection_template_blockers = list(protection_template.get("hard_blockers") or [])
     ledger = dict(post_action.get("review_ledger") or {})
     tp_sl = dict(ledger.get("tp_sl_result") or {})
-    review_decision = dict(ledger.get("review_decision") or {})
+    review_outcome = dict(ledger.get("review_outcome") or {})
     protection_ready = bool(protection_template) and selected_spec.get("protection_mode") == "single_tp_plus_sl"
-    review_ready = bool(review_template) and review_decision.get("status") in {
+    review_ready = bool(review_template) and review_outcome.get("status") in {
         "pending_open_recorded",
         "pending",
         "revise",
@@ -5320,14 +5473,14 @@ def _owner_action_protection_review_readiness(
         "review_template": review_template,
         "current_tp_sl_status": tp_sl.get("status"),
         "current_open_protection_order_count": tp_sl.get("open_protection_order_count"),
-        "review_status": review_decision.get("review_status") or review_decision.get("status"),
-        "review_id": review_decision.get("review_id"),
+        "review_status": review_outcome.get("review_status") or review_outcome.get("status"),
+        "review_id": review_outcome.get("review_id"),
         "owner_risk_acceptance_status": risk_review.get("owner_risk_acceptance_status"),
         "owner_risk_acceptance_recorded": risk_review.get("owner_risk_acceptance_recorded") is True,
         "warning_count": risk_review.get("warning_count", 0),
         "hard_blocker_count": risk_review.get("hard_blocker_count", 0),
         "action_allowed": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "places_order": False,
     }
 
@@ -5376,7 +5529,7 @@ def _owner_action_candidate_choices(
                 "warning_count": candidate.get("warning_count", 0),
                 "hard_blocker_count": candidate.get("hard_blocker_count", 0),
                 "backend_actionable": False,
-                "frontend_action_enabled": False,
+                "owner_action_enabled": False,
                 "places_order": False,
             }
         )
@@ -5390,81 +5543,17 @@ def _budgeted_autonomy_loop_projection(
     generic_specs: list[dict[str, Any]],
     post_action: dict[str, Any],
 ) -> dict[str, Any]:
-    max_notional = _decimal_from_any(envelope.get("max_notional_per_action")) or Decimal("0.01")
-    max_daily_loss = _decimal_from_any(envelope.get("max_daily_loss")) or Decimal("0")
-    max_leverage = _decimal_from_any(envelope.get("max_leverage")) or Decimal("1")
-    allowed_symbols = [str(item) for item in envelope.get("allowed_symbols") or []]
-    allowed_sides = [
-        _normalize_side(item) for item in envelope.get("allowed_sides") or []
-        if _normalize_side(item) in {"long", "short"}
-    ]
-    if not allowed_sides:
-        allowed_sides = ["long"]
-    selected_carrier = selected_spec.get("carrier_id")
-    allowed_carriers = [
-        str(item.get("carrier_id"))
-        for item in generic_specs
-        if isinstance(item, dict) and item.get("carrier_id")
-    ]
-    if selected_carrier and str(selected_carrier) not in allowed_carriers:
-        allowed_carriers.append(str(selected_carrier))
-    authorization = BudgetedAutonomyAuthorization(
-        budget_authorization_id=str(envelope.get("envelope_id") or "budgeted-autonomy:read-model"),
-        allowed_carriers=allowed_carriers,
-        allowed_symbols=allowed_symbols,
-        allowed_sides=allowed_sides,  # type: ignore[arg-type]
-        max_notional_per_action=max_notional,
-        daily_loss_cap=max_daily_loss,
-        max_active_positions=int(envelope.get("max_active_positions") or 1),
-        max_attempts=int(envelope.get("max_attempts") or 1),
-        max_leverage=max_leverage,
-        review_required="post_action_review_required",
-        protection_mode="single_tp_plus_sl",
+    boundary = _budgeted_autonomy_projection_boundary(
+        envelope=envelope,
+        selected_spec=selected_spec,
+        generic_specs=generic_specs,
+        post_action=post_action,
     )
-    review_ledger = dict(post_action.get("review_ledger") or {})
-    exchange_state = dict(post_action.get("exchange_state") or {})
-    entry = dict(review_ledger.get("entry") or {})
-    tp_sl = dict(review_ledger.get("tp_sl_result") or {})
-    positions: list[BudgetedAutonomyPositionEvidence] = []
-    if review_ledger.get("lifecycle_status") == "protected_open_from_pg_orders":
-        position_symbol = (
-            str(selected_spec.get("symbol"))
-            if selected_spec.get("symbol")
-            else (allowed_symbols[0] if allowed_symbols else "unknown")
-        )
-        open_protection_order_count = int(tp_sl.get("open_protection_order_count") or 0)
-        positions.append(
-            BudgetedAutonomyPositionEvidence(
-                carrier_id=str(selected_carrier) if selected_carrier else None,
-                symbol=position_symbol,
-                side=_normalize_side(selected_spec.get("side")),
-                quantity=_decimal_from_any(entry.get("quantity")),
-                entry_price=_decimal_from_any(entry.get("average_price")),
-                exchange_position_present=(
-                    int(exchange_state.get("exchange_position_count") or 0) > 0
-                ),
-                exchange_verified_flat=(
-                    exchange_state.get("status") == "pg_open_exchange_flat_cleanup_needed"
-                ),
-                pg_position_count=1,
-                open_tp_count=1 if open_protection_order_count > 0 else 0,
-                open_sl_count=1 if open_protection_order_count > 1 else 0,
-                pg_open_order_count=open_protection_order_count,
-                retry_allowed=False,
-                review_recorded=bool(post_action.get("review_count")),
-                audit_recorded=bool(post_action.get("audit_event_count")),
-            )
-        )
-    candidates = [
-        _budgeted_autonomy_candidate_from_spec(item)
-        for item in generic_specs
-        if isinstance(item, dict) and item.get("carrier_id")
-    ]
     evaluation = evaluate_budgeted_autonomy_loop(
-        authorization=authorization,
-        positions=positions,
-        candidates=candidates,
-        review_ledger=review_ledger,
+        authorization=boundary.authorization,
+        positions=boundary.positions,
+        candidates=boundary.candidates,
+        review_ledger=boundary.review_ledger,
     )
     return evaluation.model_dump(mode="json")
 
@@ -5476,6 +5565,51 @@ def _budgeted_autonomy_v01_projection(
     generic_specs: list[dict[str, Any]],
     post_action: dict[str, Any],
 ) -> dict[str, Any]:
+    attempt_window_start_ms = _optional_int_value(envelope.get("attempt_window_start_ms"))
+    boundary = _budgeted_autonomy_projection_boundary(
+        envelope=envelope,
+        selected_spec=selected_spec,
+        generic_specs=generic_specs,
+        post_action=post_action,
+        attempt_window_start_ms=attempt_window_start_ms,
+    )
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    daily_attempts_used = _completed_intents_for_scope_today(
+        post_action=post_action,
+        symbol=selected_spec.get("symbol"),
+        day_key=day_key,
+        attempt_window_start_ms=attempt_window_start_ms,
+    )
+    daily_state = BudgetedAutonomyDailyState(
+        day_key=day_key,
+        attempts_used=daily_attempts_used,
+        attempts_allowed=boundary.max_attempts,
+        budget_used_notional=Decimal("0"),
+        realized_loss=Decimal("0"),
+        source=(
+            "trading_console_selected_symbol_pg_intents_owner_budget_window"
+            if attempt_window_start_ms is not None
+            else "trading_console_selected_symbol_pg_intents_current_utc_day"
+        ),
+    )
+    evaluation = evaluate_budgeted_autonomy_v01(
+        authorization=boundary.authorization,
+        positions=boundary.positions,
+        candidates=boundary.candidates,
+        daily_state=daily_state,
+        review_ledger=boundary.review_ledger,
+    )
+    return evaluation.model_dump(mode="json")
+
+
+def _budgeted_autonomy_projection_boundary(
+    *,
+    envelope: dict[str, Any],
+    selected_spec: dict[str, Any],
+    generic_specs: list[dict[str, Any]],
+    post_action: dict[str, Any],
+    attempt_window_start_ms: int | None = None,
+) -> BudgetedAutonomyProjectionBoundary:
     max_notional = _decimal_from_any(envelope.get("max_notional_per_action")) or Decimal("0.01")
     max_daily_loss = _decimal_from_any(envelope.get("max_daily_loss")) or Decimal("0")
     max_leverage = _decimal_from_any(envelope.get("max_leverage")) or Decimal("1")
@@ -5508,71 +5642,71 @@ def _budgeted_autonomy_v01_projection(
         review_required="post_action_review_required",
         protection_mode="single_tp_plus_sl",
     )
-    attempt_window_start_ms = _optional_int_value(envelope.get("attempt_window_start_ms"))
     review_ledger = _review_ledger_for_budget_window(
         review_ledger=dict(post_action.get("review_ledger") or {}),
         attempt_window_start_ms=attempt_window_start_ms,
     )
-    exchange_state = dict(post_action.get("exchange_state") or {})
-    entry = dict(review_ledger.get("entry") or {})
-    tp_sl = dict(review_ledger.get("tp_sl_result") or {})
-    positions: list[BudgetedAutonomyPositionEvidence] = []
-    if review_ledger.get("lifecycle_status") == "protected_open_from_pg_orders":
-        open_protection_order_count = int(tp_sl.get("open_protection_order_count") or 0)
-        positions.append(
-            BudgetedAutonomyPositionEvidence(
-                carrier_id=str(selected_carrier) if selected_carrier else None,
-                symbol=str(selected_spec.get("symbol") or (allowed_symbols[0] if allowed_symbols else "unknown")),
-                side=_normalize_side(selected_spec.get("side")),
-                quantity=_decimal_from_any(entry.get("quantity")),
-                entry_price=_decimal_from_any(entry.get("average_price")),
-                exchange_position_present=(
-                    int(exchange_state.get("exchange_position_count") or 0) > 0
-                ),
-                exchange_verified_flat=(
-                    exchange_state.get("status") == "pg_open_exchange_flat_cleanup_needed"
-                ),
-                pg_position_count=1,
-                open_tp_count=1 if open_protection_order_count > 0 else 0,
-                open_sl_count=1 if open_protection_order_count > 1 else 0,
-                pg_open_order_count=open_protection_order_count,
-                retry_allowed=False,
-                review_recorded=bool(post_action.get("review_count")),
-                audit_recorded=bool(post_action.get("audit_event_count")),
-            )
-        )
-    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    daily_attempts_used = _completed_intents_for_scope_today(
+    positions = _budgeted_autonomy_positions_from_review_ledger(
+        selected_spec=selected_spec,
+        selected_carrier=selected_carrier,
+        allowed_symbols=allowed_symbols,
+        review_ledger=review_ledger,
+        exchange_state=dict(post_action.get("exchange_state") or {}),
         post_action=post_action,
-        symbol=selected_spec.get("symbol"),
-        day_key=day_key,
-        attempt_window_start_ms=attempt_window_start_ms,
-    )
-    daily_state = BudgetedAutonomyDailyState(
-        day_key=day_key,
-        attempts_used=daily_attempts_used,
-        attempts_allowed=max_attempts,
-        budget_used_notional=Decimal("0"),
-        realized_loss=Decimal("0"),
-        source=(
-            "trading_console_selected_symbol_pg_intents_owner_budget_window"
-            if attempt_window_start_ms is not None
-            else "trading_console_selected_symbol_pg_intents_current_utc_day"
-        ),
     )
     candidates = [
         _budgeted_autonomy_candidate_from_spec(item)
         for item in generic_specs
         if isinstance(item, dict) and item.get("carrier_id")
     ]
-    evaluation = evaluate_budgeted_autonomy_v01(
+    return BudgetedAutonomyProjectionBoundary(
         authorization=authorization,
-        positions=positions,
         candidates=candidates,
-        daily_state=daily_state,
+        positions=positions,
         review_ledger=review_ledger,
+        max_attempts=max_attempts,
     )
-    return evaluation.model_dump(mode="json")
+
+
+def _budgeted_autonomy_positions_from_review_ledger(
+    *,
+    selected_spec: dict[str, Any],
+    selected_carrier: Any,
+    allowed_symbols: list[str],
+    review_ledger: dict[str, Any],
+    exchange_state: dict[str, Any],
+    post_action: dict[str, Any],
+) -> list[BudgetedAutonomyPositionEvidence]:
+    if review_ledger.get("lifecycle_status") != "protected_open_from_pg_orders":
+        return []
+    entry = dict(review_ledger.get("entry") or {})
+    tp_sl = dict(review_ledger.get("tp_sl_result") or {})
+    open_protection_order_count = int(tp_sl.get("open_protection_order_count") or 0)
+    position_symbol = str(
+        selected_spec.get("symbol") or (allowed_symbols[0] if allowed_symbols else "unknown")
+    )
+    return [
+        BudgetedAutonomyPositionEvidence(
+            carrier_id=str(selected_carrier) if selected_carrier else None,
+            symbol=position_symbol,
+            side=_normalize_side(selected_spec.get("side")),
+            quantity=_decimal_from_any(entry.get("quantity")),
+            entry_price=_decimal_from_any(entry.get("average_price")),
+            exchange_position_present=(
+                int(exchange_state.get("exchange_position_count") or 0) > 0
+            ),
+            exchange_verified_flat=(
+                exchange_state.get("status") == "pg_open_exchange_flat_cleanup_needed"
+            ),
+            pg_position_count=1,
+            open_tp_count=1 if open_protection_order_count > 0 else 0,
+            open_sl_count=1 if open_protection_order_count > 1 else 0,
+            pg_open_order_count=open_protection_order_count,
+            retry_allowed=False,
+            review_recorded=bool(post_action.get("review_count")),
+            audit_recorded=bool(post_action.get("audit_event_count")),
+        )
+    ]
 
 
 def _completed_intents_for_scope_today(
@@ -5768,7 +5902,7 @@ def _cockpit_overall_status(
             message = f"System is waiting for the current {active_position.get('symbol') or ''} position to close."
         else:
             message = "Active position is present and protection is not fully confirmed."
-    elif review.get("review_required_before_next_action"):
+    elif review.get("review_required_before_next_attempt"):
         status = "review_required"
         message = "Review is required before the next budgeted action."
     elif autonomy.get("state") in {"paused", "revoked"}:
@@ -5787,7 +5921,7 @@ def _cockpit_overall_status(
         "status": status,
         "label": _status_label(status),
         "message": message,
-        "primary_next_action": _primary_next_action(
+        "primary_runtime_checkpoint": _primary_runtime_checkpoint(
             status=status,
             autonomy=autonomy,
             active_position=active_position,
@@ -5802,7 +5936,7 @@ def _cockpit_overall_status(
     }
 
 
-def _primary_next_action(
+def _primary_runtime_checkpoint(
     *,
     status: str,
     autonomy: dict[str, Any],
@@ -5835,7 +5969,7 @@ def _primary_next_action(
             "system_action_available": False,
             "reason": "Wait for TP/SL close evidence; reconcile if protection is incomplete.",
         }
-    if review.get("review_required_before_next_action"):
+    if review.get("review_required_before_next_attempt"):
         return {
             "action_id": "open_review",
             "label": "打开复盘",
@@ -5931,7 +6065,7 @@ def _cockpit_autonomy_summary(
         state = "revoked"
     elif active_position.get("exists"):
         state = "waiting_position_close"
-    elif review.get("review_required_before_next_action"):
+    elif review.get("review_required_before_next_attempt"):
         state = "closed_review_pending"
     elif outcome == "closed_reviewed":
         state = "closed_reviewed"
@@ -5971,7 +6105,7 @@ def _cockpit_autonomy_summary(
         ),
         "auto_execution_enabled": False,
         "backend_actionable": False,
-        "frontend_action_enabled": False,
+        "owner_action_enabled": False,
         "may_execute_live": False,
         "policy": policy,
     }
@@ -6167,10 +6301,10 @@ def _cockpit_runtime_governance_summary(
         next_gate_status = "waiting_for_position_resolution"
         next_gate_blocker = "active_position_open"
         next_step = "monitor_position_or_follow_owner_authorized_close_path"
-    elif review.get("review_required_before_next_action"):
+    elif review.get("review_required_before_next_attempt"):
         status = "blocked_by_review_gate"
         next_gate_status = "waiting_for_closed_review"
-        next_gate_blocker = "review_required_before_next_action"
+        next_gate_blocker = "review_required_before_next_attempt"
         next_step = "complete_review_ledger_before_fresh_attempt"
     elif hard_blockers:
         status = "blocked_by_runtime_governance"
@@ -6198,7 +6332,7 @@ def _cockpit_runtime_governance_summary(
     if not post_submit_finalize:
         post_submit_finalize = {
             "status": post_action.get("post_submit_finalize_status") or "not_available",
-            "packet_id": post_action.get("post_submit_finalize_packet_id"),
+            "payload_id": post_action.get("post_submit_finalize_payload_id"),
         }
 
     budget_auth_id = budget.get("budget_authorization_id") or budget_authorization.get(
@@ -6300,7 +6434,7 @@ def _cockpit_candidate_summary(
             "reason_selected": selected_proposal.get("proposal_role") or market.get("mapped_family"),
             "warnings": selected_proposal.get("warnings") or [],
             "hard_blockers": selected_proposal.get("hard_blockers") or [],
-            "frontend_action_enabled": False,
+            "owner_action_enabled": False,
         },
         "skipped_candidates": [
             {
@@ -6318,7 +6452,9 @@ def _cockpit_candidate_summary(
             if item.get("carrier_id") != selected_carrier
         ],
         "market_selection": market,
-        "next_action_recommendation": (action_data.get("final_gate_result") or {}).get("status"),
+        "non_authority_final_gate_status": (
+            action_data.get("final_gate_result") or {}
+        ).get("status"),
     }
 
 
@@ -6400,10 +6536,10 @@ def _cockpit_review_summary(
     latest = reviews[0] if reviews else None
     latest_live = live_lifecycle_reviews[0] if live_lifecycle_reviews else None
     lifecycle = ledger.get("lifecycle_status") or "not_available"
-    decision = dict(ledger.get("review_decision") or {})
+    review_outcome = dict(ledger.get("review_outcome") or {})
     review_required = bool(
-        decision.get("requires_owner_review") is True
-        and decision.get("status") in {"pending", "not_recorded"}
+        review_outcome.get("requires_owner_review") is True
+        and review_outcome.get("status") in {"pending", "not_recorded"}
         and lifecycle not in {"not_started_or_unknown", "protected_open_from_pg_orders"}
     )
     return {
@@ -6417,7 +6553,7 @@ def _cockpit_review_summary(
             "holding_time": "not_available",
             "strategy_outcome": ledger.get("strategy_outcome") or "pending",
         },
-        "review_required_before_next_action": review_required,
+        "review_required_before_next_attempt": review_required,
         "latest_review": latest or {},
         "review_count": len(reviews),
         "latest_live_lifecycle_review": latest_live or {},
@@ -6476,9 +6612,9 @@ def _cockpit_blockers(
             route="/protection",
             evidence_source="protection_health",
         ))
-    if review.get("review_required_before_next_action"):
+    if review.get("review_required_before_next_attempt"):
         blockers.append(_cockpit_blocker(
-            code="review_required_before_next_action",
+            code="review_required_before_next_attempt",
             area="review",
             what="Owner review is required before the next budgeted attempt.",
             why="Closed or unresolved trade outcomes must be reviewed before another attempt.",
@@ -6600,7 +6736,7 @@ def _cockpit_controls(
             "control_id": "refresh_status",
             "label": "刷新状态",
             "enabled": True,
-            "kind": "frontend_refresh",
+            "kind": "owner_runtime_refresh",
             "route": "/",
             "confirmation_required": False,
             "disabled_reason": None,
@@ -6681,7 +6817,7 @@ def _cockpit_controls(
             "route": "/review",
             "confirmation_required": False,
             "disabled_reason": None,
-            "owner_action_required": bool(review.get("review_required_before_next_action")),
+            "owner_action_required": bool(review.get("review_required_before_next_attempt")),
         },
         {
             "control_id": "view_evidence",
@@ -7157,7 +7293,7 @@ def _migration_drift_summary(startup_summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _owner_console_source_readiness_packet(
+def _owner_console_source_readiness_artifact(
     *,
     generated_at_ms: int,
     intake_response: TradingConsoleReadModelResponse,
@@ -7260,24 +7396,28 @@ def _owner_console_source_readiness_packet(
     )
     deploy_channel_source = _owner_console_deploy_channel_source(deploy_channel)
     source_health = {
-        "strategy_catalog": _owner_console_detail_source(
+        "strategy_catalog": _owner_console_binary_label_source(
             status=catalog_status,
-            owner_label="策略组可见" if catalog_status == "ready" else "策略组暂不可用",
+            ready_label="策略组可见",
+            not_ready_label="策略组暂不可用",
             reason="strategy_group_handoff_catalog",
         ),
-        "runtime_source": _owner_console_detail_source(
+        "runtime_source": _owner_console_binary_label_source(
             status=runtime_status,
-            owner_label="运行状态正常" if runtime_status == "ready" else "运行状态源未连接",
+            ready_label="运行状态正常",
+            not_ready_label="运行状态源未连接",
             reason=str((runtime.get("owner_state") or {}).get("blocked_reason") or "runtime_readmodel"),
         ),
-        "watcher": _owner_console_detail_source(
+        "watcher": _owner_console_binary_label_source(
             status=watcher_status,
-            owner_label="运行中" if watcher_status == "ready" else "观察状态暂不可用",
+            ready_label="运行中",
+            not_ready_label="观察状态暂不可用",
             reason=str((watcher.get("owner_state") or {}).get("blocked_reason") or "watcher_readmodel"),
         ),
-        "live_facts": _owner_console_detail_source(
+        "live_facts": _owner_console_binary_label_source(
             status=live_facts_status,
-            owner_label="事实正常" if live_facts_status == "ready" else "事实状态暂不可用",
+            ready_label="事实正常",
+            not_ready_label="事实状态暂不可用",
             reason=str((live_readiness.get("owner_state") or {}).get("blocked_reason") or "live_facts_readiness"),
         ),
         "funds": funds,
@@ -7348,12 +7488,6 @@ def _owner_console_source_readiness_packet(
         "source_health": source_health,
         "real_order_readiness": real_order_readiness,
         "critical_unavailable_sources": critical_unavailable,
-        "frontend_contract": {
-            "single_api_source": True,
-            "hide_strategy_groups_when_runtime_degraded": False,
-            "ready_empty_is_not_unavailable": True,
-            "owner_homepage_internal_gate_terms_allowed": False,
-        },
         "raw_status_refs": {
             "handoff_intake_status": intake.get("status"),
             "runtime_pilot_status": runtime.get("status"),
@@ -7489,21 +7623,21 @@ def _owner_console_funds_source(
             owner_label="资金状态暂不可用",
             reason=str(account.get("status") or "account_not_fresh"),
         )
-    return {
-        **_owner_console_detail_source(
-            status="ready",
-            owner_label="资金正常",
-            reason=str(budget.get("reason") or "readonly_account_facts_fresh"),
-        ),
-        "summary": {
+    return _owner_console_detail_source(
+        status="ready",
+        owner_label="资金正常",
+        reason=str(budget.get("reason") or "readonly_account_facts_fresh"),
+        summary={
             "available_balance_present": bool(account.get("available_balance_present")),
             "available_balance_positive": bool(account.get("available_balance_positive")),
             "total_wallet_balance_present": bool(account.get("total_wallet_balance_present")),
-            "can_trade": bool(account.get("can_trade")),
+            "exchange_account_trade_permission": bool(
+                account.get("exchange_account_trade_permission")
+            ),
             "budget_status": budget.get("status"),
             "max_notional_requirement_usdt": budget.get("max_notional_requirement_usdt"),
         },
-    }
+    )
 
 
 def _owner_console_count_source(
@@ -7530,22 +7664,18 @@ def _owner_console_count_source(
             reason=f"{count_key}_missing",
         )
     if count == 0 or status in empty_statuses:
-        return {
-            **_owner_console_detail_source(
-                status="ready_empty",
-                owner_label=empty_label,
-                reason=status or "source_readable_empty",
-            ),
-            "count": count,
-        }
-    return {
-        **_owner_console_detail_source(
-            status="ready_nonempty",
-            owner_label=nonempty_label,
-            reason=status or "source_readable_nonempty",
-        ),
-        "count": count,
-    }
+        return _owner_console_detail_source(
+            status="ready_empty",
+            owner_label=empty_label,
+            reason=status or "source_readable_empty",
+            count=count,
+        )
+    return _owner_console_detail_source(
+        status="ready_nonempty",
+        owner_label=nonempty_label,
+        reason=status or "source_readable_nonempty",
+        count=count,
+    )
 
 
 def _owner_console_protection_source(protection: dict[str, Any]) -> dict[str, Any]:
@@ -7586,19 +7716,17 @@ def _owner_console_reconciliation_source(
         orders.get("status") == "ready_empty"
         and positions.get("status") == "ready_empty"
     ):
-        return {
-            **_owner_console_detail_source(
-                status="ready",
-                owner_label="对账正常",
-                reason="flat_no_open_order_no_reconciliation_action_required",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="ready",
+            owner_label="对账正常",
+            reason="flat_no_open_order_no_reconciliation_action_required",
+            summary={
                 "open_order_count": orders.get("count", 0),
                 "active_position_count": positions.get("count", 0),
                 "exchange_write_called": False,
                 "order_created": False,
             },
-        }
+        )
     if (
         orders.get("status") == "ready_nonempty"
         or positions.get("status") == "ready_nonempty"
@@ -7651,18 +7779,16 @@ def _owner_console_operation_audit_source(
         "strategy_group_live_facts_ready_for_armed_observation",
         "",
     }:
-        return {
-            **_owner_console_detail_source(
-                status="ready_empty",
-                owner_label="暂无审计动作",
-                reason="no_operation_action_in_current_cycle",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="ready_empty",
+            owner_label="暂无审计动作",
+            reason="no_operation_action_in_current_cycle",
+            summary={
                 "shadow_candidate_id": None,
                 "prepared_authorization_id": None,
                 "operation_layer_reached": False,
             },
-        }
+        )
     if prepared_authorization_id or shadow_candidate_id:
         return _owner_console_detail_source(
             status="ready_nonempty",
@@ -7676,7 +7802,7 @@ def _owner_console_operation_audit_source(
     )
 
 
-def _owner_console_effective_deploy_channel_packet(
+def _owner_console_effective_deploy_channel_artifact(
     *,
     deploy_channel: dict[str, Any],
     deploy_channel_path: str,
@@ -7699,18 +7825,16 @@ def _owner_console_deploy_channel_source(
     deploy_channel: dict[str, Any],
 ) -> dict[str, Any]:
     if not deploy_channel:
-        return {
-            **_owner_console_detail_source(
-                status="ready_empty",
-                owner_label="部署通道未检查",
-                reason="tokyo_deploy_channel_status_missing",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="ready_empty",
+            owner_label="部署通道未检查",
+            reason="tokyo_deploy_channel_status_missing",
+            summary={
                 "checked": False,
                 "connectivity_ready": None,
                 "blockers": [],
             },
-        }
+        )
 
     checks = (
         deploy_channel.get("checks")
@@ -7731,18 +7855,16 @@ def _owner_console_deploy_channel_source(
     status = str(deploy_channel.get("status") or "")
 
     if blockers or connectivity_ready is False or status == "blocked":
-        return {
-            **_owner_console_detail_source(
-                status="degraded",
-                owner_label="部署通道暂不可用",
-                reason=",".join(blockers) if blockers else status or "tokyo_deploy_channel_blocked",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="部署通道暂不可用",
+            reason=",".join(blockers) if blockers else status or "tokyo_deploy_channel_blocked",
+            summary={
                 "checked": True,
                 "connectivity_ready": connectivity_ready,
                 "blockers": blockers[:20],
             },
-        }
+        )
 
     if status in {
         "ready",
@@ -7750,31 +7872,27 @@ def _owner_console_deploy_channel_source(
         "ready_for_deploy_apply",
         "postdeploy_accepted",
     } or connectivity_ready is True:
-        return {
-            **_owner_console_detail_source(
-                status="ready",
-                owner_label="部署通道正常",
-                reason=status or "tokyo_deploy_channel_ready",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="ready",
+            owner_label="部署通道正常",
+            reason=status or "tokyo_deploy_channel_ready",
+            summary={
                 "checked": True,
                 "connectivity_ready": connectivity_ready,
                 "blockers": [],
             },
-        }
+        )
 
-    return {
-        **_owner_console_detail_source(
-            status="degraded",
-            owner_label="部署通道需检查",
-            reason=status or "tokyo_deploy_channel_status_unknown",
-        ),
-        "summary": {
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="部署通道需检查",
+        reason=status or "tokyo_deploy_channel_status_unknown",
+        summary={
             "checked": True,
             "connectivity_ready": connectivity_ready,
             "blockers": blockers[:20],
         },
-    }
+    )
 
 
 def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[str, Any]:
@@ -7818,13 +7936,11 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
             name: checks.get(name)
             for name in sorted(OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS)
         }
-        return {
-            **_owner_console_detail_source(
-                status="ready",
-                owner_label="审计演练正常",
-                reason="runtime_dry_run_audit_chain_passed",
-            ),
-            "summary": {
+        return _owner_console_detail_source(
+            status="ready",
+            owner_label="审计演练正常",
+            reason="runtime_dry_run_audit_chain_passed",
+            summary={
                 "scenario_count": scenario_count,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_is_real_execution_proof": False,
@@ -7838,9 +7954,9 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "strategygroup_adapter_boundary_checked": (
                     checks.get("strategygroup_adapter_boundary_checked") is True
                 ),
-                "strategy_handoff_no_execution_pipeline_fields_checked": (
+                "strategy_intake_no_execution_pipeline_fields_checked": (
                     checks.get(
-                        "strategy_handoff_no_execution_pipeline_fields_checked"
+                        "strategy_intake_no_execution_pipeline_fields_checked"
                     )
                     is True
                 ),
@@ -7895,12 +8011,12 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                     )
                     is True
                 ),
-                "non_executing_prepare_auto_bridge_checked": (
-                    checks.get("non_executing_prepare_auto_bridge_checked") is True
+                "execution_attempt_rehearsal_prepare_checked": (
+                    checks.get("execution_attempt_rehearsal_prepare_checked") is True
                 ),
                 "required_checks": required_checks,
             },
-        }
+        )
     return _owner_console_detail_source(
         status="degraded",
         owner_label="审计演练需检查",
@@ -7980,32 +8096,32 @@ def _owner_console_real_order_readiness(
     runtime_goal_status: dict[str, Any],
 ) -> dict[str, Any]:
     if not runtime_goal_status:
-        return {
-            "status": "unavailable",
-            "owner_label": "实盘边界暂不可用",
-            "owner_detail": "目标状态源不可用",
-            "ready_for_real_order_action": False,
-            "pass_count": 0,
-            "waiting_count": 0,
-            "blocked_count": 0,
-            "submit_blocking_keys": [],
-            "submit_blocker_review": {
+        return _OwnerConsoleRealOrderReadinessProjection(
+            status="unavailable",
+            owner_label="实盘边界暂不可用",
+            owner_detail="目标状态源不可用",
+            ready_for_real_order_action=False,
+            pass_count=0,
+            waiting_count=0,
+            blocked_count=0,
+            submit_blocking_keys=[],
+            submit_blocker_review={
                 "required": False,
                 "allowed": False,
                 "project_progress_allowed": False,
                 "continue_observation_allowed": False,
                 "real_submit_allowed": False,
-                "next_safe_checkpoint": "refresh_runtime_goal_status",
+                "non_authority_checkpoint": "refresh_runtime_goal_status",
                 "blocker_keys": [],
             },
-            "next_safe_checkpoint": "refresh_runtime_goal_status",
-            "matrix": [],
-            "source_health": _owner_console_detail_source(
+            non_authority_checkpoint="refresh_runtime_goal_status",
+            matrix=[],
+            source_health=_owner_console_detail_source(
                 status="unavailable",
                 owner_label="实盘边界暂不可用",
                 reason="strategygroup_runtime_goal_status_missing",
             ),
-        }
+        ).to_dict()
 
     matrix = runtime_goal_status.get("real_order_readiness_matrix")
     matrix_rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
@@ -8018,11 +8134,10 @@ def _owner_console_real_order_readiness(
         if isinstance(runtime_goal_status.get("owner_state"), dict)
         else {}
     )
-    next_checkpoint = str(
-        runtime_goal_status.get("next_safe_checkpoint")
-        or owner_state.get("next_safe_checkpoint")
-        or owner_state.get("next_action")
-        or "review_runtime_goal_status"
+    next_checkpoint = _owner_non_authority_checkpoint(
+        runtime_goal_status,
+        owner_state,
+        default="review_runtime_goal_status",
     )
     submit_blocking_keys = [
         str(item.get("key"))
@@ -8072,24 +8187,24 @@ def _owner_console_real_order_readiness(
         owner_detail = "实盘边界尚未完成自动链路"
         source_status = "ready_nonempty"
 
-    return {
-        "status": status,
-        "owner_label": owner_label,
-        "owner_detail": owner_detail,
-        "ready_for_real_order_action": ready_for_real_order,
-        "pass_count": pass_count,
-        "waiting_count": waiting_count,
-        "blocked_count": blocked_count,
-        "submit_blocking_keys": submit_blocking_keys,
-        "submit_blocker_review": submit_blocker_review,
-        "next_safe_checkpoint": next_checkpoint,
-        "matrix": matrix_rows,
-        "source_health": _owner_console_detail_source(
+    return _OwnerConsoleRealOrderReadinessProjection(
+        status=status,
+        owner_label=owner_label,
+        owner_detail=owner_detail,
+        ready_for_real_order_action=ready_for_real_order,
+        pass_count=pass_count,
+        waiting_count=waiting_count,
+        blocked_count=blocked_count,
+        submit_blocking_keys=submit_blocking_keys,
+        submit_blocker_review=submit_blocker_review,
+        non_authority_checkpoint=next_checkpoint,
+        matrix=matrix_rows,
+        source_health=_owner_console_detail_source(
             status=source_status,
             owner_label=owner_label,
             reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
         ),
-    }
+    ).to_dict()
 
 
 def _owner_console_submit_blocker_review(
@@ -8145,9 +8260,7 @@ def _owner_console_submit_blocker_review(
         "project_progress_allowed": project_progress_allowed,
         "continue_observation_allowed": continue_observation_allowed,
         "real_submit_allowed": real_submit_allowed,
-        "next_safe_checkpoint": str(
-            review.get("next_safe_checkpoint") or next_checkpoint
-        ),
+        "non_authority_checkpoint": next_checkpoint,
         "blocker_keys": [str(item) for item in blocker_keys if str(item)],
     }
 
@@ -8195,11 +8308,9 @@ def _owner_console_apply_runtime_goal_status_overlay(
         or goal_owner.get("reason")
         or status
     )
-    next_checkpoint = str(
-        goal_owner.get("next_safe_checkpoint")
-        or goal_owner.get("next_action")
-        or goal_owner.get("automatic_recovery_action")
-        or "review_runtime_goal_status"
+    next_checkpoint = _owner_non_authority_checkpoint(
+        goal_owner,
+        default="review_runtime_goal_status",
     )
     if status in {
         "runtime_liveness_degraded",
@@ -8212,7 +8323,8 @@ def _owner_console_apply_runtime_goal_status_overlay(
             "status": "needs_intervention",
             "label": "需要介入",
             "reason": detail,
-            "next_action": next_checkpoint,
+            "non_authority_checkpoint": next_checkpoint,
+            "checkpoint_source": "runtime_goal_status_overlay",
             "needs_owner_action": status in {
                 "hard_safety_stop",
                 "active_position_resolution",
@@ -8231,7 +8343,8 @@ def _owner_console_apply_runtime_goal_status_overlay(
             "status": "temporarily_unavailable",
             "label": "暂不可用",
             "reason": detail,
-            "next_action": next_checkpoint,
+            "non_authority_checkpoint": next_checkpoint,
+            "checkpoint_source": "runtime_goal_status_overlay",
             "needs_owner_action": False,
             "runtime_goal_status": status,
         }
@@ -8247,7 +8360,8 @@ def _owner_console_apply_runtime_goal_status_overlay(
             "status": "processing",
             "label": "处理中",
             "reason": detail,
-            "next_action": next_checkpoint,
+            "non_authority_checkpoint": next_checkpoint,
+            "checkpoint_source": "runtime_goal_status_overlay",
             "needs_owner_action": False,
             "runtime_goal_status": status,
         }
@@ -8288,19 +8402,6 @@ def _owner_console_forbidden_effect_detected(
     return False
 
 
-def _owner_console_detail_source(
-    *,
-    status: str,
-    owner_label: str,
-    reason: str,
-) -> dict[str, Any]:
-    return {
-        "status": status,
-        "owner_label": owner_label,
-        "reason": reason,
-    }
-
-
 def _owner_console_runtime_interaction_summary() -> dict[str, Any]:
     return {
         "level": "L1_daily_check_from_snapshot",
@@ -8323,13 +8424,12 @@ def _owner_console_owner_state(
     runtime: dict[str, Any],
 ) -> dict[str, Any]:
     if critical_unavailable:
-        return {
-            "status": "temporarily_unavailable",
-            "label": "暂不可用",
-            "reason": "critical_source_unavailable",
-            "next_action": "wait_for_source_recovery",
-            "needs_owner_action": False,
-        }
+        return _owner_console_owner_state_projection(
+            status="temporarily_unavailable",
+            label="暂不可用",
+            reason="critical_source_unavailable",
+            non_authority_checkpoint="wait_for_source_recovery",
+        )
     runtime_owner = runtime.get("owner_state") if isinstance(runtime.get("owner_state"), dict) else {}
     watcher_owner = watcher.get("owner_state") if isinstance(watcher.get("owner_state"), dict) else {}
     blocked_reason = str(
@@ -8344,32 +8444,29 @@ def _owner_console_owner_state(
         runtime=runtime,
         watcher=watcher,
     ):
-        return {
-            "status": "waiting_for_opportunity",
-            "label": "等待机会",
-            "reason": blocked_reason,
-            "next_action": "continue_watcher_observation",
-            "needs_owner_action": False,
-        }
+        return _owner_console_owner_state_projection(
+            status="waiting_for_opportunity",
+            label="等待机会",
+            reason=blocked_reason,
+            non_authority_checkpoint="continue_watcher_observation",
+        )
     if blocked_reason in {"none", ""}:
-        return {
-            "status": "running",
-            "label": "运行中",
-            "reason": "sources_ready",
-            "next_action": "continue_watcher_observation",
-            "needs_owner_action": False,
-        }
-    return {
-        "status": "temporarily_unavailable",
-        "label": "暂不可用",
-        "reason": blocked_reason,
-        "next_action": str(
-            runtime_owner.get("automatic_recovery_action")
-            or watcher_owner.get("automatic_recovery_action")
-            or "continue_watcher_observation"
+        return _owner_console_owner_state_projection(
+            status="running",
+            label="运行中",
+            reason="sources_ready",
+            non_authority_checkpoint="continue_watcher_observation",
+        )
+    return _owner_console_owner_state_projection(
+        status="temporarily_unavailable",
+        label="暂不可用",
+        reason=blocked_reason,
+        non_authority_checkpoint=_owner_non_authority_checkpoint(
+            runtime_owner,
+            watcher_owner,
+            default="continue_watcher_observation",
         ),
-        "needs_owner_action": False,
-    }
+    )
 
 
 def _owner_console_waiting_for_market(

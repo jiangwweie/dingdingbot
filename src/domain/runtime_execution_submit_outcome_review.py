@@ -1,6 +1,6 @@
 """Read-only classification of exchange-submit outcomes.
 
-This model bridges a recorded exchange-submit execution result and trusted
+This model classifies a recorded exchange-submit execution result and trusted
 local order facts into the attempt-outcome policy vocabulary. It is evidence
 only: it does not release budget, mutate runtime state, create/cancel orders,
 or call an exchange.

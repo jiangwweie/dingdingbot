@@ -28,7 +28,7 @@ def _args(tmp_path: Path, **overrides):
         "allow_attempt_policy_prepare": False,
         "allow_disabled_smoke": False,
         "skip_disabled_smoke_prerequisite_probe": True,
-        "include_packets": False,
+        "include_artifacts": False,
         "notify_no_signal": False,
         "notification_dry_run": False,
         "notification_timeout_seconds": 1.0,
@@ -108,7 +108,7 @@ def _fake_supervisor(output_status: str, *, ready: bool = False):
             "cycle_summaries": [latest],
             "blockers": latest["blockers"],
             "warnings": [],
-            "operator_command_plan": {
+            "operator_review_plan": {
                 "not_executed": True,
                 "creates_execution_intent": False,
                 "places_order": False,
@@ -134,7 +134,7 @@ def _fake_supervisor(output_status: str, *, ready: bool = False):
                 "withdrawal_or_transfer_created": False,
             },
         }
-        (output_dir / "loop-packet.json").write_text(json.dumps(loop), encoding="utf-8")
+        Path(args.loop_output_json).write_text(json.dumps(loop), encoding="utf-8")
         (output_dir / "latest-summary.json").write_text(
             json.dumps(latest), encoding="utf-8"
         )
@@ -150,13 +150,13 @@ def _fake_supervisor(output_status: str, *, ready: bool = False):
     return builder
 
 
-def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, monkeypatch):
+def test_watcher_tick_writes_artifacts_without_notifying_on_no_signal(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_packet_from_path",
+        "build_operator_evidence_from_path",
         lambda **kwargs: {
-            "scope": "runtime_observation_operator_packet",
+            "scope": "runtime_observation_operator_evidence",
             "status": "observation_running_no_signal",
             "active_runtime_observation": {
                 "active_runtime_count": 1,
@@ -171,14 +171,14 @@ def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, mo
                 "strategy_group_no_action_signal_count": 1,
             },
             "runtime_prepare_context": {},
-            "operator_command_plan": {
+            "operator_review_plan": {
                 "next_step": "continue_active_runtime_observation",
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
             },
             "safety_invariants": {
-                "operator_packet_only": True,
+                "operator_evidence_only": True,
                 "execution_intent_created": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -189,38 +189,57 @@ def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, mo
         },
     )
 
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("waiting_for_signal"),
         notifier=lambda *items: sent.append(items) or {"sent": True, "status_code": 200},
     )
 
-    assert packet["status"] == "watching_no_signal"
-    assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"
-    assert packet["post_signal_auto_resume"]["blocked_reason"] == "no_fresh_strategy_signal"
-    assert packet["operator_command_plan"]["next_step"] == "continue_watcher_observation"
-    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
-    assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
-    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
-    assert packet["notification"]["required"] is False
-    assert packet["notification"]["reason"] == (
+    assert artifact["status"] == "watching_no_signal"
+    assert artifact["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert artifact["watcher_status_evidence_status"] == (
+        "observation_window_complete_no_signal"
+    )
+    assert "status_packet_status" not in artifact
+    assert artifact["post_signal_auto_resume"]["blocked_reason"] == "no_fresh_strategy_signal"
+    assert "operator_command_plan" not in artifact
+    assert "next_step" not in artifact["watcher_tick_plan"]
+    assert artifact["watcher_tick_plan"]["non_authority_checkpoint"] == (
+        "continue_watcher_observation"
+    )
+    assert artifact["watcher_tick_plan"]["not_execution_authority"] is True
+    assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is True
+    assert artifact["watcher_tick_plan"]["requires_action_time_final_gate"] is True
+    assert artifact["watcher_tick_plan"]["requires_official_operation_layer"] is True
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["reason"] == (
         "waiting_for_market_no_owner_attention_needed"
     )
     assert sent == []
     assert (tmp_path / "watcher" / "latest-status.json").exists()
-    assert (tmp_path / "watcher" / "operator-packet.json").exists()
-    assert (tmp_path / "watcher" / "wakeup-packet.json").exists()
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    state = json.loads((tmp_path / "watcher" / "notification-state.json").read_text())
+    assert state["last_watcher_status_evidence_status"] == (
+        "observation_window_complete_no_signal"
+    )
+    assert "last_status_packet_status" not in state
+    assert (tmp_path / "watcher" / "operator-evidence.json").exists()
+    assert (tmp_path / "watcher" / "wakeup-evidence.json").exists()
+    assert not (tmp_path / "watcher" / "supervisor-packet.json").exists()
+    assert not (tmp_path / "watcher" / "operator-packet.json").exists()
+    assert not (tmp_path / "watcher" / "wakeup-packet.json").exists()
+    assert "legacy_operator_packet_json" not in artifact["paths"]
+    assert "legacy_wakeup_packet_json" not in artifact["paths"]
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_packet_from_path",
+        "build_operator_evidence_from_path",
         lambda **kwargs: {
-            "scope": "runtime_observation_operator_packet",
+            "scope": "runtime_observation_operator_evidence",
             "status": "observation_running_no_signal",
             "active_runtime_observation": {
                 "active_runtime_count": 1,
@@ -235,14 +254,14 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
                 "strategy_group_no_action_signal_count": 1,
             },
             "runtime_prepare_context": {},
-            "operator_command_plan": {
+            "operator_review_plan": {
                 "next_step": "continue_active_runtime_observation",
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
             },
             "safety_invariants": {
-                "operator_packet_only": True,
+                "operator_evidence_only": True,
                 "execution_intent_created": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -262,7 +281,7 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
         )
         return _fake_supervisor("waiting_for_signal")(args)
 
-    runtime_signal_watcher_tick.build_watcher_tick_packet(
+    runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
             allow_arm_preview=True,
@@ -281,16 +300,59 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     }
 
 
-def test_watcher_tick_does_not_notify_when_operator_packet_needs_review_but_waiting_for_market(
+def test_watcher_tick_stale_status_recovers_on_fresh_observation_artifacts(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_operator_evidence_from_path",
+        lambda **kwargs: {
+            "scope": "runtime_observation_operator_evidence",
+            "status": "observation_running_no_signal",
+            "blockers": ["active_observation_artifacts_stale_or_missing"],
+            "operator_review_plan": {
+                "next_step": "continue_active_runtime_observation",
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "operator_evidence_only": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "forbidden_effects": [],
+            },
+        },
+    )
+
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(tmp_path, status_stale_after_seconds=-1),
+        supervisor_builder=_fake_supervisor("waiting_for_signal"),
+    )
+
+    assert artifact["post_signal_auto_resume"]["status"] == (
+        "blocked_observation_evidence"
+    )
+    assert artifact["post_signal_auto_resume"]["next_recover_condition"] == (
+        "fresh_non_forbidden_observation_artifacts_exist"
+    )
+    assert "fresh_non_forbidden_observation_packets_exist" not in json.dumps(artifact)
+
+
+def test_watcher_tick_does_not_notify_when_operator_evidence_needs_review_but_waiting_for_market(
     tmp_path,
     monkeypatch,
 ):
     sent = []
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_packet_from_path",
+        "build_operator_evidence_from_path",
         lambda **kwargs: {
-            "scope": "runtime_observation_operator_packet",
+            "scope": "runtime_observation_operator_evidence",
             "status": "strategy_group_signal_review_available",
             "active_runtime_observation": {
                 "active_runtime_count": 6,
@@ -306,14 +368,14 @@ def test_watcher_tick_does_not_notify_when_operator_packet_needs_review_but_wait
                 "strategy_group_no_action_signal_count": 7,
             },
             "runtime_prepare_context": {},
-            "operator_command_plan": {
+            "operator_review_plan": {
                 "next_step": "review_strategy_group_would_enter_without_execution",
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
             },
             "safety_invariants": {
-                "operator_packet_only": True,
+                "operator_evidence_only": True,
                 "execution_intent_created": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -324,16 +386,16 @@ def test_watcher_tick_does_not_notify_when_operator_packet_needs_review_but_wait
         },
     )
 
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("waiting_for_signal"),
         notifier=lambda *items: sent.append(items) or {"sent": True, "status_code": 200},
     )
 
-    assert packet["wakeup_status"] == "operator_packet_needs_review"
-    assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"
-    assert packet["notification"]["required"] is False
-    assert packet["notification"]["reason"] == (
+    assert artifact["wakeup_status"] == "operator_evidence_needs_review"
+    assert artifact["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["reason"] == (
         "waiting_for_market_no_owner_attention_needed"
     )
     assert sent == []
@@ -346,7 +408,7 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
         calls.append((webhook_url, webhook_secret, body, timeout))
         return {"sent": True, "status_code": 200, "response_body_preview": "ok"}
 
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
             feishu_webhook_url="https://example.test/hook",
@@ -356,25 +418,26 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
         notifier=notifier,
     )
 
-    assert packet["status"] == "owner_notified"
-    assert packet["wakeup_status"] == "prepared_shadow_evidence_ready_for_owner_review"
-    assert packet["post_signal_auto_resume"]["status"] == (
+    assert artifact["status"] == "owner_notified"
+    assert artifact["wakeup_status"] == "prepared_shadow_evidence_ready_for_owner_review"
+    assert artifact["post_signal_auto_resume"]["status"] == (
         "ready_for_action_time_final_gate"
     )
-    assert packet["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
-    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+    assert artifact["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
+    assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
+    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
-    assert packet["notification"]["sent"] is True
+    assert artifact["notification"]["sent"] is True
     assert calls[0][0] == "https://example.test/hook"
     assert calls[0][1] == "secret-value"
     assert "monitored runtimes: 1" in calls[0][2]["text"]
     assert "auth-ready-1" in calls[0][2]["text"]
-    assert "secret-value" not in json.dumps(packet)
+    assert "secret-value" not in json.dumps(artifact)
 
 
 def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
-    first = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    first = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
         notifier=lambda *items: {"sent": True, "status_code": 200},
@@ -382,7 +445,7 @@ def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
     assert first["notification"]["sent"] is True
 
     calls = []
-    second = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
@@ -410,43 +473,45 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
     )
     calls = []
 
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, env_file=str(env_file)),
         supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
-    assert packet["status"] == "owner_notified"
-    assert packet["notification"]["configured"] is True
-    assert packet["notification"]["secret_configured"] is True
+    assert artifact["status"] == "owner_notified"
+    assert artifact["notification"]["configured"] is True
+    assert artifact["notification"]["secret_configured"] is True
     assert calls[0][0] == "https://example.test/from-env-file"
     assert calls[0][1] == "env-file-secret"
-    assert "env-file-secret" not in json.dumps(packet)
+    assert "env-file-secret" not in json.dumps(artifact)
 
 
 def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(tmp_path):
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("ready_for_prepare", ready=False),
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
 
-    assert packet["post_signal_auto_resume"]["status"] == (
+    assert artifact["post_signal_auto_resume"]["status"] == (
         "ready_for_non_executing_prepare"
     )
-    assert packet["post_signal_auto_resume"]["blocked_reason"] == (
+    assert artifact["post_signal_auto_resume"]["blocked_reason"] == (
         "fresh_strategy_signal_ready"
     )
-    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+    assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
+    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "rerun_watcher_tick_with_allow_prepare_records"
     )
-    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is True
+    assert artifact["watcher_tick_plan"]["places_order"] is False
+    assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
 
 
 def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_records(tmp_path):
-    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
             allow_prepare_records=True,
@@ -459,32 +524,36 @@ def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_re
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
 
-    assert packet["post_signal_auto_resume"]["status"] == (
+    assert artifact["post_signal_auto_resume"]["status"] == (
         "ready_for_action_time_final_gate"
     )
-    assert packet["post_signal_auto_resume"]["prepared_authorization_id"] == (
+    assert artifact["post_signal_auto_resume"]["prepared_authorization_id"] == (
         "auth-ready-1"
     )
-    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+    assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
+    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert "operator_command_plan" not in artifact
+    assert "next_step" not in artifact["watcher_tick_plan"]
+    assert artifact["watcher_tick_plan"]["non_authority_checkpoint"] == (
         "run_official_action_time_final_gate_preflight"
     )
-    assert packet["operator_command_plan"]["creates_prepare_records"] is True
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
-    assert packet["safety_invariants"]["post_signal_auto_resume_decision_only"] is False
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
-    assert packet["safety_invariants"][
+    assert artifact["watcher_tick_plan"]["not_execution_authority"] is True
+    assert artifact["watcher_tick_plan"]["creates_prepare_records"] is True
+    assert artifact["watcher_tick_plan"]["creates_shadow_candidate"] is True
+    assert artifact["watcher_tick_plan"]["places_order"] is False
+    assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
+    assert artifact["safety_invariants"]["post_signal_auto_resume_decision_only"] is False
+    assert artifact["safety_invariants"]["prepare_records_created"] is True
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is True
+    assert artifact["safety_invariants"][
         "runtime_execution_intent_draft_created"
     ] is True
-    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
-    assert packet["safety_invariants"]["submit_authorization_created"] is True
-    assert packet["safety_invariants"]["protection_plan_created"] is True
-    assert packet["safety_invariants"]["allowed_prepare_record_effects"] == [
+    assert artifact["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert artifact["safety_invariants"]["submit_authorization_created"] is True
+    assert artifact["safety_invariants"]["protection_plan_created"] is True
+    assert artifact["safety_invariants"]["allowed_prepare_record_effects"] == [
         "prepare_records_created",
         "shadow_candidate_created",
         "runtime_execution_intent_draft_created",
@@ -492,12 +561,12 @@ def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_re
         "submit_authorization_created",
         "protection_plan_created",
     ]
-    assert packet["safety_invariants"]["real_submit_requested"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["real_submit_requested"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
-    first = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    first = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
             feishu_webhook_url="https://example.test/hook",
@@ -508,7 +577,7 @@ def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
     assert first["notification"]["skipped_reason"] == "notification_dry_run"
 
     calls = []
-    second = runtime_signal_watcher_tick.build_watcher_tick_packet(
+    second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},

@@ -69,7 +69,7 @@ class StrategyFamilyStatus(str, Enum):
 class AdmissionAuditEventType(str, Enum):
     FAMILY_CREATED = "family_created"
     FAMILY_VERSION_CREATED = "family_version_created"
-    EVIDENCE_PACKET_CREATED = "evidence_packet_created"
+    ADMISSION_EVIDENCE_CREATED = "admission_evidence_created"
     OWNER_REGIME_INPUT_CREATED = "owner_regime_input_created"
     ADMISSION_REQUEST_CREATED = "admission_request_created"
     ADMISSION_EVALUATED = "admission_evaluated"
@@ -144,8 +144,8 @@ class AdmissionRuleConfig(AdmissionModel):
     created_by: str = Field(default="system", max_length=128)
 
 
-class AdmissionEvidencePacket(AdmissionModel):
-    evidence_packet_id: str
+class AdmissionEvidence(AdmissionModel):
+    admission_evidence_id: str
     strategy_family_version_id: str
     payload_json: dict[str, Any] = Field(default_factory=dict)
     mandatory_complete: bool = False
@@ -166,7 +166,7 @@ class OwnerMarketRegimeInput(AdmissionModel):
 class AdmissionRequest(AdmissionModel):
     admission_request_id: str
     strategy_family_version_id: str
-    evidence_packet_id: str
+    admission_evidence_id: str
     owner_market_regime_input_id: str
     trial_env: TrialEnv
     trial_stage: TrialStage
@@ -204,7 +204,7 @@ class AdmissionDecision(AdmissionModel):
     playbook_id: Optional[str] = None
     playbook_catalog_snapshot_json: dict[str, Any] = Field(default_factory=dict)
     owner_market_regime_input_id: str
-    evidence_packet_id: str
+    admission_evidence_id: str
     admission_rule_config_id: str
     trial_constraint_snapshot_id: str
     risk_profile: str = Field(default="micro", max_length=64)

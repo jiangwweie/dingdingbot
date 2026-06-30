@@ -188,11 +188,11 @@ def _current_pipeline_args(
     )
 
 
-def _signal_input_json(loop_packet: dict[str, Any]) -> str | None:
-    value = loop_packet.get("signal_input_json")
+def _signal_input_json(fresh_loop_artifact: dict[str, Any]) -> str | None:
+    value = fresh_loop_artifact.get("signal_input_json")
     if isinstance(value, str) and value.strip():
         return value.strip()
-    observation = loop_packet.get("observation_prepare_flow")
+    observation = fresh_loop_artifact.get("observation_prepare_flow")
     if isinstance(observation, dict):
         value = observation.get("signal_input_json")
         if isinstance(value, str) and value.strip():
@@ -202,15 +202,17 @@ def _signal_input_json(loop_packet: dict[str, Any]) -> str | None:
 
 def _safety(
     *,
-    loop_packet: dict[str, Any] | None = None,
-    pipeline_packet: dict[str, Any] | None = None,
+    fresh_loop_artifact: dict[str, Any] | None = None,
+    current_pipeline_artifact: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
     loop_safety = (
-        loop_packet.get("safety_invariants") if isinstance(loop_packet, dict) else {}
+        fresh_loop_artifact.get("safety_invariants")
+        if isinstance(fresh_loop_artifact, dict)
+        else {}
     )
     pipeline_safety = (
-        pipeline_packet.get("safety_invariants")
-        if isinstance(pipeline_packet, dict)
+        current_pipeline_artifact.get("safety_invariants")
+        if isinstance(current_pipeline_artifact, dict)
         else {}
     )
     if not isinstance(loop_safety, dict):
@@ -255,27 +257,27 @@ def _safety(
     }
 
 
-def _build_packet(
+def _build_continuation_artifact(
     args: argparse.Namespace,
     *,
     fresh_loop_builder: FreshLoopBuilder | None = None,
     current_pipeline_builder: CurrentPipelineBuilder | None = None,
 ) -> dict[str, Any]:
     paths = _output_paths(args)
-    loop_builder = fresh_loop_builder or fresh_loop._build_packet
+    loop_builder = fresh_loop_builder or fresh_loop._build_artifact
     pipeline_builder = current_pipeline_builder or current_pipeline._build_report
 
-    loop_packet = loop_builder(_fresh_loop_args(args))
-    _write_json(paths["fresh_loop"], loop_packet)
-    loop_status = str(loop_packet.get("status") or "")
+    fresh_loop_artifact = loop_builder(_fresh_loop_args(args))
+    _write_json(paths["fresh_loop"], fresh_loop_artifact)
+    loop_status = str(fresh_loop_artifact.get("status") or "")
     if loop_status in {WAITING_FOR_SIGNAL, READY_FOR_PREPARE}:
-        return _base_packet(
+        return _base_continuation_artifact(
             args=args,
             paths=paths,
             status=loop_status,
             blocked_stage=None,
-            fresh_loop_packet=loop_packet,
-            current_pipeline_packet=None,
+            fresh_loop_artifact=fresh_loop_artifact,
+            current_pipeline_artifact=None,
             next_step=(
                 "continue_observation_until_genuine_would_enter"
                 if loop_status == WAITING_FOR_SIGNAL
@@ -283,58 +285,58 @@ def _build_packet(
             ),
         )
     if loop_status != READY_FOR_FINAL_GATE_PREFLIGHT:
-        return _base_packet(
+        return _base_continuation_artifact(
             args=args,
             paths=paths,
             status="blocked",
             blocked_stage="fresh_signal_prepare_loop",
-            fresh_loop_packet=loop_packet,
-            current_pipeline_packet=None,
+            fresh_loop_artifact=fresh_loop_artifact,
+            current_pipeline_artifact=None,
             next_step="resolve_fresh_signal_prepare_loop_blocker",
         )
 
-    signal_input_json = _signal_input_json(loop_packet)
+    signal_input_json = _signal_input_json(fresh_loop_artifact)
     if not signal_input_json:
-        return _base_packet(
+        return _base_continuation_artifact(
             args=args,
             paths=paths,
             status="blocked",
             blocked_stage="signal_input_json",
-            fresh_loop_packet=loop_packet,
-            current_pipeline_packet=None,
+            fresh_loop_artifact=fresh_loop_artifact,
+            current_pipeline_artifact=None,
             extra_blockers=["ready_fresh_signal_missing_signal_input_json"],
             next_step="rerun_fresh_signal_prepare_loop_until_signal_input_is_available",
         )
 
     has_evidence = bool(args.readiness_evidence_json or args.auto_readiness_evidence)
     if not has_evidence:
-        return _base_packet(
+        return _base_continuation_artifact(
             args=args,
             paths=paths,
             status=READY_FOR_EVIDENCE,
             blocked_stage=None,
-            fresh_loop_packet=loop_packet,
-            current_pipeline_packet=None,
+            fresh_loop_artifact=fresh_loop_artifact,
+            current_pipeline_artifact=None,
             next_step="provide_readiness_evidence_before_current_source_pipeline",
         )
 
-    current_packet = pipeline_builder(
+    current_pipeline_artifact = pipeline_builder(
         _current_pipeline_args(
             args,
             signal_input_json=signal_input_json,
             artifact_dir=paths["current_pipeline"].with_suffix(""),
         )
     )
-    _write_json(paths["current_pipeline"], current_packet)
-    status = str(current_packet.get("status") or "blocked")
-    blocked_stage = current_packet.get("blocked_stage")
-    return _base_packet(
+    _write_json(paths["current_pipeline"], current_pipeline_artifact)
+    status = str(current_pipeline_artifact.get("status") or "blocked")
+    blocked_stage = current_pipeline_artifact.get("blocked_stage")
+    return _base_continuation_artifact(
         args=args,
         paths=paths,
         status=status,
         blocked_stage=blocked_stage,
-        fresh_loop_packet=loop_packet,
-        current_pipeline_packet=current_packet,
+        fresh_loop_artifact=fresh_loop_artifact,
+        current_pipeline_artifact=current_pipeline_artifact,
         next_step=(
             "await_real_submit_gate_after_disabled_smoke"
             if status == current_pipeline.READY_STATUS
@@ -343,29 +345,29 @@ def _build_packet(
     )
 
 
-def _base_packet(
+def _base_continuation_artifact(
     *,
     args: argparse.Namespace,
     paths: dict[str, Path],
     status: str,
     blocked_stage: str | None,
-    fresh_loop_packet: dict[str, Any],
-    current_pipeline_packet: dict[str, Any] | None,
+    fresh_loop_artifact: dict[str, Any],
+    current_pipeline_artifact: dict[str, Any] | None,
     next_step: str,
     extra_blockers: list[str] | None = None,
 ) -> dict[str, Any]:
     blockers = list(extra_blockers or [])
-    blockers.extend(str(item) for item in fresh_loop_packet.get("blockers") or [])
-    if isinstance(current_pipeline_packet, dict):
+    blockers.extend(str(item) for item in fresh_loop_artifact.get("blockers") or [])
+    if isinstance(current_pipeline_artifact, dict):
         blockers.extend(
             f"current_source_pipeline:{item}"
-            for item in current_pipeline_packet.get("blockers") or []
+            for item in current_pipeline_artifact.get("blockers") or []
         )
-    warnings = [str(item) for item in fresh_loop_packet.get("warnings") or []]
-    if isinstance(current_pipeline_packet, dict):
+    warnings = [str(item) for item in fresh_loop_artifact.get("warnings") or []]
+    if isinstance(current_pipeline_artifact, dict):
         warnings.extend(
             f"current_source_pipeline:{item}"
-            for item in current_pipeline_packet.get("warnings") or []
+            for item in current_pipeline_artifact.get("warnings") or []
         )
     return {
         "scope": "runtime_current_source_observation_continuation",
@@ -373,23 +375,23 @@ def _base_packet(
         "blocked_stage": blocked_stage,
         "runtime_instance_id": args.runtime_instance_id,
         "artifact_paths": {key: str(value) for key, value in paths.items()},
-        "fresh_signal_prepare_loop": fresh_loop_packet,
-        "current_source_pipeline": current_pipeline_packet,
-        "signal_input_json": _signal_input_json(fresh_loop_packet),
+        "fresh_signal_prepare_loop": fresh_loop_artifact,
+        "current_source_pipeline": current_pipeline_artifact,
+        "signal_input_json": _signal_input_json(fresh_loop_artifact),
         "blockers": _dedupe(blockers),
         "warnings": _dedupe(warnings),
-        "operator_command_plan": {
+        "current_source_continuation_plan": {
             "next_step": next_step,
             "creates_shadow_candidate": bool(
                 _safety(
-                    loop_packet=fresh_loop_packet,
-                    pipeline_packet=current_pipeline_packet,
+                    fresh_loop_artifact=fresh_loop_artifact,
+                    current_pipeline_artifact=current_pipeline_artifact,
                 ).get("shadow_candidate_created")
             ),
             "creates_execution_intent": bool(
                 _safety(
-                    loop_packet=fresh_loop_packet,
-                    pipeline_packet=current_pipeline_packet,
+                    fresh_loop_artifact=fresh_loop_artifact,
+                    current_pipeline_artifact=current_pipeline_artifact,
                 ).get("execution_intent_created")
             ),
             "places_order": False,
@@ -398,8 +400,8 @@ def _base_packet(
             "requires_real_submit_gate": status == current_pipeline.READY_STATUS,
         },
         "safety_invariants": _safety(
-            loop_packet=fresh_loop_packet,
-            pipeline_packet=current_pipeline_packet,
+            fresh_loop_artifact=fresh_loop_artifact,
+            current_pipeline_artifact=current_pipeline_artifact,
         ),
     }
 
@@ -514,12 +516,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    output = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        artifact = _build_continuation_artifact(args)
+    output = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
-        _write_json(Path(args.output_json).expanduser(), packet)
+        _write_json(Path(args.output_json).expanduser(), artifact)
     print(output)
-    return 0 if packet["status"] in {
+    return 0 if artifact["status"] in {
         WAITING_FOR_SIGNAL,
         READY_FOR_PREPARE,
         READY_FOR_EVIDENCE,

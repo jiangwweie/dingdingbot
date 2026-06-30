@@ -1,6 +1,6 @@
-"""Official submit handoff packet for runtime executable readiness.
+"""Official submit preview artifact for runtime executable readiness.
 
-This packet bridges a ready runtime executable-submit preview to the existing
+This preview adapts a ready runtime executable-submit artifact to the existing
 Trading Console official submit endpoint. It never calls the endpoint, creates
 orders, calls OrderLifecycle, or touches exchange. Its job is to freeze the
 fresh authorization and evidence IDs that a later explicit submit action must
@@ -19,7 +19,7 @@ from src.domain.standing_authorization import (
     standing_authorization_metadata,
 )
 from src.domain.runtime_executable_submit_readiness import (
-    RuntimeExecutableSubmitReadinessPacket,
+    RuntimeExecutableSubmitReadinessArtifact,
     RuntimeExecutableSubmitReadinessStatus,
 )
 
@@ -38,10 +38,10 @@ class RuntimeOfficialSubmitHandoffMode(str, Enum):
     REAL_GATEWAY_ACTION = "real_gateway_action"
 
 
-class RuntimeOfficialSubmitHandoffPacket(RuntimeOfficialSubmitHandoffModel):
+class RuntimeOfficialSubmitHandoffArtifact(RuntimeOfficialSubmitHandoffModel):
     handoff_id: str = Field(min_length=1, max_length=840)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
-    readiness_packet_id: str = Field(min_length=1, max_length=720)
+    readiness_artifact_id: str = Field(min_length=1, max_length=720)
     source_consumed_authorization_id: str = Field(min_length=1, max_length=220)
     fresh_submit_authorization_id: str | None = Field(default=None, max_length=260)
     mode: RuntimeOfficialSubmitHandoffMode
@@ -70,7 +70,7 @@ class RuntimeOfficialSubmitHandoffPacket(RuntimeOfficialSubmitHandoffModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_packet(self) -> "RuntimeOfficialSubmitHandoffPacket":
+    def _validate_artifact(self) -> "RuntimeOfficialSubmitHandoffArtifact":
         _reject_forbidden_execution_fields(
             "runtime official submit handoff",
             {"metadata": self.metadata, "official_query": self.official_query},
@@ -100,9 +100,9 @@ class RuntimeOfficialSubmitHandoffPacket(RuntimeOfficialSubmitHandoffModel):
         return self
 
 
-def build_runtime_official_submit_handoff_packet(
+def build_runtime_official_submit_handoff_artifact(
     *,
-    readiness_packet: RuntimeExecutableSubmitReadinessPacket,
+    readiness_artifact: RuntimeExecutableSubmitReadinessArtifact,
     fresh_submit_authorization_id: str | None,
     mode: RuntimeOfficialSubmitHandoffMode = (
         RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
@@ -111,21 +111,21 @@ def build_runtime_official_submit_handoff_packet(
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
-) -> RuntimeOfficialSubmitHandoffPacket:
+) -> RuntimeOfficialSubmitHandoffArtifact:
     blockers: list[str] = []
-    warnings: list[str] = list(readiness_packet.warnings)
+    warnings: list[str] = list(readiness_artifact.warnings)
 
-    if readiness_packet.status != (
+    if readiness_artifact.status != (
         RuntimeExecutableSubmitReadinessStatus.READY_FOR_EXECUTABLE_SUBMIT
     ):
         blockers.append("readiness_not_ready_for_executable_submit")
-        blockers.extend(f"readiness:{item}" for item in readiness_packet.blockers)
-    _append_side_effect_blockers("readiness", readiness_packet, blockers)
+        blockers.extend(f"readiness:{item}" for item in readiness_artifact.blockers)
+    _append_side_effect_blockers("readiness", readiness_artifact, blockers)
 
     fresh_authorization = _optional_str(fresh_submit_authorization_id)
     if not fresh_authorization:
         blockers.append("fresh_submit_authorization_id_missing")
-    elif fresh_authorization == readiness_packet.source_authorization_id:
+    elif fresh_authorization == readiness_artifact.source_authorization_id:
         blockers.append("fresh_submit_authorization_reuses_consumed_authorization")
 
     if (
@@ -137,7 +137,7 @@ def build_runtime_official_submit_handoff_packet(
             "standing_authorization"
         )
 
-    evidence = readiness_packet.evidence
+    evidence = readiness_artifact.evidence
     query = {
         "trusted_submit_fact_snapshot_id": evidence.trusted_submit_fact_snapshot_id,
         "submit_idempotency_policy_id": evidence.submit_idempotency_policy_id,
@@ -188,15 +188,15 @@ def build_runtime_official_submit_handoff_packet(
         "runtime-execution-first-real-submit-actions/authorizations/"
         f"{fresh_authorization or 'FRESH_SUBMIT_AUTHORIZATION_REQUIRED'}"
     )
-    return RuntimeOfficialSubmitHandoffPacket(
+    return RuntimeOfficialSubmitHandoffArtifact(
         handoff_id=(
             "runtime-official-submit-handoff-"
-            f"{readiness_packet.runtime_instance_id}-"
-            f"{readiness_packet.source_strategy_planning_packet_id}"
+            f"{readiness_artifact.runtime_instance_id}-"
+            f"{readiness_artifact.source_strategy_planning_artifact_id}"
         ),
-        runtime_instance_id=readiness_packet.runtime_instance_id,
-        readiness_packet_id=readiness_packet.packet_id,
-        source_consumed_authorization_id=readiness_packet.source_authorization_id,
+        runtime_instance_id=readiness_artifact.runtime_instance_id,
+        readiness_artifact_id=readiness_artifact.artifact_id,
+        source_consumed_authorization_id=readiness_artifact.source_authorization_id,
         fresh_submit_authorization_id=fresh_authorization,
         mode=mode,
         status=status,
@@ -205,14 +205,14 @@ def build_runtime_official_submit_handoff_packet(
         blockers=blockers,
         warnings=warnings,
         readiness_snapshot={
-            "status": readiness_packet.status.value,
-            "order_candidate_id": readiness_packet.order_candidate_id,
-            "signal_evaluation_id": readiness_packet.signal_evaluation_id,
-            "source_strategy_planning_packet_id": (
-                readiness_packet.source_strategy_planning_packet_id
+            "status": readiness_artifact.status.value,
+            "order_candidate_id": readiness_artifact.order_candidate_id,
+            "signal_evaluation_id": readiness_artifact.signal_evaluation_id,
+            "source_strategy_planning_artifact_id": (
+                readiness_artifact.source_strategy_planning_artifact_id
             ),
-            "source_release_packet_id": readiness_packet.source_release_packet_id,
-            "executable_submit_ready": readiness_packet.executable_submit_ready,
+            "source_release_evidence_id": readiness_artifact.source_release_evidence_id,
+            "executable_submit_ready": readiness_artifact.executable_submit_ready,
         },
         ready_for_official_submit_call=(
             status == RuntimeOfficialSubmitHandoffStatus.READY_FOR_OFFICIAL_SUBMIT_CALL
@@ -220,7 +220,9 @@ def build_runtime_official_submit_handoff_packet(
         created_at_ms=now_ms,
         metadata={
             "scope": "runtime_official_submit_handoff",
-            "read_only_handoff": True,
+            "read_only_submit_projection": True,
+            "execution_attempt_source": False,
+            "lifecycle_authority": False,
             **standing_authorization_metadata(
                 scope="runtime_official_submit_handoff"
             ),

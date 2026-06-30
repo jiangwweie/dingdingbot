@@ -1,10 +1,4 @@
 {
-  "actionability_contract": {
-    "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
-    "actionable_now_source": "runtime_state_only",
-    "static_rows_must_not_set_actionable_now_true": true,
-    "trial_eligible_source": "registry_plus_owner_policy"
-  },
   "required_row_fields": [
     "strategy_group_id",
     "owner_label",
@@ -14,8 +8,6 @@
     "supported_sides",
     "default_tier",
     "trial_eligible",
-    "actionable_now",
-    "actionable_now_reason",
     "risk_gaps",
     "hard_blocks",
     "required_facts_summary",
@@ -39,8 +31,6 @@
   },
   "rows": [
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L4",
       "downshift_rule": "Downshift if momentum exhaustion, concentration, stale facts, or protection/account conflicts appear.",
@@ -118,8 +108,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "MPG-001",
       "supported_sides": [
@@ -129,8 +118,93 @@
       "trial_eligible": true
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L3",
+      "downshift_rule": "Downshift if pullback/reclaim facts, action-time account facts, liquidity, or funding context become unavailable.",
+      "edge_thesis": "Capture trend-intact pullback followed by reclaim, distinct from MPG momentum continuation.",
+      "evidence_refs": [
+        {
+          "kind": "identity_decision",
+          "path": "output/runtime-monitor/latest-cpm-identity-routing-decision.json"
+        },
+        {
+          "kind": "required_facts_mapping",
+          "path": "output/runtime-monitor/latest-cpm-required-facts-mapping.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "standalone_trial_asset_identity_closed",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live review shows pullback-reclaim has persistent false continuation after costs and protection.",
+      "owner_label": "CPM 回踩收复",
+      "park_rule": "Park if identity evidence regresses or CPM becomes redundant with MPG after review.",
+      "promotion_gate": "Armed observation only; real submit still depends on fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "regime_fit": "Bullish rebound or trend-continuation regime where pullback depth remains normal and reclaim confirms.",
+      "required_facts_summary": {
+        "account_exchange": "action-time available balance, active position, open orders, symbol availability, min notional, step, tick, leverage limit",
+        "market": "15m/1h/4h closed structure, liquidity, mark, funding",
+        "risk": "invalidated below level, protection plan, exit plan, time stop",
+        "strategy": "htf trend intact, pullback depth normal, reclaim confirmed"
+      },
+      "required_next_evidence": "fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L3 armed observation is not real submit authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "fee, funding, fill-gap slippage, and pullback continuation failure"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "missing protection, stale account facts, open-order or active-position conflict"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "trend, pullback depth, reclaim, liquidity, funding, and action-time account facts"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "failed reclaim",
+            "trend break after pullback",
+            "choppy rebound regime"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Long-only pullback-reclaim lane with trend break, failed reclaim, liquidity, funding, and action-time account disables.",
+      "trial_eligible": true
+    },
+    {
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L2",
       "downshift_rule": "Downshift if product eligibility, breadth, or session gap facts are unavailable.",
@@ -204,8 +278,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "TEQ-001",
       "supported_sides": [
@@ -215,8 +288,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L3",
       "downshift_rule": "Downshift if derivatives facts are stale or settlement timing invalidates the setup.",
@@ -243,7 +314,7 @@
       "kill_condition": "Kill if stress signals repeatedly fail after funding, basis, and liquidation costs.",
       "owner_label": "资金费率/基差压力",
       "park_rule": "Park if crowding stress is absent or derivatives source quality is too weak.",
-      "promotion_gate": "Derivatives facts and margin/liquidation mapping must support a Decision Ledger promote/go-live review after P0 closure or Owner lane change.",
+      "promotion_gate": "Derivatives facts and margin/liquidation mapping must support a Strategy Asset State promote/go-live review after P0 closure or Owner lane change.",
       "regime_fit": "Derivative crowding, negative funding, basis/premium stress, and settlement timing regimes.",
       "required_facts_summary": {
         "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
@@ -289,8 +360,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "FBS-001",
       "supported_sides": [
@@ -301,8 +371,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L3",
       "downshift_rule": "Downshift outside valid session/structure window or when trigger bars are not closed.",
@@ -376,8 +444,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "SOR-001",
       "supported_sides": [
@@ -388,8 +455,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L1",
       "downshift_rule": "Remain observe-only when overlay role or session facts are unclear.",
@@ -462,8 +527,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "PMR-001",
       "supported_sides": [
@@ -474,8 +538,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L2",
       "downshift_rule": "Downshift if strong-uptrend conflict, stale signal, squeeze risk, or derivatives facts invalidate review.",
@@ -491,11 +553,11 @@
         },
         {
           "kind": "decision",
-          "path": "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.json"
+          "path": "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json"
         },
         {
-          "kind": "ledger",
-          "path": "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
         }
       ],
       "evidence_status": "reviewed_l2_handoff_plus_proxy_replay_decision",
@@ -510,7 +572,7 @@
       "kill_condition": "Kill if bear-pullback would-enter cases fail after derivatives, squeeze, freshness, and cost review.",
       "owner_label": "熊市回抽延续",
       "park_rule": "Park if proxy replay or live derivatives source review shows no durable right-tail edge.",
-      "promotion_gate": "Complete live derivatives fact-source mapping, classifier review, and Decision Ledger revise resolution before higher-tier review.",
+      "promotion_gate": "Complete live derivatives fact-source mapping, classifier review, and Strategy Asset State revise resolution before higher-tier review.",
       "regime_fit": "Downtrend continuation after weak rally or pullback, excluding strong upside reclaim regimes.",
       "required_facts_summary": {
         "derivatives": "funding, premium, OI/crowding proxy, squeeze risk, historical OI, long/short, top-trader ratio",
@@ -557,8 +619,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "BTPC-001",
       "supported_sides": [
@@ -568,8 +629,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "current_decision_ref": "keep_observing",
       "default_tier": "L1",
@@ -581,8 +640,8 @@
           "path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json"
         },
         {
-          "kind": "ledger",
-          "path": "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
         }
       ],
       "evidence_status": "partial_replay_and_decision_evidence",
@@ -602,7 +661,7 @@
       "required_facts_summary": {
         "market": "partial; runtime observation facts remain lower-level evidence",
         "risk_account_exchange": "runtime-only before any live or shadow authority",
-        "strategy": "partial; see replay corpus and current Decision Ledger evidence"
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
       },
       "required_next_evidence": "post-revision stage review before any tier change",
       "risk_gaps": {
@@ -642,8 +701,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "VCB-001",
       "supported_sides": [
@@ -653,8 +711,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "current_decision_ref": "keep_observing",
       "default_tier": "L1",
@@ -666,8 +722,8 @@
           "path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json"
         },
         {
-          "kind": "ledger",
-          "path": "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
         }
       ],
       "evidence_status": "partial_replay_and_decision_evidence",
@@ -687,7 +743,7 @@
       "required_facts_summary": {
         "market": "partial; runtime observation facts remain lower-level evidence",
         "risk_account_exchange": "runtime-only before any live or shadow authority",
-        "strategy": "partial; see replay corpus and current Decision Ledger evidence"
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
       },
       "required_next_evidence": "post-revision stage review before any tier change",
       "risk_gaps": {
@@ -728,8 +784,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "LSR-001",
       "supported_sides": [
@@ -740,8 +795,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "current_decision_ref": "keep_observing",
       "default_tier": "L1",
@@ -753,8 +806,8 @@
           "path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json"
         },
         {
-          "kind": "ledger",
-          "path": "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
         }
       ],
       "evidence_status": "partial_replay_and_decision_evidence",
@@ -774,7 +827,7 @@
       "required_facts_summary": {
         "market": "partial; runtime observation facts remain lower-level evidence",
         "risk_account_exchange": "runtime-only before any live or shadow authority",
-        "strategy": "partial; see replay corpus and current Decision Ledger evidence"
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
       },
       "required_next_evidence": "post-revision stage review before any tier change",
       "risk_gaps": {
@@ -814,8 +867,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "BRF-001",
       "supported_sides": [
@@ -825,8 +877,6 @@
       "trial_eligible": false
     },
     {
-      "actionable_now": false,
-      "actionable_now_reason": "runtime_state_only; requires fresh signal, live facts, candidate/auth, action-time execution gates, official submission path, protection, account, and exchange facts",
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "current_decision_ref": "park",
       "default_tier": "L1",
@@ -835,7 +885,7 @@
       "evidence_refs": [
         {
           "kind": "replay_or_generated_view",
-          "path": "output/runtime-monitor/latest-strategygroup-decision-ledger.json"
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
         }
       ],
       "evidence_status": "partial_generated_decision_only",
@@ -855,7 +905,7 @@
       "required_facts_summary": {
         "market": "partial; runtime observation facts remain lower-level evidence",
         "risk_account_exchange": "runtime-only before any live or shadow authority",
-        "strategy": "partial; see replay corpus and current Decision Ledger evidence"
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
       },
       "required_next_evidence": "new edge evidence strong enough to reopen active review",
       "risk_gaps": {
@@ -896,8 +946,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "places_order": false,
-        "real_order_authority": false
+        "places_order": false
       },
       "strategy_group_id": "RBR-001",
       "supported_sides": [
@@ -907,6 +956,14 @@
       "trial_eligible": false
     }
   ],
+  "runtime_authority_contract": {
+    "runtime_authority_sources": [
+      "Tradeability Decision",
+      "Runtime Safety State"
+    ],
+    "static_rows_must_not_grant_runtime_authority": true,
+    "trial_eligible_source": "registry_plus_owner_policy"
+  },
   "safety_invariants": {
     "calls_exchange_write": false,
     "calls_finalgate": false,
@@ -914,15 +971,14 @@
     "changes_live_profile": false,
     "changes_order_sizing_defaults": false,
     "places_order": false,
-    "real_order_authority": false,
     "withdrawal_or_transfer": false
   },
   "schema": "brc.strategygroup_registry_baseline.v1",
   "scope": "strategygroup_registry_baseline",
   "source_authority": {
-    "decision_ledger_contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
     "handoff_index": "docs/current/strategy-group-handoffs/main-control-handoff-index.md",
     "registry_contract": "docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md",
+    "strategy_asset_state_evidence_contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
     "tier_policy": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
   },
   "status": "current_pilot_baseline"

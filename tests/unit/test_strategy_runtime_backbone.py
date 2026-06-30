@@ -220,7 +220,7 @@ class _ProfileAdmissionRepo:
             strategy_family_version_id="CPM-RO-001-v0",
             strategy_family_id="CPM-RO-001",
             version=1,
-            hypothesis="CPM 30U profile confirmation test",
+            hypothesis="CPM controlled-subaccount profile confirmation test",
             supported_symbols=["BNB/USDT:USDT"],
             supported_timeframes=["1h", "4h"],
             created_at_ms=NOW_MS,
@@ -434,7 +434,7 @@ async def test_service_creates_shadow_runtime_from_confirmed_profile_proposal():
         semantic_confirmations=_semantic_confirmed(),
         runtime_confirmations=_runtime_confirmed(),
         runtime_profile_proposal_snapshot=proposal,
-        reason="Owner/Codex confirms CPM 30U profile proposal.",
+        reason="Owner/Codex confirms CPM controlled-subaccount profile proposal.",
         created_at_ms=NOW_MS,
     )
 

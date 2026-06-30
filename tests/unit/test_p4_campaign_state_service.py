@@ -381,6 +381,23 @@ async def test_review_gated_transition_requires_owner_review_metadata():
 
     assert service.get_state().status == "observe"
 
+    with pytest.raises(ValueError, match="requires owner review"):
+        await service.set_state(
+            status="hard_locked",
+            reason="manual hard lock with legacy review decision marker",
+            updated_by="owner",
+            metadata={"owner_review_decision_id": "legacy-review-id"},
+        )
+
+    await service.set_state(
+        status="hard_locked",
+        reason="manual hard lock with review outcome evidence",
+        updated_by="owner",
+        metadata={"owner_review_outcome_id": "review-outcome-id"},
+    )
+
+    assert service.get_state().status == "hard_locked"
+
 
 @pytest.mark.asyncio
 async def test_terminal_runtime_states_require_explicit_trigger():

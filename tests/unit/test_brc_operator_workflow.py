@@ -151,7 +151,7 @@ async def test_brc_llm_workflow_confirmed_read_only_executes_without_mutation():
     assert completed.mutation_executed is False
     assert completed.withdrawal_executed is False
     assert completed.live_ready is False
-    assert completed.result_json["eligibility"]["decision"] == "blocked"
+    assert completed.result_json["eligibility"]["eligibility_result"] == "blocked"
 
     with pytest.raises(BrcRuleViolation, match="already completed"):
         await workflow.confirm_workflow(
@@ -221,3 +221,4 @@ async def test_brc_llm_workflow_confirmed_testnet_uses_fixed_executor():
     assert completed.mutation_executed is True
     assert completed.withdrawal_executed is False
     assert completed.live_ready is False
+    assert "review_decision" not in completed.result_json

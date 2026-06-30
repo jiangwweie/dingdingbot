@@ -23,10 +23,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-SourceName = Literal["sample", "local_sqlite_fallback", "live_market"]
+SourceName = Literal["sample", "local_sqlite_read_only", "live_market"]
 
 
-def build_preview_packet(*, source_name: SourceName) -> dict[str, Any]:
+def build_preview_artifact(*, source_name: SourceName) -> dict[str, Any]:
     from src.application.strategy_group_live_readonly_observation import (
         SampleStrategyGroupMarketBarSource,
         build_strategy_group_live_readonly_observation_v1,
@@ -76,14 +76,9 @@ def build_preview_packet(*, source_name: SourceName) -> dict[str, Any]:
         "no_action_signals": no_action,
         "invalid_signals": invalid,
         "preview": payload,
-        "operator_command_plan": {
-            "not_executed": True,
-            "records_observation": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
+        "interaction": {
+            "preview_only": True,
+            "not_execution_authority": True,
             "next_step": (
                 "review_strategy_group_would_enter_signals_without_execution"
                 if would_enter
@@ -133,15 +128,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
-        default="local_sqlite_fallback",
+        choices=["sample", "local_sqlite_read_only", "live_market"],
+        default="local_sqlite_read_only",
         help="Read-only closed-candle source.",
     )
     parser.add_argument("--output-json")
     args = parser.parse_args(argv)
 
-    packet = build_preview_packet(source_name=args.source)
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    artifact = build_preview_artifact(source_name=args.source)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)

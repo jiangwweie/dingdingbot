@@ -1,6 +1,6 @@
 """Resolve a persisted fresh submit authorization for official handoff.
 
-The resolver is a non-executing bridge between a ready official-submit handoff
+The resolver is a non-executing adapter between a ready official-submit handoff
 and the existing persisted RuntimeExecutionSubmitAuthorization record. It never
 creates an authorization, calls the official submit endpoint, creates orders, or
 touches exchange.
@@ -19,7 +19,7 @@ from src.domain.runtime_execution_submit_authorization import (
 )
 from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
     RuntimeOfficialSubmitHandoffStatus,
 )
 
@@ -36,17 +36,16 @@ class RuntimeFreshSubmitAuthorizationResolutionStatus(str, Enum):
 class RuntimeFreshSubmitAuthorizationResolutionSource(str, Enum):
     EXPLICIT_AUTHORIZATION_ID = "explicit_authorization_id"
     HANDOFF_AUTHORIZATION_ID = "handoff_authorization_id"
-    ORDER_CANDIDATE_LATEST = "order_candidate_latest"
     UNRESOLVED = "unresolved"
 
 
-class RuntimeFreshSubmitAuthorizationResolutionPacket(
+class RuntimeFreshSubmitAuthorizationResolutionArtifact(
     RuntimeFreshSubmitAuthorizationResolutionModel
 ):
     resolution_id: str = Field(min_length=1, max_length=900)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     handoff_id: str = Field(min_length=1, max_length=840)
-    readiness_packet_id: str = Field(min_length=1, max_length=720)
+    readiness_artifact_id: str = Field(min_length=1, max_length=720)
     source_consumed_authorization_id: str = Field(min_length=1, max_length=220)
     requested_fresh_submit_authorization_id: str | None = Field(
         default=None,
@@ -83,7 +82,7 @@ class RuntimeFreshSubmitAuthorizationResolutionPacket(
     @model_validator(mode="after")
     def _validate_resolution(
         self,
-    ) -> "RuntimeFreshSubmitAuthorizationResolutionPacket":
+    ) -> "RuntimeFreshSubmitAuthorizationResolutionArtifact":
         if (
             self.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
             and self.blockers
@@ -105,9 +104,9 @@ class RuntimeFreshSubmitAuthorizationResolutionPacket(
         return self
 
 
-def build_runtime_fresh_submit_authorization_resolution_packet(
+def build_runtime_fresh_submit_authorization_resolution_artifact(
     *,
-    handoff: RuntimeOfficialSubmitHandoffPacket,
+    handoff: RuntimeOfficialSubmitHandoffArtifact,
     authorization: RuntimeExecutionSubmitAuthorization | None,
     resolution_source: RuntimeFreshSubmitAuthorizationResolutionSource,
     requested_fresh_submit_authorization_id: str | None,
@@ -115,7 +114,7 @@ def build_runtime_fresh_submit_authorization_resolution_packet(
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
-) -> RuntimeFreshSubmitAuthorizationResolutionPacket:
+) -> RuntimeFreshSubmitAuthorizationResolutionArtifact:
     blockers: list[str] = []
     warnings: list[str] = list(handoff.warnings)
 
@@ -153,14 +152,14 @@ def build_runtime_fresh_submit_authorization_resolution_packet(
     )
     official_query = dict(handoff.official_query)
     official_query["owner_confirmed_for_first_real_submit_action"] = False
-    return RuntimeFreshSubmitAuthorizationResolutionPacket(
+    return RuntimeFreshSubmitAuthorizationResolutionArtifact(
         resolution_id=(
             "runtime-fresh-submit-authorization-resolution-"
-            f"{handoff.runtime_instance_id}-{handoff.readiness_packet_id}"
+            f"{handoff.runtime_instance_id}-{handoff.readiness_artifact_id}"
         ),
         runtime_instance_id=handoff.runtime_instance_id,
         handoff_id=handoff.handoff_id,
-        readiness_packet_id=handoff.readiness_packet_id,
+        readiness_artifact_id=handoff.readiness_artifact_id,
         source_consumed_authorization_id=handoff.source_consumed_authorization_id,
         requested_fresh_submit_authorization_id=_optional_str(
             requested_fresh_submit_authorization_id
@@ -209,7 +208,7 @@ def build_runtime_fresh_submit_authorization_resolution_packet(
 
 
 def _authorization_blockers(
-    handoff: RuntimeOfficialSubmitHandoffPacket,
+    handoff: RuntimeOfficialSubmitHandoffArtifact,
     authorization: RuntimeExecutionSubmitAuthorization,
 ) -> list[str]:
     blockers: list[str] = []

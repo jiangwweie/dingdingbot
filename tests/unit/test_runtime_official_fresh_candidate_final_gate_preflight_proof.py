@@ -21,6 +21,8 @@ def test_official_fresh_candidate_final_gate_preflight_passes(tmp_path):
     assert report["controlled_submit_preflight_id"].startswith(
         "runtime-controlled-submit-preflight-"
     )
+    assert "operator_command_plan" not in report
+    assert report["fresh_candidate_preflight_plan"]["places_order"] is False
 
     checks = report["checks"]
     assert checks["rtf089_prerequisite_passed"] is True
@@ -50,7 +52,7 @@ def test_official_fresh_candidate_final_gate_preflight_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_fresh_candidate_final_gate_preflight_outputs_packet(tmp_path):
+def test_official_fresh_candidate_final_gate_preflight_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf090"
 
     report = script.build_proof_report(output_dir)
@@ -59,7 +61,7 @@ def test_official_fresh_candidate_final_gate_preflight_outputs_packet(tmp_path):
         "contract-report.json",
         "rtf089-prerequisite-report.json",
         "rtf081-final-gate-preflight-report.json",
-        "fresh-candidate-final-gate-preflight-packet.json",
+        "fresh-candidate-final-gate-preflight-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -67,30 +69,32 @@ def test_official_fresh_candidate_final_gate_preflight_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
+    artifact = json.loads(
         (
-            output_dir / "fresh-candidate-final-gate-preflight-packet.json"
+            output_dir / "fresh-candidate-final-gate-preflight-artifact.json"
         ).read_text()
     )
-    assert packet["status"] == (
+    assert artifact["status"] == (
         "fresh_candidate_ready_for_controlled_submit_adapter"
     )
-    assert packet["candidate_handoff"]["candidate_ids_match"] is True
-    assert packet["candidate_handoff"]["fresh_ready_status"] == (
+    assert artifact["candidate_handoff"]["candidate_ids_match"] is True
+    assert artifact["candidate_handoff"]["fresh_ready_status"] == (
         "ready_for_final_gate_preflight"
     )
-    assert packet["authorization"]["fresh_authorization_required_before_submit"] is True
-    assert packet["final_gate"]["verdict"] == "PASS"
-    assert packet["controlled_submit_preflight"]["status"] == (
+    assert (
+        artifact["authorization"]["fresh_authorization_required_before_submit"] is True
+    )
+    assert artifact["final_gate"]["verdict"] == "PASS"
+    assert artifact["controlled_submit_preflight"]["status"] == (
         "ready_for_controlled_submit_adapter"
     )
-    assert packet["controlled_submit_preflight"]["preview_only"] is True
-    assert packet["safety_invariants"]["ready_path_shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["local_order_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["exchange_called"] is False
-    assert packet["safety_invariants"]["exchange_order_submitted"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["controlled_submit_preflight"]["preview_only"] is True
+    assert artifact["safety_invariants"]["ready_path_shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["local_order_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["exchange_called"] is False
+    assert artifact["safety_invariants"]["exchange_order_submitted"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_official_fresh_candidate_final_gate_preflight_cli_stdout_is_json_only(

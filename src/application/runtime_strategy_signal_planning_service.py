@@ -1,4 +1,4 @@
-"""Bridge strategy-family signals into runtime execution planning.
+"""Adapt strategy-family signals into runtime execution planning.
 
 This service is a non-executing orchestration layer:
 

@@ -123,14 +123,14 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             )
             prepare_report = flow.run()
 
-    prepare_packet = _summarize_prepare_report(prepare_report)
+    prepare_artifact = _summarize_prepare_artifact(prepare_report)
     _write_json(output_dir / "prepare-report.json", prepare_report)
-    _write_json(output_dir / "prepare-packet.json", prepare_packet)
+    _write_json(output_dir / "prepare-artifact.json", prepare_artifact)
 
     report = _report(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
-        prepare_packet=prepare_packet,
+        prepare_artifact=prepare_artifact,
         state=state,
     )
     _write_json(output_dir / "contract-report.json", report)
@@ -583,7 +583,7 @@ def _temporary_api_injections(state: _ServerProofState):
         )
 
 
-def _summarize_prepare_report(report: dict[str, Any]) -> dict[str, Any]:
+def _summarize_prepare_artifact(report: dict[str, Any]) -> dict[str, Any]:
     ids = dict(report.get("ids") or {})
     steps = list(report.get("steps") or [])
     step_names = [
@@ -596,7 +596,7 @@ def _summarize_prepare_report(report: dict[str, Any]) -> dict[str, Any]:
         and bool(ids.get("authorization_id"))
     )
     return {
-        "scope": "runtime_official_server_prepare_integration_packet",
+        "scope": "runtime_official_server_prepare_integration_artifact",
         "status": "ready_for_final_gate_preflight" if ready else "blocked",
         "ids": ids,
         "step_names": step_names,
@@ -656,13 +656,13 @@ def _report(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
     state: _ServerProofState,
 ) -> dict[str, Any]:
     checks = _checks(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
-        prepare_packet=prepare_packet,
+        prepare_artifact=prepare_artifact,
         state=state,
     )
     return {
@@ -676,24 +676,24 @@ def _report(
         "order_candidate_id": state.candidate.order_candidate_id,
         "signal_evaluation_id": state.signal_evaluation.signal_evaluation_id,
         "prepared_authorization_id": (
-            prepare_packet.get("ids", {}).get("authorization_id")
+            prepare_artifact.get("ids", {}).get("authorization_id")
         ),
         "runtime_execution_intent_draft_id": (
-            prepare_packet.get("ids", {}).get("runtime_execution_intent_draft_id")
+            prepare_artifact.get("ids", {}).get("runtime_execution_intent_draft_id")
         ),
-        "execution_intent_id": prepare_packet.get("ids", {}).get(
+        "execution_intent_id": prepare_artifact.get("ids", {}).get(
             "execution_intent_id"
         ),
-        "protection_plan_id": prepare_packet.get("ids", {}).get(
+        "protection_plan_id": prepare_artifact.get("ids", {}).get(
             "protection_plan_id"
         ),
-        "prepare_packet": prepare_packet,
+        "prepare_artifact": prepare_artifact,
         "first_real_submit_prepare_report": prepare_report,
         "shadow_contract": shadow_report,
         "checks": checks,
-        "blockers": list(prepare_packet.get("blockers") or []),
-        "warnings": list(prepare_packet.get("warnings") or []),
-        "operator_command_plan": {
+        "blockers": list(prepare_artifact.get("blockers") or []),
+        "warnings": list(prepare_artifact.get("warnings") or []),
+        "server_prepare_integration_plan": {
             "next_step": (
                 "run_official_final_gate_preflight"
                 if _contract_passed(checks)
@@ -715,7 +715,7 @@ def _report(
             "automatic_withdrawal_assumed": False,
             "not_proven_alpha": True,
         },
-        "safety_invariants": prepare_packet["safety_invariants"],
+        "safety_invariants": prepare_artifact["safety_invariants"],
     }
 
 
@@ -723,15 +723,15 @@ def _checks(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
     state: _ServerProofState,
 ) -> dict[str, bool]:
-    ids = prepare_packet.get("ids") or {}
-    created = prepare_packet.get("created_records") or {}
-    safety = prepare_packet.get("safety_invariants") or {}
-    step_names = prepare_packet.get("step_names") or []
-    next_gate = prepare_packet.get("next_attempt_gate") or {}
-    evidence_preparation = prepare_packet.get("evidence_preparation") or {}
+    ids = prepare_artifact.get("ids") or {}
+    created = prepare_artifact.get("created_records") or {}
+    safety = prepare_artifact.get("safety_invariants") or {}
+    step_names = prepare_artifact.get("step_names") or []
+    next_gate = prepare_artifact.get("next_attempt_gate") or {}
+    evidence_preparation = prepare_artifact.get("evidence_preparation") or {}
     return {
         "shadow_contract_passed": (
             shadow_report.get("status")
@@ -755,17 +755,17 @@ def _checks(
         in step_names,
         "evidence_preparation_route_called": "prepare_machine_evidence"
         in step_names,
-        "evidence_preparation_packet_created": (
-            evidence_preparation.get("packet_created") is True
+        "evidence_preparation_artifact_created": (
+            evidence_preparation.get("artifact_created") is True
         ),
         "evidence_preparation_not_dependency_blocked": (
             evidence_preparation.get("dependency_blocked") is False
         ),
-        "evidence_preparation_status_prepared_packet_blocked": (
-            evidence_preparation.get("status") == "prepared_packet_blocked"
+        "evidence_preparation_status_prepared_artifact_blocked": (
+            evidence_preparation.get("status") == "prepared_evidence_blocked"
         ),
         "prepare_ready_for_final_gate_preflight": (
-            prepare_packet.get("status") == "ready_for_final_gate_preflight"
+            prepare_artifact.get("status") == "ready_for_final_gate_preflight"
         ),
         "runtime_execution_intent_draft_created": bool(
             created.get("runtime_execution_intent_draft_created")
@@ -816,9 +816,9 @@ def _contract_passed(checks: dict[str, bool]) -> bool:
         "protection_plan_route_called",
         "submit_authorization_route_called",
         "evidence_preparation_route_called",
-        "evidence_preparation_packet_created",
+        "evidence_preparation_artifact_created",
         "evidence_preparation_not_dependency_blocked",
-        "evidence_preparation_status_prepared_packet_blocked",
+        "evidence_preparation_status_prepared_artifact_blocked",
         "prepare_ready_for_final_gate_preflight",
         "runtime_execution_intent_draft_created",
         "execution_intent_created",
@@ -855,7 +855,7 @@ def _summarize_evidence_preparation(step: dict[str, Any] | None) -> dict[str, An
     if not step:
         return {
             "status": None,
-            "packet_created": False,
+            "artifact_created": False,
             "dependency_blocked": True,
             "blockers": ["evidence_preparation_step_missing"],
         }
@@ -868,9 +868,9 @@ def _summarize_evidence_preparation(step: dict[str, Any] | None) -> dict[str, An
     )
     return {
         "status": status,
-        "packet_created": str(status or "").startswith("prepared_packet_"),
-        "packet_status": (
-            "blocked" if status == "prepared_packet_blocked" else None
+        "artifact_created": str(status or "").startswith("prepared_evidence_"),
+        "source_status": (
+            "blocked" if status == "prepared_evidence_blocked" else None
         ),
         "dependency_blocked": dependency_blocked,
         "blockers": blockers,

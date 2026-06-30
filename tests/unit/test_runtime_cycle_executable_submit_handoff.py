@@ -8,10 +8,10 @@ from scripts import runtime_cycle_executable_submit_handoff
 
 def _strategy_plan():
     return {
-        "packet_id": "strategy-plan-1",
+        "artifact_id": "strategy-plan-1",
         "runtime_instance_id": "runtime-1",
         "source_authorization_id": "consumed-auth-1",
-        "post_submit_finalize_packet_id": "post-submit-1",
+        "post_submit_finalize_payload_id": "post-submit-1",
         "status": "ready_for_final_gate_preflight",
         "next_attempt_gate_status": "ready_for_fresh_signal",
         "signal_evaluation_id": "signal-eval-1",
@@ -21,7 +21,7 @@ def _strategy_plan():
         "order_candidate_id": "order-candidate-1",
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {},
+        "strategy_planning_plan": {},
         "consumed_authorization_replay_only": True,
         "requires_fresh_strategy_signal": True,
         "requires_fresh_authorization_before_submit": True,
@@ -39,7 +39,7 @@ def _strategy_plan():
     }
 
 
-def _cycle_packet(*, status="ready_for_final_gate_preflight"):
+def _cycle_artifact(*, status="ready_for_final_gate_preflight"):
     return {
         "scope": "runtime_post_submit_next_attempt_cycle",
         "status": status,
@@ -81,9 +81,9 @@ def _readiness_flow():
         "scope": "runtime_executable_submit_readiness_api_flow",
         "status": "ready_for_executable_submit",
         "api_payload": {
-            "packet_id": "readiness-1",
+            "artifact_id": "readiness-1",
             "runtime_instance_id": "runtime-1",
-            "source_strategy_planning_packet_id": "strategy-plan-1",
+            "source_strategy_planning_artifact_id": "strategy-plan-1",
             "source_authorization_id": "consumed-auth-1",
             "status": "ready_for_executable_submit",
             "blockers": [],
@@ -115,7 +115,7 @@ def _handoff_flow():
 def _write_inputs(tmp_path, *, cycle_status="ready_for_final_gate_preflight"):
     cycle_path = tmp_path / "cycle.json"
     evidence_path = tmp_path / "evidence.json"
-    cycle_path.write_text(json.dumps(_cycle_packet(status=cycle_status)), encoding="utf-8")
+    cycle_path.write_text(json.dumps(_cycle_artifact(status=cycle_status)), encoding="utf-8")
     evidence_path.write_text(json.dumps(_evidence()), encoding="utf-8")
     return cycle_path, evidence_path
 
@@ -127,9 +127,9 @@ def _args(tmp_path, **overrides):
     )
     values = {
         "runtime_instance_id": "runtime-1",
-        "cycle_packet_json": str(cycle_path),
+        "cycle_artifact_json": str(cycle_path),
         "evidence_json": str(evidence_path),
-        "first_real_submit_packet_json": None,
+        "first_real_submit_evidence_json": None,
         "fresh_submit_authorization_id": None,
         "mode": "disabled_smoke",
         "owner_confirmed_for_real_submit_action": False,
@@ -149,16 +149,17 @@ def _args(tmp_path, **overrides):
 def test_blocks_before_readiness_when_cycle_not_ready(tmp_path):
     calls = []
 
-    packet = runtime_cycle_executable_submit_handoff._build_packet(
+    artifact = runtime_cycle_executable_submit_handoff._build_artifact(
         _args(tmp_path, cycle_status="waiting_for_signal"),
         readiness_builder=lambda args: calls.append(args),
         handoff_builder=lambda args: calls.append(args),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "post_submit_next_attempt_cycle"
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "post_submit_next_attempt_cycle"
+    assert artifact["source_cycle_artifact"]["status"] == "waiting_for_signal"
     assert calls == []
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_ready_for_fresh_authorization_after_readiness_ready(tmp_path):
@@ -169,37 +170,43 @@ def test_ready_for_fresh_authorization_after_readiness_ready(tmp_path):
         readiness_calls.append(args)
         return _readiness_flow()
 
-    packet = runtime_cycle_executable_submit_handoff._build_packet(
+    artifact = runtime_cycle_executable_submit_handoff._build_artifact(
         _args(tmp_path),
         readiness_builder=readiness_builder,
         handoff_builder=lambda args: handoff_calls.append(args),
     )
 
-    assert packet["status"] == "ready_for_fresh_submit_authorization"
+    assert artifact["status"] == "ready_for_fresh_submit_authorization"
+    assert artifact["source_cycle_artifact"]["status"] == "ready_for_final_gate_preflight"
     assert len(readiness_calls) == 1
     assert handoff_calls == []
-    strategy_path = packet["artifact_paths"]["strategy_planning_packet"]
-    assert json.loads(open(strategy_path, encoding="utf-8").read())["packet_id"] == "strategy-plan-1"
-    assert packet["operator_command_plan"]["requires_fresh_submit_authorization"] is True
+    strategy_path = artifact["artifact_paths"]["strategy_planning_artifact"]
+    assert (
+        json.loads(open(strategy_path, encoding="utf-8").read())["artifact_id"]
+        == "strategy-plan-1"
+    )
+    assert readiness_calls[0].strategy_planning_artifact_json == strategy_path
+    assert artifact["executable_handoff_plan"]["requires_fresh_submit_authorization"] is True
 
 
 def test_calls_handoff_preview_when_fresh_authorization_present(tmp_path):
-    packet = runtime_cycle_executable_submit_handoff._build_packet(
+    artifact = runtime_cycle_executable_submit_handoff._build_artifact(
         _args(tmp_path, fresh_submit_authorization_id="fresh-auth-1"),
         readiness_builder=lambda args: _readiness_flow(),
         handoff_builder=lambda args: _handoff_flow(),
     )
 
-    assert packet["status"] == "ready_for_official_submit_call"
-    assert packet["operator_action_preview"]["ready_for_call"] is True
-    assert packet["operator_command_plan"]["calls_official_submit_endpoint"] is False
-    assert packet["operator_command_plan"]["requires_owner_chat_confirmation"] is False
-    assert packet["operator_command_plan"]["uses_standing_runtime_authorization"] is True
-    assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
-    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
-    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
-    assert packet["operator_command_plan"]["requires_action_time_confirmation"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "ready_for_official_submit_call"
+    assert artifact["source_cycle_artifact"]["status"] == "ready_for_final_gate_preflight"
+    assert artifact["operator_action_preview"]["ready_for_call"] is True
+    assert artifact["executable_handoff_plan"]["calls_official_submit_endpoint"] is False
+    assert artifact["executable_handoff_plan"]["requires_owner_chat_confirmation"] is False
+    assert artifact["executable_handoff_plan"]["uses_standing_runtime_authorization"] is True
+    assert artifact["executable_handoff_plan"]["requires_action_time_final_gate"] is True
+    assert artifact["executable_handoff_plan"]["requires_official_operation_layer"] is True
+    assert artifact["executable_handoff_plan"]["can_continue_without_owner_chat"] is True
+    assert artifact["executable_handoff_plan"]["requires_action_time_confirmation"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_blocks_when_readiness_blocks(tmp_path):
@@ -211,26 +218,26 @@ def test_blocks_when_readiness_blocks(tmp_path):
             "api_payload": {"status": "blocked"},
         }
 
-    packet = runtime_cycle_executable_submit_handoff._build_packet(
+    artifact = runtime_cycle_executable_submit_handoff._build_artifact(
         _args(tmp_path),
         readiness_builder=blocked_readiness,
         handoff_builder=lambda args: _handoff_flow(),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "executable_submit_readiness"
-    assert "final_gate_not_passed" in packet["blockers"]
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "executable_submit_readiness"
+    assert "final_gate_not_passed" in artifact["blockers"]
 
 
 def test_cycle_to_handoff_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_packet(args):
-        print("inner noisy handoff bridge")
+    def fake_build_artifact(args):
+        print("inner noisy handoff projection")
         return {"status": "ready_for_fresh_submit_authorization", "ok": True}
 
     monkeypatch.setattr(
         runtime_cycle_executable_submit_handoff,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,
@@ -239,7 +246,7 @@ def test_cycle_to_handoff_cli_stdout_is_json_only(monkeypatch, capsys):
             "runtime_cycle_executable_submit_handoff.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--cycle-packet-json",
+            "--cycle-artifact-json",
             "cycle.json",
             "--evidence-json",
             "evidence.json",
@@ -250,5 +257,40 @@ def test_cycle_to_handoff_cli_stdout_is_json_only(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert captured.out.startswith("{")
-    assert "inner noisy handoff bridge" not in captured.out
-    assert "inner noisy handoff bridge" in captured.err
+    assert "inner noisy handoff projection" not in captured.out
+    assert "inner noisy handoff projection" in captured.err
+
+
+def test_cycle_to_handoff_cli_rejects_legacy_cycle_alias(monkeypatch):
+    observed = []
+
+    def fake_build_artifact(args):
+        observed.append(args.cycle_artifact_json)
+        return {"status": "ready_for_fresh_submit_authorization", "ok": True}
+
+    monkeypatch.setattr(
+        runtime_cycle_executable_submit_handoff,
+        "_build_artifact",
+        fake_build_artifact,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "runtime_cycle_executable_submit_handoff.py",
+            "--runtime-instance-id",
+            "runtime-1",
+            "--cycle-" + "packet-json",
+            "cycle.json",
+            "--evidence-json",
+            "evidence.json",
+        ],
+    )
+
+    try:
+        runtime_cycle_executable_submit_handoff.main()
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("legacy cycle packet alias should be rejected")
+    assert observed == []

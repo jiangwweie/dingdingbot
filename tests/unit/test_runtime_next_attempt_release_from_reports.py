@@ -14,7 +14,7 @@ from src.domain.runtime_active_position_resolution import (
 )
 
 
-def test_release_from_reports_emits_json_only_packet(tmp_path, capsys):
+def test_release_from_reports_emits_json_only_projection(tmp_path, capsys):
     resolution = _resolution(
         RuntimeActivePositionResolutionStatus.READY_FOR_NEXT_ATTEMPT_GATE,
     )
@@ -24,7 +24,7 @@ def test_release_from_reports_emits_json_only_packet(tmp_path, capsys):
         + json.dumps(
             {
                 "status": resolution.status.value,
-                "packet": resolution.model_dump(mode="json"),
+                "artifact": resolution.model_dump(mode="json"),
             },
         ),
         encoding="utf-8",
@@ -46,7 +46,12 @@ def test_release_from_reports_emits_json_only_packet(tmp_path, capsys):
     assert code == 0
     stdout = json.loads(capsys.readouterr().out)
     assert stdout["status"] == "ready_for_strategy_signal"
-    assert stdout["operator_command_plan"]["executable_submit_allowed"] is False
+    assert "release_evidence" in stdout
+    assert "packet" not in stdout
+    assert "operator_command_plan" not in stdout
+    assert stdout["next_attempt_release_plan"]["executable_submit_allowed"] is False
+    assert stdout["safety_invariants"]["next_attempt_release_projection_only"] is True
+    assert "packet_only" not in stdout["safety_invariants"]
     assert stdout["safety_invariants"]["exchange_write_called"] is False
     assert stdout["safety_invariants"]["execution_intent_created"] is False
     assert stdout["safety_invariants"]["order_lifecycle_called"] is False
@@ -58,7 +63,7 @@ def test_release_from_reports_returns_blocked_exit_code_without_gate(tmp_path, c
     )
     resolution_path = tmp_path / "active-position-resolution.json"
     resolution_path.write_text(
-        json.dumps({"packet": resolution.model_dump(mode="json")}),
+        json.dumps({"artifact": resolution.model_dump(mode="json")}),
         encoding="utf-8",
     )
 
@@ -74,4 +79,7 @@ def test_release_from_reports_returns_blocked_exit_code_without_gate(tmp_path, c
     assert code == 2
     stdout = json.loads(capsys.readouterr().out)
     assert stdout["status"] == "waiting_for_next_attempt_gate"
-    assert stdout["operator_command_plan"]["shadow_candidate_planning_allowed"] is False
+    assert "release_evidence" in stdout
+    assert "packet" not in stdout
+    assert "operator_command_plan" not in stdout
+    assert stdout["next_attempt_release_plan"]["shadow_candidate_planning_allowed"] is False

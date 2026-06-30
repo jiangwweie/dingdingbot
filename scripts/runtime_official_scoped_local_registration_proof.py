@@ -230,7 +230,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 },
             )
 
-    packet = _local_registration_packet(
+    local_registration_artifact = _local_registration_artifact(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
         controlled_submit_preflight=controlled_submit_preflight,
@@ -260,7 +260,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         ),
         "local-registration-enablement.json": local_registration_enablement,
         "local-registration-adapter-result.json": adapter_result,
-        "local-registration-packet.json": packet,
+        "local-registration-artifact.json": local_registration_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -278,7 +278,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         local_action_authorization=local_action_authorization,
         local_registration_enablement=local_registration_enablement,
         adapter_result=adapter_result,
-        packet=packet,
+        local_registration_artifact=local_registration_artifact,
         lifecycle=lifecycle,
     )
     _write_json(output_dir / "contract-report.json", report)
@@ -364,7 +364,7 @@ def _evidence_ids(
     }
 
 
-def _local_registration_packet(
+def _local_registration_artifact(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
@@ -398,7 +398,7 @@ def _local_registration_packet(
     adapter_body = _body(adapter_result)
     enablement_body = _body(local_registration_enablement)
     return {
-        "scope": "runtime_official_scoped_local_registration_packet",
+        "scope": "runtime_official_scoped_local_registration_artifact",
         "status": (
             "local_created_orders_registered"
             if _contract_passed(checks)
@@ -498,11 +498,11 @@ def _report(
     local_action_authorization: dict[str, Any],
     local_registration_enablement: dict[str, Any],
     adapter_result: dict[str, Any],
-    packet: dict[str, Any],
+    local_registration_artifact: dict[str, Any],
     lifecycle: _InMemoryOrderLifecycleService,
 ) -> dict[str, Any]:
-    checks = dict(packet["checks"])
-    ids = dict(packet["ids"])
+    checks = dict(local_registration_artifact["checks"])
+    ids = dict(local_registration_artifact["ids"])
     return {
         "scope": "runtime_official_scoped_local_registration_proof",
         "status": (
@@ -520,8 +520,10 @@ def _report(
         "local_registration_adapter_result_id": ids.get(
             "local_registration_adapter_result_id"
         ),
-        "local_order_ids": packet["local_registration"]["local_order_ids"],
-        "local_registration_packet": packet,
+        "local_order_ids": local_registration_artifact[
+            "local_registration"
+        ]["local_order_ids"],
+        "local_registration_artifact": local_registration_artifact,
         "shadow_contract": shadow_report,
         "first_real_submit_prepare_report": prepare_report,
         "controlled_submit_preflight": controlled_submit_preflight,
@@ -535,9 +537,9 @@ def _report(
         "local_registration_enablement": local_registration_enablement,
         "adapter_result": adapter_result,
         "checks": checks,
-        "operator_command_plan": {
+        "scoped_local_registration_plan": {
             "next_step": (
-                "build_exchange_submit_packet_preview"
+                "build_exchange_submit_preview"
                 if _contract_passed(checks)
                 else "resolve_scoped_local_registration_blockers"
             ),
@@ -561,7 +563,7 @@ def _report(
             "automatic_withdrawal_assumed": False,
             "not_proven_alpha": True,
         },
-        "safety_invariants": packet["safety_invariants"],
+        "safety_invariants": local_registration_artifact["safety_invariants"],
         "lifecycle_register_calls": [
             {
                 "order_id": str(call["order"].id),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build Signal Watcher deployment and post-signal resume evidence packs.
+"""Build Signal Watcher deployment and post-signal resume evidence artifacts.
 
 The pack builder is read-only. It consumes watcher JSON artifacts and writes
-operator evidence packets. It never sends notifications, calls exchange APIs,
+operator evidence artifacts. It never sends notifications, calls exchange APIs,
 creates orders, mutates PG, or advances runtime authorization.
 """
 
@@ -13,6 +13,11 @@ import json
 from pathlib import Path
 import time
 from typing import Any
+
+from src.application.readmodels.owner_projection import (
+    owner_state_source_checkpoint,
+    owner_state_without_legacy_input_recovery_action,
+)
 
 
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
@@ -110,7 +115,8 @@ def _waiting_for_market_auto_resume() -> dict[str, Any]:
         "next_recover_condition": (
             "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
         ),
-        "automatic_recovery_action": "continue_watcher_observation",
+        "non_authority_checkpoint": "continue_watcher_observation",
+        "checkpoint_source": "runtime_signal_watcher_readiness_pack",
         "downgrade_mode": "observe_only",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
@@ -143,10 +149,11 @@ def _action_time_resume(
         allowed_auto_actions = [FRESH_AUTHORIZATION_ACTION]
     else:
         status = "waiting_for_market"
-        next_step = (
-            post_signal_auto_resume.get("automatic_recovery_action")
-            or "continue_watcher_observation"
+        next_step = owner_state_source_checkpoint(
+            post_signal_auto_resume,
+            default="continue_watcher_observation",
         )
+        next_step = next_step[0]
         allowed_auto_actions = ["continue_watcher_observation"]
 
     return {
@@ -191,7 +198,7 @@ def _owner_state(
         next_recover_condition = (
             "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
         )
-        automatic_recovery_action = "continue_watcher_observation"
+        fallback_checkpoint = "continue_watcher_observation"
         downgrade_mode = "observe_only"
     elif status == NON_EXECUTING_PREPARE_STATUS:
         blocker_class = "none"
@@ -200,7 +207,7 @@ def _owner_state(
         next_recover_condition = (
             "fresh_candidate_runtime_grant_authorization_evidence_exists"
         )
-        automatic_recovery_action = FRESH_AUTHORIZATION_ACTION
+        fallback_checkpoint = FRESH_AUTHORIZATION_ACTION
         downgrade_mode = "no_real_submit_until_candidate_authorization_finalgate"
     elif status == "ready_for_action_time_final_gate":
         blocker_class = "none"
@@ -209,16 +216,36 @@ def _owner_state(
         next_recover_condition = (
             "official_final_gate_preflight_passes_with_current_facts"
         )
-        automatic_recovery_action = "run_official_action_time_final_gate_preflight"
+        fallback_checkpoint = "run_official_action_time_final_gate_preflight"
         downgrade_mode = "no_real_submit_until_final_gate_pass"
     else:
         blocker_class = "hard_safety_stop"
         blocked_at = "watcher_resume"
         blocked_reason = "watcher_resume_blocked"
         next_recover_condition = "watcher_resume_blockers_are_resolved"
-        automatic_recovery_action = "resolve_watcher_resume_blockers"
+        fallback_checkpoint = "resolve_watcher_resume_blockers"
         downgrade_mode = "manual_review_only"
 
+    allowed_auto_action = (action_time_resume.get("allowed_auto_actions") or [None])[0]
+    source_checkpoint = None
+    source_checkpoint_label = "owner_state_default"
+    if not prefer_action_time_resume:
+        source_checkpoint, source_checkpoint_label = owner_state_source_checkpoint(
+            post_signal_auto_resume,
+            default="",
+        )
+        source_checkpoint = source_checkpoint or None
+    non_authority_checkpoint = (
+        allowed_auto_action
+        or source_checkpoint
+        or fallback_checkpoint
+    )
+    if allowed_auto_action:
+        checkpoint_source = "action_time_resume"
+    elif source_checkpoint:
+        checkpoint_source = source_checkpoint_label
+    else:
+        checkpoint_source = "owner_state_default"
     return {
         "status": status,
         "blocker_class": blocker_class,
@@ -240,21 +267,26 @@ def _owner_state(
             else post_signal_auto_resume.get("next_recover_condition")
         )
         or next_recover_condition,
-        "automatic_recovery_action": (
-            None
-            if prefer_action_time_resume
-            else post_signal_auto_resume.get("automatic_recovery_action")
-        )
-        or (
-            action_time_resume.get("allowed_auto_actions") or [None]
-        )[0]
-        or (
-            action_time_resume.get("next_step")
-            or automatic_recovery_action
-        ),
+        "non_authority_checkpoint": non_authority_checkpoint,
+        "checkpoint_source": checkpoint_source,
         "downgrade_mode": post_signal_auto_resume.get("downgrade_mode")
         or downgrade_mode,
     }
+
+
+def _normalized_post_signal_auto_resume(
+    post_signal_auto_resume: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = owner_state_without_legacy_input_recovery_action(post_signal_auto_resume)
+    checkpoint, source = owner_state_source_checkpoint(
+        normalized,
+        default="",
+    )
+    if not checkpoint:
+        return normalized
+    normalized.setdefault("non_authority_checkpoint", checkpoint)
+    normalized.setdefault("checkpoint_source", source)
+    return normalized
 
 
 def build_pack(
@@ -266,16 +298,16 @@ def build_pack(
 ) -> dict[str, Any]:
     paths = {
         "watcher_tick": report_dir / "watcher-tick.json",
-        "wakeup_packet": report_dir / "wakeup-packet.json",
-        "operator_packet": report_dir / "operator-packet.json",
-        "status_packet": report_dir / "status-packet.json",
+        "wakeup_evidence": report_dir / "wakeup-evidence.json",
+        "operator_evidence": report_dir / "operator-evidence.json",
+        "status_artifact": report_dir / "status-artifact.json",
         "notification_state": report_dir / "notification-state.json",
     }
     payloads = {name: _read_json(path) for name, path in paths.items()}
     watcher_tick = payloads["watcher_tick"]
-    wakeup_packet = payloads["wakeup_packet"]
-    operator_packet = payloads["operator_packet"]
-    status_packet = payloads["status_packet"]
+    wakeup_evidence = payloads["wakeup_evidence"]
+    operator_evidence = payloads["operator_evidence"]
+    status_artifact = payloads["status_artifact"]
     notification_state = payloads["notification_state"]
     files = _file_status(paths)
     generated_at_ms = int(time.time() * 1000)
@@ -288,24 +320,26 @@ def build_pack(
     stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
     safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
     safety = safety if isinstance(safety, dict) else {}
-    post_signal_auto_resume = _dict(watcher_tick.get("post_signal_auto_resume"))
+    post_signal_auto_resume = _normalized_post_signal_auto_resume(
+        _dict(watcher_tick.get("post_signal_auto_resume"))
+    )
     unsafe_flags = [
         name for name in sorted(UNSAFE_FLAGS)
         if safety.get(name) not in {False, None}
     ]
     notification = watcher_tick.get("notification") if isinstance(watcher_tick, dict) else {}
     notification = notification if isinstance(notification, dict) else {}
-    wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_packet.get("status") or "unknown")
-    operator_status = str(watcher_tick.get("operator_status") or operator_packet.get("status") or "unknown")
-    runtime_signal_summaries = _items(status_packet.get("runtime_signal_summaries"))
+    wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_evidence.get("status") or "unknown")
+    operator_status = str(watcher_tick.get("operator_status") or operator_evidence.get("status") or "unknown")
+    runtime_signal_summaries = _items(status_artifact.get("runtime_signal_summaries"))
     selected_runtime_instance_ids = [
         str(item)
-        for item in (status_packet.get("selected_runtime_instance_ids") or [])
+        for item in (status_artifact.get("selected_runtime_instance_ids") or [])
         if str(item).strip()
     ]
-    signal_input_json = status_packet.get("signal_input_json")
-    prepared_authorization_id = status_packet.get("prepared_authorization_id")
-    shadow_candidate_id = status_packet.get("shadow_candidate_id")
+    signal_input_json = status_artifact.get("signal_input_json")
+    prepared_authorization_id = status_artifact.get("prepared_authorization_id")
+    shadow_candidate_id = status_artifact.get("shadow_candidate_id")
     actionable_runtime_signal = _has_actionable_runtime_signal(
         runtime_signal_summaries=runtime_signal_summaries,
         signal_input_json=signal_input_json,
@@ -353,7 +387,7 @@ def build_pack(
     if missing or unsafe_flags:
         resume_status = "blocked"
 
-    deployment_packet = {
+    deployment_artifact = {
         "scope": "runtime_signal_watcher_deployment_readiness",
         "label": label,
         "generated_at_ms": generated_at_ms,
@@ -372,7 +406,7 @@ def build_pack(
             "tick_status": watcher_tick.get("status") or "unknown",
             "wakeup_status": wakeup_status,
             "operator_status": operator_status,
-            "status_packet_status": watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown",
+            "watcher_status_evidence_status": status_artifact.get("status") or "unknown",
         },
         "post_signal_auto_resume": post_signal_auto_resume,
         "post_signal_resume_normalization": {
@@ -400,13 +434,9 @@ def build_pack(
         "can_continue_steps_5_8": can_resume_steps_5_8,
         "current_wakeup_status": wakeup_status,
         "current_operator_status": operator_status,
-        "current_status_packet_status": (
-            watcher_tick.get("status_packet_status")
-            or status_packet.get("status")
-            or "unknown"
-        ),
-        "active_runtime_count": status_packet.get("active_runtime_count"),
-        "monitored_runtime_count": status_packet.get("monitored_runtime_count"),
+        "current_watcher_status_evidence_status": status_artifact.get("status") or "unknown",
+        "active_runtime_count": status_artifact.get("active_runtime_count"),
+        "monitored_runtime_count": status_artifact.get("monitored_runtime_count"),
         "selected_runtime_instance_ids": selected_runtime_instance_ids,
         "runtime_signal_summaries": runtime_signal_summaries,
         "signal_input_json": signal_input_json,
@@ -427,9 +457,10 @@ def build_pack(
                 normalized_ready_without_actionable_signal
             ),
         },
-        "automatic_recovery_action": post_signal_auto_resume.get(
-            "automatic_recovery_action"
-        ),
+        "non_authority_checkpoint": owner_state_source_checkpoint(
+            post_signal_auto_resume,
+            default="continue_watcher_observation",
+        )[0],
         "blocked_at": post_signal_auto_resume.get("blocked_at"),
         "blocked_reason": post_signal_auto_resume.get("blocked_reason"),
         "next_recover_condition": post_signal_auto_resume.get(
@@ -462,11 +493,11 @@ def build_pack(
             "FinalGate failure",
             "Operation Layer bypass",
         ],
-        "safety_invariants": deployment_packet["safety_invariants"],
-        "blockers": deployment_packet["blockers"]
-        + list(watcher_tick.get("blockers") or status_packet.get("blockers") or []),
+        "safety_invariants": deployment_artifact["safety_invariants"],
+        "blockers": deployment_artifact["blockers"]
+        + list(watcher_tick.get("blockers") or status_artifact.get("blockers") or []),
         "warnings": list(
-            watcher_tick.get("warnings") or status_packet.get("warnings") or []
+            watcher_tick.get("warnings") or status_artifact.get("warnings") or []
         )
         + (
             ["normalized_ready_status_without_actionable_signal"]
@@ -475,14 +506,14 @@ def build_pack(
         ),
     }
 
-    deployment_path = output_dir / "deployment-readiness-packet.json"
+    deployment_path = output_dir / "deployment-readiness-artifact.json"
     resume_path = output_dir / "post-signal-resume-pack.json"
-    _write_json(deployment_path, deployment_packet)
+    _write_json(deployment_path, deployment_artifact)
     _write_json(resume_path, resume_pack)
     return {
         "scope": "runtime_signal_watcher_readiness_pack_builder",
         "status": "completed",
-        "deployment_readiness_packet": str(deployment_path),
+        "deployment_readiness_artifact": str(deployment_path),
         "post_signal_resume_pack": str(resume_path),
         "deployment_status": deployment_status,
         "resume_status": resume_status,
@@ -508,13 +539,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    packet = build_pack(
+    artifact = build_pack(
         report_dir=Path(args.report_dir).expanduser(),
         output_dir=Path(args.output_dir).expanduser(),
         stale_after_seconds=args.stale_after_seconds,
         label=args.label,
     )
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0
 
 

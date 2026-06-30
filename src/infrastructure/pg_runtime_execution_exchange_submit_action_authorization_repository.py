@@ -86,7 +86,7 @@ class PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository:
             deployment_readiness_evidence_id=(
                 authorization.deployment_readiness_evidence_id
             ),
-            packet_preview_id=authorization.packet_preview_id,
+            submit_preview_id=authorization.submit_preview_id,
             binding_id=authorization.binding_id,
             local_registration_adapter_result_id=(
                 authorization.local_registration_adapter_result_id

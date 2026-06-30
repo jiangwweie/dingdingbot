@@ -75,3 +75,7 @@ def test_runtime_tier_l4_still_requires_official_chain():
     assert policy["not_execution_authority"] is True
     assert policy["not_finalgate_input"] is True
     assert policy["not_operation_layer_input"] is True
+    assert policy["strategygroup_decision_review"][
+        "review_rows_are_not_submit_authority"
+    ] is True
+    assert "real_order_authority" not in policy["strategygroup_decision_review"]

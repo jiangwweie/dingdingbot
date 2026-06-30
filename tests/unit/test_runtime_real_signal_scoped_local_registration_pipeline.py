@@ -372,6 +372,18 @@ def test_pipeline_can_record_scoped_local_registration_with_fake_client(tmp_path
     )
 
 
+def test_fresh_id_hint_ignores_legacy_packet_id_when_current_identity_missing():
+    hint = script._fresh_id_hint(
+        {
+            "api_payload": {
+                "packet_id": "legacy-readiness-packet",
+            },
+        }
+    )
+
+    assert hint == "requested-fresh-submit-authorization-unknown"
+
+
 def test_pipeline_outputs_dispatcher_ready_operation_layer_evidence_after_registration(
     tmp_path,
 ):
@@ -418,7 +430,7 @@ def test_pipeline_outputs_dispatcher_ready_operation_layer_evidence_after_regist
         "operation_layer_submit_allowed": False,
         "ready_for_real_order": False,
     }
-    dispatch_packet = dispatcher.build_dispatch_packet(
+    dispatch_packet = dispatcher.build_dispatch_artifact(
         resume_pack=_finalgate_ready_resume_pack("auth-rtf020"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         operation_layer_evidence_report=operation_layer_evidence,
@@ -511,8 +523,8 @@ class _Client:
                 "http_status": 200,
                 "body": {
                     "status": "ready_for_executable_submit",
-                    "packet_id": "readiness-rtf020",
-                    "source_strategy_planning_packet_id": "strategy-plan-rtf020",
+                    "artifact_id": "readiness-rtf020",
+                    "source_strategy_planning_artifact_id": "strategy-plan-rtf020",
                     "source_authorization_id": "persisted-draft-source:rtf020",
                     "signal_evaluation_id": "signal-rtf020",
                     "order_candidate_id": "candidate-rtf020",
@@ -570,7 +582,7 @@ class _Client:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "prepared_packet_blocked",
+                    "status": "prepared_evidence_blocked",
                     "available_evidence_ids": {
                         "trusted_submit_fact_snapshot_id": "facts-rtf020",
                         "submit_idempotency_policy_id": "idem-rtf020",
@@ -580,7 +592,7 @@ class _Client:
                         ),
                     },
                     "blockers": [
-                        "first_real_submit_packet_unavailable:"
+                        "first_real_submit_evidence_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ],
                 },

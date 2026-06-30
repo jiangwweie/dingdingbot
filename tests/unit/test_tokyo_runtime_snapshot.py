@@ -14,7 +14,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
-    "scoped_pipeline_operation_layer_handoff_checked",
+    "scoped_pipeline_operation_layer_submit_projection_checked",
     "fresh_signal_fast_auto_chain_checked",
     "required_facts_readiness_checked",
     "mock_operation_layer_closed_loop_checked",
@@ -34,7 +34,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "new_strategygroups_default_observe_only_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-    "non_executing_prepare_auto_bridge_checked",
+    "execution_attempt_rehearsal_prepare_checked",
 )
 
 
@@ -51,7 +51,7 @@ def _load_module():
     return module
 
 
-def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
+def _healthy_remote_payload() -> dict:
     dry_run_checks = {name: True for name in REQUIRED_DRY_RUN_CHECKS}
     dry_run_checks["scenario_count"] = 14
     return {
@@ -76,13 +76,6 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                 "enabled": "enabled",
             },
             "nginx.service": {"active": "active", "enabled": "enabled"},
-        },
-        "frontend": {
-            "root": "/var/www/brc-owner-console",
-            "nginx_root": "/var/www/brc-owner-console",
-            "index_exists": True,
-            "release_exists": frontend_release is not None,
-            "release": frontend_release,
         },
         "reports": {
             "owner-console-source-readiness.json": {
@@ -190,10 +183,10 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
     }
 
 
-def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
+def _complete_live_closure_evidence_artifact(*, official: bool = True) -> dict:
     evidence = {
         "live_watcher_signal_packet_id": "live-signal-1",
-        "required_facts_readiness_packet_id": "facts-ready-1",
+        "required_facts_readiness_artifact_id": "facts-ready-1",
         "candidate_id": "candidate-1",
         "runtime_grant_id": "grant-1",
         "fresh_submit_authorization_id": "fresh-auth-1",
@@ -201,24 +194,24 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
         "operation_layer_submit_authorization_id": "operation-auth-1",
         "exchange_submit_execution_result_id": "exchange-result-1",
         "exchange_native_hard_stop_order_id": "hard-stop-1",
-        "runtime_post_submit_finalize_packet_id": "finalize-1",
+        "runtime_post_submit_finalize_payload_id": "finalize-1",
         "post_submit_reconciliation_evidence_id": "reconcile-1",
         "post_submit_budget_settlement_id": "settlement-1",
         "submit_outcome_review_id": "review-1",
     }
     return {
-        "scope": "runtime_live_closure_evidence_packet",
-        "status": "live_closure_evidence_packet_built",
+        "scope": "runtime_live_closure_evidence_artifact",
+        "status": "live_closure_evidence_artifact_built",
         "source_kind": "official_live_closure_evidence" if official else "local_rehearsal",
         "official_live_closure_evidence": official,
         "live_signal_chain_proof": {
             "live_watcher_signal_packet_id": "live-signal-1",
             "present_evidence_keys": [
-                "required_facts_readiness_packet_id",
+                "required_facts_readiness_artifact_id",
                 "candidate_id",
             ],
             "matched_evidence_keys": [
-                "required_facts_readiness_packet_id",
+                "required_facts_readiness_artifact_id",
                 "candidate_id",
             ],
             "missing_source_match_keys": [],
@@ -262,13 +255,13 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
         "post_submit_close_loop_proof": {
             "exchange_submit_execution_result_id": "exchange-result-1",
             "present_evidence_keys": [
-                "runtime_post_submit_finalize_packet_id",
+                "runtime_post_submit_finalize_payload_id",
                 "post_submit_reconciliation_evidence_id",
                 "post_submit_budget_settlement_id",
                 "submit_outcome_review_id",
             ],
             "matched_evidence_keys": [
-                "runtime_post_submit_finalize_packet_id",
+                "runtime_post_submit_finalize_payload_id",
                 "post_submit_reconciliation_evidence_id",
                 "post_submit_budget_settlement_id",
                 "submit_outcome_review_id",
@@ -323,9 +316,7 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head=None,
         runner=runner,
     )
 
@@ -356,9 +347,7 @@ def test_tokyo_runtime_snapshot_local_host_does_not_self_ssh():
         host="local",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head=None,
         runner=runner,
     )
 
@@ -374,7 +363,6 @@ def test_tokyo_runtime_snapshot_local_host_does_not_self_ssh():
     assert report["status"] == "ready"
     assert report["checks"]["blockers"] == []
     assert report["checks"]["product_gaps"] == []
-    assert report["checks"]["frontend_scope"] == "externalized"
     assert report["checks"]["runtime_goal_status_submit_blocker_keys"] == []
     assert report["checks"]["runtime_goal_status_real_order_readiness_summary"] == {
         "blocked": 0,
@@ -472,16 +460,18 @@ def test_tokyo_runtime_snapshot_preserves_fresh_signal_processing_over_stale_wai
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head=None,
         runner=runner,
     )
 
     assert report["status"] == "ready"
     assert report["checks"]["waiting_for_market"] is False
     assert report["owner_summary"]["state"] == "处理中"
-    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "等待系统完成收口"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "tokyo_runtime_snapshot_projection"
+    )
     goal_status_summary = report["facts"]["reports"]["goal_status"]
     assert goal_status_summary["status"] == "fresh_signal_processing"
     assert goal_status_summary["fresh_signal_present"] is True
@@ -497,12 +487,12 @@ def test_tokyo_runtime_snapshot_preserves_fresh_signal_processing_over_stale_wai
     assert report["interaction"]["places_order"] is False
 
 
-def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_packet():
+def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_artifact():
     module = _load_module()
     payload = _healthy_remote_payload()
     payload["reports"]["runtime-live-closure-evidence.json"] = {
         "exists": True,
-        "payload": _complete_live_closure_evidence_packet(),
+        "payload": _complete_live_closure_evidence_artifact(),
     }
 
     def runner(command: tuple[str, ...]):
@@ -516,9 +506,7 @@ def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_packet():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head=None,
         runner=runner,
     )
 
@@ -534,12 +522,12 @@ def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_packet():
     ] == "live_closure_complete"
 
 
-def test_tokyo_runtime_snapshot_rejects_unmarked_live_closure_evidence_packet():
+def test_tokyo_runtime_snapshot_rejects_unmarked_live_closure_evidence_artifact():
     module = _load_module()
     payload = _healthy_remote_payload()
     payload["reports"]["runtime-live-closure-evidence.json"] = {
         "exists": True,
-        "payload": _complete_live_closure_evidence_packet(official=False),
+        "payload": _complete_live_closure_evidence_artifact(official=False),
     }
 
     def runner(command: tuple[str, ...]):
@@ -553,9 +541,7 @@ def test_tokyo_runtime_snapshot_rejects_unmarked_live_closure_evidence_packet():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head=None,
         runner=runner,
     )
 
@@ -571,7 +557,7 @@ def test_tokyo_runtime_snapshot_rejects_unmarked_live_closure_evidence_packet():
 
 def test_tokyo_runtime_snapshot_blocks_on_goal_status_submit_blocker():
     module = _load_module()
-    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    payload = _healthy_remote_payload()
     goal_status = payload["reports"]["strategygroup-runtime-goal-status.json"][
         "payload"
     ]
@@ -595,9 +581,7 @@ def test_tokyo_runtime_snapshot_blocks_on_goal_status_submit_blocker():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
         runner=runner,
     )
 
@@ -640,40 +624,9 @@ def test_tokyo_runtime_snapshot_cli_writes_output_json_atomically(
     assert list(tmp_path.glob(".snapshot.json.*.tmp")) == []
 
 
-def test_tokyo_runtime_snapshot_ignores_externalized_frontend_release():
-    module = _load_module()
-
-    def runner(command: tuple[str, ...]):
-        return module.CommandResult(
-            stdout=json.dumps(
-                _healthy_remote_payload(frontend_release={"head": "frontend-head"})
-            ),
-            stderr="",
-            returncode=0,
-        )
-
-    report = module.build_tokyo_runtime_snapshot(
-        host="tokyo",
-        deploy_root="/home/ubuntu/brc-deploy",
-        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
-        expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
-        runner=runner,
-    )
-
-    assert report["status"] == "ready"
-    assert report["checks"]["product_gaps"] == []
-    assert report["checks"]["frontend_scope"] == "externalized"
-    assert report["owner_summary"]["frontend"] == "外部项目"
-    assert report["safety_invariants"]["remote_files_modified"] is False
-    assert report["safety_invariants"]["order_created"] is False
-    assert report["safety_invariants"]["exchange_write_called"] is False
-
-
 def test_tokyo_runtime_snapshot_reads_head_from_release_manifest_local_git():
     module = _load_module()
-    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    payload = _healthy_remote_payload()
     payload["release"] = {
         "current_realpath": "/home/ubuntu/brc-deploy/releases/current",
         "manifest": {
@@ -694,9 +647,7 @@ def test_tokyo_runtime_snapshot_reads_head_from_release_manifest_local_git():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="nested-runtime-head",
-        expected_frontend_head="frontend-head",
         runner=runner,
     )
 
@@ -707,7 +658,7 @@ def test_tokyo_runtime_snapshot_reads_head_from_release_manifest_local_git():
 
 def test_tokyo_runtime_snapshot_blocks_on_runtime_liveness_failure():
     module = _load_module()
-    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    payload = _healthy_remote_payload()
     payload["systemd"]["brc-owner-console-backend.service"]["active"] = "inactive"
 
     def runner(command: tuple[str, ...]):
@@ -721,9 +672,7 @@ def test_tokyo_runtime_snapshot_blocks_on_runtime_liveness_failure():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
         runner=runner,
     )
 
@@ -735,7 +684,7 @@ def test_tokyo_runtime_snapshot_blocks_on_runtime_liveness_failure():
 
 def test_tokyo_runtime_snapshot_blocks_on_nested_goal_status_liveness_failure():
     module = _load_module()
-    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    payload = _healthy_remote_payload()
     goal_status = payload["reports"]["strategygroup-runtime-goal-status.json"][
         "payload"
     ]
@@ -752,9 +701,7 @@ def test_tokyo_runtime_snapshot_blocks_on_nested_goal_status_liveness_failure():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
         runner=runner,
     )
 
@@ -765,7 +712,7 @@ def test_tokyo_runtime_snapshot_blocks_on_nested_goal_status_liveness_failure():
 
 def test_tokyo_runtime_snapshot_blocks_when_dry_run_required_check_is_missing():
     module = _load_module()
-    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    payload = _healthy_remote_payload()
     dry_run = payload["reports"]["runtime-dry-run-audit-chain.json"]["payload"]
     dry_run["checks"]["fresh_signal_fast_auto_chain_checked"] = False
 
@@ -780,9 +727,7 @@ def test_tokyo_runtime_snapshot_blocks_when_dry_run_required_check_is_missing():
         host="tokyo",
         deploy_root="/home/ubuntu/brc-deploy",
         report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        frontend_root="/var/www/brc-owner-console",
         expected_runtime_head="runtime-head",
-        expected_frontend_head="frontend-head",
         runner=runner,
     )
 

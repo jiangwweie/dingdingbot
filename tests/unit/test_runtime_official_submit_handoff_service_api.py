@@ -15,8 +15,8 @@ from tests.unit.test_runtime_official_submit_handoff import _readiness
 async def test_service_builds_disabled_smoke_handoff_preview():
     service = RuntimeOfficialSubmitHandoffService()
 
-    packet = await service.preview_from_readiness_packet(
-        readiness_packet=_readiness(),
+    packet = await service.preview_from_readiness_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
     )
 
@@ -26,6 +26,9 @@ async def test_service_builds_disabled_smoke_handoff_preview():
     assert packet.official_query[
         "owner_confirmed_for_first_real_submit_action"
     ] is False
+    assert packet.metadata["read_only_submit_projection"] is True
+    assert packet.metadata["execution_attempt_source"] is False
+    assert "read_only_handoff" not in packet.metadata
     assert packet.exchange_order_submitted is False
     assert packet.order_lifecycle_called is False
 
@@ -34,8 +37,8 @@ async def test_service_builds_disabled_smoke_handoff_preview():
 async def test_service_uses_standing_authorization_for_real_gateway_handoff():
     service = RuntimeOfficialSubmitHandoffService()
 
-    packet = await service.preview_from_readiness_packet(
-        readiness_packet=_readiness(),
+    packet = await service.preview_from_readiness_artifact(
+        readiness_artifact=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
         mode=RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION,
         owner_confirmed_for_real_submit_action=False,
@@ -61,7 +64,7 @@ async def test_trading_console_official_submit_handoff_endpoint():
     response = await runtime_official_submit_handoff_preview(
         readiness.runtime_instance_id,
         RuntimeOfficialSubmitHandoffPreviewRequest(
-            readiness_packet=readiness,
+            readiness_artifact=readiness,
             fresh_submit_authorization_id="fresh-auth-1",
             additional_warnings=["unit_endpoint"],
         ),
@@ -89,10 +92,10 @@ async def test_trading_console_official_submit_handoff_endpoint_blocks_runtime_m
         await runtime_official_submit_handoff_preview(
             "different-runtime",
             RuntimeOfficialSubmitHandoffPreviewRequest(
-                readiness_packet=readiness,
+                readiness_artifact=readiness,
                 fresh_submit_authorization_id="fresh-auth-1",
             ),
         )
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "readiness_packet_runtime_mismatch"
+    assert exc_info.value.detail == "readiness_artifact_runtime_mismatch"

@@ -10,6 +10,11 @@
       "reason": "First bounded-aggressive live-order pilot lane; use Owner-allocated subaccount profile; no expansion of symbol, side, notional, leverage, or max exposure beyond the selected profile.",
       "tier": "L4"
     },
+    "CPM-RO-001": {
+      "mode": "armed_observation",
+      "reason": "Standalone CPM-LONG pullback-reclaim trial StrategyGroup; may observe and run non-executing rehearsal, but real submit still requires fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "tier": "L3"
+    },
     "PMR-001": {
       "mode": "observe_only",
       "reason": "Precious-metal overlay remains observe-only until role/session/mark facts are consistently ready.",
@@ -101,7 +106,7 @@
     ],
     "one_current_row_per_strategy_group": true,
     "raw_replay_samples_stay_lower_level": true,
-    "real_order_authority": false
+    "review_rows_are_not_submit_authority": true
   },
   "safety_invariants": {
     "l4_still_requires_official_runtime_chain": true,
@@ -128,7 +133,7 @@
       "may_prepare_shadow_candidate": false,
       "may_reach_finalgate": false,
       "may_reach_operation_layer": false,
-      "meaning": "May record read-only observations and no-action packets only.",
+      "meaning": "May record read-only observations and no-action evidence only.",
       "name": "observe_only"
     },
     "L2": {

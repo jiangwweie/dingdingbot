@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one non-executing post-submit -> next-attempt strategy cycle.
 
-This is the RTF-030 bridge from the post-submit finalize mainline into the
+This is the RTF-030 lifecycle proof from the post-submit finalize mainline into the
 fresh strategy-signal loop:
 
 runtime latest durable submit result
@@ -64,8 +64,8 @@ def _output_paths(args: argparse.Namespace) -> dict[str, Path]:
     return {
         "post_submit_finalize_flow": output_dir
         / f"{cycle_id}-post-submit-finalize-flow.json",
-        "post_submit_finalize_packet": output_dir
-        / f"{cycle_id}-post-submit-finalize-packet.json",
+        "post_submit_finalize_payload": output_dir
+        / f"{cycle_id}-post-submit-finalize-payload.json",
         "next_attempt_strategy_plan_flow": output_dir
         / f"{cycle_id}-next-attempt-strategy-plan-flow.json",
     }
@@ -100,7 +100,7 @@ def _finalize_args(args: argparse.Namespace) -> argparse.Namespace:
 def _planning_args(
     args: argparse.Namespace,
     *,
-    post_submit_finalize_packet_json: Path,
+    post_submit_finalize_payload_json: Path,
 ) -> argparse.Namespace:
     metadata = {
         **_load_json_object(args.metadata_json),
@@ -109,7 +109,7 @@ def _planning_args(
     }
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        post_submit_finalize_packet_json=str(post_submit_finalize_packet_json),
+        post_submit_finalize_payload_json=str(post_submit_finalize_payload_json),
         signal_input_json=args.signal_input_json,
         env_file=args.env_file,
         api_base=args.api_base,
@@ -154,27 +154,32 @@ def _operator_next_step(status: str) -> str:
     return "resolve_post_submit_or_strategy_planning_blocker"
 
 
-def _build_cycle_packet(
+def _post_submit_payload(finalize_artifact: dict[str, Any]) -> dict[str, Any]:
+    payload = finalize_artifact.get("post_submit_finalize_payload")
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
+def _build_cycle_artifact(
     args: argparse.Namespace,
     *,
     finalize_builder: FinalizeBuilder | None = None,
     planning_builder: PlanningBuilder | None = None,
 ) -> dict[str, Any]:
     paths = _output_paths(args)
-    finalize_builder = finalize_builder or finalize_flow._build_packet
-    planning_builder = planning_builder or planning_flow._build_packet
+    finalize_builder = finalize_builder or finalize_flow._build_artifact
+    planning_builder = planning_builder or planning_flow._build_artifact
 
-    finalize_packet = finalize_builder(_finalize_args(args))
-    _write_json(paths["post_submit_finalize_flow"], finalize_packet)
+    finalize_artifact = finalize_builder(_finalize_args(args))
+    _write_json(paths["post_submit_finalize_flow"], finalize_artifact)
 
-    post_submit = finalize_packet.get("post_submit_finalize_packet")
-    if not isinstance(post_submit, dict):
-        post_submit = {}
-    _write_json(paths["post_submit_finalize_packet"], post_submit)
+    post_submit = _post_submit_payload(finalize_artifact)
+    _write_json(paths["post_submit_finalize_payload"], post_submit)
 
-    finalize_status = str(finalize_packet.get("status") or "")
+    finalize_status = str(finalize_artifact.get("status") or "")
     if finalize_status != READY_POST_SUBMIT_STATUS:
-        blockers = list(finalize_packet.get("blockers") or [])
+        blockers = list(finalize_artifact.get("blockers") or [])
         if not blockers:
             blockers.append("post_submit_finalize_not_ready_for_next_attempt")
         return {
@@ -182,12 +187,12 @@ def _build_cycle_packet(
             "status": "blocked",
             "blocked_stage": "post_submit_finalize",
             "runtime_instance_id": args.runtime_instance_id,
-            "post_submit_finalize_flow": finalize_packet,
+            "post_submit_finalize_flow": finalize_artifact,
             "next_attempt_strategy_plan_flow": None,
             "artifact_paths": {k: str(v) for k, v in paths.items()},
             "blockers": blockers,
-            "warnings": list(finalize_packet.get("warnings") or []),
-            "operator_command_plan": {
+            "warnings": list(finalize_artifact.get("warnings") or []),
+            "next_attempt_cycle_plan": {
                 "next_step": "resolve_post_submit_finalize_blocker",
                 "creates_shadow_candidate": False,
                 "creates_execution_intent": False,
@@ -197,23 +202,23 @@ def _build_cycle_packet(
             "safety_invariants": _safety(),
         }
 
-    planning_packet = planning_builder(
+    planning_artifact = planning_builder(
         _planning_args(
             args,
-            post_submit_finalize_packet_json=paths["post_submit_finalize_packet"],
+            post_submit_finalize_payload_json=paths["post_submit_finalize_payload"],
         )
     )
-    _write_json(paths["next_attempt_strategy_plan_flow"], planning_packet)
+    _write_json(paths["next_attempt_strategy_plan_flow"], planning_artifact)
 
-    planning_status = str(planning_packet.get("status") or "")
+    planning_status = str(planning_artifact.get("status") or "")
     status = _status_from_planning(planning_status)
-    planning_payload = planning_packet.get("api_payload") or {}
+    planning_payload = planning_artifact.get("api_payload") or {}
     if not isinstance(planning_payload, dict):
         planning_payload = {}
-    operator_plan = planning_payload.get("operator_command_plan") or {}
-    if not isinstance(operator_plan, dict):
-        operator_plan = {}
-    blockers = list(planning_packet.get("blockers") or [])
+    strategy_planning_plan = planning_payload.get("strategy_planning_plan") or {}
+    if not isinstance(strategy_planning_plan, dict):
+        strategy_planning_plan = {}
+    blockers = list(planning_artifact.get("blockers") or [])
     if status == "blocked" and not blockers:
         blockers.append("next_attempt_strategy_planning_not_ready")
     return {
@@ -221,19 +226,19 @@ def _build_cycle_packet(
         "status": status,
         "blocked_stage": None if status != "blocked" else "next_attempt_strategy_planning",
         "runtime_instance_id": args.runtime_instance_id,
-        "post_submit_finalize_flow": finalize_packet,
-        "next_attempt_strategy_plan_flow": planning_packet,
+        "post_submit_finalize_flow": finalize_artifact,
+        "next_attempt_strategy_plan_flow": planning_artifact,
         "artifact_paths": {k: str(v) for k, v in paths.items()},
         "signal_input_json": args.signal_input_json,
         "signal_evaluation_id": planning_payload.get("signal_evaluation_id"),
         "order_candidate_id": planning_payload.get("order_candidate_id"),
         "blockers": blockers,
-        "warnings": list(finalize_packet.get("warnings") or [])
-        + list(planning_packet.get("warnings") or []),
-        "operator_command_plan": {
+        "warnings": list(finalize_artifact.get("warnings") or [])
+        + list(planning_artifact.get("warnings") or []),
+        "next_attempt_cycle_plan": {
             "next_step": _operator_next_step(status),
             "creates_shadow_candidate": bool(
-                operator_plan.get("creates_shadow_candidate")
+                strategy_planning_plan.get("creates_shadow_candidate")
                 or planning_payload.get("order_candidate_id")
             ),
             "creates_executable_execution_intent": False,
@@ -275,9 +280,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_cycle_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_cycle_artifact(args)
+    print(
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    )
+    return 0 if artifact["status"] in {
         READY_PLANNING_STATUS,
         WAITING_PLANNING_STATUS,
         "blocked",

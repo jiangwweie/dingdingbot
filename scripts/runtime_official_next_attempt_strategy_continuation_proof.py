@@ -4,7 +4,7 @@
 RTF-089 proves the post-submit loop can reconnect to strategy-driven planning:
 
 blocked post-submit gate -> no strategy planner call / no shadow candidate
-ready post-submit gate + fresh CPM signal -> shadow candidate planning packet
+ready post-submit gate + fresh CPM signal -> shadow candidate planning artifact
 
 It uses the official Trading Console next-attempt strategy planning route and
 does not create executable intents, local orders, OrderLifecycle handoffs,
@@ -38,7 +38,7 @@ from scripts.runtime_official_server_prepare_integration_proof import (  # noqa:
     _login,
 )
 from src.domain.runtime_post_submit_finalize import (  # noqa: E402
-    RuntimePostSubmitFinalizePacket,
+    RuntimePostSubmitFinalizePayload,
 )
 
 
@@ -49,10 +49,10 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
 
     runtime = ready_fixture._runtime()
     signal_input = ready_fixture._signal_input()
-    ready_post_submit = ready_fixture._post_submit_finalize_packet(runtime)
-    blocked_post_submit_body = _body(rtf088_report["post_submit_finalize_packet"])
+    ready_post_submit = ready_fixture._post_submit_finalize_payload(runtime)
+    blocked_post_submit_body = _body(rtf088_report["post_submit_finalize_payload"])
     if not blocked_post_submit_body:
-        raise RuntimeError("rtf089_blocked_post_submit_packet_missing")
+        raise RuntimeError("rtf089_blocked_post_submit_payload_missing")
 
     blocked_store = ready_fixture._ShadowStore()
     ready_store = ready_fixture._ShadowStore()
@@ -82,7 +82,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             blocked_strategy_plan = _post_next_attempt_strategy_plan(
                 api_client=api_client,
                 runtime_instance_id=runtime.runtime_instance_id,
-                post_submit_finalize_packet=blocked_post_submit_body,
+                post_submit_finalize_payload=blocked_post_submit_body,
                 signal_input=signal_input.model_dump(mode="json"),
                 context_id="rtf089-blocked-active-position",
             )
@@ -103,12 +103,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             ready_strategy_plan = _post_next_attempt_strategy_plan(
                 api_client=api_client,
                 runtime_instance_id=runtime.runtime_instance_id,
-                post_submit_finalize_packet=ready_post_submit.model_dump(mode="json"),
+                post_submit_finalize_payload=ready_post_submit.model_dump(mode="json"),
                 signal_input=signal_input.model_dump(mode="json"),
                 context_id="rtf089-ready-fresh-cpm-signal",
             )
 
-    packet = _proof_packet(
+    proof_artifact = _proof_artifact(
         rtf088_report=rtf088_report,
         blocked_strategy_plan=blocked_strategy_plan,
         ready_strategy_plan=ready_strategy_plan,
@@ -122,7 +122,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "signal-input.json": signal_input.model_dump(mode="json"),
         "blocked-next-attempt-strategy-plan.json": blocked_strategy_plan,
         "ready-next-attempt-strategy-plan.json": ready_strategy_plan,
-        "next-attempt-strategy-continuation-packet.json": packet,
+        "next-attempt-strategy-continuation-artifact.json": proof_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -131,21 +131,23 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "scope": "runtime_official_next_attempt_strategy_continuation_proof",
         "status": (
             "official_next_attempt_strategy_continuation_passed"
-            if _contract_passed(packet["checks"])
+            if _contract_passed(proof_artifact["checks"])
             else "blocked"
         ),
         "runtime_instance_id": runtime.runtime_instance_id,
-        "order_candidate_id": packet["ready_path"].get("order_candidate_id"),
-        "signal_evaluation_id": packet["ready_path"].get("signal_evaluation_id"),
-        "blocked_status": packet["blocked_path"].get("status"),
-        "ready_status": packet["ready_path"].get("status"),
-        "next_attempt_strategy_continuation_packet": packet,
-        "checks": packet["checks"],
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "order_candidate_id": proof_artifact["ready_path"].get("order_candidate_id"),
+        "signal_evaluation_id": proof_artifact["ready_path"].get(
+            "signal_evaluation_id"
+        ),
+        "blocked_status": proof_artifact["blocked_path"].get("status"),
+        "ready_status": proof_artifact["ready_path"].get("status"),
+        "next_attempt_strategy_continuation_artifact": proof_artifact,
+        "checks": proof_artifact["checks"],
+        "safety_invariants": proof_artifact["safety_invariants"],
+        "next_attempt_strategy_continuation_plan": {
             "next_step": (
                 "run_runtime_final_gate_preflight_for_fresh_shadow_candidate"
-                if _contract_passed(packet["checks"])
+                if _contract_passed(proof_artifact["checks"])
                 else "resolve_next_attempt_strategy_continuation_blockers"
             ),
             "uses_official_fastapi_routes": True,
@@ -201,7 +203,7 @@ def _post_next_attempt_strategy_plan(
     *,
     api_client: _TestClientApiClient,
     runtime_instance_id: str,
-    post_submit_finalize_packet: dict[str, Any],
+    post_submit_finalize_payload: dict[str, Any],
     signal_input: dict[str, Any],
     context_id: str,
 ) -> dict[str, Any]:
@@ -212,7 +214,7 @@ def _post_next_attempt_strategy_plan(
             f"{runtime_instance_id}/next-attempt-strategy-plans"
         ),
         body={
-            "post_submit_finalize_packet": post_submit_finalize_packet,
+            "post_submit_finalize_payload": post_submit_finalize_payload,
             "signal_input": signal_input,
             "context_id": context_id,
             "metadata": {
@@ -224,12 +226,12 @@ def _post_next_attempt_strategy_plan(
     )
 
 
-def _proof_packet(
+def _proof_artifact(
     *,
     rtf088_report: dict[str, Any],
     blocked_strategy_plan: dict[str, Any],
     ready_strategy_plan: dict[str, Any],
-    ready_post_submit: RuntimePostSubmitFinalizePacket,
+    ready_post_submit: RuntimePostSubmitFinalizePayload,
     blocked_store: Any,
     ready_store: Any,
 ) -> dict[str, Any]:
@@ -250,7 +252,7 @@ def _proof_packet(
         proposal=proposal,
     )
     return {
-        "scope": "runtime_official_next_attempt_strategy_continuation_packet",
+        "scope": "runtime_official_next_attempt_strategy_continuation_artifact",
         "status": (
             "next_attempt_strategy_continuation_ready_for_final_gate"
             if _contract_passed(checks)
@@ -261,7 +263,7 @@ def _proof_packet(
             "status": blocked_body.get("status"),
             "blockers": list(blocked_body.get("blockers") or []),
             "order_candidate_id": blocked_body.get("order_candidate_id"),
-            "operator_command_plan": blocked_body.get("operator_command_plan") or {},
+            "strategy_planning_plan": _strategy_planning_plan(blocked_body),
         },
         "ready_path": {
             "http_status": ready_strategy_plan.get("http_status"),
@@ -272,11 +274,11 @@ def _proof_packet(
             "candidate_planning_status": ready_body.get(
                 "candidate_planning_status"
             ),
-            "operator_command_plan": ready_body.get("operator_command_plan") or {},
+            "strategy_planning_plan": _strategy_planning_plan(ready_body),
             "proposal": proposal,
         },
         "ready_post_submit_gate": {
-            "packet_id": ready_post_submit.packet_id,
+            "payload_id": ready_post_submit.post_submit_finalize_payload_id,
             "status": ready_post_submit.status.value,
             "next_attempt_gate_status": ready_post_submit.next_attempt_gate.status.value,
             "active_positions_count": (
@@ -308,7 +310,7 @@ def _checks(
 ) -> dict[str, bool]:
     blocked_body = _body(blocked_strategy_plan)
     ready_body = _body(ready_strategy_plan)
-    ready_operator = ready_body.get("operator_command_plan") or {}
+    ready_operator = _strategy_planning_plan(ready_body)
     tp_refs = (
         proposal.get("take_profit_references", [])
         if isinstance(proposal, dict)
@@ -380,6 +382,11 @@ def _checks(
             ready_body.get("withdrawal_or_transfer_created") is True
         ),
     }
+
+
+def _strategy_planning_plan(body: dict[str, Any]) -> dict[str, Any]:
+    plan = body.get("strategy_planning_plan") or {}
+    return plan if isinstance(plan, dict) else {}
 
 
 def _contract_passed(checks: dict[str, bool]) -> bool:

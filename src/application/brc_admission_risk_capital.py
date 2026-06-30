@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from src.domain.brc_admission import (
-    AdmissionEvidencePacket,
+    AdmissionEvidence,
     AdmissionExecutionMode,
     AdmissionRequest,
     AdmissionRuleConfig,
@@ -43,7 +43,7 @@ class BrcAdmissionRiskCapitalAdapter:
         *,
         request: AdmissionRequest,
         strategy_family_version: StrategyFamilyVersion,
-        evidence_packet: AdmissionEvidencePacket,
+        admission_evidence: AdmissionEvidence,
         owner_regime_input: OwnerMarketRegimeInput,
         rule_config: AdmissionRuleConfig,
     ) -> RiskCapitalAdapterResult:
@@ -60,7 +60,7 @@ class BrcAdmissionRiskCapitalAdapter:
             limitations.append("no symbols can be installed until strategy family version is pinned")
         if not allowed_timeframes:
             limitations.append("allowed_timeframes not declared by strategy family version")
-        if not evidence_packet.mandatory_complete:
+        if not admission_evidence.mandatory_complete:
             warnings.append("mandatory evidence incomplete")
 
         base = {
@@ -107,7 +107,7 @@ class BrcAdmissionRiskCapitalAdapter:
         constraints = dict(base)
         policy = _policy_from_rule_config(rule_config) or {}
 
-        constraints["source"] = "fallback_policy"
+        constraints["source"] = "non_live_policy_defaults"
         constraints["max_loss_budget"] = _money_string(
             policy.get("max_loss_budget") or _DEFAULT_TESTNET_MAX_LOSS_BUDGET
         )
@@ -117,7 +117,7 @@ class BrcAdmissionRiskCapitalAdapter:
         constraints["max_leverage"] = int(policy.get("max_leverage") or _DEFAULT_TESTNET_MAX_LEVERAGE)
         constraints["max_attempts"] = int(policy.get("max_attempts") or _DEFAULT_MAX_ATTEMPTS)
         constraints["limitations"].append(
-            "fallback constraints are for non-live admission only and are not live risk capital"
+            "non-live policy defaults are for non-live admission only and are not live risk capital"
         )
         if account["source"] == "unavailable":
             constraints["warnings"].append(
@@ -127,18 +127,22 @@ class BrcAdmissionRiskCapitalAdapter:
         return RiskCapitalAdapterResult(
             status=TrialConstraintSnapshotStatus.INSTALLABLE,
             risk_profile=request.requested_risk_profile,
-            risk_policy_version=str(policy.get("risk_policy_version") or "brc-admission-fallback-v1"),
+            risk_policy_version=str(
+                policy.get("risk_policy_version")
+                or "brc-admission-non-live-defaults-v1"
+            ),
             constraints_json=constraints,
             risk_policy_snapshot_json={
-                "source": "fallback_policy",
+                "source": "non_live_policy_defaults",
                 "risk_policy_version": str(
-                    policy.get("risk_policy_version") or "brc-admission-fallback-v1"
+                    policy.get("risk_policy_version")
+                    or "brc-admission-non-live-defaults-v1"
                 ),
                 "live_usable": False,
             },
             adapter_result_json={
                 "adapter": "BrcAdmissionRiskCapitalAdapter",
-                "resolution": "installable_non_live_fallback",
+                "resolution": "installable_non_live_policy_defaults",
                 "sizing_computed": False,
                 "live_usable": False,
             },
@@ -271,7 +275,7 @@ def _cooldowns(rule_config: AdmissionRuleConfig) -> dict[str, Any]:
 
 def _policy_from_rule_config(rule_config: AdmissionRuleConfig) -> Optional[dict[str, Any]]:
     details = rule_config.rule_details_json
-    policy = details.get("non_live_fallback_policy")
+    policy = details.get("non_live_policy_defaults")
     return dict(policy) if isinstance(policy, dict) else None
 
 

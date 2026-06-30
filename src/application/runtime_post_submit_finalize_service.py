@@ -1,4 +1,4 @@
-"""Application service for runtime post-submit finalize packets."""
+"""Application service for runtime post-submit finalize payloads."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitOutcomeReview,
 )
 from src.domain.runtime_post_submit_finalize import (
-    RuntimePostSubmitFinalizePacket,
-    build_runtime_post_submit_finalize_packet,
+    RuntimePostSubmitFinalizePayload,
+    build_runtime_post_submit_finalize_payload,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
@@ -128,7 +128,7 @@ class RuntimePostSubmitFinalizeService:
         expected_runtime_instance_id: str | None = None,
         closed_review_required: bool = False,
         protection_blockers: list[str] | None = None,
-    ) -> RuntimePostSubmitFinalizePacket:
+    ) -> RuntimePostSubmitFinalizePayload:
         blockers: list[str] = []
         warnings: list[str] = []
         result = await self._load_exchange_submit_execution_result(
@@ -168,7 +168,7 @@ class RuntimePostSubmitFinalizeService:
             settlement=settlement,
             blockers=blockers,
         )
-        return build_runtime_post_submit_finalize_packet(
+        return build_runtime_post_submit_finalize_payload(
             authorization_id=authorization_id,
             runtime=runtime,
             exchange_submit_execution_result=result,
@@ -190,12 +190,12 @@ class RuntimePostSubmitFinalizeService:
         active_positions_count: int | None,
         closed_review_required: bool = False,
         protection_blockers: list[str] | None = None,
-    ) -> RuntimePostSubmitFinalizePacket:
+    ) -> RuntimePostSubmitFinalizePayload:
         result = await self._load_latest_exchange_submit_execution_result(
             runtime_instance_id,
         )
         if result is None:
-            return build_runtime_post_submit_finalize_packet(
+            return build_runtime_post_submit_finalize_payload(
                 authorization_id=f"unresolved-latest-submit-{runtime_instance_id}",
                 runtime=None,
                 exchange_submit_execution_result=None,

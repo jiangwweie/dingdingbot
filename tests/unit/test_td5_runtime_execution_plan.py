@@ -1777,6 +1777,8 @@ async def test_runtime_execution_intent_adapter_preview_is_owner_gated_and_non_e
     assert result.source_payload["risk_preview"]["leverage"] == "1"
     assert result.source_payload["protection_preview"]["requires_protection"] is True
     assert result.source_payload["protection_preview"]["stop_reference"] == "bounded_loss_reference"
+    assert result.metadata["non_executing_projection"] is True
+    assert "non_executing_bridge" not in result.metadata
     assert result.requires_owner_gated_creation is True
     assert result.compatibility_signal_result_created is False
     assert result.execution_intent_repository_write_enabled is False
@@ -3643,6 +3645,8 @@ async def test_trading_console_runtime_execution_intent_adapter_preview_endpoint
     assert preview.source_type == RuntimeExecutionIntentSourceType.BRC_RUNTIME_ORDER_CANDIDATE
     assert preview.source_id == "candidate-1"
     assert preview.compatibility_signal_result_created is False
+    assert preview.metadata["non_executing_projection"] is True
+    assert "non_executing_bridge" not in preview.metadata
     assert preview.execution_intent_created is False
     assert preview.order_created is False
     assert preview.exchange_called is False

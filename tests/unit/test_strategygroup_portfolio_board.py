@@ -30,7 +30,6 @@ def _safe() -> dict:
         "calls_finalgate": False,
         "calls_operation_layer": False,
         "places_order": False,
-        "real_order_authority": False,
         "registry_authority_changed": False,
         "tier_policy_changed": False,
         "live_profile_changed": False,
@@ -101,14 +100,14 @@ def _capture_audit(**overrides) -> dict:
         "status": "strategy_capture_gap_audit_ready",
         "owner_visibility_state": {
             "p0_state": "waiting_for_market",
-            "p0_5_observation_state": "review_needed",
+            "signal_observation_state": "review_needed",
             "observation_active": True,
         },
         "runtime_baseline": {"status": "waiting_for_market", "blockers": []},
-        "decision_recommendations": [
+        "observation_recommendations": [
             {
                 "strategy_group_id": group,
-                "decision": decision,
+                "observation_recommendation": decision,
                 "next_checkpoint": next_checkpoint,
             }
             for group, decision, next_checkpoint in decisions
@@ -178,13 +177,56 @@ def _registry() -> dict:
 
 def _deep_dive() -> dict:
     return {
-        "status": "review_only_deep_dive_ready_for_owner_decision",
+        "status": "review_only_deep_dive_ready_for_owner_policy",
+        "deep_dive_artifacts": [
+            {"strategy_group_id": "MPG-001", "recommended_owner_policy": "accept_member_role_split", "owner_policy_type": "member_role_exit_decay_boundary"},
+            {"strategy_group_id": "MI-001", "recommended_owner_policy": "open_formal_candidate_review_without_registry_admission", "owner_policy_type": "registry_identity_candidate_review"},
+            {"strategy_group_id": "CPM-RO-001", "recommended_owner_policy": "keep_observation_asset_run_merge_review_before_independent_admission", "owner_policy_type": "registry_identity_merge_review"},
+        ],
         "deep_dive_packets": [
-            {"strategy_group_id": "MPG-001", "recommended_owner_decision": "accept_member_role_split", "decision_type": "member_role_exit_decay_boundary"},
-            {"strategy_group_id": "MI-001", "recommended_owner_decision": "open_formal_candidate_review_without_registry_admission", "decision_type": "registry_identity_candidate_review"},
-            {"strategy_group_id": "CPM-RO-001", "recommended_owner_decision": "keep_observation_asset_run_merge_review_before_independent_admission", "decision_type": "registry_identity_merge_review"},
+            {"strategy_group_id": "MI-001", "recommended_owner_policy": "legacy_packet_should_not_drive_stage", "owner_policy_type": "legacy_packet"},
         ],
         "interaction": {"remote_interaction_count": 0},
+        "safety_invariants": _safe(),
+    }
+
+
+def _quality_closure() -> dict:
+    return {
+        "status": "quality_closure_wave_ready",
+        "priority_1_capture_closure": {
+            "rows": [
+                {
+                    "strategy_group_id": "BRF-001",
+                    "strategy_asset_current_decision": "promote_review_only",
+                    "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+                },
+                {
+                    "strategy_group_id": "BTPC-001",
+                    "strategy_asset_current_decision": "revise",
+                    "next_checkpoint": "BTPC-001_classifier_fact_source_revision_review",
+                },
+                {
+                    "strategy_group_id": "LSR-001",
+                    "strategy_asset_current_decision": "revise",
+                    "next_checkpoint": "LSR-001_classifier_fact_source_revision_review",
+                },
+            ]
+        },
+        "priority_3_identity_review": {
+            "rows": [
+                {
+                    "strategy_group_id": "MI-001",
+                    "strategy_asset_current_decision": "identity_review",
+                    "next_checkpoint": "MI-001_registry_identity_review",
+                },
+                {
+                    "strategy_group_id": "CPM-RO-001",
+                    "strategy_asset_current_decision": "identity_review",
+                    "next_checkpoint": "CPM-RO-001_registry_identity_review",
+                },
+            ]
+        },
         "safety_invariants": _safe(),
     }
 
@@ -192,38 +234,136 @@ def _deep_dive() -> dict:
 def test_portfolio_board_is_evidence_driven_and_review_only():
     module = _load_module()
 
-    packet = module.build_strategygroup_portfolio_board(
+    board_artifact = module.build_strategygroup_portfolio_board(
         capture_gap_audit=_capture_audit(),
         review_deep_dive=_deep_dive(),
-        owner_decision_package={"status": "owner_decision_package_ready", "safety_invariants": _safe()},
+        owner_policy_package={"status": "owner_policy_package_ready", "safety_invariants": _safe()},
+        quality_closure_wave=_quality_closure(),
+        tier_policy=_tier_policy(),
+        registry_baseline=_registry(),
+    )
+
+    assert board_artifact["status"] == "portfolio_board_ready"
+    assert board_artifact["runtime_posture"]["p0_state"] == "waiting_for_market"
+    assert board_artifact["runtime_posture"]["p0_state_source"] == (
+        "strategy_capture_gap_audit.owner_visibility_state.p0_state"
+    )
+    assert board_artifact["owner_progress_projection"]["p0_state_source"] == (
+        "strategy_capture_gap_audit.owner_visibility_state.p0_state"
+    )
+    assert board_artifact["portfolio_summary"]["portfolio_row_count"] == 10
+    assert board_artifact["portfolio_summary"]["registry_only_strategy_groups"] == [
+        "PMR-001",
+        "TEQ-001",
+    ]
+    by_group = {row["strategy_group_id"]: row for row in board_artifact["portfolio_rows"]}
+    assert by_group["MPG-001"]["evidence_stage"] == "trial_waiting"
+    assert by_group["MPG-001"]["capture_gap_recommendation_provenance"] == {
+        "recommendation": "coverage_visibility_review",
+        "next_checkpoint": "MPG-001_no_action_visibility_and_routing_audit",
+        "source_role": "capture_gap_observation_provenance",
+    }
+    assert by_group["MI-001"]["execution_tier"] == "unknown"
+    assert by_group["MI-001"]["evidence_stage"] == "identity_review"
+    assert by_group["MI-001"]["strategy_review_checkpoint"] == "MI-001_registry_identity_review"
+    assert "registry_identity_or_registry_row_missing" in by_group["MI-001"]["evidence_gaps"]
+    assert by_group["CPM-RO-001"]["strategy_review_checkpoint"] == "CPM-RO-001_registry_identity_review"
+    assert by_group["BTPC-001"]["evidence_stage"] == "revise"
+    assert by_group["BRF-001"]["evidence_stage"] == "promote_review"
+    assert by_group["RBR-001"]["evidence_stage"] == "park"
+    assert by_group["RBR-001"]["owner_policy_required"] is False
+
+    assert board_artifact["trial_candidate_pool"]["candidate_count"] == 5
+    assert "actionable_now_count" not in board_artifact["trial_candidate_pool"]
+    assert board_artifact["trial_candidate_pool"]["live_permission_change_count"] == 0
+    for row in board_artifact["portfolio_rows"]:
+        assert "actionable_now" not in row
+        assert "actionable_now_reason" not in row
+        assert row["live_permission_change"] is False
+        assert row["does_not_authorize_live_execution"] is True
+    for row in board_artifact["trial_candidate_pool"]["rows"]:
+        assert "actionable_now" not in row
+    assert "execution_intent_created" not in board_artifact["safety_invariants"]
+
+
+def test_portfolio_board_identity_review_fallback_actions_are_review_artifacts():
+    module = _load_module()
+
+    board_artifact = module.build_strategygroup_portfolio_board(
+        capture_gap_audit=_capture_audit(),
+        review_deep_dive=_deep_dive(),
+        owner_policy_package={
+            "status": "owner_policy_package_ready",
+            "safety_invariants": _safe(),
+        },
+        quality_closure_wave={
+            "status": "quality_closure_wave_ready",
+            "safety_invariants": _safe(),
+        },
+        tier_policy=_tier_policy(),
+        registry_baseline=_registry(),
+    )
+
+    by_group = {row["strategy_group_id"]: row for row in board_artifact["portfolio_rows"]}
+    assert by_group["MI-001"]["strategy_review_checkpoint"] == (
+        "open_mi_identity_overlap_symbol_concentration_review"
+    )
+    assert by_group["CPM-RO-001"]["strategy_review_checkpoint"] == (
+        "open_cpm_ro_semantic_source_merge_quality_review"
+    )
+    assert "packet" not in by_group["MI-001"]["strategy_review_checkpoint"]
+    assert "packet" not in by_group["CPM-RO-001"]["strategy_review_checkpoint"]
+
+
+def test_portfolio_board_does_not_use_capture_gap_decision_as_stage_authority():
+    module = _load_module()
+
+    board_artifact = module.build_strategygroup_portfolio_board(
+        capture_gap_audit=_capture_audit(),
+        review_deep_dive={"status": "missing", "safety_invariants": _safe()},
+        owner_policy_package={"status": "owner_policy_package_ready", "safety_invariants": _safe()},
         quality_closure_wave={"status": "quality_closure_wave_ready", "safety_invariants": _safe()},
         tier_policy=_tier_policy(),
         registry_baseline=_registry(),
     )
 
-    assert packet["status"] == "portfolio_board_ready"
-    assert packet["portfolio_summary"]["portfolio_row_count"] == 10
-    assert packet["portfolio_summary"]["registry_only_strategy_groups"] == [
-        "PMR-001",
-        "TEQ-001",
+    by_group = {row["strategy_group_id"]: row for row in board_artifact["portfolio_rows"]}
+    assert by_group["BRF-001"]["capture_gap_recommendation_provenance"] == {
+        "recommendation": "promote_review",
+        "next_checkpoint": "BRF-001_forward_outcome_and_requiredfacts_review",
+        "source_role": "capture_gap_observation_provenance",
+    }
+    assert by_group["BRF-001"]["evidence_stage"] != "promote_review"
+    assert by_group["BRF-001"]["evidence_stage_reasons"] == [
+        "no_decision_or_capture_evidence"
     ]
-    by_group = {row["strategy_group_id"]: row for row in packet["portfolio_rows"]}
-    assert by_group["MPG-001"]["evidence_stage"] == "trial_waiting"
-    assert by_group["MPG-001"]["audit_decision"] == "coverage_visibility_review"
-    assert by_group["MI-001"]["execution_tier"] == "unknown"
-    assert by_group["MI-001"]["evidence_stage"] == "identity_review"
-    assert "registry_identity_or_registry_row_missing" in by_group["MI-001"]["evidence_gaps"]
-    assert by_group["BTPC-001"]["evidence_stage"] == "revise"
-    assert by_group["RBR-001"]["evidence_stage"] == "park"
-    assert by_group["RBR-001"]["owner_policy_required"] is False
 
-    assert packet["trial_candidate_pool"]["candidate_count"] == 5
-    assert packet["trial_candidate_pool"]["actionable_now_count"] == 0
-    assert packet["trial_candidate_pool"]["live_permission_change_count"] == 0
-    for row in packet["portfolio_rows"]:
-        assert row["actionable_now"] is False
-        assert row["live_permission_change"] is False
-        assert row["does_not_authorize_live_execution"] is True
+
+def test_portfolio_board_does_not_default_missing_p0_state_to_waiting_for_market():
+    module = _load_module()
+    capture = _capture_audit()
+    capture.pop("owner_visibility_state", None)
+
+    board_artifact = module.build_strategygroup_portfolio_board(
+        capture_gap_audit=capture,
+        review_deep_dive=_deep_dive(),
+        owner_policy_package={
+            "status": "owner_policy_package_ready",
+            "safety_invariants": _safe(),
+        },
+        quality_closure_wave=_quality_closure(),
+        tier_policy=_tier_policy(),
+        registry_baseline=_registry(),
+    )
+
+    assert board_artifact["runtime_posture"]["p0_state"] == "unknown_runtime_state"
+    assert board_artifact["runtime_posture"]["p0_state"] != "waiting_for_market"
+    assert board_artifact["runtime_posture"]["p0_state_source"] == (
+        "missing_capture_gap_owner_visibility_state_p0_state"
+    )
+    assert board_artifact["owner_progress_projection"]["p0_state"] == (
+        "unknown_runtime_state"
+    )
 
 
 def test_portfolio_board_rejects_forbidden_source_effects():
@@ -254,8 +394,8 @@ def test_portfolio_board_cli_writes_outputs(tmp_path, capsys):
     tier.write_text(json.dumps(_tier_policy()), encoding="utf-8")
     registry.write_text(json.dumps(_registry()), encoding="utf-8")
     deep.write_text(json.dumps(_deep_dive()), encoding="utf-8")
-    owner.write_text(json.dumps({"status": "owner_decision_package_ready", "safety_invariants": _safe()}), encoding="utf-8")
-    quality.write_text(json.dumps({"status": "quality_closure_wave_ready", "safety_invariants": _safe()}), encoding="utf-8")
+    owner.write_text(json.dumps({"status": "owner_policy_package_ready", "safety_invariants": _safe()}), encoding="utf-8")
+    quality.write_text(json.dumps(_quality_closure()), encoding="utf-8")
 
     exit_code = module.main(
         [
@@ -263,7 +403,7 @@ def test_portfolio_board_cli_writes_outputs(tmp_path, capsys):
             str(capture),
             "--review-deep-dive-json",
             str(deep),
-            "--owner-decision-package-json",
+            "--owner-policy-package-json",
             str(owner),
             "--quality-closure-wave-json",
             str(quality),
@@ -282,9 +422,74 @@ def test_portfolio_board_cli_writes_outputs(tmp_path, capsys):
 
     assert exit_code == 0
     stdout_payload = json.loads(capsys.readouterr().out)
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    board_artifact = json.loads(output_json.read_text(encoding="utf-8"))
     assert stdout_payload["portfolio_row_count"] == 10
     assert stdout_payload["trial_candidate_count"] == 5
-    assert packet["portfolio_summary"]["portfolio_row_count"] == 10
+    assert board_artifact["portfolio_summary"]["portfolio_row_count"] == 10
     assert "StrategyGroup Portfolio Board v0" in output_md.read_text(encoding="utf-8")
     assert "StrategyGroup Trial Candidate Pool v0" in pool_md.read_text(encoding="utf-8")
+
+
+def test_portfolio_board_cli_omitted_review_provenance_stays_missing(
+    tmp_path, capsys
+):
+    module = _load_module()
+    capture = tmp_path / "capture.json"
+    tier = tmp_path / "tier.json"
+    registry = tmp_path / "registry.json"
+    output_json = tmp_path / "portfolio.json"
+    output_md = tmp_path / "portfolio.md"
+    pool_md = tmp_path / "pool.md"
+    capture.write_text(json.dumps(_capture_audit()), encoding="utf-8")
+    tier.write_text(json.dumps(_tier_policy()), encoding="utf-8")
+    registry.write_text(json.dumps(_registry()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--capture-gap-audit-json",
+            str(capture),
+            "--tier-policy-json",
+            str(tier),
+            "--registry-baseline-json",
+            str(registry),
+            "--output-json",
+            str(output_json),
+            "--output-md",
+            str(output_md),
+            "--output-trial-pool-md",
+            str(pool_md),
+        ]
+    )
+
+    assert exit_code == 0
+    capsys.readouterr()
+    board_artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert board_artifact["source_status"]["review_deep_dive"] == "missing"
+    assert board_artifact["source_status"]["owner_policy_package"] == "missing"
+    assert board_artifact["source_status"]["quality_closure_wave"] == "missing"
+    assert "review_deep_dive_missing" in board_artifact["source_status"]["source_gaps"]
+    assert "owner_policy_package_missing" in board_artifact["source_status"]["source_gaps"]
+    assert "quality_closure_wave_missing" in board_artifact["source_status"]["source_gaps"]
+
+
+def test_portfolio_board_cli_requires_capture_gap_audit(tmp_path):
+    module = _load_module()
+    output_json = tmp_path / "portfolio.json"
+    output_md = tmp_path / "portfolio.md"
+    pool_md = tmp_path / "pool.md"
+
+    try:
+        module.main(
+            [
+                "--output-json",
+                str(output_json),
+                "--output-md",
+                str(output_md),
+                "--output-trial-pool-md",
+                str(pool_md),
+            ]
+        )
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected missing capture gap audit to fail argparse")

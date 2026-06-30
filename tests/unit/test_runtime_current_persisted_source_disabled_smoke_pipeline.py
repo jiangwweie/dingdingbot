@@ -23,6 +23,7 @@ def test_current_persisted_source_pipeline_reaches_disabled_smoke(tmp_path):
         "final_handoff": "ready_for_official_submit_call",
         "disabled_smoke": "disabled_smoke_passed",
     }
+    assert "packet_status" not in report
     assert report["fresh_submit_authorization_id"] == "auth-rtf061"
     assert report["safety_invariants"]["uses_current_runtime_persisted_source"] is True
     assert report["safety_invariants"]["uses_historical_rtf015_sample_handoff"] is False
@@ -58,15 +59,15 @@ def test_final_handoff_uses_fresh_authorization_not_consumed_source(tmp_path):
         client=client,
     )
 
-    final_packet = report["reports"]["final_handoff"]["packet"]
-    assert final_packet["fresh_submit_authorization_id"] == "auth-rtf061"
-    assert final_packet["source_consumed_authorization_id"] == (
+    final_handoff = report["reports"]["final_handoff"]["handoff_artifact"]
+    assert final_handoff["fresh_submit_authorization_id"] == "auth-rtf061"
+    assert final_handoff["source_consumed_authorization_id"] == (
         "persisted-draft-source:rtf061"
     )
-    assert final_packet["fresh_submit_authorization_id"] != (
-        final_packet["source_consumed_authorization_id"]
+    assert final_handoff["fresh_submit_authorization_id"] != (
+        final_handoff["source_consumed_authorization_id"]
     )
-    assert final_packet["official_query"][
+    assert final_handoff["official_query"][
         "owner_confirmed_for_first_real_submit_action"
     ] is False
 
@@ -118,6 +119,16 @@ def test_current_persisted_source_pipeline_writes_artifacts_and_output(tmp_path)
     assert (artifact_root / "06-final-handoff.json").exists()
     assert (artifact_root / "07-disabled-smoke.json").exists()
     assert report["blockers"] == []
+
+
+def test_report_status_does_not_unwrap_legacy_packet_wrapper():
+    report = {
+        "status": "outer_status",
+        "packet": {"status": "legacy_inner_status"},
+    }
+
+    assert script._report_status(report) == "outer_status"
+    assert script._handoff_artifact(report) == {}
 
 
 class _Client:
@@ -188,10 +199,10 @@ class _Client:
 
 def _readiness_body():
     return {
-        "packet_id": "readiness-rtf061",
+        "artifact_id": "readiness-rtf061",
         "runtime_instance_id": "runtime-rtf061",
-        "source_release_packet_id": None,
-        "source_strategy_planning_packet_id": "strategy-plan-rtf061",
+        "source_release_evidence_id": None,
+        "source_strategy_planning_artifact_id": "strategy-plan-rtf061",
         "source_authorization_id": "persisted-draft-source:rtf061",
         "signal_evaluation_id": "signal-rtf061",
         "order_candidate_id": "candidate-rtf061",

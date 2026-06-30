@@ -57,7 +57,7 @@ def _read_json_file(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("packet", "api_payload"):
+    for key in ("artifact", "api_payload"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -66,7 +66,7 @@ def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "readiness_packet": _read_json_file(args.readiness_json),
+        "readiness_artifact": _read_json_file(args.readiness_json),
         "fresh_submit_authorization_id": args.fresh_submit_authorization_id,
         "mode": args.mode,
         "owner_confirmed_for_real_submit_action": (
@@ -101,7 +101,7 @@ def _call_api(
     )
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -196,9 +196,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         "ready_for_official_submit_call",
         "blocked",
     } else 2

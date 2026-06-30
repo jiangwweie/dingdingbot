@@ -2,7 +2,7 @@
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
 authority: docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-last_verified: 2026-06-20
+last_verified: 2026-06-23
 ---
 
 # Project Information Architecture
@@ -40,7 +40,7 @@ This information architecture exists to support this authority split:
 ```text
 Owner controls policy.
 System executes process.
-Runtime decides actionability.
+Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
 Review updates strategy governance.
 ```
 
@@ -52,9 +52,12 @@ RequiredFacts, replay rows, no-action rows, FinalGate evidence, Operation Layer
 evidence, or ordinary in-boundary execution steps.
 
 `trial_eligible` is a strategy-governance and policy outcome.
-`actionable_now` is runtime-only and must be derived from current fresh signal,
-RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, account,
-and exchange facts.
+`tradeability_decision` is a generated read model that explains whether a
+StrategyGroup can trade now and, if not, names the first blocker.
+`runtime_safety_state` is the generated read model that explains whether the
+official live-submit path is currently safe enough to proceed. Other generated
+views may summarize those models, but they must not recompute can-trade or
+live-submit authority from documents or generated artifact metadata.
 
 ## Information Classes
 
@@ -64,8 +67,8 @@ and exchange facts.
 | `strategy_registry` | StrategyGroup identity, edge thesis, trade logic, risk gaps, promotion gates, downshift and kill rules | `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md` plus reviewed handoff packs | Defines strategy assets; not execution authority |
 | `machine_config` | Structured policy or config consumed by scripts | `docs/current/**/*.json` where scripts read it | Must be schema-like, testable, and stable |
 | `owner_policy` | Owner risk acceptance, tier switches, capital scope, pauses, parks, kills | Future runtime/policy store; during pilot only explicit Owner decisions and bounded docs | Dynamic authorization state; should not live as narrative Markdown long-term |
-| `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher packets | Current operational truth, subject to freshness rules |
-| `generated_view` | Decision Ledger, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
+| `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher artifacts | Current operational truth, subject to freshness rules |
+| `generated_view` | Strategy Asset State evidence, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
 | `archive` | Historical plans and obsolete evidence | `docs/history-archive-2026-06-15-pre-governance.tar.gz`, historical output | Recovery/provenance only |
 
 ## Authority Order
@@ -88,6 +91,8 @@ Owner decisions.
 | Concern | Source |
 | --- | --- |
 | Product objective and Owner role | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
+| Strategy experiment evaluation semantics | `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` |
+| Tradeability Decision semantics | `docs/current/TRADEABILITY_DECISION_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
 | Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
 | Agent boundaries and goal-mode execution | `docs/current/AI_AGENT_CONSTRAINTS.md` |
@@ -100,7 +105,8 @@ Owner decisions.
 | Runtime tier definitions | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md` |
 | Machine tier mapping | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` |
 | RequiredFacts classes | `docs/current/strategy-group-handoffs/main-control-required-facts-map.md` |
-| Pre-live strategy decision ledger | `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` |
+| Strategy Asset State pre-live evidence compatibility path | `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` |
+| Tradeability Decision generated view | `output/runtime-monitor/latest-strategygroup-tradeability-decision.json` and `output/runtime-monitor/latest-strategygroup-tradeability-decision.md` |
 | Current goal audit | `docs/current/STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md` |
 | Monitor baseline config | `docs/current/RUNTIME_MONITOR_BASELINE.json` |
 
@@ -151,7 +157,7 @@ Generated views include:
 - `output/runtime-monitor/*.json`;
 - `output/runtime-monitor/*.md`;
 - deploy-session summaries;
-- local monitor sequence packets;
+- local monitor sequence artifacts;
 - replay and audit reports generated by scripts.
 
 They must be treated as:
@@ -169,6 +175,22 @@ generated view -> hand-edited source of truth
 If a generated view and a roadmap disagree, regenerate or update the roadmap to
 reference the generated source. Do not let the stale roadmap redefine current
 state.
+
+The Tradeability Decision generated view has one narrow role: it summarizes
+registry, policy, runtime, research-intake, and ledger inputs into a current
+answer for each candidate:
+
+```text
+can trade now
+or
+cannot trade because of first blocker X
+```
+
+It must not become an authority source for strategy semantics, Owner policy,
+action-time facts, FinalGate, Operation Layer, or exchange writes. If the
+Tradeability Decision reports `asset_admission`, the next source is the registry
+or admission proposal. If it reports `policy`, the next source is an explicit
+Owner decision. If it reports `execution_gate`, the next source is runtime state.
 
 ## Owner Policy Direction
 

@@ -745,7 +745,7 @@ class PGBrcOperatorActionORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "draft_action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', 'unknown')",
+            "draft_action IN ('read_review_artifact', 'read_next_eligibility', 'read_evidence', 'unknown')",
             name="ck_brc_operator_actions_draft_action",
         ),
         CheckConstraint(
@@ -761,7 +761,12 @@ class PGBrcOperatorActionORM(PGCoreBase):
 
 
 class PGBrcReviewDecisionORM(PGCoreBase):
-    """Persisted Owner review decisions for BRC campaigns."""
+    """Storage-compatible persisted BRC review records.
+
+    Product/API/readmodel surfaces expose these records as Review Outcomes.
+    The table and column names remain stable until a dedicated storage
+    migration is accepted.
+    """
 
     __tablename__ = "brc_review_decisions"
 
@@ -859,7 +864,7 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
     places_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mutates_exchange: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     grants_trading_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    frontend_action_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_action_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="codex")
     created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
@@ -893,8 +898,8 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
             name="ck_brc_live_lifecycle_reviews_no_permission",
         ),
         CheckConstraint(
-            "frontend_action_enabled = false",
-            name="ck_brc_live_lifecycle_reviews_no_frontend_action",
+            "owner_action_enabled = false",
+            name="ck_brc_live_lifecycle_reviews_no_owner_action",
         ),
         Index("idx_brc_live_lifecycle_reviews_auth_time", "authorization_id", "created_at_ms"),
         Index("idx_brc_live_lifecycle_reviews_symbol_time", "symbol", "created_at_ms"),
@@ -2794,7 +2799,7 @@ class PGRuntimeExecutionExchangeSubmitAdapterResultORM(PGCoreBase):
     adapter_result_id: Mapped[str] = mapped_column(String(520), primary_key=True)
     enablement_decision_id: Mapped[str] = mapped_column(String(500), nullable=False)
     gate_id: Mapped[str] = mapped_column(String(460), nullable=False)
-    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    submit_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
     binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
     local_registration_adapter_result_id: Mapped[str] = mapped_column(
         String(420),
@@ -3277,7 +3282,7 @@ class PGRuntimeExecutionExchangeSubmitActionAuthorizationORM(PGCoreBase):
         String(220),
         nullable=True,
     )
-    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    submit_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
     binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
     local_registration_adapter_result_id: Mapped[str] = mapped_column(
         String(420),
@@ -3461,7 +3466,7 @@ class PGRuntimeExecutionExchangeSubmitExecutionResultORM(PGCoreBase):
 
     execution_result_id: Mapped[str] = mapped_column(String(540), primary_key=True)
     enablement_decision_id: Mapped[str] = mapped_column(String(500), nullable=False)
-    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    submit_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
     binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
     authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
     execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -5004,7 +5009,8 @@ class PGLlmConsumableEventORM(PGCoreBase):
     )
     dedupe_key: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    context_packet: Mapped[dict] = mapped_column(
+    context_artifact: Mapped[dict] = mapped_column(
+        "context_packet",
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=False,
         default=dict,
@@ -5290,7 +5296,7 @@ class PGBrcLlmIntentORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', "
+            "action IN ('read_review_artifact', 'read_next_eligibility', 'read_evidence', "
             "'request_testnet_rehearsal', 'unknown')",
             name="ck_brc_llm_intents_action",
         ),
@@ -5343,7 +5349,7 @@ class PGBrcWorkflowRunORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "action IN ('read_review_packet', 'read_next_eligibility', 'read_evidence', "
+            "action IN ('read_review_artifact', 'read_next_eligibility', 'read_evidence', "
             "'request_testnet_rehearsal', 'unknown')",
             name="ck_brc_workflow_runs_action",
         ),
@@ -6422,12 +6428,16 @@ class PGBrcAdmissionRuleConfigORM(PGCoreBase):
     )
 
 
-class PGBrcAdmissionEvidencePacketORM(PGCoreBase):
-    """Evidence packet pinned into admission evaluation."""
+class PGBrcAdmissionEvidenceORM(PGCoreBase):
+    """Admission evidence pinned into admission evaluation."""
 
     __tablename__ = "brc_admission_evidence_packets"
 
-    evidence_packet_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    admission_evidence_id: Mapped[str] = mapped_column(
+        "evidence_packet_id",
+        String(128),
+        primary_key=True,
+    )
     strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
     mandatory_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -6465,7 +6475,11 @@ class PGBrcAdmissionRequestORM(PGCoreBase):
 
     admission_request_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    evidence_packet_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_evidence_id: Mapped[str] = mapped_column(
+        "evidence_packet_id",
+        String(128),
+        nullable=False,
+    )
     owner_market_regime_input_id: Mapped[str] = mapped_column(String(128), nullable=False)
     trial_env: Mapped[str] = mapped_column(String(16), nullable=False)
     trial_stage: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -6535,7 +6549,11 @@ class PGBrcAdmissionDecisionORM(PGCoreBase):
     playbook_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     playbook_catalog_snapshot_json: Mapped[dict] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict)
     owner_market_regime_input_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    evidence_packet_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_evidence_id: Mapped[str] = mapped_column(
+        "evidence_packet_id",
+        String(128),
+        nullable=False,
+    )
     admission_rule_config_id: Mapped[str] = mapped_column(String(128), nullable=False)
     trial_constraint_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
     risk_profile: Mapped[str] = mapped_column(String(64), nullable=False, default="micro")

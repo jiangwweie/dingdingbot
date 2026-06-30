@@ -49,7 +49,7 @@ def _api_base(args: argparse.Namespace) -> str:
     )
 
 
-def _read_json_file(path: str) -> dict[str, Any]:
+def _read_handoff_artifact_file(path: str) -> dict[str, Any]:
     value = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
@@ -57,7 +57,7 @@ def _read_json_file(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("packet", "api_payload"):
+    for key in ("handoff_artifact", "artifact", "api_payload"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested
@@ -65,12 +65,12 @@ def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
+    handoff_artifact = _read_handoff_artifact_file(_handoff_artifact_json(args))
     body: dict[str, Any] = {
-        "handoff_packet": _read_json_file(args.handoff_json),
+        "handoff_artifact": handoff_artifact,
         "requested_fresh_submit_authorization_id": (
             args.requested_fresh_submit_authorization_id
         ),
-        "allow_order_candidate_fallback": args.allow_order_candidate_fallback,
         "metadata": {
             "runtime_fresh_submit_authorization_resolution_api_flow": True,
             "non_executing_probe": True,
@@ -82,6 +82,13 @@ def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     if args.additional_blocker:
         body["additional_blockers"] = list(args.additional_blocker)
     return body
+
+
+def _handoff_artifact_json(args: argparse.Namespace) -> str:
+    path = getattr(args, "handoff_artifact_json", None)
+    if not path:
+        raise ValueError("handoff_artifact_json_required")
+    return str(path)
 
 
 def _call_api(
@@ -172,13 +179,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Resolve persisted fresh submit authorization for handoff.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--handoff-json", required=True)
+    parser.add_argument("--handoff-artifact-json", required=True)
     parser.add_argument("--requested-fresh-submit-authorization-id")
-    parser.add_argument(
-        "--allow-order-candidate-fallback",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-    )
     parser.add_argument("--additional-warning", action="append")
     parser.add_argument("--additional-blocker", action="append")
     parser.add_argument("--env-file")

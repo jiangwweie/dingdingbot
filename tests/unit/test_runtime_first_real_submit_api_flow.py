@@ -174,10 +174,10 @@ class _FakeClient:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "prepared_packet_blocked",
+                    "status": "prepared_evidence_blocked",
                     "available_evidence_ids": available,
                     "blockers": [
-                        "first_real_submit_packet_unavailable:"
+                        "first_real_submit_evidence_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ]
                     + self.evidence_blockers,
@@ -232,7 +232,7 @@ class _FakeClient:
             return {"http_status": 200, "body": {"decision_id": "exchange-enable-1", "status": "ready_for_exchange_submit_action"}}
         if "runtime-execution-exchange-submit-adapter-results" in path:
             return {"http_status": 200, "body": {"adapter_result_id": "exchange-adapter-1", "status": "exchange_submit_adapter_armed"}}
-        if "runtime-execution-first-real-submit-enablement-packets" in path:
+        if "runtime-execution-first-real-submit-enablement-evidence" in path:
             return {"http_status": 200, "body": {"status": "ready_for_owner_final_review"}}
         if "runtime-execution-first-real-submit-actions" in path:
             if query and query.get("owner_confirmed_for_first_real_submit_action") is False:
@@ -643,6 +643,10 @@ def test_arm_standing_authorized_scoped_evidence_prep_records_operation_layer_id
     assert report["ids"]["exchange_submit_action_authorization_id"] == "exchange-action-1"
     assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
     assert report["ids"]["exchange_submit_adapter_result_id"] == "exchange-adapter-1"
+    assert report["ids"]["first_real_submit_enablement_status"] == (
+        "ready_for_owner_final_review"
+    )
+    assert "first_real_submit_packet_status" not in report["ids"]
     assert report["safety"]["standing_authorized_scoped_evidence_preparation"] is True
     paths = [call["path"] for call in client.calls]
     assert any("runtime-execution-attempt-mutations" in path for path in paths)
@@ -852,7 +856,7 @@ def test_disabled_smoke_requires_authorization_id():
 def test_disabled_smoke_reports_missing_prerequisite_detail():
     client = _FakeClient(
         disabled_action_http_status=404,
-        disabled_action_detail="RuntimeExecutionExchangeSubmitPacketPreview not found",
+        disabled_action_detail="RuntimeExecutionExchangeSubmitPreview not found",
     )
     flow = FirstRealSubmitApiFlow(
         client=client,
@@ -867,11 +871,11 @@ def test_disabled_smoke_reports_missing_prerequisite_detail():
 
     assert "preview_disabled_first_real_submit_action_http_404" in report["blockers"]
     assert report["steps"][0]["detail"] == (
-        "RuntimeExecutionExchangeSubmitPacketPreview not found"
+        "RuntimeExecutionExchangeSubmitPreview not found"
     )
     assert (
         "disabled_first_real_submit_action_prerequisite_missing:"
-        "RuntimeExecutionExchangeSubmitPacketPreview not found"
+        "RuntimeExecutionExchangeSubmitPreview not found"
     ) in report["warnings"]
     assert report["steps"][1]["name"] == "prepare_machine_evidence"
     assert report["ids"]["trusted_submit_fact_snapshot_id"] == "facts-1"

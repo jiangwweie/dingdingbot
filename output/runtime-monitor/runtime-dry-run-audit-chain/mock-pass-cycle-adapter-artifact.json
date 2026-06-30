@@ -1,0 +1,95 @@
+{
+  "blocked_stage": null,
+  "blockers": [],
+  "fresh_signal_cycle_adapter_plan": {
+    "adapter_source": "runtime_fresh_signal_prepare_loop",
+    "calls_order_lifecycle": false,
+    "creates_executable_execution_intent": false,
+    "next_step": "run_executable_submit_readiness",
+    "places_order": false,
+    "requires_fresh_authorization_before_submit": true
+  },
+  "fresh_signal_prepare_loop": {
+    "blockers": [],
+    "observation_prepare_flow": {
+      "signal_input_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/runtime-dry-run-audit-chain/ready_for_final_gate_preflight-signal-input.json",
+      "status": "ready_for_final_gate_preflight"
+    },
+    "post_submit_finalize_flow": {
+      "post_submit_finalize_payload": {
+        "artifact_id": "dry-run-post-submit-finalize-1",
+        "authorization_id": "dry-run-consumed-auth-1",
+        "blockers": [],
+        "next_attempt_gate": {
+          "active_positions_count": 0,
+          "attempts_remaining": 1,
+          "blockers": [],
+          "budget_remaining": "10",
+          "runtime_instance_id": "dry-run-runtime-mpg-001",
+          "status": "ready_for_fresh_signal",
+          "warnings": []
+        },
+        "post_submit_budget_settled": true,
+        "post_submit_finalize_complete": true,
+        "post_submit_reconciliation_evidence_id": "dry-run-reconciliation-1",
+        "post_submit_reconciliation_matched": true,
+        "runtime_instance_id": "dry-run-runtime-mpg-001",
+        "status": "finalized_ready_for_next_attempt",
+        "submit_outcome_review_recorded": true,
+        "warnings": []
+      },
+      "status": "finalized_ready_for_next_attempt"
+    },
+    "runtime_instance_id": "dry-run-runtime-mpg-001",
+    "safety_invariants": {
+      "exchange_write_called": false,
+      "order_created": false,
+      "order_lifecycle_called": false,
+      "withdrawal_or_transfer_created": false
+    },
+    "scope": "runtime_fresh_signal_prepare_loop",
+    "signal_input_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/runtime-dry-run-audit-chain/ready_for_final_gate_preflight-signal-input.json",
+    "status": "ready_for_final_gate_preflight",
+    "warnings": []
+  },
+  "next_attempt_strategy_plan_flow": {
+    "api_payload": {
+      "artifact_id": "dry-run-strategy-plan-1",
+      "blockers": [],
+      "consumed_authorization_replay_only": true,
+      "exchange_called": false,
+      "exchange_order_submitted": false,
+      "executable_execution_intent_created": false,
+      "execution_intent_created": false,
+      "metadata": {
+        "runtime_dry_run_audit_chain": true
+      },
+      "next_attempt_gate_status": "ready_for_fresh_signal",
+      "order_candidate_id": "dry-run-order-candidate-1",
+      "order_created": false,
+      "order_lifecycle_called": false,
+      "post_submit_finalize_payload_id": "dry-run-post-submit-finalize-1",
+      "requires_fresh_authorization_before_submit": true,
+      "requires_fresh_strategy_signal": true,
+      "runtime_instance_id": "dry-run-runtime-mpg-001",
+      "runtime_state_mutated": false,
+      "side": "long",
+      "signal_evaluation_id": "dry-run-signal-eval-1",
+      "source_authorization_id": "dry-run-consumed-auth-1",
+      "status": "ready_for_final_gate_preflight",
+      "strategy_family_id": "MPG-001",
+      "strategy_family_version_id": "MPG-001-v0",
+      "symbol": "MSTR/USDT:USDT",
+      "warnings": [],
+      "withdrawal_or_transfer_created": false
+    },
+    "blockers": [],
+    "scope": "runtime_next_attempt_strategy_plan_api_flow",
+    "status": "ready_for_final_gate_preflight",
+    "warnings": []
+  },
+  "runtime_instance_id": "dry-run-runtime-mpg-001",
+  "scope": "runtime_fresh_signal_readiness_evidence_cycle_adapter",
+  "status": "ready_for_final_gate_preflight",
+  "warnings": []
+}

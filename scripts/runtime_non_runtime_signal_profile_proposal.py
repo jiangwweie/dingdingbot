@@ -40,8 +40,8 @@ def _load_json(path: str) -> dict[str, Any]:
     return value
 
 
-def _non_runtime_would_enter(selector_packet: dict[str, Any], index: int) -> dict[str, Any] | None:
-    signals = selector_packet.get("non_runtime_would_enter_signals") or []
+def _non_runtime_would_enter(selector_artifact: dict[str, Any], index: int) -> dict[str, Any] | None:
+    signals = selector_artifact.get("non_runtime_would_enter_signals") or []
     if not isinstance(signals, list) or not signals:
         return None
     if index < 0 or index >= len(signals):
@@ -88,24 +88,24 @@ def _operator_next_step(status: str) -> str:
     return "run_live_selector_until_non_runtime_would_enter_available"
 
 
-def build_packet(
+def build_profile_proposal_artifact(
     *,
-    selector_packet: dict[str, Any],
+    selector_artifact: dict[str, Any],
     capital_base: Decimal,
     signal_index: int = 0,
 ) -> dict[str, Any]:
-    signal = _non_runtime_would_enter(selector_packet, signal_index)
+    signal = _non_runtime_would_enter(selector_artifact, signal_index)
     if signal is None:
         return {
             "scope": "runtime_non_runtime_signal_profile_proposal",
             "status": BLOCKED_STATUS,
-            "source_selector_status": selector_packet.get("status"),
-            "source_selector_blockers": list(selector_packet.get("blockers") or []),
+            "source_selector_status": selector_artifact.get("status"),
+            "source_selector_blockers": list(selector_artifact.get("blockers") or []),
             "selected_non_runtime_signal": None,
             "experimental_runtime_profile_proposal": None,
             "blockers": ["non_runtime_would_enter_signal_missing"],
             "warnings": [],
-            "operator_command_plan": {
+            "profile_proposal_plan": {
                 "next_step": _operator_next_step(BLOCKED_STATUS),
                 "creates_runtime": False,
                 "mutates_runtime_profile": False,
@@ -139,8 +139,8 @@ def build_packet(
     return {
         "scope": "runtime_non_runtime_signal_profile_proposal",
         "status": READY_STATUS if ready else "blocked_profile_proposal_not_ready",
-        "source_selector_status": selector_packet.get("status"),
-        "source_selector_blockers": list(selector_packet.get("blockers") or []),
+        "source_selector_status": selector_artifact.get("status"),
+        "source_selector_blockers": list(selector_artifact.get("blockers") or []),
         "selected_non_runtime_signal": signal,
         "experimental_runtime_profile_proposal": proposal_json,
         "runtime_boundary_preview": proposal.boundary.model_dump(mode="json"),
@@ -152,7 +152,7 @@ def build_packet(
             "proposal_is_not_execution_authority",
             "owner_must_confirm_runtime_profile_before_use",
         ],
-        "operator_command_plan": {
+        "profile_proposal_plan": {
             "next_step": _operator_next_step(READY_STATUS if ready else "blocked"),
             "creates_runtime": False,
             "mutates_runtime_profile": False,
@@ -181,18 +181,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_packet(
-        selector_packet=_load_json(args.selector_json),
+    artifact = build_profile_proposal_artifact(
+        selector_artifact=_load_json(args.selector_json),
         capital_base=Decimal(str(args.capital_base)),
         signal_index=args.signal_index,
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] == READY_STATUS else 2
+    return 0 if artifact["status"] == READY_STATUS else 2
 
 
 if __name__ == "__main__":

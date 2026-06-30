@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = (
@@ -25,14 +27,14 @@ def _load_module():
     return module
 
 
-def _proxy_packet() -> dict:
+def _proxy_artifact() -> dict:
     return {
         "status": "btpc_local_fact_proxy_review_ready",
         "counts": {
             "expected_proxy_fact_count": 5,
             "proxy_attached_count": 5,
         },
-        "decision": {
+        "review_outcome_state": {
             "local_proxy_can_feed_replay_review": True,
             "local_proxy_satisfies_live_required_facts": False,
         },
@@ -63,7 +65,6 @@ def _proxy_row(required_fact: str) -> dict:
         "required_fact": required_fact,
         "l2_quality_proxy_ready": True,
         "live_required_fact_satisfied": False,
-        "real_order_authority": False,
     }
 
 
@@ -158,25 +159,33 @@ def _sample(
 def test_btpc_proxy_replay_quality_review_classifies_case_level_outcomes() -> None:
     module = _load_module()
 
-    packet = module.build_btpc_proxy_replay_quality_review(
-        btpc_local_fact_proxy_packet=_proxy_packet(),
+    artifact = module.build_btpc_proxy_replay_quality_review(
+        btpc_local_fact_proxy_artifact=_proxy_artifact(),
         replay_corpus=_replay_corpus(),
     )
 
-    assert packet["status"] == "btpc_proxy_replay_quality_review_ready"
-    assert packet["counts"]["replay_case_count"] == 5
-    assert packet["counts"]["would_enter_case_count"] == 2
-    assert packet["counts"]["proxy_reviewable_would_enter_count"] == 2
-    assert packet["counts"]["proxy_resolved_missing_derivatives_context_count"] == 1
-    assert packet["counts"]["freshness_or_conflict_revision_count"] == 2
-    assert packet["counts"]["keep_observing_count"] == 2
-    assert packet["counts"]["live_required_fact_satisfied_count"] == 0
-    assert packet["counts"]["real_order_authorized_count"] == 0
-    assert packet["counts"]["l4_scope_change_recommended_count"] == 0
+    assert artifact["status"] == "btpc_proxy_replay_quality_review_ready"
+    assert artifact["counts"]["replay_case_count"] == 5
+    assert artifact["counts"]["would_enter_case_count"] == 2
+    assert artifact["counts"]["proxy_reviewable_would_enter_count"] == 2
+    assert artifact["counts"]["proxy_resolved_missing_derivatives_context_count"] == 1
+    assert artifact["counts"]["freshness_or_conflict_revision_count"] == 2
+    assert artifact["counts"]["keep_observing_count"] == 2
+    assert artifact["counts"]["live_required_fact_satisfied_count"] == 0
+    assert "real_order_authorized_count" not in artifact["counts"]
+    assert artifact["counts"]["l4_scope_change_recommended_count"] == 0
+    assert "decision_counts" not in artifact
+    assert artifact["proxy_replay_quality_review_outcome_counts"] == {
+        "keep_observing_l2_shadow_with_proxy_context": 1,
+        "keep_waiting_for_market_no_action_baseline": 1,
+        "revise_conflict_disable_before_l2_promotion": 1,
+        "revise_freshness_or_classifier_before_l2_promotion": 1,
+        "revise_live_fact_collection_but_l2_proxy_reviewable": 1,
+    }
 
-    rows = {row["fixture_case"]: row for row in packet["case_rows"]}
+    rows = {row["fixture_case"]: row for row in artifact["case_rows"]}
     assert rows["bear_pullback_would_enter"][
-        "proxy_replay_quality_decision"
+        "proxy_replay_quality_review_outcome"
     ] == "keep_observing_l2_shadow_with_proxy_context"
     assert rows["missing_derivatives_context"]["proxy_effect"] == (
         "l2_proxy_resolves_missing_derivatives_context_for_review_only"
@@ -185,25 +194,38 @@ def test_btpc_proxy_replay_quality_review_classifies_case_level_outcomes() -> No
         "live_required_facts_satisfied"
     ] is False
     assert rows["strong_uptrend_conflict"][
-        "proxy_replay_quality_decision"
+        "proxy_replay_quality_review_outcome"
     ] == "revise_conflict_disable_before_l2_promotion"
     assert rows["stale_signal"][
-        "proxy_replay_quality_decision"
+        "proxy_replay_quality_review_outcome"
     ] == "revise_freshness_or_classifier_before_l2_promotion"
-    assert all(row["real_order_authority"] is False for row in rows.values())
+    assert all("real_order_authority" not in row for row in rows.values())
     assert all(row["operation_layer_authority"] is False for row in rows.values())
     assert all(row["exchange_write_authority"] is False for row in rows.values())
-    assert packet["decision"]["proxy_replay_quality_review_ready"] is True
-    assert packet["decision"]["proxy_replay_satisfies_live_required_facts"] is False
-    assert packet["decision"]["l4_scope_change_recommended"] is False
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["interaction"]["approaches_real_order"] is False
-    assert packet["interaction"]["calls_finalgate"] is False
-    assert packet["interaction"]["calls_operation_layer"] is False
-    assert packet["interaction"]["calls_exchange_write"] is False
-    assert packet["interaction"]["places_order"] is False
-    assert packet["safety_invariants"]["proxy_replay_is_not_live_required_fact"] is True
-    assert packet["safety_invariants"]["does_not_lower_owner_selected_leverage"] is True
+    review_outcome = artifact["review_outcome_state"]
+    assert review_outcome["state_family"] == "Review Outcome State"
+    assert (
+        review_outcome["source_role"]
+        == "btpc_proxy_replay_quality_review_provenance"
+    )
+    assert review_outcome["tradeability_decision_source"] is False
+    assert review_outcome["proxy_replay_quality_review_ready"] is True
+    assert (
+        review_outcome["proxy_replay_satisfies_live_required_facts"]
+        is False
+    )
+    assert review_outcome["l4_scope_change_recommended"] is False
+    assert "decision" not in artifact
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert artifact["interaction"]["approaches_real_order"] is False
+    assert artifact["interaction"]["calls_finalgate"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert artifact["interaction"]["calls_exchange_write"] is False
+    assert artifact["interaction"]["places_order"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["safety_invariants"]["proxy_replay_is_not_live_required_fact"] is True
+    assert artifact["safety_invariants"]["does_not_lower_owner_selected_leverage"] is True
+    assert "execution_intent_created" not in artifact["safety_invariants"]
 
 
 def test_btpc_proxy_replay_quality_review_blocks_live_replay_authority() -> None:
@@ -211,20 +233,67 @@ def test_btpc_proxy_replay_quality_review_blocks_live_replay_authority() -> None
     corpus = _replay_corpus()
     corpus["replay_samples"][0]["operation_layer_submit_allowed"] = True
 
-    packet = module.build_btpc_proxy_replay_quality_review(
-        btpc_local_fact_proxy_packet=_proxy_packet(),
+    artifact = module.build_btpc_proxy_replay_quality_review(
+        btpc_local_fact_proxy_artifact=_proxy_artifact(),
         replay_corpus=corpus,
     )
 
-    assert packet["status"] == "blocked_forbidden_effect"
+    assert artifact["status"] == "blocked_forbidden_effect"
     assert (
         "btpc_replay_corpus.bear_pullback_would_enter.operation_layer_submit_allowed"
-        in packet["safety_invariants"]["source_forbidden_effects"]
+        in artifact["safety_invariants"]["source_forbidden_effects"]
     )
-    assert packet["decision"]["default_next_step"] == (
+    assert artifact["review_outcome_state"]["default_next_step"] == (
         "stop_and_repair_btpc_proxy_replay_quality_source_forbidden_effects"
     )
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+
+
+def test_btpc_proxy_replay_quality_review_rejects_source_legacy_authority_mirrors() -> None:
+    module = _load_module()
+    proxy = _proxy_artifact()
+    proxy["safety_invariants"]["real_order_authority"] = False
+    proxy["review_outcome_state"]["actionable_now"] = False
+    proxy["proxy_rows"][0]["real_order_authority"] = False
+    corpus = _replay_corpus()
+    corpus["actionable_now"] = False
+    corpus["replay_samples"][0]["real_order_authority"] = False
+
+    artifact = module.build_btpc_proxy_replay_quality_review(
+        btpc_local_fact_proxy_artifact=proxy,
+        replay_corpus=corpus,
+    )
+
+    assert artifact["status"] == "blocked_forbidden_effect"
+    effects = artifact["safety_invariants"]["source_forbidden_effects"]
+    assert (
+        "btpc_local_fact_proxy.safety_invariants."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert (
+        "btpc_local_fact_proxy.review_outcome_state."
+        "legacy_authority_mirror_present:actionable_now"
+    ) in effects
+    assert (
+        "btpc_local_fact_proxy.proxy_rows.historical_open_interest_window."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+    assert "btpc_replay_corpus.legacy_authority_mirror_present:actionable_now" in effects
+    assert (
+        "btpc_replay_corpus.bear_pullback_would_enter."
+        "legacy_authority_mirror_present:real_order_authority"
+    ) in effects
+
+
+def test_btpc_proxy_replay_quality_review_rejects_legacy_packet_kwarg() -> None:
+    module = _load_module()
+
+    with pytest.raises(TypeError):
+        module.build_btpc_proxy_replay_quality_review(
+            btpc_local_fact_proxy_packet=_proxy_artifact(),
+            replay_corpus=_replay_corpus(),
+        )
 
 
 def test_btpc_proxy_replay_quality_review_cli_writes_outputs(
@@ -236,7 +305,7 @@ def test_btpc_proxy_replay_quality_review_cli_writes_outputs(
     replay_path = tmp_path / "replay.json"
     output_path = tmp_path / "proxy-replay.json"
     owner_path = tmp_path / "proxy-replay.md"
-    proxy_path.write_text(json.dumps(_proxy_packet()), encoding="utf-8")
+    proxy_path.write_text(json.dumps(_proxy_artifact()), encoding="utf-8")
     replay_path.write_text(json.dumps(_replay_corpus()), encoding="utf-8")
 
     exit_code = module.main(
@@ -260,4 +329,32 @@ def test_btpc_proxy_replay_quality_review_cli_writes_outputs(
     assert file_payload["status"] == "btpc_proxy_replay_quality_review_ready"
     owner_text = owner_path.read_text(encoding="utf-8")
     assert "BTPC Proxy Replay Quality Review" in owner_text
-    assert "Live RequiredFacts satisfied by proxy replay: `false`" in owner_text
+    assert "Real order authority" not in owner_text
+    assert "| Case | Signal | Proxy status | Decision | Exchange write |" in owner_text
+    assert "| Case | Signal | Proxy status | Decision | Real order |" not in owner_text
+
+
+def test_btpc_proxy_replay_cli_omitted_local_proxy_does_not_read_default(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    replay_path = tmp_path / "replay.json"
+    output_path = tmp_path / "proxy-replay.json"
+    owner_path = tmp_path / "proxy-replay.md"
+    replay_path.write_text(json.dumps(_replay_corpus()), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--btpc-replay-corpus-json",
+            str(replay_path),
+            "--output-json",
+            str(output_path),
+            "--output-owner-progress",
+            str(owner_path),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "btpc_proxy_replay_quality_review_incomplete"
+    assert artifact["source_status"]["btpc_local_fact_proxy_review"] is None

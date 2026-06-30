@@ -97,7 +97,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("deployment_readiness_evidence_id", sa.String(220), nullable=True),
-        sa.Column("packet_preview_id", sa.String(460), nullable=False),
+        sa.Column("submit_preview_id", sa.String(460), nullable=False),
         sa.Column("binding_id", sa.String(460), nullable=False),
         sa.Column(
             "local_registration_adapter_result_id",

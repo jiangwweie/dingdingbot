@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an Owner-readable StrategyGroup runtime pilot status packet.
+"""Build an Owner-readable StrategyGroup runtime pilot status artifact.
 
 This is a read-only product layer over StrategyGroup intake, live-facts
 readiness, and runtime signal watcher evidence. It never creates candidates,
@@ -22,11 +22,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.application.runtime_strategy_signal_evaluation_service import (
     RuntimeStrategySignalEvaluationService,
 )
+from src.application.readmodels.owner_projection import (
+    owner_non_authority_checkpoint,
+    owner_state_source_checkpoint,
+    owner_state_with_explicit_action_authority,
+    owner_state_without_legacy_input_recovery_action,
+)
 from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 
 
 PREFERRED_GROUP_ID = "MPG-001"
-FALLBACK_GROUP_ID = "TEQ-001"
 DEFAULT_MAX_SYMBOLS = 3
 UNSAFE_FLAGS = {
     "exchange_write_called",
@@ -125,18 +130,18 @@ def _selection_rank(
 ) -> tuple[int, int, int, int]:
     observe_penalty = 0 if readiness.get("observe_ready") else 10
     candidate_penalty = len(readiness.get("blockers") or [])
-    preference = {PREFERRED_GROUP_ID: 0, FALLBACK_GROUP_ID: 1}.get(group_id, 5)
+    preference = 0 if group_id == PREFERRED_GROUP_ID else 5
     ready_count = len((readiness.get("exchange_rules") or {}).get("ready_symbols") or [])
     return (observe_penalty, candidate_penalty, preference, -ready_count)
 
 
 def _select_pilot(
     *,
-    intake_packet: dict[str, Any],
+    intake_artifact: dict[str, Any],
     live_facts_readiness: dict[str, Any],
     requested_group_id: str | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str]:
-    groups = _by_id(_items(intake_packet.get("strategy_picker")))
+    groups = _by_id(_items(intake_artifact.get("strategy_picker")))
     readiness_by_id = _by_id(_items(live_facts_readiness.get("readiness")))
     if requested_group_id:
         group = groups.get(requested_group_id)
@@ -145,27 +150,6 @@ def _select_pilot(
             readiness_by_id.get(requested_group_id, {}),
             "owner_requested_strategy_group",
         )
-
-    preferred = groups.get(PREFERRED_GROUP_ID)
-    fallback = groups.get(FALLBACK_GROUP_ID)
-    preferred_readiness = readiness_by_id.get(PREFERRED_GROUP_ID, {})
-    fallback_readiness = readiness_by_id.get(FALLBACK_GROUP_ID, {})
-    if preferred and fallback:
-        preferred_rank = _selection_rank(
-            group_id=PREFERRED_GROUP_ID,
-            readiness=preferred_readiness,
-        )
-        fallback_rank = _selection_rank(
-            group_id=FALLBACK_GROUP_ID,
-            readiness=fallback_readiness,
-        )
-        if fallback_rank < preferred_rank:
-            return fallback, fallback_readiness, "fallback_teq_has_better_engineering_readiness"
-        return preferred, preferred_readiness, "default_mpg_engineering_readiness_not_worse"
-    if preferred:
-        return preferred, preferred_readiness, "default_mpg_available"
-    if fallback:
-        return fallback, fallback_readiness, "fallback_teq_available"
 
     candidates = [
         (
@@ -181,7 +165,9 @@ def _select_pilot(
         return None, {}, "no_strategy_group_available"
     _rank, group = sorted(candidates, key=lambda item: item[0])[0]
     group_id = str(group.get("strategy_group_id"))
-    return group, readiness_by_id.get(group_id, {}), "first_engineering_ready_group"
+    if group_id == PREFERRED_GROUP_ID:
+        return group, readiness_by_id.get(group_id, {}), "preferred_mpg_engineering_ready"
+    return group, readiness_by_id.get(group_id, {}), "best_engineering_ready_group"
 
 
 def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
@@ -191,7 +177,9 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         else watcher_status
     )
     if data.get("scope") == "runtime_signal_watcher_post_signal_resume_pack":
-        post_signal_auto_resume = _dict(data.get("post_signal_auto_resume"))
+        post_signal_auto_resume = owner_state_without_legacy_input_recovery_action(
+            _dict(data.get("post_signal_auto_resume"))
+        )
         prepared_evidence = _dict(data.get("prepared_evidence"))
         signal_input_json = (
             data.get("signal_input_json")
@@ -226,7 +214,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             ),
             "wakeup_status": str(data.get("current_wakeup_status") or "unknown"),
             "operator_status": str(data.get("current_operator_status") or "unknown"),
-            "status_packet_status": "unknown",
+            "watcher_status_evidence_status": "unknown",
             "can_continue_steps_5_8": bool(data.get("can_continue_steps_5_8")),
             "current_gate": (
                 "fresh_signal_or_prepared_shadow_ready"
@@ -258,18 +246,22 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         else {}
     )
     watcher = data.get("watcher") if isinstance(data.get("watcher"), dict) else {}
-    status_packet = (
-        data.get("status_packet") if isinstance(data.get("status_packet"), dict) else {}
+    watcher_status_evidence = (
+        data.get("watcher_status_evidence")
+        if isinstance(data.get("watcher_status_evidence"), dict)
+        else {}
     )
     resume = (
         data.get("post_signal_resume")
         if isinstance(data.get("post_signal_resume"), dict)
         else {}
     )
-    post_signal_auto_resume = _dict(
-        data.get("post_signal_auto_resume")
-        or watcher.get("post_signal_auto_resume")
-        or resume.get("post_signal_auto_resume")
+    post_signal_auto_resume = owner_state_without_legacy_input_recovery_action(
+        _dict(
+            data.get("post_signal_auto_resume")
+            or watcher.get("post_signal_auto_resume")
+            or resume.get("post_signal_auto_resume")
+        )
     )
     prepared_evidence = _dict(data.get("prepared_evidence") or resume.get("prepared_evidence"))
     signal_input_json = (
@@ -305,7 +297,10 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         "deployment_status": str(deployment.get("status") or "unknown"),
         "wakeup_status": str(watcher.get("wakeup_status") or "unknown"),
         "operator_status": str(watcher.get("operator_status") or "unknown"),
-        "status_packet_status": str(watcher.get("status_packet_status") or "unknown"),
+        "watcher_status_evidence_status": str(
+            watcher.get("watcher_status_evidence_status")
+            or "unknown"
+        ),
         "can_continue_steps_5_8": bool(resume.get("can_continue_steps_5_8")),
         "current_gate": str(resume.get("current_gate") or "unknown"),
         "blockers": blockers,
@@ -313,7 +308,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         "unsafe_flags": sorted(set(str(item) for item in unsafe_flags if item)),
         "runtime_signal_summaries": _items(
             watcher.get("runtime_signal_summaries")
-            or status_packet.get("runtime_signal_summaries")
+            or watcher_status_evidence.get("runtime_signal_summaries")
             or data.get("runtime_signal_summaries")
         ),
         "signal_input_json": signal_input_json,
@@ -359,8 +354,8 @@ def _watcher_scope(group: dict[str, Any] | None) -> dict[str, Any]:
         "business_signal_validity": str(
             scope.get("business_signal_validity") or "unknown"
         ),
-        "candidate_packet_freshness_seconds": scope.get(
-            "candidate_packet_freshness_seconds"
+        "shadow_candidate_evidence_freshness_target_seconds": scope.get(
+            "shadow_candidate_evidence_freshness_target_seconds"
         ),
     }
 
@@ -430,7 +425,7 @@ def _watcher_scope_alignment(
         "matched_runtime_signal_summaries": matched,
         "out_of_scope_runtime_signal_summaries": out_of_scope[:10],
         "blocker": blocker,
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "create_or_attach_selected_strategygroup_runtime_then_constrain_watcher_scope"
             if blocker
             else "continue_selected_pilot_observation"
@@ -458,7 +453,7 @@ def _strategy_family_version_id(group: dict[str, Any] | None) -> str | None:
     return f"{group_id}-v0" if group_id else None
 
 
-def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
+def _runtime_binding(group: dict[str, Any] | None) -> dict[str, Any]:
     if not group:
         return {
             "status": "not_selected",
@@ -467,7 +462,7 @@ def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
             "semantics_binding_found": False,
             "evaluator_route_configured": False,
             "blockers": ["strategy_group_not_selected"],
-            "automatic_recovery_action": "select_strategy_group",
+            "non_authority_checkpoint": "select_strategy_group",
             "next_recover_condition": "strategy_group_selected",
             "non_executing": True,
         }
@@ -505,7 +500,7 @@ def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
         "candidate_mode": candidate_mode,
         "runtime_confirmation_mode": runtime_confirmation_mode,
         "blockers": sorted(dict.fromkeys(blockers)),
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "continue_to_runtime_scope_alignment"
             if status == "configured"
             else "add_strategy_semantics_binding_and_evaluator_route"
@@ -519,7 +514,7 @@ def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
 
 def _strategy_group_board_rows(
     *,
-    intake_packet: dict[str, Any],
+    intake_artifact: dict[str, Any],
     live_facts_readiness: dict[str, Any],
     watcher: dict[str, Any],
     selected_group_id: str | None,
@@ -532,10 +527,10 @@ def _strategy_group_board_rows(
             summaries_by_group.setdefault(group_id, []).append(summary)
 
     rows: list[dict[str, Any]] = []
-    for group in _items(intake_packet.get("strategy_picker")):
+    for group in _items(intake_artifact.get("strategy_picker")):
         group_id = str(group.get("strategy_group_id") or "")
         readiness = readiness_by_id.get(group_id, {})
-        bridge = _runtime_bridge(group)
+        binding = _runtime_binding(group)
         summaries = summaries_by_group.get(group_id, [])
         default_mode = str((group.get("picker") or {}).get("default_mode") or "")
         observe_ready = bool(readiness.get("observe_ready"))
@@ -549,29 +544,29 @@ def _strategy_group_board_rows(
             str(item.get("signal_type") or item.get("status") or "")
             for item in summaries
         }
-        if bridge.get("status") != "configured":
+        if binding.get("status") != "configured":
             runtime_state = "blocked"
-            next_action = "add_strategy_semantics_binding_and_evaluator_route"
-            blocked_reason = ",".join(str(item) for item in bridge.get("blockers") or [])
+            non_authority_checkpoint = "add_strategy_semantics_binding_and_evaluator_route"
+            blocked_reason = ",".join(str(item) for item in binding.get("blockers") or [])
         elif not observe_ready:
             runtime_state = "blocked"
-            next_action = "refresh_exchange_rules_or_reduce_symbol_scope"
+            non_authority_checkpoint = "refresh_exchange_rules_or_reduce_symbol_scope"
             blocked_reason = ",".join(blockers) or "no_exchange_ready_symbol"
         elif default_mode == "observe_only":
             runtime_state = "observe_only_ready"
-            next_action = "continue_observe_only_until_upgrade_facts_pass"
+            non_authority_checkpoint = "continue_observe_only_until_upgrade_facts_pass"
             blocked_reason = "observe_only_default"
         elif summaries and "no_action" not in signal_types:
             runtime_state = "signal_review"
-            next_action = "review_runtime_signal_summary"
+            non_authority_checkpoint = "review_runtime_signal_summary"
             blocked_reason = "none"
         elif summaries:
             runtime_state = "observing"
-            next_action = "continue_watcher_observation"
+            non_authority_checkpoint = "continue_watcher_observation"
             blocked_reason = "no_fresh_strategy_signal"
         else:
             runtime_state = "admission_ready"
-            next_action = "create_or_attach_strategygroup_runtime"
+            non_authority_checkpoint = "create_or_attach_strategygroup_runtime"
             blocked_reason = "runtime_not_selected_for_watcher_scope"
 
         rows.append(
@@ -597,13 +592,14 @@ def _strategy_group_board_rows(
                     if observe_ready
                     else "missing"
                 ),
-                "runtime_bridge": bridge.get("status"),
+                "runtime_binding": binding.get("status"),
                 "ready_symbols": ready_symbols,
                 "blocked_symbols": blocked_symbols,
                 "blockers": blockers,
                 "warnings": warnings,
                 "blocked_reason": blocked_reason,
-                "next_action": next_action,
+                "non_authority_checkpoint": non_authority_checkpoint,
+                "checkpoint_source": "candidate_runtime_state",
             }
         )
     return sorted(
@@ -631,8 +627,8 @@ def _dual_freshness(
         action_time_status = "blocked_live_account_facts"
     elif owner_state["status"] == "blocked_runtime_scope_mismatch":
         action_time_status = "blocked_runtime_scope_mismatch"
-    elif owner_state["status"] == "blocked_runtime_bridge_missing":
-        action_time_status = "blocked_runtime_bridge_missing"
+    elif owner_state["status"] == "blocked_runtime_binding_missing":
+        action_time_status = "blocked_runtime_binding_missing"
     elif not watcher["can_continue_steps_5_8"]:
         action_time_status = "not_reached_waiting_for_signal"
     elif readiness.get("armed_candidate_prepare_ready"):
@@ -643,8 +639,8 @@ def _dual_freshness(
         "strategy_signal": {
             "status": signal_status,
             "freshness_window": scope["business_signal_validity"],
-            "candidate_packet_freshness_seconds": scope[
-                "candidate_packet_freshness_seconds"
+            "shadow_candidate_evidence_freshness_target_seconds": scope[
+                "shadow_candidate_evidence_freshness_target_seconds"
             ],
             "source": "runtime_signal_watcher",
             "current_gate": watcher["current_gate"],
@@ -669,7 +665,7 @@ def _gate_row(
     blocked_at: str,
     blocked_reason: str,
     next_recover_condition: str,
-    automatic_recovery_action: str,
+    non_authority_checkpoint: str,
     downgrade_mode: str,
     hard_stop: bool = False,
     blockers: list[Any] | None = None,
@@ -681,7 +677,7 @@ def _gate_row(
         "blocked_at": blocked_at,
         "blocked_reason": blocked_reason,
         "next_recover_condition": next_recover_condition,
-        "automatic_recovery_action": automatic_recovery_action,
+        "non_authority_checkpoint": non_authority_checkpoint,
         "downgrade_mode": downgrade_mode,
         "hard_stop": hard_stop,
         "owner_visible": status not in {"ready"},
@@ -697,7 +693,7 @@ def _gate_failure_ledger(
     owner_state: dict[str, Any],
     fact_summary: dict[str, Any],
     candidate_blockers: list[str],
-    runtime_bridge: dict[str, Any],
+    runtime_binding: dict[str, Any],
     watcher_scope_alignment: dict[str, Any],
 ) -> list[dict[str, Any]]:
     no_group = group is None
@@ -707,15 +703,15 @@ def _gate_failure_ledger(
     signal_ready = bool(watcher["can_continue_steps_5_8"])
     candidate_ready = bool(readiness.get("armed_candidate_prepare_ready"))
     hard_safety_stop = owner_state["status"] == "blocked_hard_safety_stop"
-    bridge_blocked = runtime_bridge.get("status") != "configured"
+    binding_blocked = runtime_binding.get("status") != "configured"
     scope_blocked = owner_state["status"] == "blocked_runtime_scope_mismatch"
     ready_for_final_gate = owner_state["status"] == "ready_for_action_time_final_gate"
 
     group_status = "blocked" if no_group else "ready"
-    bridge_status = "blocked" if bridge_blocked else "ready"
+    projection_status = "blocked" if binding_blocked else "ready"
     account_status = "blocked" if account_blocked else "ready"
     watcher_scope_status = "blocked" if scope_blocked else "ready"
-    if hard_safety_stop or bridge_blocked or scope_blocked:
+    if hard_safety_stop or binding_blocked or scope_blocked:
         signal_status = "blocked"
     elif signal_ready:
         signal_status = "ready"
@@ -731,7 +727,7 @@ def _gate_failure_ledger(
     owner_blocked_at = str(owner_state["blocked_at"])
     owner_reason = str(owner_state["blocked_reason"])
     owner_recover = str(owner_state["next_recover_condition"])
-    owner_action = str(owner_state["automatic_recovery_action"])
+    owner_action = _owner_checkpoint(owner_state)
     owner_downgrade = str(owner_state["downgrade_mode"])
 
     return [
@@ -744,7 +740,7 @@ def _gate_failure_ledger(
             next_recover_condition=(
                 owner_recover if no_group else "strategy_group_handoff_selected"
             ),
-            automatic_recovery_action=(
+            non_authority_checkpoint=(
                 owner_action if no_group else "continue_selected_pilot_observation"
             ),
             downgrade_mode=owner_downgrade if no_group else "armed_observation",
@@ -761,7 +757,7 @@ def _gate_failure_ledger(
                 if account_blocked
                 else "account_position_and_open_order_facts_are_flat"
             ),
-            automatic_recovery_action=(
+            non_authority_checkpoint=(
                 owner_action
                 if account_blocked
                 else "continue_selected_pilot_observation"
@@ -772,25 +768,25 @@ def _gate_failure_ledger(
             blockers=[],
         ),
         _gate_row(
-            gate="runtime_bridge",
-            status=bridge_status,
-            blocker_class="missing_fact" if bridge_blocked else "none",
-            blocked_at="runtime_bridge" if bridge_blocked else "none",
-            blocked_reason=owner_reason if bridge_blocked else "none",
+            gate="runtime_binding",
+            status=projection_status,
+            blocker_class="missing_fact" if binding_blocked else "none",
+            blocked_at="runtime_binding" if binding_blocked else "none",
+            blocked_reason=owner_reason if binding_blocked else "none",
             next_recover_condition=(
-                str(runtime_bridge.get("next_recover_condition"))
-                if bridge_blocked
+                str(runtime_binding.get("next_recover_condition"))
+                if binding_blocked
                 else "strategy_semantics_binding_and_evaluator_route_are_configured"
             ),
-            automatic_recovery_action=(
-                str(runtime_bridge.get("automatic_recovery_action"))
-                if bridge_blocked
+            non_authority_checkpoint=(
+                str(runtime_binding.get("non_authority_checkpoint"))
+                if binding_blocked
                 else "continue_selected_pilot_observation"
             ),
             downgrade_mode=(
-                owner_downgrade if bridge_blocked else "armed_observation"
+                owner_downgrade if binding_blocked else "armed_observation"
             ),
-            blockers=runtime_bridge.get("blockers") or [],
+            blockers=runtime_binding.get("blockers") or [],
         ),
         _gate_row(
             gate="watcher_scope",
@@ -807,8 +803,8 @@ def _gate_failure_ledger(
                 if scope_blocked
                 else "watcher_scope_matches_selected_pilot"
             ),
-            automatic_recovery_action=(
-                str(watcher_scope_alignment.get("automatic_recovery_action"))
+            non_authority_checkpoint=(
+                str(watcher_scope_alignment.get("non_authority_checkpoint"))
                 if scope_blocked
                 else "continue_selected_pilot_observation"
             ),
@@ -831,7 +827,7 @@ def _gate_failure_ledger(
                 if owner_blocked_at in {
                     "watcher_signal",
                     "watcher_safety_invariants",
-                    "runtime_bridge",
+                    "runtime_binding",
                     "runtime_signal_watcher_scope",
                 }
                 else ("none" if signal_ready else "waiting_for_market")
@@ -841,7 +837,7 @@ def _gate_failure_ledger(
             next_recover_condition=(
                 "fresh_strategy_signal_available" if signal_ready else owner_recover
             ),
-            automatic_recovery_action=(
+            non_authority_checkpoint=(
                 "continue_to_required_facts_readiness" if signal_ready else owner_action
             ),
             downgrade_mode="armed_observation" if signal_ready else owner_downgrade,
@@ -863,7 +859,7 @@ def _gate_failure_ledger(
                 if candidate_blockers
                 else "required_facts_ready_for_candidate_prepare"
             ),
-            automatic_recovery_action=(
+            non_authority_checkpoint=(
                 "collect_or_prepare_missing_candidate_specific_facts"
                 if signal_ready and candidate_blockers
                 else "wait_for_fresh_signal_before_candidate_specific_fact_materialization"
@@ -892,7 +888,7 @@ def _gate_failure_ledger(
                 if ready_for_final_gate
                 else "fresh_candidate_runtime_grant_authorization_evidence_exists"
             ),
-            automatic_recovery_action=(
+            non_authority_checkpoint=(
                 owner_action
                 if ready_for_final_gate
                 else "stop_before_action_time_final_gate_until_candidate_chain_exists"
@@ -909,7 +905,7 @@ def _gate_failure_ledger(
             blocked_at="Operation Layer",
             blocked_reason="official_operation_layer_requires_final_gate_pass",
             next_recover_condition="action_time_final_gate_passes_with_current_facts",
-            automatic_recovery_action="stop_before_gateway_action_until_final_gate_passes",
+            non_authority_checkpoint="stop_before_gateway_action_until_final_gate_passes",
             downgrade_mode="no_real_submit",
             hard_stop=True,
         ),
@@ -921,7 +917,7 @@ def _owner_state(
     selected_group_id: str | None,
     readiness: dict[str, Any],
     watcher: dict[str, Any],
-    runtime_bridge: dict[str, Any],
+    runtime_binding: dict[str, Any],
     watcher_scope_alignment: dict[str, Any],
 ) -> dict[str, Any]:
     fact_summary = _candidate_fact_summary(readiness)
@@ -938,23 +934,23 @@ def _owner_state(
             "next_recover_condition": (
                 "strategy_group_handoff_intake_contains_at_least_one_group"
             ),
-            "automatic_recovery_action": "rebuild_strategy_group_handoff_intake",
+            "non_authority_checkpoint": "rebuild_strategy_group_handoff_intake",
             "downgrade_mode": "no_runtime_observation",
         }
-    if runtime_bridge.get("status") != "configured":
+    if runtime_binding.get("status") != "configured":
         return {
-            "status": "blocked_runtime_bridge_missing",
+            "status": "blocked_runtime_binding_missing",
             "blocker_class": "missing_fact",
-            "blocked_at": "runtime_bridge",
+            "blocked_at": "runtime_binding",
             "blocked_reason": ",".join(
-                str(item) for item in (runtime_bridge.get("blockers") or [])
+                str(item) for item in (runtime_binding.get("blockers") or [])
             )
-            or "strategy_runtime_bridge_missing",
+            or "strategy_runtime_binding_missing",
             "next_recover_condition": str(
-                runtime_bridge.get("next_recover_condition")
+                runtime_binding.get("next_recover_condition")
             ),
-            "automatic_recovery_action": str(
-                runtime_bridge.get("automatic_recovery_action")
+            "non_authority_checkpoint": str(
+                runtime_binding.get("non_authority_checkpoint")
             ),
             "downgrade_mode": "observe_only_no_runtime_evaluation",
         }
@@ -967,7 +963,7 @@ def _owner_state(
             "next_recover_condition": (
                 "forbidden_effect_flags_are_absent_in_current_evidence"
             ),
-            "automatic_recovery_action": "stop_resume_path_and_investigate_watcher_evidence",
+            "non_authority_checkpoint": "stop_resume_path_and_investigate_watcher_evidence",
             "downgrade_mode": "manual_review_only",
         }
     if fact_summary["active_position_blocked"] or fact_summary["open_order_blocked"]:
@@ -984,7 +980,7 @@ def _owner_state(
             "next_recover_condition": (
                 "same_symbol_position_and_open_orders_are_flat_or_reconciled"
             ),
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "refresh_readonly_account_position_open_order_facts_then_reconcile"
             ),
             "downgrade_mode": "observe_only_no_candidate_prepare",
@@ -996,7 +992,7 @@ def _owner_state(
             "blocked_at": "exchange_symbol_rules",
             "blocked_reason": "selected_strategy_group_is_not_observe_ready",
             "next_recover_condition": "exchange_rules_are_ready_for_selected_universe",
-            "automatic_recovery_action": "refresh_readonly_exchange_rules_for_selected_symbols",
+            "non_authority_checkpoint": "refresh_readonly_exchange_rules_for_selected_symbols",
             "downgrade_mode": "no_runtime_observation",
         }
     if watcher["deployment_status"] in {"evidence_missing", "evidence_stale", "unknown"}:
@@ -1006,7 +1002,7 @@ def _owner_state(
             "blocked_at": "runtime_signal_watcher_evidence",
             "blocked_reason": f"watcher_evidence_{watcher['deployment_status']}",
             "next_recover_condition": "watcher_evidence_files_are_present_and_fresh",
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
             ),
             "downgrade_mode": "observe_only_no_candidate_prepare",
@@ -1020,8 +1016,8 @@ def _owner_state(
             "next_recover_condition": str(
                 watcher_scope_alignment.get("next_recover_condition")
             ),
-            "automatic_recovery_action": str(
-                watcher_scope_alignment.get("automatic_recovery_action")
+            "non_authority_checkpoint": str(
+                watcher_scope_alignment.get("non_authority_checkpoint")
             ),
             "downgrade_mode": "observe_only_no_candidate_prepare",
         }
@@ -1044,9 +1040,11 @@ def _owner_state(
                         auto_resume.get("next_recover_condition")
                         or "official_final_gate_preflight_passes_with_current_facts"
                     ),
-                    "automatic_recovery_action": (
-                        auto_resume.get("automatic_recovery_action")
-                        or "run_official_action_time_final_gate_preflight"
+                    "non_authority_checkpoint": (
+                        owner_state_source_checkpoint(
+                            auto_resume,
+                            default="run_official_action_time_final_gate_preflight",
+                        )[0]
                     ),
                     "downgrade_mode": (
                         auto_resume.get("downgrade_mode")
@@ -1059,9 +1057,11 @@ def _owner_state(
                 "blocked_at": "none",
                 "blocked_reason": "none",
                 "next_recover_condition": "fresh_signal_already_available",
-                "automatic_recovery_action": (
-                    auto_resume.get("automatic_recovery_action")
-                    or "prepare_shadow_candidate_runtime_grant_authorization_evidence"
+                "non_authority_checkpoint": (
+                    owner_state_source_checkpoint(
+                        auto_resume,
+                        default="prepare_shadow_candidate_runtime_grant_authorization_evidence",
+                    )[0]
                 ),
                 "downgrade_mode": "armed_observation",
             }
@@ -1074,11 +1074,11 @@ def _owner_state(
                 or "candidate_required_facts_missing"
             ),
             "next_recover_condition": "protection_budget_next_attempt_gate_and_account_facts_pass",
-            "automatic_recovery_action": "collect_or_prepare_missing_candidate_specific_facts",
+            "non_authority_checkpoint": "collect_or_prepare_missing_candidate_specific_facts",
             "downgrade_mode": "observe_only_no_real_submit",
         }
     if _has_no_signal_blocker(watcher["blockers"]) or watcher["wakeup_status"] in {
-        "operator_packet_needs_review",
+        "operator_evidence_needs_review",
         "owner_sleep_safe_observation_running",
         "observation_window_complete_no_signal",
         "unknown",
@@ -1094,21 +1094,23 @@ def _owner_state(
                 auto_resume.get("next_recover_condition")
                 or "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
             ),
-            "automatic_recovery_action": (
-                auto_resume.get("automatic_recovery_action")
-                or "continue_watcher_observation_and_notify_on_material_change"
+            "non_authority_checkpoint": (
+                owner_state_source_checkpoint(
+                    auto_resume,
+                    default="continue_watcher_observation_and_notify_on_material_change",
+                )[0]
             ),
             "downgrade_mode": auto_resume.get("downgrade_mode") or "observe_only",
         }
     return {
         "status": "blocked_operator_review",
         "blocker_class": "review_only_warning",
-        "blocked_at": "operator_packet",
+        "blocked_at": "operator_review_evidence",
         "blocked_reason": watcher["wakeup_status"],
         "next_recover_condition": (
-            "operator_packet_translates_to_fresh_signal_or_waiting_for_market"
+            "operator_review_evidence_translates_to_fresh_signal_or_waiting_for_market"
         ),
-        "automatic_recovery_action": "rebuild_watcher_status_and_resume_pack",
+        "non_authority_checkpoint": "rebuild_watcher_status_and_resume_pack",
         "downgrade_mode": "observe_only_no_candidate_prepare",
     }
 
@@ -1138,7 +1140,7 @@ def _action_time_resume_state(
         allowed_auto_actions = ["continue_watcher_observation"]
     else:
         status = "blocked"
-        next_step = owner_state["automatic_recovery_action"]
+        next_step = _owner_checkpoint(owner_state)
         allowed_auto_actions = []
 
     return {
@@ -1168,7 +1170,7 @@ def _action_time_resume_state(
     }
 
 
-def _owner_action_card(
+def _owner_action_item(
     *,
     owner_state: dict[str, Any],
     action_time_resume: dict[str, Any],
@@ -1177,27 +1179,25 @@ def _owner_action_card(
     status = str(owner_state.get("status") or "unknown")
     blocked_reason = str(owner_state.get("blocked_reason") or "none")
     blocked_at = str(owner_state.get("blocked_at") or "unknown")
-    auto_action = str(
-        owner_state.get("automatic_recovery_action") or "review_current_state"
-    )
+    non_authority_checkpoint = _owner_checkpoint(owner_state)
     if status == "waiting_for_market":
         headline = "Watcher is active; waiting for a fresh strategy signal."
-        owner_next_action = "none_wait_for_signal_notification"
+        owner_status_checkpoint = "none_wait_for_signal_notification"
     elif status == "ready_for_non_executing_prepare":
         headline = "Fresh signal is ready; system can prepare non-executing evidence."
-        owner_next_action = "none_system_prepares_candidate_evidence"
+        owner_status_checkpoint = "none_system_prepares_candidate_evidence"
     elif status == "ready_for_action_time_final_gate":
         headline = "Fresh authorization evidence is ready for action-time FinalGate."
-        owner_next_action = "none_system_runs_official_finalgate"
+        owner_status_checkpoint = "none_system_runs_official_finalgate"
     elif str(owner_state.get("blocker_class")) == "hard_safety_stop":
         headline = "Hard safety stop; automatic execution is halted."
-        owner_next_action = "review_hard_safety_stop"
+        owner_status_checkpoint = "review_hard_safety_stop"
     elif str(owner_state.get("blocker_class")) == "active_position_resolution":
         headline = "Existing position or open-order state must be resolved first."
-        owner_next_action = "review_position_resolution"
+        owner_status_checkpoint = "review_position_resolution"
     else:
         headline = "Pilot cannot advance yet; recovery condition is explicit."
-        owner_next_action = "none_system_attempts_recovery_if_bounded"
+        owner_status_checkpoint = "none_system_attempts_recovery_if_bounded"
 
     return {
         "headline": headline,
@@ -1207,9 +1207,10 @@ def _owner_action_card(
         "next_recover_condition": str(
             owner_state.get("next_recover_condition") or "unknown"
         ),
-        "automatic_recovery_action": auto_action,
+        "non_authority_checkpoint": non_authority_checkpoint,
+        "checkpoint_source": "owner_state",
         "downgrade_mode": str(owner_state.get("downgrade_mode") or "unknown"),
-        "owner_next_action": owner_next_action,
+        "owner_status_checkpoint": owner_status_checkpoint,
         "can_continue_without_owner_chat": bool(
             owner_state.get("can_continue_without_owner_chat")
             or post_signal_auto_resume.get("can_continue_without_owner_chat")
@@ -1224,16 +1225,23 @@ def _owner_action_card(
             or action_time_resume.get("requires_official_operation_layer")
             or post_signal_auto_resume.get("requires_official_operation_layer")
         ),
-        "no_packet_read_required": True,
+        "no_raw_evidence_review_required": True,
         "why_not_executable": []
         if blocked_reason == "none"
         else [blocked_reason],
     }
 
 
-def build_packet(
+def _owner_checkpoint(owner_state: dict[str, Any]) -> str:
+    return owner_non_authority_checkpoint(
+        owner_state,
+        default="review_current_state",
+    )
+
+
+def build_status_artifact(
     *,
-    intake_packet: dict[str, Any],
+    intake_artifact: dict[str, Any],
     live_facts_readiness: dict[str, Any],
     watcher_status: dict[str, Any],
     selected_strategy_group_id: str | None = None,
@@ -1242,7 +1250,7 @@ def build_packet(
 ) -> dict[str, Any]:
     generated_at_ms = generated_at_ms or int(time.time() * 1000)
     group, readiness, selection_reason = _select_pilot(
-        intake_packet=intake_packet,
+        intake_artifact=intake_artifact,
         live_facts_readiness=live_facts_readiness,
         requested_group_id=selected_strategy_group_id,
     )
@@ -1258,7 +1266,7 @@ def build_packet(
         str(item) for item in (group or {}).get("supported_sides") or []
     ]
     selected_side = supported_sides[0] if supported_sides else "unknown"
-    runtime_bridge = _runtime_bridge(group)
+    runtime_binding = _runtime_binding(group)
     watcher_scope_alignment = _watcher_scope_alignment(
         selected_strategy_group_id=group_id,
         selected_universe=selected_universe,
@@ -1269,7 +1277,7 @@ def build_packet(
         selected_group_id=group_id,
         readiness=readiness,
         watcher=watcher,
-        runtime_bridge=runtime_bridge,
+        runtime_binding=runtime_binding,
         watcher_scope_alignment=watcher_scope_alignment,
     )
     risk_defaults = (
@@ -1282,34 +1290,6 @@ def build_packet(
         blocker for blocker in candidate_blockers
         if blocker in {"protection:missing", "budget:missing", "next_attempt_gate:missing"}
     ]
-    dual_freshness = _dual_freshness(
-        group=group,
-        readiness=readiness,
-        watcher=watcher,
-        owner_state=owner_state,
-        candidate_blockers=candidate_blockers,
-    )
-    gate_failure_ledger = _gate_failure_ledger(
-        group=group,
-        readiness=readiness,
-        watcher=watcher,
-        owner_state=owner_state,
-        fact_summary=fact_summary,
-        candidate_blockers=candidate_blockers,
-        runtime_bridge=runtime_bridge,
-        watcher_scope_alignment=watcher_scope_alignment,
-    )
-    why_not_executable: list[str] = []
-    if owner_state["status"] == "waiting_for_market":
-        why_not_executable.append("no_fresh_strategy_signal")
-    elif owner_state["blocked_reason"] != "none":
-        why_not_executable.append(owner_state["blocked_reason"])
-    if owner_state["status"] == "blocked_runtime_scope_mismatch":
-        why_not_executable.append("watcher_scope_not_bound_to_selected_pilot")
-    if progressive_gaps:
-        why_not_executable.append(
-            "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
-        )
     prepared_authorization_ready = (
         owner_state["status"] == "ready_for_action_time_final_gate"
     )
@@ -1329,8 +1309,57 @@ def build_packet(
         watcher=watcher,
         candidate_evidence=candidate_evidence,
     )
+    owner_state = owner_state_with_explicit_action_authority(
+        owner_state=owner_state,
+        action_time_resume=action_time_resume,
+    )
+    checkpoint_source = str(owner_state.get("checkpoint_source") or "owner_state")
+    if "non_authority_checkpoint" not in owner_state:
+        source_checkpoint, checkpoint_source = owner_state_source_checkpoint(
+            owner_state,
+            default="",
+        )
+        if source_checkpoint:
+            owner_state = {
+                **owner_state,
+                "non_authority_checkpoint": source_checkpoint,
+            }
+    owner_checkpoint = _owner_checkpoint(owner_state)
+    owner_state_projection = {
+        **owner_state_without_legacy_input_recovery_action(owner_state),
+        "non_authority_checkpoint": owner_checkpoint,
+        "checkpoint_source": checkpoint_source,
+    }
+    dual_freshness = _dual_freshness(
+        group=group,
+        readiness=readiness,
+        watcher=watcher,
+        owner_state=owner_state,
+        candidate_blockers=candidate_blockers,
+    )
+    gate_failure_ledger = _gate_failure_ledger(
+        group=group,
+        readiness=readiness,
+        watcher=watcher,
+        owner_state=owner_state,
+        fact_summary=fact_summary,
+        candidate_blockers=candidate_blockers,
+        runtime_binding=runtime_binding,
+        watcher_scope_alignment=watcher_scope_alignment,
+    )
+    why_not_executable: list[str] = []
+    if owner_state["status"] == "waiting_for_market":
+        why_not_executable.append("no_fresh_strategy_signal")
+    elif owner_state["blocked_reason"] != "none":
+        why_not_executable.append(owner_state["blocked_reason"])
+    if owner_state["status"] == "blocked_runtime_scope_mismatch":
+        why_not_executable.append("watcher_scope_not_bound_to_selected_pilot")
+    if progressive_gaps:
+        why_not_executable.append(
+            "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
+        )
     strategy_group_rows = _strategy_group_board_rows(
-        intake_packet=intake_packet,
+        intake_artifact=intake_artifact,
         live_facts_readiness=live_facts_readiness,
         watcher=watcher,
         selected_group_id=group_id,
@@ -1341,7 +1370,7 @@ def build_packet(
         if owner_state["status"] == "waiting_for_market"
         else owner_state["status"]
     )
-    packet = {
+    artifact = {
         "scope": "strategygroup_runtime_pilot_status",
         "status": owner_state["status"],
         "generated_at_ms": generated_at_ms,
@@ -1363,8 +1392,8 @@ def build_packet(
                 ),
             },
         },
-        "owner_state": owner_state,
-        "runtime_bridge": runtime_bridge,
+        "owner_state": owner_state_projection,
+        "runtime_binding": runtime_binding,
         "watcher_scope_alignment": watcher_scope_alignment,
         "candidate_evidence": candidate_evidence,
         "action_time_resume": action_time_resume,
@@ -1413,7 +1442,8 @@ def build_packet(
                     and not fact_summary["open_order_blocked"]
                     else "blocked"
                 ),
-                "next_action": owner_state["automatic_recovery_action"],
+                "non_authority_checkpoint": owner_checkpoint,
+                "checkpoint_source": "owner_state",
             },
             "runtime_row": {
                 "budget": "pending_until_candidate_specific_budget",
@@ -1428,26 +1458,15 @@ def build_packet(
                     else "ready"
                 ),
                 "next_gate": owner_state["blocked_at"],
-                "runtime_bridge": runtime_bridge["status"],
+                "runtime_binding": runtime_binding["status"],
                 "watcher_scope": watcher_scope_alignment["status"],
             },
             "candidate_row": {
-                "fresh_signal_id": candidate_evidence["signal_input_json"] or "pending",
                 "signal_input_json": candidate_evidence["signal_input_json"],
                 "shadow_candidate_id": candidate_evidence["shadow_candidate_id"],
                 "prepared_authorization_id": candidate_evidence[
                     "prepared_authorization_id"
                 ],
-                "runtime_grant_status": (
-                    "prepared_authorization_ready"
-                    if candidate_evidence["prepared_authorization_id"]
-                    else "pending"
-                ),
-                "authorization_evidence_status": (
-                    "fresh_authorization_evidence_ready"
-                    if candidate_evidence["prepared_authorization_id"]
-                    else "pending"
-                ),
                 "symbol": selected_universe[0] if selected_universe else "pending",
                 "side": selected_side,
                 "candidate_state": (
@@ -1458,16 +1477,10 @@ def build_packet(
                     else "not_prepared"
                 ),
                 "blocker": owner_state["blocked_reason"],
-                "final_gate_status": (
-                    "ready_to_run" if prepared_authorization_ready else "not_reached"
-                ),
-                "operation_layer_status": "not_reached",
-                "action_time_resume_status": action_time_resume["status"],
-                "action_time_next_step": action_time_resume["next_step"],
             },
             "review_row": {
                 "outcome": "not_started",
-                "review_decision": "keep_observing"
+                "review_outcome": "keep_observing"
                 if owner_state["status"] == "waiting_for_market"
                 else "pending",
             },
@@ -1491,14 +1504,14 @@ def build_packet(
                 else "none",
             },
             {
-                "gate": "runtime_bridge",
+                "gate": "runtime_binding",
                 "status": "ready"
-                if runtime_bridge["status"] == "configured"
+                if runtime_binding["status"] == "configured"
                 else "blocked",
                 "class": "missing_fact"
-                if runtime_bridge["status"] != "configured"
+                if runtime_binding["status"] != "configured"
                 else "none",
-                "blockers": runtime_bridge["blockers"],
+                "blockers": runtime_binding["blockers"],
             },
             {
                 "gate": "watcher_scope",
@@ -1557,18 +1570,19 @@ def build_packet(
             },
         ],
         "why_not_executable": why_not_executable,
-        "owner_action_card": {
-            **_owner_action_card(
+        "owner_action_item": {
+            **_owner_action_item(
                 owner_state=owner_state,
                 action_time_resume=action_time_resume,
                 post_signal_auto_resume=watcher["post_signal_auto_resume"],
             ),
             "why_not_executable": why_not_executable,
         },
-        "next_safe_checkpoint": owner_state["automatic_recovery_action"],
+        "non_authority_checkpoint": owner_checkpoint,
+        "checkpoint_source": "owner_state",
         "watcher": watcher,
         "source_anchor": {
-            "intake": intake_packet.get("source_anchor") or {},
+            "intake": intake_artifact.get("source_anchor") or {},
             "live_facts_source": live_facts_readiness.get("live_facts_source") or {},
             "watcher_report": (
                 (watcher_status.get("data") or {}).get("deployment_readiness") or {}
@@ -1587,7 +1601,7 @@ def build_packet(
             "mutates_pg": False,
         },
     }
-    return packet
+    return artifact
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1605,16 +1619,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    packet = build_packet(
-        intake_packet=_read_json(args.intake_json),
+    artifact = build_status_artifact(
+        intake_artifact=_read_json(args.intake_json),
         live_facts_readiness=_read_json(args.live_facts_readiness_json),
         watcher_status=_read_json(args.watcher_status_json),
         selected_strategy_group_id=args.selected_strategy_group_id,
         max_symbols=args.max_symbols,
     )
-    _write_json(args.output_json, packet)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if not packet["status"].startswith("blocked_hard_safety_stop") else 2
+    _write_json(args.output_json, artifact)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if not artifact["status"].startswith("blocked_hard_safety_stop") else 2
 
 
 if __name__ == "__main__":

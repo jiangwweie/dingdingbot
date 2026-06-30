@@ -1,0 +1,124 @@
+{
+  "brf2_new_first_blocker": "required_facts_mapping_gap",
+  "brf2_policy_checkpoint": "close_brf2_required_facts_mapping_for_armed_observation",
+  "brf2_policy_scope_recorded": true,
+  "brf2_stage_after_policy": "admitted_trial_asset",
+  "checks": {
+    "attempt_cap": 3,
+    "capital_scope_allocation_mode": "full_available_isolated_subaccount",
+    "capital_scope_balance_source": "action_time_exchange_available_balance",
+    "capital_scope_currency": "USDT",
+    "leverage_scenario_is_not_authority": true,
+    "loss_capable": true,
+    "loss_unit_source": "action_time_exchange_available_balance",
+    "max_notional_source": "runtime_profile_and_action_time_exchange_facts",
+    "owner_policy_recorded": true,
+    "owner_policy_scope_missing": false,
+    "side_scope_short_only": true
+  },
+  "final_policy_evidence": {
+    "brf2_new_first_blocker": "required_facts_mapping_gap",
+    "brf2_policy_scope_recorded": true,
+    "brf2_stage_after_policy": "admitted_trial_asset",
+    "capability_unlocked": "main control can advance BRF2 from Owner policy blocker to admitted trial asset with a later engineering facts blocker",
+    "closed_engineering_problem": "BRF2 Owner trial policy is now recorded as a final-owned machine-readable policy scope instead of remaining a chat-only or proposal-only blocker",
+    "deploy_status": "not_deployed",
+    "files_changed": [
+      "scripts/build_brf2_owner_trial_policy_scope.py",
+      "scripts/build_strategygroup_trial_asset_admission_proposal.py",
+      "scripts/build_strategygroup_three_strategy_live_trial_portfolio.py",
+      "scripts/build_strategygroup_tradeability_decision.py",
+      "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+      "tests/unit/test_brf2_owner_trial_policy_scope.py",
+      "tests/unit/test_strategygroup_trial_asset_admission_proposal.py",
+      "tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py",
+      "tests/unit/test_strategygroup_tradeability_decision.py",
+      "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
+      "tests/unit/test_strategygroup_current_artifact_contract.py",
+      "docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.json",
+      "docs/current/strategy-group-handoffs/brf2-owner-trial-policy-scope-v0.md",
+      "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json",
+      "output/runtime-monitor/latest-brf2-owner-trial-policy-scope.md",
+      "output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json",
+      "output/runtime-monitor/latest-three-strategy-live-trial-portfolio.json",
+      "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
+      "output/runtime-monitor/latest-local-monitor-sequence.json"
+    ],
+    "tests_run": [
+      "python3 -m py_compile scripts/build_brf2_owner_trial_policy_scope.py scripts/build_strategygroup_trial_asset_admission_proposal.py scripts/build_strategygroup_three_strategy_live_trial_portfolio.py scripts/build_strategygroup_tradeability_decision.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+      "python3 -m pytest tests/unit/test_brf2_owner_trial_policy_scope.py tests/unit/test_strategygroup_trial_asset_admission_proposal.py tests/unit/test_strategygroup_three_strategy_live_trial_portfolio.py tests/unit/test_strategygroup_tradeability_decision.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py tests/unit/test_strategygroup_current_artifact_contract.py -q",
+      "python3 -m pytest tests/unit/test_strategygroup_* -q",
+      "python3 -m compileall scripts tests",
+      "python3 -m pytest tests/unit -q",
+      "git diff --check"
+    ],
+    "three_strategy_portfolio_status": "pending_downstream_regeneration"
+  },
+  "generated_at_utc": "2026-06-29T11:49:48.383084+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_brf2_owner_trial_policy_scope",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "owner_policy_recorded": true,
+  "owner_policy_scope_missing": false,
+  "policy": {
+    "attempt_cap": 3,
+    "authority_boundary": "owner_policy_only; finalgate_required; operation_layer_required; no_exchange_write",
+    "capital_scope": {
+      "allocation_mode": "full_available_isolated_subaccount",
+      "amount_source": "action_time_exchange_available_balance",
+      "currency": "USDT",
+      "loss_capable": true,
+      "type": "isolated_subaccount_full_allocation"
+    },
+    "daily_loss_cap_units": 1,
+    "leverage_scenario": "5x_scenario_not_authority",
+    "loss_unit": {
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation / attempt cap",
+      "calculation": "action_time_exchange_available_balance / attempt_cap",
+      "currency": "USDT"
+    },
+    "max_consecutive_losses": 2,
+    "max_notional": {
+      "balance_source": "action_time_exchange_available_balance",
+      "basis": "controlled subaccount dynamic allocation x leverage scenario",
+      "calculation": "action_time_exchange_available_balance * leverage_scenario",
+      "currency": "USDT",
+      "final_authority": "runtime_profile_and_action_time_exchange_facts"
+    },
+    "pause_conditions": [
+      "any_path_stop_without_post_trade_review",
+      "two_consecutive_losses",
+      "symbol_specific_loss_until_symbol_review",
+      "missing_required_path_or_liquidation_buffer_evidence"
+    ],
+    "side_scope": [
+      "short"
+    ],
+    "strategy_group_id": "BRF2-001",
+    "symbol_scope": "brf2_research_supported_symbols_only",
+    "trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
+    "valid_until": "one_review_cycle"
+  },
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "registry_authority_changed": false,
+    "tier_policy_changed": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.brf2_owner_trial_policy_scope.v0",
+  "scope": "final_owned_brf2_owner_trial_policy_scope_non_executing",
+  "status": "brf2_owner_trial_policy_scope_recorded"
+}

@@ -95,6 +95,7 @@ class ConfigRepository:
         
         # YAML parser
         self._parser = ConfigParser()
+        self._config_entry_repo: Optional[Any] = None
         
         # Config directory (for YAML backward compatibility)
         self._config_dir: Optional[Path] = None
@@ -231,6 +232,9 @@ class ConfigRepository:
     
     async def close(self) -> None:
         """Close database connection (only if self-owned)."""
+        if self._config_entry_repo is not None:
+            await self._config_entry_repo.close()
+            self._config_entry_repo = None
         if self._db and self._owns_connection:
             await self._db.close()
             self._db = None
@@ -260,6 +264,18 @@ class ConfigRepository:
                     "ConfigRepository 未初始化 - 请确保先调用 initialize()",
                     "F-003",
                 )
+
+    async def _ensure_config_entry_repository(self) -> Any:
+        """Return the KV repository for this repository's active database path."""
+        self.assert_initialized()
+        if self._config_entry_repo is None:
+            from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
+            self._config_entry_repo = ConfigEntryRepository(
+                db_path=self._db_path or "data/v3_dev.db",
+            )
+            await self._config_entry_repo.initialize()
+        return self._config_entry_repo
     
     # ============================================================
     # Database Schema Management
@@ -1404,16 +1420,8 @@ class ConfigRepository:
         if profile_name is None:
             profile_name = "default"
         
-        # TODO: Use ConfigEntryRepository for KV storage
-        # For now, return default values
-        return {
-            "slippage_rate": Decimal("0.001"),
-            "fee_rate": Decimal("0.0004"),
-            "initial_balance": Decimal("10000"),
-            "tp_slippage_rate": Decimal("0.0005"),
-            "funding_rate_enabled": True,
-            "funding_rate": Decimal("0.0001"),
-        }
+        config_entry_repo = await self._ensure_config_entry_repository()
+        return await config_entry_repo.get_backtest_configs(profile_name=profile_name)
     
     async def save_backtest_configs(
         self,
@@ -1437,18 +1445,26 @@ class ConfigRepository:
         if profile_name is None:
             profile_name = "default"
         
-        # TODO: Use ConfigEntryRepository for KV storage
-        # For now, just log the operation
+        config_entry_repo = await self._ensure_config_entry_repository()
+        old_configs = await config_entry_repo.get_backtest_configs(profile_name=profile_name)
+        saved_count = await config_entry_repo.save_backtest_configs(
+            configs=configs,
+            profile_name=profile_name,
+            version="v1.0.0",
+        )
+
         await self._log_config_change(
             entity_type="backtest_config",
             entity_id=f"profile:{profile_name}",
             action="UPDATE",
+            old_values={k: str(v) for k, v in old_configs.items()},
             new_values={k: str(v) for k, v in configs.items()},
             changed_by=changed_by,
             change_summary=f"回测配置更新 - Profile:{profile_name}, 变更项:{len(configs)}",
         )
+        await self._db.commit()
         
-        return len(configs)
+        return saved_count
     
     # ============================================================
     # YAML Import/Export Operations
@@ -1473,8 +1489,44 @@ class ConfigRepository:
         with open(yaml_path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
         
-        # TODO: Parse and import into database
-        logger.info(f"Configuration imported from {yaml_path}")
+        if not isinstance(data, dict):
+            raise ValueError("YAML config import requires a mapping at the document root")
+
+        profile_name = str(data.get("profile_name") or "default")
+        config_entry_repo = await self._ensure_config_entry_repository()
+        imported_sections: list[str] = []
+        imported_count = 0
+
+        config_entries = data.get("config_entries")
+        if config_entries is not None:
+            if not isinstance(config_entries, dict):
+                raise ValueError("config_entries must be a flat mapping")
+            imported_count += await config_entry_repo.import_from_dict(config_entries)
+            imported_sections.append("config_entries")
+
+        backtest_config = data.get("backtest")
+        if backtest_config is not None:
+            if not isinstance(backtest_config, dict):
+                raise ValueError("backtest must be a mapping")
+            imported_count += await config_entry_repo.save_backtest_configs(
+                backtest_config,
+                profile_name=profile_name,
+                version="v1.0.0",
+            )
+            imported_sections.append(f"backtest:{profile_name}")
+
+        if not imported_sections:
+            raise ValueError(
+                "YAML import supports only explicit KV sections: "
+                "config_entries and backtest. Runtime table imports must use ConfigManager."
+            )
+
+        logger.info(
+            "Configuration imported from %s: %s (%s entries)",
+            yaml_path,
+            ", ".join(imported_sections),
+            imported_count,
+        )
         
         # Log the import operation to config history
         await self._log_config_change(
@@ -1482,10 +1534,15 @@ class ConfigRepository:
             entity_id="import_export",
             action="IMPORT",
             old_values=None,
-            new_values={"source_path": yaml_path, "data_keys": list(data.keys()) if data else []},
+            new_values={
+                "source_path": yaml_path,
+                "imported_sections": imported_sections,
+                "imported_count": imported_count,
+            },
             changed_by=changed_by,
-            change_summary=f"Configuration imported from {yaml_path}",
+            change_summary=f"Configuration imported from {yaml_path}: {', '.join(imported_sections)}",
         )
+        await self._db.commit()
         
         return data
     

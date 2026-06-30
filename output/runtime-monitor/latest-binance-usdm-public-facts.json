@@ -1,0 +1,167 @@
+{
+  "checks": {
+    "exchange_write": false,
+    "order_created": false,
+    "private_account_endpoint": false,
+    "public_facts_ready": true,
+    "signed_request": false
+  },
+  "generated_at_utc": "2026-06-30T11:53:52.629933+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L1_tokyo_binance_usdm_public_facts_fetch",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 1
+  },
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.binance_usdm_public_facts.v1",
+  "scope": "binance_usdm_public_readonly_facts",
+  "source": {
+    "endpoint_base": "https://fapi.binance.com",
+    "private_account_endpoint": false,
+    "signed_request": false,
+    "source_role": "public_market_and_contract_facts_not_account_facts",
+    "venue": "binance_usdm"
+  },
+  "status": "binance_usdm_public_facts_ready",
+  "summary": {
+    "errors": [],
+    "private_action_time_facts_included": false,
+    "public_fact_keys": [
+      "exchange_contract_exists",
+      "mark_price_fresh",
+      "funding_not_extreme",
+      "spread_ok",
+      "min_notional_ok",
+      "qty_step_ok",
+      "leverage_available"
+    ],
+    "ready_symbol_count": 5,
+    "symbol_count": 5
+  },
+  "symbols": [
+    {
+      "exchange_contract_exists": true,
+      "facts": {
+        "ask_price": "59285.50",
+        "bid_price": "59285.40",
+        "contract_status": "TRADING",
+        "contract_type": "PERPETUAL",
+        "last_funding_rate": "0.00009682",
+        "mark_price": "59285.40000000",
+        "min_notional": "50",
+        "qty_step": "0.001",
+        "spread_bps": 0.0169
+      },
+      "funding_not_extreme": true,
+      "leverage_available": true,
+      "mark_price_fresh": true,
+      "min_notional_ok": true,
+      "public_facts_ready": true,
+      "qty_step_ok": true,
+      "spread_ok": true,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "exchange_contract_exists": true,
+      "facts": {
+        "ask_price": "1582.43",
+        "bid_price": "1582.42",
+        "contract_status": "TRADING",
+        "contract_type": "PERPETUAL",
+        "last_funding_rate": "0.00004931",
+        "mark_price": "1582.43000000",
+        "min_notional": "20",
+        "qty_step": "0.001",
+        "spread_bps": 0.0632
+      },
+      "funding_not_extreme": true,
+      "leverage_available": true,
+      "mark_price_fresh": true,
+      "min_notional_ok": true,
+      "public_facts_ready": true,
+      "qty_step_ok": true,
+      "spread_ok": true,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "exchange_contract_exists": true,
+      "facts": {
+        "ask_price": "73.6100",
+        "bid_price": "73.6000",
+        "contract_status": "TRADING",
+        "contract_type": "PERPETUAL",
+        "last_funding_rate": "0.00003223",
+        "mark_price": "73.61000000",
+        "min_notional": "5",
+        "qty_step": "0.01",
+        "spread_bps": 1.3585
+      },
+      "funding_not_extreme": true,
+      "leverage_available": true,
+      "mark_price_fresh": true,
+      "min_notional_ok": true,
+      "public_facts_ready": true,
+      "qty_step_ok": true,
+      "spread_ok": true,
+      "symbol": "SOLUSDT"
+    },
+    {
+      "exchange_contract_exists": true,
+      "facts": {
+        "ask_price": "6.5540",
+        "bid_price": "6.5530",
+        "contract_status": "TRADING",
+        "contract_type": "PERPETUAL",
+        "last_funding_rate": "0.00001803",
+        "mark_price": "6.55300000",
+        "min_notional": "5",
+        "qty_step": "1",
+        "spread_bps": 1.526
+      },
+      "funding_not_extreme": true,
+      "leverage_available": true,
+      "mark_price_fresh": true,
+      "min_notional_ok": true,
+      "public_facts_ready": true,
+      "qty_step_ok": true,
+      "spread_ok": true,
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "exchange_contract_exists": true,
+      "facts": {
+        "ask_price": "0.692500",
+        "bid_price": "0.692400",
+        "contract_status": "TRADING",
+        "contract_type": "PERPETUAL",
+        "last_funding_rate": "-0.00001739",
+        "mark_price": "0.69240000",
+        "min_notional": "5",
+        "qty_step": "0.1",
+        "spread_bps": 1.4443
+      },
+      "funding_not_extreme": true,
+      "leverage_available": true,
+      "mark_price_fresh": true,
+      "min_notional_ok": true,
+      "public_facts_ready": true,
+      "qty_step_ok": true,
+      "spread_ok": true,
+      "symbol": "SUIUSDT"
+    }
+  ]
+}

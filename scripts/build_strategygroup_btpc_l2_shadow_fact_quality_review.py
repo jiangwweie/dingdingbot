@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the local BTPC L2 shadow fact-quality review packet.
+"""Build the local BTPC L2 shadow fact-quality review artifact.
 
 This review consumes local opportunity/replay/readiness artifacts and classifies
 BTPC-001 fact gaps by the boundary they affect. It does not fetch market data,
@@ -12,17 +12,25 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.json"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    SOURCE_SAFETY_TRUE_KEYS,
+    artifact_source_forbidden_effects,
+    legacy_authority_mirror_effects_for_artifacts,
+    legacy_authority_mirror_present_errors,
+    non_executing_interaction,
+    non_executing_safety_boundary,
+    review_outcome_default_next_step,
+    review_outcome_state_boundary,
 )
-DEFAULT_L2_READINESS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-l2-readiness-review.json"
-)
-DEFAULT_REPLAY_LAB_JSON = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.json"
+
 DEFAULT_BTPC_HANDOFF_JSON = (
     REPO_ROOT / "docs/current/strategy-group-handoffs/BTPC-001/handoff.json"
 )
@@ -70,24 +78,24 @@ EXPECTED_BTPC_GAPS = {
 
 def build_btpc_l2_shadow_fact_quality_review(
     *,
-    opportunity_decision_loop_packet: dict[str, Any],
-    l2_readiness_packet: dict[str, Any],
-    replay_lab_packet: dict[str, Any],
+    opportunity_review_work_loop_artifact: dict[str, Any],
+    l2_readiness_artifact: dict[str, Any],
+    replay_lab_artifact: dict[str, Any],
     btpc_handoff: dict[str, Any],
 ) -> dict[str, Any]:
     btpc_row = _find_row(
-        _dict_rows(opportunity_decision_loop_packet.get("decision_rows")),
+        _dict_rows(opportunity_review_work_loop_artifact.get("opportunity_review_rows")),
         "BTPC-001",
     )
     readiness_row = _find_row(
-        _dict_rows(l2_readiness_packet.get("readiness_rows")), "BTPC-001"
+        _dict_rows(l2_readiness_artifact.get("readiness_rows")), "BTPC-001"
     )
-    replay_summary = _replay_summary_for_btpc(btpc_row, replay_lab_packet)
+    replay_summary = _replay_summary_for_btpc(btpc_row, replay_lab_artifact)
     fact_rows = _fact_rows(btpc_row)
     forbidden_effects = _forbidden_effects(
-        opportunity_decision_loop_packet,
-        l2_readiness_packet,
-        replay_lab_packet,
+        opportunity_review_work_loop_artifact,
+        l2_readiness_artifact,
+        replay_lab_artifact,
         btpc_handoff,
     )
     missing_classification = [
@@ -129,21 +137,14 @@ def build_btpc_l2_shadow_fact_quality_review(
         "scope": "btpc_l2_shadow_fact_quality_review",
         "status": status,
         "source_status": {
-            "opportunity_decision_loop": opportunity_decision_loop_packet.get("status"),
-            "l2_readiness": l2_readiness_packet.get("status"),
-            "replay_lab": replay_lab_packet.get("status"),
+            "opportunity_review_work_loop": opportunity_review_work_loop_artifact.get("status"),
+            "l2_readiness": l2_readiness_artifact.get("status"),
+            "replay_lab": replay_lab_artifact.get("status"),
             "btpc_handoff": btpc_handoff.get("status"),
         },
-        "interaction": {
-            "level": "L0_local_btpc_l2_shadow_fact_quality_review",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "interaction": non_executing_interaction(
+            "L0_local_btpc_l2_shadow_fact_quality_review"
+        ),
         "counts": {
             "fact_gap_count": len(fact_rows),
             "classified_fact_gap_count": len(fact_rows) - len(missing_classification),
@@ -163,90 +164,82 @@ def build_btpc_l2_shadow_fact_quality_review(
                 1 if "missing_derivatives_context" in replay_summary["fixture_cases"] else 0
             ),
             "forbidden_effect_count": len(forbidden_effects),
-            "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
         },
         "btpc_state": {
             "current_tier": btpc_row.get("current_tier"),
             "tier_state": btpc_row.get("tier_state") or readiness_row.get("l2_readiness"),
-            "decision_action": btpc_row.get("decision_action"),
+            "review_work_action": btpc_row.get("review_work_action"),
             "l2_shadow_observation_enabled": l2_enabled,
             "replay_covered": replay_covered,
             "handoff_boundary_ok": boundary_ok,
         },
         "fact_rows": fact_rows,
         "replay_summary": replay_summary,
-        "decision": {
-            "l2_shadow_observation_can_continue": (
-                status == "btpc_l2_shadow_fact_quality_review_ready"
+        "review_outcome_state": review_outcome_state_boundary(
+            source_role="btpc_l2_shadow_fact_quality_review_provenance",
+            review_scope="l2_shadow_fact_quality",
+            extra={
+                "strategy_group_id": "BTPC-001",
+                "l2_shadow_observation_can_continue": (
+                    status == "btpc_l2_shadow_fact_quality_review_ready"
+                ),
+                "fact_sources_pending": bool(fact_rows),
+                "tier_policy_change_recommended_now": False,
+                "l2_promotion_recommended_now": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+                "default_next_step": _default_next_step(status, fact_rows),
+            },
+        ),
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=(
+                "local_btpc_fact_quality_review_only",
+                "input_is_not_execution_authority",
             ),
-            "fact_sources_pending": bool(fact_rows),
-            "tier_policy_change_recommended_now": False,
-            "l2_promotion_recommended_now": False,
-            "l4_scope_change_recommended": False,
-            "real_order_scope_change_recommended": False,
-            "default_next_step": _default_next_step(status, fact_rows),
-        },
-        "operator_command_plan": {
-            "not_executed": True,
-            "starts_runtime": False,
-            "changes_strategy_parameters": False,
-            "changes_tier_policy": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "calls_final_gate": False,
-            "calls_operation_layer": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
-        },
-        "safety_invariants": {
-            "local_btpc_fact_quality_review_only": True,
-            "input_is_not_execution_authority": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "runtime_started": False,
-            "strategy_parameters_changed": False,
-            "tier_policy_changed": False,
-            "l2_promotion_authorized": False,
-            "l4_real_order_scope_expanded": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-            "source_forbidden_effects": forbidden_effects,
-        },
+            false_keys=(
+                "server_interaction",
+                "server_files_mutated",
+                "runtime_started",
+                "strategy_parameters_changed",
+                "tier_policy_changed",
+                "l2_promotion_authorized",
+                "l4_real_order_scope_expanded",
+                "shadow_candidate_created",
+                "final_gate_called",
+                "operation_layer_called",
+                "order_created",
+                "order_lifecycle_called",
+                "exchange_write_called",
+                "withdrawal_or_transfer_created",
+            ),
+            source_forbidden_effects=forbidden_effects,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
-    counts = _as_dict(packet.get("counts"))
-    decision = _as_dict(packet.get("decision"))
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
+    counts = _as_dict(artifact.get("counts"))
     lines = [
         "# BTPC L2 Shadow Fact Quality Review",
         "",
         "## Summary",
         "",
-        f"- Status: `{packet.get('status')}`",
+        f"- Status: `{artifact.get('status')}`",
         f"- Fact gaps: `{counts.get('fact_gap_count', 0)}`",
         f"- Classified: `{counts.get('classified_fact_gap_count', 0)}`",
         f"- Promotion blockers: `{counts.get('promotion_blocker_count', 0)}`",
         f"- Real-order blockers: `{counts.get('real_order_eligibility_blocker_count', 0)}`",
         "- L2 promotion authority: `false`",
         "- L4 scope change: `false`",
-        "- Real order authority: `false`",
         "",
         "## Fact Rows",
         "",
-        _fact_table(_dict_rows(packet.get("fact_rows"))),
+        _fact_table(_dict_rows(artifact.get("fact_rows"))),
         "",
         "## Next",
         "",
-        f"- `{decision.get('default_next_step')}`",
+        f"- `{review_outcome_default_next_step(artifact)}`",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -280,10 +273,9 @@ def _fact_rows(btpc_row: dict[str, Any]) -> list[dict[str, Any]]:
                     "strategy_review_pending_not_runtime_blocking",
                 },
                 "next_local_action": spec.get("next_local_action")
-                or item.get("next_stage_decision")
+                or item.get("next_stage_recommendation")
                 or "classify_gap_before_next_review",
                 "validation_command": item.get("validation_command"),
-                "real_order_authority": False,
                 "l4_scope_change_recommended": False,
             }
         )
@@ -292,12 +284,12 @@ def _fact_rows(btpc_row: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _replay_summary_for_btpc(
     btpc_row: dict[str, Any],
-    replay_lab_packet: dict[str, Any],
+    replay_lab_artifact: dict[str, Any],
 ) -> dict[str, Any]:
     row_summary = _as_dict(btpc_row.get("replay_verification"))
     samples = [
         row
-        for row in _dict_rows(replay_lab_packet.get("l2_shadow_replay_samples"))
+        for row in _dict_rows(replay_lab_artifact.get("l2_shadow_replay_samples"))
         if row.get("strategy_group_id") == "BTPC-001"
     ]
     fixture_cases = sorted(
@@ -376,32 +368,89 @@ def _default_next_step(status: str, fact_rows: list[dict[str, Any]]) -> str:
     return "continue_btpc_l2_shadow_observation_with_fact_gap_tracking"
 
 
-def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
-    effects: list[str] = []
-    for index, packet in enumerate(packets):
-        safety = _as_dict(packet.get("safety_invariants"))
-        for item in safety.get("source_forbidden_effects") or []:
-            effects.append(f"packet_{index}.{item}")
-        for key in (
-            "server_files_mutated",
-            "runtime_started",
-            "strategy_parameters_changed",
-            "tier_policy_changed",
-            "shadow_candidate_created",
-            "execution_intent_created",
-            "final_gate_called",
-            "operation_layer_called",
-            "order_created",
-            "order_lifecycle_called",
-            "exchange_write_called",
-            "withdrawal_or_transfer_created",
-        ):
-            if safety.get(key) is True:
-                effects.append(f"packet_{index}.safety.{key}")
-    boundary = _as_dict(packets[-1].get("execution_boundary")) if packets else {}
+def _forbidden_effects(*artifacts: dict[str, Any]) -> list[str]:
+    effects = artifact_source_forbidden_effects(
+        artifacts,
+        true_keys=SOURCE_SAFETY_TRUE_KEYS,
+    )
+    boundary = _as_dict(artifacts[-1].get("execution_boundary")) if artifacts else {}
     if boundary.get("real_submit_authorized") is True:
         effects.append("btpc_handoff.execution_boundary.real_submit_authorized")
+    effects.extend(_legacy_authority_mirror_effects(*artifacts))
     return sorted(set(effects))
+
+
+def _legacy_authority_mirror_effects(*artifacts: dict[str, Any]) -> list[str]:
+    artifact_items = tuple(
+        zip(
+            (
+                "opportunity_review_work_loop",
+                "l2_readiness",
+                "replay_lab",
+                "btpc_handoff",
+            ),
+            artifacts,
+        )
+    )
+    effects = legacy_authority_mirror_effects_for_artifacts(
+        artifact_items,
+        section_names=(
+            "safety_invariants",
+            "review_outcome_state",
+            "btpc_state",
+            "execution_boundary",
+        ),
+        row_names=(
+            "opportunity_review_rows",
+            "readiness_rows",
+            "l2_shadow_replay_samples",
+            "gap_work_items",
+        ),
+        row_id_keys=("fixture_case", "strategy_group_id", "gap"),
+    )
+    for artifact_name, artifact in artifact_items:
+        for row_name in (
+            "opportunity_review_rows",
+            "readiness_rows",
+            "l2_shadow_replay_samples",
+            "gap_work_items",
+        ):
+            for index, row in enumerate(_dict_rows(artifact.get(row_name))):
+                row_id = _source_row_id(row, row_name=row_name, fallback=index)
+                effects.extend(
+                    legacy_authority_mirror_present_errors(
+                        _as_dict(row.get("replay_verification")),
+                        label_prefix=(
+                            f"{artifact_name}.{row_name}.{row_id}."
+                            "replay_verification."
+                        ),
+                    )
+                )
+                for gap_index, gap_row in enumerate(
+                    _dict_rows(row.get("gap_work_items"))
+                ):
+                    gap_id = str(gap_row.get("gap") or gap_index)
+                    effects.extend(
+                        legacy_authority_mirror_present_errors(
+                            gap_row,
+                            label_prefix=(
+                                f"{artifact_name}.{row_name}.{row_id}."
+                                f"gap_work_items.{gap_id}."
+                            ),
+                        )
+                    )
+    return effects
+
+
+def _source_row_id(row: dict[str, Any], *, row_name: str, fallback: int) -> str:
+    if row_name == "l2_shadow_replay_samples":
+        return str(row.get("fixture_case") or row.get("strategy_group_id") or fallback)
+    return str(
+        row.get("strategy_group_id")
+        or row.get("fixture_case")
+        or row.get("gap")
+        or fallback
+    )
 
 
 def _fact_table(rows: list[dict[str, Any]]) -> str:
@@ -443,6 +492,12 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_optional_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    return _load_json_object(path)
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -461,27 +516,34 @@ def _int(value: Any) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--opportunity-decision-loop-json",
-        default=str(DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON),
+        "--opportunity-review-work-loop-json",
     )
-    parser.add_argument("--l2-readiness-json", default=str(DEFAULT_L2_READINESS_JSON))
-    parser.add_argument("--replay-lab-json", default=str(DEFAULT_REPLAY_LAB_JSON))
+    parser.add_argument("--l2-readiness-json")
+    parser.add_argument("--replay-lab-json")
     parser.add_argument("--btpc-handoff-json", default=str(DEFAULT_BTPC_HANDOFF_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
 
-    packet = build_btpc_l2_shadow_fact_quality_review(
-        opportunity_decision_loop_packet=_load_json_object(
-            Path(args.opportunity_decision_loop_json).expanduser()
-        ),
-        l2_readiness_packet=_load_json_object(
+    artifact = build_btpc_l2_shadow_fact_quality_review(
+        opportunity_review_work_loop_artifact=_load_optional_json_object(
+            Path(args.opportunity_review_work_loop_json).expanduser()
+        )
+        if args.opportunity_review_work_loop_json
+        else {},
+        l2_readiness_artifact=_load_optional_json_object(
             Path(args.l2_readiness_json).expanduser()
-        ),
-        replay_lab_packet=_load_json_object(Path(args.replay_lab_json).expanduser()),
+        )
+        if args.l2_readiness_json
+        else {},
+        replay_lab_artifact=_load_optional_json_object(
+            Path(args.replay_lab_json).expanduser()
+        )
+        if args.replay_lab_json
+        else {},
         btpc_handoff=_load_json_object(Path(args.btpc_handoff_json).expanduser()),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -489,9 +551,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] != "blocked_forbidden_effect" else 2
+    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
 
 
 if __name__ == "__main__":

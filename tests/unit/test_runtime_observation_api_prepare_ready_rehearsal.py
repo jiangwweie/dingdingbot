@@ -37,13 +37,14 @@ def test_ready_rehearsal_reaches_prepare_without_execution():
     assert report["checks"]["prepared_authorization_id_present"] is True
     assert report["checks"]["forbidden_execution_flags"] == []
     assert report["dry_run_payload"]["status"] == "ready_for_prepare"
-    assert report["dry_run_payload"]["prepare_packet"] is None
+    assert report["dry_run_payload"]["prepare_artifact"] is None
     assert report["allow_prepare_payload"]["status"] == "ready_for_final_gate_preflight"
     assert report["summary"]["prepared_authorization_id"] == "auth-ready-rehearsal"
     assert report["summary"]["real_submit_authorized"] is False
-    assert report["operator_command_plan"]["places_order"] is False
-    assert report["operator_command_plan"]["calls_order_lifecycle"] is False
-    assert "run_disabled_first_real_submit_smoke" in report["operator_command_plan"][
+    assert "operator_command_plan" not in report
+    assert report["ready_prepare_rehearsal_plan"]["places_order"] is False
+    assert report["ready_prepare_rehearsal_plan"]["calls_order_lifecycle"] is False
+    assert "run_disabled_first_real_submit_smoke" in report["ready_prepare_rehearsal_plan"][
         "allowed_after_real_ready_signal"
     ]
     assert "exchange order placement" in report["owner_gate"]["does_not_authorize"]
@@ -54,7 +55,7 @@ def test_ready_rehearsal_reaches_prepare_without_execution():
         is True
     )
     assert (
-        report["allow_prepare_payload"]["prepare_packet"]["created_records"][
+        report["allow_prepare_payload"]["prepare_artifact"]["created_records"][
             "attempt_mutation_created"
         ]
         is False
@@ -74,4 +75,5 @@ def test_ready_rehearsal_cli_can_write_owner_review_json(tmp_path, capsys):
     assert stdout_payload == file_payload
     assert file_payload["status"] == "rehearsal_passed"
     assert file_payload["owner_gate"]["rehearsal_only"] is True
-    assert file_payload["operator_command_plan"]["places_order"] is False
+    assert "operator_command_plan" not in file_payload
+    assert file_payload["ready_prepare_rehearsal_plan"]["places_order"] is False

@@ -35,7 +35,10 @@ async def test_post_submit_finalize_loop_report_covers_runtime_level_paths():
     }
 
     ready = scenarios["latest-result-ready-for-fresh-signal"]
-    assert ready["packet_status"] == "finalized_ready_for_next_attempt"
+    assert ready["finalize_status"] == "finalized_ready_for_next_attempt"
+    assert "packet_status" not in ready
+    assert "packet" not in ready
+    assert ready["finalize_artifact"]["status"] == "finalized_ready_for_next_attempt"
     assert ready["next_attempt_gate_status"] == "ready_for_fresh_signal"
     assert ready["checks"]["latest_result_resolved_without_manual_authorization"] is True
     assert ready["checks"]["old_authorization_replay_only"] is True
@@ -45,7 +48,7 @@ async def test_post_submit_finalize_loop_report_covers_runtime_level_paths():
     assert ready["checks"]["no_execution_side_effects"] is True
 
     active_position = scenarios["latest-result-active-position-blocks-next-attempt"]
-    assert active_position["packet_status"] == "finalized_next_attempt_blocked"
+    assert active_position["finalize_status"] == "finalized_next_attempt_blocked"
     assert active_position["blockers"] == []
     assert active_position["next_attempt_gate_status"] == "blocked"
     assert "runtime_active_position_slot_in_use" in (
@@ -53,7 +56,7 @@ async def test_post_submit_finalize_loop_report_covers_runtime_level_paths():
     )
 
     missing = scenarios["latest-result-missing-blocks-finalize"]
-    assert missing["packet_status"] == "blocked"
+    assert missing["finalize_status"] == "blocked"
     assert "latest_exchange_submit_execution_result_not_found" in missing["blockers"]
     assert "trusted_active_positions_count_missing" in missing["next_attempt_blockers"]
     assert missing["checks"]["adapter_not_used_to_create_missing_facts"] is True

@@ -12,10 +12,26 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.strategygroup_non_executing_projection import (  # noqa: E402
+    L2_NON_EXECUTING_SOURCE_TRUE_KEYS,
+    legacy_authority_mirror_effects_for_artifacts,
+    non_executing_interaction,
+    non_executing_safety_boundary,
+    review_outcome_default_next_step,
+    review_outcome_state_boundary,
+    review_outcome_value,
+    source_forbidden_effects,
+)
+
+
 DEFAULT_L2_READINESS_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-l2-readiness-review.json"
 )
@@ -34,12 +50,12 @@ EXECUTION_BOUNDARY_FALSE_FIELDS = {
 
 def build_l2_intake_dry_run(
     *,
-    l2_readiness_packet: dict[str, Any],
+    l2_readiness_artifact: dict[str, Any],
     handoff_root: Path = DEFAULT_HANDOFF_ROOT,
 ) -> dict[str, Any]:
     source_rows = [
         row
-        for row in l2_readiness_packet.get("readiness_rows") or []
+        for row in l2_readiness_artifact.get("readiness_rows") or []
         if isinstance(row, dict)
     ]
     rows = [
@@ -63,7 +79,7 @@ def build_l2_intake_dry_run(
         for row in rows
     ]
     failed_rows = [row for row in dry_run_rows if row["status"] != "passed"]
-    forbidden_effects = _source_forbidden_effects(l2_readiness_packet)
+    forbidden_effects = _source_forbidden_effects(l2_readiness_artifact)
 
     if forbidden_effects:
         status = "blocked_forbidden_effect"
@@ -86,17 +102,8 @@ def build_l2_intake_dry_run(
         "scope": "strategygroup_l2_intake_dry_run",
         "status": status,
         "owner_state": owner_state,
-        "source_l2_readiness_status": l2_readiness_packet.get("status"),
-        "interaction": {
-            "level": "L0_local_l2_intake_dry_run",
-            "remote_interaction_count": 0,
-            "mutates_remote_files": False,
-            "approaches_real_order": False,
-            "calls_finalgate": False,
-            "calls_operation_layer": False,
-            "calls_exchange_write": False,
-            "places_order": False,
-        },
+        "source_l2_readiness_status": l2_readiness_artifact.get("status"),
+        "interaction": non_executing_interaction("L0_local_l2_intake_dry_run"),
         "counts": {
             "candidate_count": len(dry_run_rows),
             "passed_count": len(dry_run_rows) - len(failed_rows),
@@ -109,100 +116,93 @@ def build_l2_intake_dry_run(
         },
         "dry_run_rows": dry_run_rows,
         "source_readiness_rows": [_source_row(row) for row in source_rows],
-        "decision": {
-            "default_next_step": next_step,
-            "no_candidate_reason": (
-                "no_conditional_l2_review_candidates"
-                if not dry_run_rows
-                else None
+        "review_outcome_state": review_outcome_state_boundary(
+            source_role="l2_intake_dry_run_provenance",
+            review_scope="l2_intake_dry_run",
+            extra={
+                "default_next_step": next_step,
+                "no_candidate_reason": (
+                    "no_conditional_l2_review_candidates"
+                    if not dry_run_rows
+                    else None
+                ),
+                "tier_policy_change_ready_for_review": (
+                    status == "l2_intake_dry_run_passed"
+                ),
+                "l4_scope_change_recommended": False,
+                "shadow_candidate_creation_recommended_now": False,
+                "groups_ready_for_l2_policy_review": [
+                    row["strategy_group_id"]
+                    for row in dry_run_rows
+                    if row["status"] == "passed"
+                ],
+                "enabled_l2_groups": [
+                    str(row.get("strategy_group_id") or "unknown")
+                    for row in enabled_rows
+                ],
+                "blocked_groups": [
+                    str(row.get("strategy_group_id") or "unknown")
+                    for row in blocked_rows
+                ],
+            },
+        ),
+        "safety_invariants": non_executing_safety_boundary(
+            true_keys=("review_only",),
+            false_keys=(
+                "server_interaction",
+                "server_files_mutated",
+                "runtime_started",
+                "strategy_parameters_changed",
+                "tier_policy_changed",
+                "l4_real_order_scope_expanded",
+                "shadow_candidate_created",
+                "final_gate_called",
+                "operation_layer_called",
+                "order_created",
+                "order_lifecycle_called",
+                "exchange_write_called",
+                "withdrawal_or_transfer_created",
             ),
-            "tier_policy_change_ready_for_review": (
-                status == "l2_intake_dry_run_passed"
-            ),
-            "l4_scope_change_recommended": False,
-            "shadow_candidate_creation_recommended_now": False,
-            "groups_ready_for_l2_policy_review": [
-                row["strategy_group_id"] for row in dry_run_rows if row["status"] == "passed"
-            ],
-            "enabled_l2_groups": [
-                str(row.get("strategy_group_id") or "unknown")
-                for row in enabled_rows
-            ],
-            "blocked_groups": [
-                str(row.get("strategy_group_id") or "unknown")
-                for row in blocked_rows
-            ],
-        },
-        "operator_command_plan": {
-            "not_executed": True,
-            "next_step": next_step,
-            "starts_runtime": False,
-            "changes_strategy_parameters": False,
-            "changes_tier_policy": False,
-            "creates_shadow_candidate": False,
-            "creates_execution_intent": False,
-            "calls_final_gate": False,
-            "calls_operation_layer": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "withdrawal_or_transfer_requested": False,
-        },
-        "safety_invariants": {
-            "review_only": True,
-            "server_interaction": False,
-            "server_files_mutated": False,
-            "runtime_started": False,
-            "strategy_parameters_changed": False,
-            "tier_policy_changed": False,
-            "l4_real_order_scope_expanded": False,
-            "shadow_candidate_created": False,
-            "execution_intent_created": False,
-            "final_gate_called": False,
-            "operation_layer_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_write_called": False,
-            "withdrawal_or_transfer_created": False,
-            "source_forbidden_effects": forbidden_effects,
-        },
+            source_forbidden_effects=forbidden_effects,
+        ),
     }
 
 
-def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
-    counts = packet.get("counts") if isinstance(packet.get("counts"), dict) else {}
+def render_owner_progress_markdown(artifact: dict[str, Any]) -> str:
+    counts = artifact.get("counts") if isinstance(artifact.get("counts"), dict) else {}
     lines = [
         "# L2 Intake Dry-Run",
         "",
         "## Owner 摘要",
         "",
-        f"- Status: `{packet.get('status')}`",
-        f"- Owner state: `{packet.get('owner_state')}`",
+        f"- Status: `{artifact.get('status')}`",
+        f"- Owner state: `{artifact.get('owner_state')}`",
         f"- Candidate count: `{counts.get('candidate_count', 0)}`",
         f"- Passed count: `{counts.get('passed_count', 0)}`",
         f"- Source enabled L2: `{counts.get('source_enabled_l2_count', 0)}`",
         f"- Source blocked rows: `{counts.get('source_blocked_count', 0)}`",
-        f"- No-candidate reason: `{_dict(packet.get('decision')).get('no_candidate_reason')}`",
+        f"- No-candidate reason: `{review_outcome_value(artifact, 'no_candidate_reason')}`",
         "- Tier policy changed: `false`",
         "- L4 scope changed: `false`",
         "- Real order: `false`",
         "",
         "## Rows",
         "",
-        _rows_table([row for row in packet.get("dry_run_rows") or [] if isinstance(row, dict)]),
+        _rows_table([row for row in artifact.get("dry_run_rows") or [] if isinstance(row, dict)]),
         "",
         "## Source Readiness Rows",
         "",
         _source_rows_table(
             [
                 row
-                for row in packet.get("source_readiness_rows") or []
+                for row in artifact.get("source_readiness_rows") or []
                 if isinstance(row, dict)
             ]
         ),
         "",
         "## 下一步",
         "",
-        f"- `{_dict(packet.get('decision')).get('default_next_step')}`",
+        f"- `{review_outcome_default_next_step(artifact)}`",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -213,7 +213,7 @@ def _dry_run_row(*, row: dict[str, Any], handoff_root: Path) -> dict[str, Any]:
     blockers: list[str] = []
     handoff = _read_json_object_if_exists(handoff_path)
     if not handoff:
-        blockers.append("handoff_json_missing")
+        blockers.append("strategy_intake_source_json_missing")
     boundary = _dict(handoff.get("execution_boundary"))
     mode = _dict(handoff.get("mode_recommendation"))
     risk_defaults = _dict(handoff.get("risk_defaults"))
@@ -223,13 +223,13 @@ def _dry_run_row(*, row: dict[str, Any], handoff_root: Path) -> dict[str, Any]:
     symbol = _exchange_symbol(row.get("symbol"))
 
     checks = {
-        "handoff_json_present": bool(handoff),
+        "intake_source_json_present": bool(handoff),
         "default_mode_observe_only": mode.get("default") == "observe_only",
         "conditional_signal_side_supported": row.get("side") in (handoff.get("supported_sides") or []),
         "conditional_signal_symbol_supported": symbol in (handoff.get("supported_symbols") or []),
         "required_fact_categories_present": REQUIRED_FACT_CATEGORIES.issubset(required_categories),
         "l2_signal_status_is_observe_only": signal_rule.get("status_name") == "would_enter_observe_only",
-        "research_handoff_only": boundary.get("research_handoff_only") is True,
+        "research_intake_source_only": boundary.get("research_intake_source_only") is True,
         "does_not_authorize_execution": all(
             boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
         ),
@@ -245,7 +245,7 @@ def _dry_run_row(*, row: dict[str, Any], handoff_root: Path) -> dict[str, Any]:
         "symbol": row.get("symbol"),
         "side": row.get("side"),
         "status": "passed" if not blockers else "failed",
-        "handoff_json": str(handoff_path),
+        "intake_source_json": str(handoff_path),
         "checks": checks,
         "blockers": blockers,
         "next_step": (
@@ -276,22 +276,21 @@ def _source_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _source_forbidden_effects(packet: dict[str, Any]) -> list[str]:
-    safety = _dict(packet.get("safety_invariants"))
-    effects = [str(item) for item in safety.get("source_forbidden_effects") or []]
-    for key in (
-        "shadow_candidate_created",
-        "execution_intent_created",
-        "final_gate_called",
-        "operation_layer_called",
-        "order_created",
-        "order_lifecycle_called",
-        "exchange_write_called",
-        "withdrawal_or_transfer_created",
-    ):
-        if safety.get(key) is True:
-            effects.append(f"source_l2_readiness.safety.{key}")
-    return sorted(set(effects))
+def _source_forbidden_effects(artifact: dict[str, Any]) -> list[str]:
+    effects = source_forbidden_effects(
+        (("source_l2_readiness", artifact),),
+        true_keys=L2_NON_EXECUTING_SOURCE_TRUE_KEYS,
+    )
+    effects.extend(
+        legacy_authority_mirror_effects_for_artifacts(
+            (("source_l2_readiness", artifact),),
+            root_section_name="root",
+            section_names=("checks", "safety_invariants", "review_outcome_state"),
+            row_names=("readiness_rows",),
+            row_id_keys=("strategy_group_id", "symbol"),
+        )
+    )
+    return sorted(set(effect for effect in effects if effect))
 
 
 def _rows_table(rows: list[dict[str, Any]]) -> str:
@@ -384,11 +383,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
 
-    packet = build_l2_intake_dry_run(
-        l2_readiness_packet=_read_json_object(Path(args.l2_readiness_json).expanduser()),
+    artifact = build_l2_intake_dry_run(
+        l2_readiness_artifact=_read_json_object(
+            Path(args.l2_readiness_json).expanduser()
+        ),
         handoff_root=Path(args.handoff_root).expanduser(),
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
+    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,9 +397,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.output_owner_progress:
         owner_path = Path(args.output_owner_progress).expanduser()
         owner_path.parent.mkdir(parents=True, exist_ok=True)
-        owner_path.write_text(build_owner_progress_markdown(packet), encoding="utf-8")
+        owner_path.write_text(render_owner_progress_markdown(artifact), encoding="utf-8")
     print(payload)
-    return 0 if packet["status"] != "blocked_forbidden_effect" else 2
+    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
 
 
 if __name__ == "__main__":

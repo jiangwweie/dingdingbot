@@ -40,7 +40,7 @@ def upgrade() -> None:
         TABLE,
         sa.Column("execution_result_id", sa.String(length=540), primary_key=True),
         sa.Column("enablement_decision_id", sa.String(length=500), nullable=False),
-        sa.Column("packet_preview_id", sa.String(length=460), nullable=False),
+        sa.Column("submit_preview_id", sa.String(length=460), nullable=False),
         sa.Column("binding_id", sa.String(length=460), nullable=False),
         sa.Column("authorization_id", sa.String(length=220), nullable=False),
         sa.Column("execution_intent_id", sa.String(length=64), nullable=False),

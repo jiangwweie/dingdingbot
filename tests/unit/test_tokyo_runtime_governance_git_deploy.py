@@ -14,7 +14,7 @@ EXECUTE_SCRIPT_PATH = (
     REPO_ROOT / "scripts" / "execute_tokyo_runtime_governance_git_deploy.py"
 )
 PACKET_SCRIPT_PATH = (
-    REPO_ROOT / "scripts" / "build_tokyo_runtime_governance_git_owner_deploy_packet.py"
+    REPO_ROOT / "scripts" / "build_tokyo_runtime_governance_git_owner_deploy_policy_artifact.py"
 )
 
 
@@ -42,7 +42,7 @@ def _load_execute_module():
 def _load_packet_module():
     return _load_module(
         PACKET_SCRIPT_PATH,
-        "build_tokyo_runtime_governance_git_owner_deploy_packet",
+        "build_tokyo_runtime_governance_git_owner_deploy_policy_artifact",
     )
 
 
@@ -97,7 +97,7 @@ def _ready_git_plan():
     )
 
 
-def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
+def _owner_evidence_for_plan(plan: dict, *, head: str | None = None) -> dict:
     return {
         "status": "ready_for_owner_git_deploy_decision",
         "candidate": {
@@ -120,7 +120,7 @@ def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
     }
 
 
-def _owner_deploy_packet_inputs() -> tuple[dict, dict, dict, dict]:
+def _owner_deploy_artifact_inputs() -> tuple[dict, dict, dict, dict]:
     plan = _ready_git_plan()
     deploy_dry_run = {
         "status": "dry_run_ready",
@@ -324,13 +324,13 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
     assert report["checks"]["remote_mutation_authorization"]
-    assert report["inputs"]["target_migration_count"] == 84
+    assert report["inputs"]["target_migration_count"] == 85
     assert report["inputs"]["local_latest_migration"] == (
-        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+        "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
     )
     assert report["inputs"]["remote_migration_revision"] == "081"
-    assert report["inputs"]["target_migration_revision"] == "084"
-    assert report["inputs"]["migration_gap_revision_count"] == 8
+    assert report["inputs"]["target_migration_revision"] == "085"
+    assert report["inputs"]["migration_gap_revision_count"] == 9
     phases = {phase["phase"]: phase for phase in report["plan_phases"]}
     assert phases["2_owner_authorized_git_fetch_and_export"]["remote_mutation"] is True
     assert all(
@@ -361,9 +361,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert '"status": "postdeploy_accepted"' in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
-    assert "--expected-min-migrations 84" in all_commands
-    assert "--base-revision 081 --head-revision 084 --expected-revision-count 8" in all_commands
-    assert "--expected-migration-count 84" in all_commands
+    assert "--expected-min-migrations 85" in all_commands
+    assert "--base-revision 081 --head-revision 085 --expected-revision-count 9" in all_commands
+    assert "--expected-migration-count 85" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
 
@@ -559,11 +559,10 @@ def test_git_deploy_executor_dry_run_does_not_execute_commands():
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_exchange_write"] is False
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["owner_summary"]["frontend_static_site"] == "not_included"
     assert report["owner_summary"]["postdeploy_snapshot_recommended"] is False
 
 
-def test_git_deploy_executor_applies_with_standing_authorization_without_owner_packet():
+def test_git_deploy_executor_applies_with_standing_authorization_without_owner_evidence():
     module = _load_execute_module()
     plan = _ready_git_plan()
     calls = []
@@ -595,7 +594,7 @@ def test_git_deploy_executor_can_require_legacy_confirmation_phrase():
         apply=True,
         confirmation_phrase=None,
         require_confirmation_phrase=True,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
@@ -620,7 +619,7 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 
@@ -644,12 +643,11 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert report["owner_summary"]["changed"]["remote_files"] is True
     assert report["owner_summary"]["changed"]["services_restarted"] is True
     assert report["owner_summary"]["not_changed"]["exchange_orders"] is True
-    assert report["owner_summary"]["frontend_static_site"] == "not_included"
     assert report["owner_summary"]["postdeploy_snapshot_recommended"] is True
     assert report["owner_summary"]["safety"]["order_created"] is False
 
 
-def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit():
+def test_git_owner_deploy_artifact_requires_ready_git_plan_and_blocked_real_submit():
     module = _load_packet_module()
     plan = _ready_git_plan()
     deploy_dry_run = {
@@ -697,7 +695,7 @@ def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit
             "exchange_called": False,
         },
     }
-    pre_live_packet = {
+    pre_live_evidence = {
         "status": "blocked_before_first_real_submit",
         "checks": {
             "technical_rehearsal_passed": True,
@@ -712,52 +710,75 @@ def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit
         },
     }
 
-    packet = module.build_git_owner_deploy_packet(
+    artifact = module.build_git_owner_deploy_artifact(
         release_report=release_report,
         deploy_plan=plan,
         deploy_dry_run=deploy_dry_run,
         tokyo_probe=tokyo_probe,
-        pre_live_packet=pre_live_packet,
+        pre_live_evidence=pre_live_evidence,
     )
 
-    assert packet["status"] == "ready_for_owner_git_deploy_decision"
-    assert packet["checks"]["ready_for_owner_git_deploy_decision"] is True
-    assert packet["checks"]["first_real_submit_still_blocked"] is True
-    assert packet["checks"]["forbidden_effects"] == []
-    assert packet["candidate"]["repo_url"] == plan["inputs"]["repo_url"]
-    assert packet["candidate"]["git_ref"] == plan["inputs"]["git_ref"]
-    assert packet["owner_gate"]["deploy_confirmation_phrase_required"] is False
-    assert packet["owner_gate"]["deploy_apply_authorized_by"]
+    assert artifact["status"] == "ready_for_owner_git_deploy_decision"
+    assert artifact["checks"]["ready_for_owner_git_deploy_decision"] is True
+    assert artifact["checks"]["first_real_submit_still_blocked"] is True
+    assert artifact["checks"]["forbidden_effects"] == []
+    assert artifact["candidate"]["repo_url"] == plan["inputs"]["repo_url"]
+    assert artifact["candidate"]["git_ref"] == plan["inputs"]["git_ref"]
+    assert artifact["owner_gate"]["deploy_confirmation_phrase_required"] is False
+    assert artifact["owner_gate"]["deploy_apply_authorized_by"]
     assert "real runtime submit" in (
-        packet["owner_gate"]["deploy_confirmation_does_not_authorize"]
+        artifact["owner_gate"]["deploy_confirmation_does_not_authorize"]
     )
 
 
-def test_git_owner_deploy_packet_can_skip_pre_live_packet_for_deploy_only():
+def test_git_owner_deploy_artifact_human_output_reads_artifact(capsys):
     module = _load_packet_module()
     plan, deploy_dry_run, release_report, tokyo_probe = (
-        _owner_deploy_packet_inputs()
+        _owner_deploy_artifact_inputs()
     )
-
-    packet = module.build_git_owner_deploy_packet(
+    artifact = module.build_git_owner_deploy_artifact(
         release_report=release_report,
         deploy_plan=plan,
         deploy_dry_run=deploy_dry_run,
         tokyo_probe=tokyo_probe,
-        pre_live_packet=None,
+        pre_live_evidence=None,
     )
 
-    assert packet["status"] == "ready_for_owner_git_deploy_decision"
-    assert packet["checks"]["ready_for_owner_git_deploy_decision"] is True
-    assert packet["checks"]["pre_live_packet_skipped"] is True
-    assert packet["checks"]["first_real_submit_still_blocked"] is True
-    assert "pre_live_packet_skipped_for_deploy_only" in packet["checks"]["warnings"]
+    module._print_human(artifact)
+
+    output = capsys.readouterr().out
+    assert "status=ready_for_owner_git_deploy_decision" in output
+    assert "ready_for_owner_git_deploy_decision=true" in output
+    assert f"head={plan['release']['head']}" in output
+    assert "repo_url=https://github.com/example/dingdingbot.git" in output
+    assert "git_ref=release/test" in output
 
 
-def test_git_owner_deploy_packet_surfaces_tokyo_connectivity_blocker():
+def test_git_owner_deploy_artifact_can_skip_pre_live_evidence_for_deploy_only():
+    module = _load_packet_module()
+    plan, deploy_dry_run, release_report, tokyo_probe = (
+        _owner_deploy_artifact_inputs()
+    )
+
+    artifact = module.build_git_owner_deploy_artifact(
+        release_report=release_report,
+        deploy_plan=plan,
+        deploy_dry_run=deploy_dry_run,
+        tokyo_probe=tokyo_probe,
+        pre_live_evidence=None,
+    )
+
+    assert artifact["status"] == "ready_for_owner_git_deploy_decision"
+    assert artifact["checks"]["ready_for_owner_git_deploy_decision"] is True
+    assert artifact["checks"]["pre_live_evidence_skipped"] is True
+    assert artifact["checks"]["first_real_submit_still_blocked"] is True
+    assert "pre_live_evidence_skipped_for_deploy_only" in artifact["checks"]["warnings"]
+
+
+def test_git_owner_deploy_artifact_surfaces_tokyo_connectivity_blocker():
     module = _load_packet_module()
     plan, deploy_dry_run, release_report, _tokyo_probe = (
-        _owner_deploy_packet_inputs()
+        _owner_deploy_artifact_inputs()
     )
     connectivity_probe = {
         "status": "blocked",
@@ -801,38 +822,38 @@ def test_git_owner_deploy_packet_surfaces_tokyo_connectivity_blocker():
         },
     }
 
-    packet = module.build_git_owner_deploy_packet(
+    artifact = module.build_git_owner_deploy_artifact(
         release_report=release_report,
         deploy_plan=plan,
         deploy_dry_run=deploy_dry_run,
         tokyo_probe=tokyo_probe,
-        pre_live_packet=None,
+        pre_live_evidence=None,
         connectivity_probe=connectivity_probe,
     )
 
-    assert packet["status"] == "blocked"
-    assert "tokyo_readonly_probe_not_ready" in packet["checks"]["blockers"]
+    assert artifact["status"] == "blocked"
+    assert "tokyo_readonly_probe_not_ready" in artifact["checks"]["blockers"]
     assert (
-        "tokyo_probe:tokyo_readonly_probe_error" in packet["checks"]["blockers"]
+        "tokyo_probe:tokyo_readonly_probe_error" in artifact["checks"]["blockers"]
     )
     assert (
         "tokyo_connectivity:tokyo_tcp_22_unreachable"
-        in packet["checks"]["blockers"]
+        in artifact["checks"]["blockers"]
     )
-    assert packet["checks"]["tokyo_connectivity_probe_ready"] is False
-    assert packet["checks"]["tokyo_connectivity_blockers"] == [
+    assert artifact["checks"]["tokyo_connectivity_probe_ready"] is False
+    assert artifact["checks"]["tokyo_connectivity_blockers"] == [
         "tokyo_tcp_22_unreachable"
     ]
-    assert packet["safety_invariants"]["deploy_apply_requested"] is False
+    assert artifact["safety_invariants"]["deploy_apply_requested"] is False
 
 
 def test_git_deploy_executor_allows_deploy_only_packet_when_pre_live_skipped():
     module = _load_execute_module()
     plan = _ready_git_plan()
-    packet = _owner_packet_for_plan(plan)
-    packet["checks"]["first_real_submit_still_blocked"] = False
-    packet["checks"]["pre_live_packet_skipped"] = True
+    artifact = _owner_evidence_for_plan(plan)
+    artifact["checks"]["first_real_submit_still_blocked"] = False
+    artifact["checks"]["pre_live_evidence_skipped"] = True
 
-    blockers = module._owner_deploy_packet_blockers(plan, packet)
+    blockers = module._owner_deploy_artifact_blockers(plan, artifact)
 
-    assert "owner_git_deploy_packet_first_real_submit_not_blocked" not in blockers
+    assert "owner_git_deploy_artifact_first_real_submit_not_blocked" not in blockers

@@ -87,13 +87,13 @@ def _active_monitor(*rows: dict, exchange_write_called: bool = False) -> dict:
 
 def _lifecycle_packet(**overrides) -> dict:
     packet = {
-        "scope": "runtime_position_lifecycle_exit_readiness_packet",
+        "scope": "runtime_position_lifecycle_exit_readiness_artifact",
         "status": "position_lifecycle_hold_or_standing_recovery_ready",
         "runtime_instance_id": "runtime-bnb",
         "symbol": "BNB/USDT:USDT",
         "side": "long",
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
-        "operator_command_plan": {
+        "position_lifecycle_plan": {
             "next_step": "continue_monitoring_or_prepare_official_reduce_only_recovery",
             "allows_new_attempt_now": False,
             "reduce_only_close_ready_for_owner_authorization": False,
@@ -119,8 +119,8 @@ def _lifecycle_packet(**overrides) -> dict:
 
 
 def test_refresh_flow_builds_readiness_and_selector_for_current_mixed_state():
-    refresh, readiness, selector = script.build_refresh_flow_packet(
-        active_monitor_packet=_active_monitor(
+    refresh, readiness, selector = script.build_refresh_flow_artifacts(
+        active_monitor_artifact=_active_monitor(
             _runtime_summary(
                 "runtime-ada",
                 blockers=["strategy_signal_not_ready_for_shadow_candidate_prepare"],
@@ -140,7 +140,7 @@ def test_refresh_flow_builds_readiness_and_selector_for_current_mixed_state():
                 blockers=["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             ),
         ),
-        lifecycle_packets=[_lifecycle_packet()],
+        lifecycle_artifacts=[_lifecycle_packet()],
         deployed_head="6b671626",
     )
 
@@ -148,15 +148,19 @@ def test_refresh_flow_builds_readiness_and_selector_for_current_mixed_state():
     assert readiness["status"] == "live_attempt_blocked_by_runtime_or_signal_gate"
     assert selector["status"] == "continuation_monitor_position_or_standing_recovery"
     assert refresh["selected_continuation"]["runtime_instance_id"] == "runtime-bnb"
-    assert refresh["operator_command_plan"]["execute_tiny_live_attempt_now"] is False
-    assert refresh["operator_command_plan"]["execute_reduce_only_close_now"] is False
-    assert refresh["operator_command_plan"]["ready_for_controlled_tiny_live_path"] is False
+    assert "operator_command_plan" not in refresh
+    assert refresh["refresh_plan"]["not_execution_authority"] is True
+    assert refresh["refresh_plan"]["execute_tiny_live_attempt_now"] is False
+    assert refresh["refresh_plan"]["execute_reduce_only_close_now"] is False
+    assert refresh["refresh_plan"]["ready_for_controlled_tiny_live_path"] is False
+    assert refresh["safety_invariants"]["projection_only"] is True
+    assert "packet_only" not in refresh["safety_invariants"]
     assert refresh["safety_invariants"]["no_forbidden_live_side_effects"] is True
 
 
 def test_refresh_flow_marks_ready_for_final_gate_path():
-    refresh, _, selector = script.build_refresh_flow_packet(
-        active_monitor_packet=_active_monitor(
+    refresh, _, selector = script.build_refresh_flow_artifacts(
+        active_monitor_artifact=_active_monitor(
             _runtime_summary(
                 "runtime-ready",
                 status="ready_for_final_gate_preflight",
@@ -170,13 +174,13 @@ def test_refresh_flow_marks_ready_for_final_gate_path():
     assert selector["selected_continuation"]["selected_action"] == (
         "review_final_gate_preflight"
     )
-    assert refresh["operator_command_plan"]["ready_for_controlled_tiny_live_path"] is True
-    assert refresh["operator_command_plan"]["execute_tiny_live_attempt_now"] is False
+    assert refresh["refresh_plan"]["ready_for_controlled_tiny_live_path"] is True
+    assert refresh["refresh_plan"]["execute_tiny_live_attempt_now"] is False
 
 
 def test_refresh_flow_blocks_forbidden_effects():
-    refresh, _, _ = script.build_refresh_flow_packet(
-        active_monitor_packet=_active_monitor(
+    refresh, _, _ = script.build_refresh_flow_artifacts(
+        active_monitor_artifact=_active_monitor(
             _runtime_summary("runtime-avax"),
             exchange_write_called=True,
         )
@@ -186,7 +190,7 @@ def test_refresh_flow_blocks_forbidden_effects():
     assert refresh["safety_invariants"]["no_forbidden_live_side_effects"] is False
 
 
-def test_refresh_flow_cli_writes_all_packets(tmp_path, capsys):
+def test_refresh_flow_cli_writes_all_artifacts(tmp_path, capsys):
     active_path = tmp_path / "active-monitor.json"
     lifecycle_path = tmp_path / "lifecycle.json"
     output_dir = tmp_path / "out"
@@ -223,11 +227,12 @@ def test_refresh_flow_cli_writes_all_packets(tmp_path, capsys):
         ]
     ) == 0
 
-    stdout_packet = json.loads(capsys.readouterr().out)
-    assert stdout_packet["status"] == "continuation_refresh_monitor_position_or_standing_recovery"
+    stdout_artifact = json.loads(capsys.readouterr().out)
+    assert stdout_artifact["status"] == "continuation_refresh_monitor_position_or_standing_recovery"
     assert json.loads(output_json.read_text(encoding="utf-8"))["deployment_context"][
         "deployed_head"
     ] == "6b671626"
-    assert (output_dir / "live-attempt-readiness-packet.json").exists()
-    assert (output_dir / "live-continuation-selector.json").exists()
+    assert "operator_command_plan" not in stdout_artifact
+    assert (output_dir / "live-attempt-readiness-artifact.json").exists()
+    assert (output_dir / "live-continuation-selector-projection.json").exists()
     assert (output_dir / "live-continuation-refresh-flow.json").exists()

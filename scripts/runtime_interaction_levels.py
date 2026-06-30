@@ -40,7 +40,7 @@ INTERACTION_LEVELS: dict[str, dict[str, Any]] = {
         "remote_mutation_allowed": True,
         "approaches_real_order": False,
         "exchange_write_allowed": False,
-        "description": "Bounded deploy apply, service refresh, or static publish.",
+        "description": "Bounded deploy apply, service refresh, or non-trading release maintenance.",
     },
     "L4": {
         "rank": 4,

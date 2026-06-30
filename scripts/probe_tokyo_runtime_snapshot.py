@@ -26,7 +26,6 @@ DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
 DEFAULT_REPORT_DIR = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
 )
-DEFAULT_FRONTEND_ROOT = "/var/www/brc-owner-console"
 DEFAULT_SERVICES = (
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
@@ -49,7 +48,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
-    "scoped_pipeline_operation_layer_handoff_checked",
+    "scoped_pipeline_operation_layer_submit_projection_checked",
     "fresh_signal_fast_auto_chain_checked",
     "required_facts_readiness_checked",
     "mock_operation_layer_closed_loop_checked",
@@ -69,7 +68,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "new_strategygroups_default_observe_only_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-    "non_executing_prepare_auto_bridge_checked",
+    "execution_attempt_rehearsal_prepare_checked",
 )
 
 ACTIVE_GOAL_STATUSES = {
@@ -96,9 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         deploy_root=args.deploy_root,
         report_dir=args.report_dir,
-        frontend_root=args.frontend_root,
         expected_runtime_head=args.expected_runtime_head,
-        expected_frontend_head=args.expected_frontend_head,
         connect_timeout_seconds=args.connect_timeout_seconds,
     )
     if args.output_json:
@@ -118,9 +115,7 @@ def build_tokyo_runtime_snapshot(
     host: str,
     deploy_root: str,
     report_dir: str,
-    frontend_root: str,
     expected_runtime_head: str | None,
-    expected_frontend_head: str | None,
     connect_timeout_seconds: int = 8,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
@@ -130,7 +125,6 @@ def build_tokyo_runtime_snapshot(
         host=host,
         deploy_root=deploy_root,
         report_dir=report_dir,
-        frontend_root=frontend_root,
         connect_timeout_seconds=connect_timeout_seconds,
         runner=runner,
     )
@@ -139,9 +133,7 @@ def build_tokyo_runtime_snapshot(
         host=host,
         deploy_root=deploy_root,
         report_dir=report_dir,
-        frontend_root=frontend_root,
         expected_runtime_head=expected_runtime_head,
-        expected_frontend_head=expected_frontend_head,
     )
 
 
@@ -150,7 +142,6 @@ def collect_remote_snapshot(
     host: str,
     deploy_root: str,
     report_dir: str,
-    frontend_root: str,
     connect_timeout_seconds: int,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
@@ -160,7 +151,6 @@ def collect_remote_snapshot(
     remote_command = _remote_snapshot_command(
         deploy_root=deploy_root,
         report_dir=report_dir,
-        frontend_root=frontend_root,
     )
     command = (
         ("sh", "-lc", remote_command)
@@ -201,9 +191,7 @@ def evaluate_runtime_snapshot(
     host: str,
     deploy_root: str,
     report_dir: str,
-    frontend_root: str,
     expected_runtime_head: str | None,
-    expected_frontend_head: str | None,
 ) -> dict[str, Any]:
     """Project raw facts into a compact Owner/Codex interaction report."""
 
@@ -264,9 +252,9 @@ def evaluate_runtime_snapshot(
     )
     if chain_closure.get("status") != "non_market_execution_chain_ready":
         blockers.append("runtime_execution_chain_closure_status_not_ready")
-    if _packet_check(goal_status, "deployment_aligned") is False:
+    if _artifact_check(goal_status, "deployment_aligned") is False:
         blockers.append("runtime_goal_status_deployment_not_aligned")
-    if _packet_check(goal_status, "watcher_liveness_healthy") is False:
+    if _artifact_check(goal_status, "watcher_liveness_healthy") is False:
         blockers.append("watcher_liveness_not_healthy")
     goal_status_submit_blockers = _goal_status_submit_blocker_keys(goal_status)
     goal_status_real_order_readiness_summary = (
@@ -290,10 +278,10 @@ def evaluate_runtime_snapshot(
         )
 
     goal_status_value = str(goal_status.get("status") or "")
-    fresh_signal_present = _packet_check(goal_status, "fresh_signal_present") is True
+    fresh_signal_present = _artifact_check(goal_status, "fresh_signal_present") is True
     goal_processing = fresh_signal_present or goal_status_value in ACTIVE_GOAL_STATUSES
     waiting_for_market = (not goal_processing) and (
-        _packet_check(goal_status, "fresh_signal_present") is False
+        _artifact_check(goal_status, "fresh_signal_present") is False
         or latest_summary.get("status") in {"waiting_for_signal", "waiting_for_market"}
         or source_readiness.get("owner_state") in {"等待机会", "waiting_for_opportunity"}
     )
@@ -305,7 +293,7 @@ def evaluate_runtime_snapshot(
         owner_stage = "暂不可用"
     if ready_for_real_order:
         owner_stage = "处理中"
-    owner_current_action = (
+    owner_checkpoint = (
         "继续等待市场机会"
         if waiting_for_market
         else "等待系统完成收口"
@@ -346,7 +334,6 @@ def evaluate_runtime_snapshot(
         "runtime_goal_status_real_order_readiness_summary": (
             goal_status_real_order_readiness_summary
         ),
-        "frontend_scope": "externalized",
     }
     status = "ready"
     if checks["blockers"]:
@@ -377,11 +364,11 @@ def evaluate_runtime_snapshot(
             "deploy_root": deploy_root,
             "report_dir": report_dir,
             "expected_runtime_head": expected_runtime_head,
-            "expected_frontend_head": expected_frontend_head,
         },
         "owner_summary": {
             "state": owner_stage,
-            "current_action": owner_current_action,
+            "non_authority_checkpoint": owner_checkpoint,
+            "checkpoint_source": "tokyo_runtime_snapshot_projection",
             "owner_intervention_required": False if not checks["blockers"] else True,
             "runtime": "正常" if not checks["blockers"] else "暂不可用",
             "watcher": "运行中" if checks["watcher_timer_active"] else "暂不可用",
@@ -398,7 +385,6 @@ def evaluate_runtime_snapshot(
                 if checks["runtime_execution_chain_closure_status_ready"]
                 else "非市场链路待修复"
             ),
-            "frontend": "外部项目",
         },
         "facts": {
             "release": {
@@ -408,18 +394,18 @@ def evaluate_runtime_snapshot(
             },
             "systemd": services,
             "reports": {
-                "latest_summary": _summary_from_packet(latest_summary),
-                "goal_status": _summary_from_packet(goal_status),
-                "source_readiness": _summary_from_packet(source_readiness),
-                "runtime_dry_run_audit": _summary_from_packet(dry_run),
+                "latest_summary": _summary_from_artifact(latest_summary),
+                "goal_status": _summary_from_artifact(goal_status),
+                "source_readiness": _summary_from_artifact(source_readiness),
+                "runtime_dry_run_audit": _summary_from_artifact(dry_run),
                 "runtime_execution_chain_closure_status": (
-                    _summary_from_packet(chain_closure)
+                    _summary_from_artifact(chain_closure)
                 ),
                 "runtime_live_closure_evidence": (
-                    _summary_from_packet(live_closure_evidence)
+                    _summary_from_artifact(live_closure_evidence)
                 ),
                 "runtime_live_closure_evidence_verification": (
-                    _summary_from_packet(live_closure_verification)
+                    _summary_from_artifact(live_closure_verification)
                 ),
             },
         },
@@ -443,7 +429,6 @@ def _remote_snapshot_command(
     *,
     deploy_root: str,
     report_dir: str,
-    frontend_root: str,
 ) -> str:
     remote_python = r'''
 import json
@@ -455,7 +440,6 @@ from pathlib import Path
 
 deploy_root = sys.argv[1]
 report_dir = sys.argv[2]
-frontend_root = sys.argv[3]
 services = [
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
@@ -529,7 +513,6 @@ payload = {
         ),
     },
     "systemd": systemd,
-    "frontend": {"scope": "externalized"},
     "reports": reports,
     "collector_safety": {
         "remote_files_modified": False,
@@ -546,7 +529,6 @@ print(json.dumps(payload, sort_keys=True))
         "python3 - "
         f"{shlex.quote(deploy_root)} "
         f"{shlex.quote(report_dir)} "
-        f"{shlex.quote(frontend_root)} "
         "<<'PY'\n"
         f"{remote_python}\n"
         "PY"
@@ -601,16 +583,16 @@ def _missing_dry_run_required_checks(checks: dict[str, Any]) -> list[str]:
     return sorted(name for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is not True)
 
 
-def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
-    dry_run_chain = _as_dict(packet.get("dry_run_chain"))
+def _summary_from_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    dry_run_chain = _as_dict(artifact.get("dry_run_chain"))
     return {
-        "status": packet.get("status"),
-        "owner_state": packet.get("owner_state"),
-        "blockers": packet.get("blockers"),
-        "scenario_count": packet.get("scenario_count")
-        or _as_dict(packet.get("checks")).get("scenario_count"),
-        "fresh_signal_present": _packet_check(packet, "fresh_signal_present"),
-        "ready_for_real_order_action": packet.get("ready_for_real_order_action"),
+        "status": artifact.get("status"),
+        "owner_state": artifact.get("owner_state"),
+        "blockers": artifact.get("blockers"),
+        "scenario_count": artifact.get("scenario_count")
+        or _as_dict(artifact.get("checks")).get("scenario_count"),
+        "fresh_signal_present": _artifact_check(artifact, "fresh_signal_present"),
+        "ready_for_real_order_action": artifact.get("ready_for_real_order_action"),
         "projected_checks": dry_run_chain.get("projected_checks"),
         "ready_segments": dry_run_chain.get("ready_segments"),
         "missing_or_failed_segments": dry_run_chain.get(
@@ -626,22 +608,22 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "missing_or_failed_goal_chain_segments": dry_run_chain.get(
             "missing_or_failed_goal_chain_segments"
         ),
-        "submit_blocker_keys": _goal_status_submit_blocker_keys(packet),
+        "submit_blocker_keys": _goal_status_submit_blocker_keys(artifact),
         "real_order_readiness_summary": _goal_status_real_order_readiness_summary(
-            packet
+            artifact
         ),
     }
 
 
-def _packet_check(packet: dict[str, Any], key: str) -> Any:
-    if key in packet:
-        return packet.get(key)
-    checks = _as_dict(packet.get("checks"))
+def _artifact_check(artifact: dict[str, Any], key: str) -> Any:
+    if key in artifact:
+        return artifact.get(key)
+    checks = _as_dict(artifact.get("checks"))
     return checks.get(key)
 
 
-def _goal_status_submit_blocker_keys(packet: dict[str, Any]) -> list[str]:
-    matrix = packet.get("real_order_readiness_matrix")
+def _goal_status_submit_blocker_keys(artifact: dict[str, Any]) -> list[str]:
+    matrix = artifact.get("real_order_readiness_matrix")
     if not isinstance(matrix, list):
         return []
     keys: list[str] = []
@@ -658,8 +640,8 @@ def _goal_status_submit_blocker_keys(packet: dict[str, Any]) -> list[str]:
     return _dedupe(keys)
 
 
-def _goal_status_real_order_readiness_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    matrix = packet.get("real_order_readiness_matrix")
+def _goal_status_real_order_readiness_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    matrix = artifact.get("real_order_readiness_matrix")
     if not isinstance(matrix, list):
         return {
             "total": 0,
@@ -728,9 +710,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--deploy-root", default=DEFAULT_DEPLOY_ROOT)
     parser.add_argument("--report-dir", default=DEFAULT_REPORT_DIR)
-    parser.add_argument("--frontend-root", default=DEFAULT_FRONTEND_ROOT)
     parser.add_argument("--expected-runtime-head", default=None)
-    parser.add_argument("--expected-frontend-head", default=None)
     parser.add_argument("--connect-timeout-seconds", type=int, default=8)
     parser.add_argument(
         "--output-json",
@@ -754,7 +734,7 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"status={report['status']}")
     print(f"interaction={report['interaction']['level']}")
     print(f"owner_state={owner['state']}")
-    print(f"current_action={owner['current_action']}")
+    print(f"non_authority_checkpoint={owner['non_authority_checkpoint']}")
     if checks["blockers"]:
         print("blockers=" + ",".join(checks["blockers"]))
     if checks["product_gaps"]:

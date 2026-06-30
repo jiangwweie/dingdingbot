@@ -119,7 +119,7 @@ class PgLiveLifecycleReviewRepository:
                 "places_order": row.places_order,
                 "mutates_exchange": row.mutates_exchange,
                 "grants_trading_permission": row.grants_trading_permission,
-                "frontend_action_enabled": row.frontend_action_enabled,
+                "owner_action_enabled": row.owner_action_enabled,
                 "created_by": row.created_by,
                 "created_at_ms": row.created_at_ms,
                 "updated_at_ms": row.updated_at_ms,

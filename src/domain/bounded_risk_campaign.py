@@ -63,7 +63,7 @@ class BrcNextEligibilityDecision(str, Enum):
 
 
 class BrcOperatorAction(str, Enum):
-    READ_REVIEW_PACKET = "read_review_packet"
+    READ_REVIEW_ARTIFACT = "read_review_artifact"
     READ_NEXT_ELIGIBILITY = "read_next_eligibility"
     READ_EVIDENCE = "read_evidence"
     UNKNOWN = "unknown"
@@ -83,7 +83,7 @@ class BrcReviewDecision(str, Enum):
 
 
 class BrcLlmIntentAction(str, Enum):
-    READ_REVIEW_PACKET = "read_review_packet"
+    READ_REVIEW_ARTIFACT = "read_review_artifact"
     READ_NEXT_ELIGIBILITY = "read_next_eligibility"
     READ_EVIDENCE = "read_evidence"
     REQUEST_TESTNET_REHEARSAL = "request_testnet_rehearsal"
@@ -191,7 +191,7 @@ class BrcInvariantCheck(BaseModel):
     detail: str
 
 
-class BrcReviewPacket(BaseModel):
+class BrcReviewArtifact(BaseModel):
     campaign_id: str
     status: BrcCampaignStatus
     outcome: Optional[CampaignOutcome] = None
@@ -215,7 +215,7 @@ class BrcReviewPacket(BaseModel):
 
 
 class BrcNextCampaignEligibility(BaseModel):
-    decision: BrcNextEligibilityDecision
+    eligibility_result: BrcNextEligibilityDecision
     reason: str
     campaign_id: Optional[str] = None
     latest_status: Optional[BrcCampaignStatus] = None

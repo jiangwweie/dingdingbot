@@ -225,7 +225,7 @@ def _account_summary(account: dict[str, Any]) -> dict[str, Any]:
     available_balance = _decimal(payload.get("availableBalance"))
     return {
         "status": "fresh",
-        "can_trade": bool(payload.get("canTrade")),
+        "exchange_account_trade_permission": bool(payload.get("canTrade")),
         "fee_tier": payload.get("feeTier"),
         "total_wallet_balance_present": payload.get("totalWalletBalance") is not None,
         "available_balance_present": payload.get("availableBalance") is not None,
@@ -393,7 +393,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    packet = collect_live_facts(
+    artifact = collect_live_facts(
         handoff_dir=Path(args.handoff_dir),
         env_file=Path(args.env_file).expanduser() if args.env_file else None,
         base_url=args.base_url,
@@ -401,12 +401,12 @@ def main(argv: list[str] | None = None) -> int:
     output_path = Path(args.output_json).expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         + "\n",
         encoding="utf-8",
     )
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["exchange_rules"]["status"] == "ready" else 2
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["exchange_rules"]["status"] == "ready" else 2
 
 
 if __name__ == "__main__":

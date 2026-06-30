@@ -12,17 +12,17 @@ from src.domain.strategygroup_runtime_replay import (
     EXPECTED_MPG001_REPLAY_CORPUS_CASES,
     EXPECTED_POST_SUBMIT_SIMULATOR_CASES,
     EXPECTED_VCB001_L1_REPLAY_CASES,
-    build_mpg001_replay_lab_packet,
+    build_mpg001_replay_lab_report,
 )
 from scripts.run_strategygroup_runtime_replay_lab import _owner_markdown
 
 
 def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    assert packet.status == "passed"
-    assert packet.strategy_group_id == "MPG-001"
-    assert packet.checks == {
+    assert report.status == "passed"
+    assert report.strategy_group_id == "MPG-001"
+    assert report.checks == {
         "mpg001_replay_sample_present": True,
         "mpg001_replay_corpus_cases_present": True,
         "btpc001_l2_shadow_replay_cases_present": True,
@@ -47,7 +47,7 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
         "external_framework_sidecar_only": True,
         "no_replay_or_synthetic_signal_has_live_authority": True,
     }
-    assert packet.safety_invariants == {
+    assert report.safety_invariants == {
         "replay_only": True,
         "synthetic_signals_are_not_live_market_signals": True,
         "external_framework_is_sidecar_only": True,
@@ -61,27 +61,27 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
         "modifies_live_profile": False,
         "modifies_order_sizing_defaults": False,
     }
-    assert packet.owner_summary.current_state == "P0.5 replay_ready"
-    assert packet.owner_summary.next_action == (
+    assert report.owner_summary.current_state == "signal_observation_replay_ready"
+    assert report.owner_summary.non_authority_checkpoint == (
         "Use replay/synthetic rehearsal while P0 waits for a real fresh signal."
     )
 
 
 def test_btpc001_l2_shadow_replay_expands_observation_without_execution() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    cases = {item.fixture_case for item in packet.l2_shadow_replay_samples}
+    cases = {item.fixture_case for item in report.l2_shadow_replay_samples}
     assert cases == EXPECTED_BTPC001_L2_REPLAY_CASES
-    assert packet.checks["btpc001_l2_shadow_replay_cases_present"] is True
-    assert packet.checks["btpc001_l2_would_enter_review_shape_present"] is True
+    assert report.checks["btpc001_l2_shadow_replay_cases_present"] is True
+    assert report.checks["btpc001_l2_would_enter_review_shape_present"] is True
     assert (
-        packet.checks["btpc001_l2_blocked_cases_do_not_reach_operation_layer"]
+        report.checks["btpc001_l2_blocked_cases_do_not_reach_operation_layer"]
         is True
     )
 
     would_enter = next(
         item
-        for item in packet.l2_shadow_replay_samples
+        for item in report.l2_shadow_replay_samples
         if item.fixture_case == "bear_pullback_would_enter"
     )
     assert would_enter.strategy_group_id == "BTPC-001"
@@ -97,7 +97,7 @@ def test_btpc001_l2_shadow_replay_expands_observation_without_execution() -> Non
 
     blocked = [
         item
-        for item in packet.l2_shadow_replay_samples
+        for item in report.l2_shadow_replay_samples
         if item.fixture_case != "bear_pullback_would_enter"
     ]
     assert blocked
@@ -105,23 +105,23 @@ def test_btpc001_l2_shadow_replay_expands_observation_without_execution() -> Non
         item.stage_results["operation_layer_shape_reachable"] is False
         for item in blocked
     )
-    assert all(item.real_order_allowed is False for item in packet.l2_shadow_replay_samples)
+    assert all(item.real_order_allowed is False for item in report.l2_shadow_replay_samples)
 
 
 def test_vcb001_l1_observe_replay_expands_visibility_without_shadow_authority() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
     vcb_samples = [
         item
-        for item in packet.l1_observe_replay_samples
+        for item in report.l1_observe_replay_samples
         if item.strategy_group_id == "VCB-001"
     ]
     cases = {item.fixture_case for item in vcb_samples}
     assert cases == EXPECTED_VCB001_L1_REPLAY_CASES
-    assert packet.checks["vcb001_l1_observe_replay_cases_present"] is True
-    assert packet.checks["vcb001_l1_would_enter_review_shape_present"] is True
+    assert report.checks["vcb001_l1_observe_replay_cases_present"] is True
+    assert report.checks["vcb001_l1_would_enter_review_shape_present"] is True
     assert (
-        packet.checks["vcb001_l1_cases_do_not_reach_prepare_or_operation_layer"]
+        report.checks["vcb001_l1_cases_do_not_reach_prepare_or_operation_layer"]
         is True
     )
 
@@ -150,19 +150,19 @@ def test_vcb001_l1_observe_replay_expands_visibility_without_shadow_authority() 
 
 
 def test_lsr001_l1_observe_replay_keeps_rewrite_gap_visible_without_shadow_authority() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
     lsr_samples = [
         item
-        for item in packet.l1_observe_replay_samples
+        for item in report.l1_observe_replay_samples
         if item.strategy_group_id == "LSR-001"
     ]
     cases = {item.fixture_case for item in lsr_samples}
     assert cases == EXPECTED_LSR001_L1_REPLAY_CASES
-    assert packet.checks["lsr001_l1_observe_replay_cases_present"] is True
-    assert packet.checks["lsr001_l1_would_enter_review_shape_present"] is True
+    assert report.checks["lsr001_l1_observe_replay_cases_present"] is True
+    assert report.checks["lsr001_l1_would_enter_review_shape_present"] is True
     assert (
-        packet.checks["lsr001_l1_cases_do_not_reach_prepare_or_operation_layer"]
+        report.checks["lsr001_l1_cases_do_not_reach_prepare_or_operation_layer"]
         is True
     )
 
@@ -192,19 +192,19 @@ def test_lsr001_l1_observe_replay_keeps_rewrite_gap_visible_without_shadow_autho
 
 
 def test_brf001_l1_observe_replay_expands_bear_rally_failure_visibility_without_shadow_authority() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
     brf_samples = [
         item
-        for item in packet.l1_observe_replay_samples
+        for item in report.l1_observe_replay_samples
         if item.strategy_group_id == "BRF-001"
     ]
     cases = {item.fixture_case for item in brf_samples}
     assert cases == EXPECTED_BRF001_L1_REPLAY_CASES
-    assert packet.checks["brf001_l1_observe_replay_cases_present"] is True
-    assert packet.checks["brf001_l1_would_enter_review_shape_present"] is True
+    assert report.checks["brf001_l1_observe_replay_cases_present"] is True
+    assert report.checks["brf001_l1_would_enter_review_shape_present"] is True
     assert (
-        packet.checks["brf001_l1_cases_do_not_reach_prepare_or_operation_layer"]
+        report.checks["brf001_l1_cases_do_not_reach_prepare_or_operation_layer"]
         is True
     )
 
@@ -266,13 +266,13 @@ def test_tracked_lsr_vcb_replay_corpus_carries_economic_review_fields() -> None:
 
 
 def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    fixture_cases = {item.fixture_case for item in packet.synthetic_fixtures}
+    fixture_cases = {item.fixture_case for item in report.synthetic_fixtures}
     assert fixture_cases == EXPECTED_SYNTHETIC_FIXTURE_CASES
 
     fresh = next(
-        item for item in packet.synthetic_fixtures if item.fixture_case == "fresh_signal_pass"
+        item for item in report.synthetic_fixtures if item.fixture_case == "fresh_signal_pass"
     )
     assert fresh.signal_confidence == Decimal("0.62")
     assert fresh.stage_results["prepare_chain_ready"] is True
@@ -281,22 +281,22 @@ def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
 
     blocked = [
         item
-        for item in packet.synthetic_fixtures
+        for item in report.synthetic_fixtures
         if item.fixture_case != "fresh_signal_pass"
     ]
     assert blocked
     assert all(item.stage_results["operation_layer_shape_reachable"] is False for item in blocked)
     assert all(
         item.stage_results["real_submit_allowed"] is False
-        for item in packet.synthetic_fixtures
+        for item in report.synthetic_fixtures
     )
-    assert all(item.not_live_market_signal is True for item in packet.synthetic_fixtures)
+    assert all(item.not_live_market_signal is True for item in report.synthetic_fixtures)
 
 
 def test_replay_report_keeps_freqtrade_as_future_sidecar_not_authority() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    assert packet.external_adapter_policy == {
+    assert report.external_adapter_policy == {
         "freqtrade_role": "future_sidecar_research_adapter",
         "may_supply": [
             "external_backtest_summary",
@@ -313,7 +313,7 @@ def test_replay_report_keeps_freqtrade_as_future_sidecar_not_authority() -> None
             "live signal identity",
         ],
     }
-    assert packet.checks["external_framework_sidecar_only"] is True
+    assert report.checks["external_framework_sidecar_only"] is True
 
 
 def test_tracked_mpg001_replay_samples_match_runtime_contract() -> None:
@@ -346,14 +346,14 @@ def test_tracked_mpg001_replay_samples_match_runtime_contract() -> None:
 
 
 def test_mpg001_replay_lab_covers_multi_window_replay_corpus_with_cost_review() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    corpus_cases = {item.fixture_case for item in packet.replay_samples}
+    corpus_cases = {item.fixture_case for item in report.replay_samples}
     assert corpus_cases == EXPECTED_MPG001_REPLAY_CORPUS_CASES
-    assert packet.checks["mpg001_replay_corpus_cases_present"] is True
-    assert packet.checks["cost_review_skeleton_present"] is True
+    assert report.checks["mpg001_replay_corpus_cases_present"] is True
+    assert report.checks["cost_review_skeleton_present"] is True
 
-    for event in packet.replay_samples:
+    for event in report.replay_samples:
         assert event.replay_only is True
         assert event.not_live_market_signal is True
         assert event.operation_layer_submit_allowed is False
@@ -371,16 +371,16 @@ def test_mpg001_replay_lab_covers_multi_window_replay_corpus_with_cost_review() 
 
 
 def test_post_submit_simulator_matrix_is_non_executing_and_review_ready() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    simulator_cases = {item.case for item in packet.post_submit_simulator_matrix}
+    simulator_cases = {item.case for item in report.post_submit_simulator_matrix}
     assert simulator_cases == EXPECTED_POST_SUBMIT_SIMULATOR_CASES
-    assert packet.checks["post_submit_simulator_cases_present"] is True
-    assert packet.checks["post_submit_simulator_non_executing"] is True
+    assert report.checks["post_submit_simulator_cases_present"] is True
+    assert report.checks["post_submit_simulator_non_executing"] is True
 
     protection_failed = next(
         item
-        for item in packet.post_submit_simulator_matrix
+        for item in report.post_submit_simulator_matrix
         if item.case == "entry_filled_sl_creation_failed"
     )
     assert protection_failed.protection_status == "failed"
@@ -388,7 +388,7 @@ def test_post_submit_simulator_matrix_is_non_executing_and_review_ready() -> Non
     assert protection_failed.operation_layer_live_submit_called is False
     assert protection_failed.exchange_write_called is False
 
-    for item in packet.post_submit_simulator_matrix:
+    for item in report.post_submit_simulator_matrix:
         assert item.finalize_shape_checked is True
         assert item.reconciliation_shape_checked is True
         assert item.budget_settlement_shape_checked is True
@@ -398,9 +398,9 @@ def test_post_submit_simulator_matrix_is_non_executing_and_review_ready() -> Non
 
 
 def test_owner_markdown_summarizes_replay_corpus_post_submit_and_cost_review() -> None:
-    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+    report = build_mpg001_replay_lab_report(generated_at_ms=1781750000000)
 
-    text = _owner_markdown(packet)
+    text = _owner_markdown(report)
 
     assert "- Replay samples: 8" in text
     assert "- L2 shadow replay samples: 5" in text

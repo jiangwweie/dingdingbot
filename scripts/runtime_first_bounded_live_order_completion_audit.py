@@ -25,6 +25,10 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.runtime_interaction_levels import annotate_interaction
+from scripts.runtime_live_closure_evidence_contract import (  # noqa: E402
+    ACTION_TIME_FINALGATE_CHAIN_KEY,
+    LIVE_SIGNAL_CHAIN_KEY,
+)
 
 
 DEFAULT_DAILY_CHECK_JSON = (
@@ -50,16 +54,16 @@ REQUIRED_INPUT_SOURCES = (
     "live_cutover",
 )
 LIVE_CLOSURE_REQUIRED_EVIDENCE_KEYS = (
-    "live_watcher_signal_packet_id",
-    "required_facts_readiness_packet_id",
+    LIVE_SIGNAL_CHAIN_KEY,
+    "required_facts_readiness_artifact_id",
     "candidate_id",
     "runtime_grant_id",
     "fresh_submit_authorization_id",
-    "action_time_finalgate_packet_id",
+    ACTION_TIME_FINALGATE_CHAIN_KEY,
     "operation_layer_submit_authorization_id",
     "exchange_submit_execution_result_id",
     "exchange_native_hard_stop_order_id",
-    "runtime_post_submit_finalize_packet_id",
+    "runtime_post_submit_finalize_payload_id",
     "post_submit_reconciliation_evidence_id",
     "post_submit_budget_settlement_id",
     "submit_outcome_review_id",
@@ -106,16 +110,16 @@ def _read_input_json(path: Path, source_name: str) -> dict[str, Any]:
         }
 
 
-def _input_source_summary(path: Path, packet: dict[str, Any]) -> dict[str, Any]:
-    source = _dict(packet.get("source"))
+def _input_source_summary(path: Path, artifact: dict[str, Any]) -> dict[str, Any]:
+    source = _dict(artifact.get("source"))
     return {
         "path": str(path),
         "exists": path.exists(),
-        "scope": packet.get("scope"),
-        "status": packet.get("status"),
-        "schema": packet.get("schema") or packet.get("schema_version"),
-        "generated_at_utc": packet.get("generated_at_utc"),
-        "generated_at_ms": packet.get("generated_at_ms"),
+        "scope": artifact.get("scope"),
+        "status": artifact.get("status"),
+        "schema": artifact.get("schema") or artifact.get("schema_version"),
+        "generated_at_utc": artifact.get("generated_at_utc"),
+        "generated_at_ms": artifact.get("generated_at_ms"),
         "source_runtime_head": source.get("runtime_head"),
         "source_expected_runtime_head": source.get("expected_runtime_head"),
     }
@@ -199,18 +203,18 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _flag(packet: dict[str, Any], key: str) -> Any:
-    checks = _dict(packet.get("checks"))
+def _flag(artifact: dict[str, Any], key: str) -> Any:
+    checks = _dict(artifact.get("checks"))
     if key in checks:
         return checks[key]
-    summary = _dict(packet.get("summary"))
+    summary = _dict(artifact.get("summary"))
     if key in summary:
         return summary[key]
     return None
 
 
-def _current_boundary_ready(packet: dict[str, Any], key: str) -> bool:
-    boundary = _dict(packet.get(key))
+def _current_boundary_ready(artifact: dict[str, Any], key: str) -> bool:
+    boundary = _dict(artifact.get(key))
     return boundary.get("status") == "ready"
 
 
@@ -220,20 +224,20 @@ def _prefer_current_boundary(current_boundary_ready: bool, legacy_value: Any) ->
     return legacy_value
 
 
-def _section_status(packet: dict[str, Any], section_name: str) -> Any:
-    for section in _list(packet.get("sections")):
-        if isinstance(section, dict) and section.get("name") == section_name:
-            return section.get("status")
+def _check_group_status(artifact: dict[str, Any], group_name: str) -> Any:
+    for group in _list(artifact.get("check_groups")):
+        if isinstance(group, dict) and group.get("name") == group_name:
+            return group.get("status")
     return None
 
 
-def _contract_checks(packet: dict[str, Any]) -> dict[str, Any]:
-    contract = _dict(packet.get("live_closure_cutover_contract"))
+def _contract_checks(artifact: dict[str, Any]) -> dict[str, Any]:
+    contract = _dict(artifact.get("live_closure_cutover_contract"))
     return _dict(contract.get("checks"))
 
 
-def _contract_evidence_keys(packet: dict[str, Any]) -> list[str]:
-    contract = _dict(packet.get("live_closure_cutover_contract"))
+def _contract_evidence_keys(artifact: dict[str, Any]) -> list[str]:
+    contract = _dict(artifact.get("live_closure_cutover_contract"))
     return [str(item) for item in _list(contract.get("required_evidence_keys"))]
 
 
@@ -277,8 +281,8 @@ def _live_closure_boundary_in_progress(live_closure: dict[str, Any]) -> bool:
     }
 
 
-def _packet_status_projection(packet: dict[str, Any], key: str) -> str:
-    value = packet.get(key)
+def _projection_status(artifact: dict[str, Any], key: str) -> str:
+    value = artifact.get(key)
     return str(value).strip() if value is not None else ""
 
 
@@ -288,8 +292,8 @@ def _completion_runtime_status(
     daily_check: dict[str, Any],
     goal_progress: dict[str, Any],
 ) -> str:
-    for packet in (goal_progress, daily_check):
-        projected = _packet_status_projection(packet, "runtime_status")
+    for artifact in (goal_progress, daily_check):
+        projected = _projection_status(artifact, "runtime_status")
         if projected:
             return projected
     if status == "complete":
@@ -305,12 +309,12 @@ def _completion_monitor_status(
     daily_check: dict[str, Any],
     goal_progress: dict[str, Any],
 ) -> str:
-    for packet in (goal_progress, daily_check):
-        projected = _packet_status_projection(packet, "monitor_status")
+    for artifact in (goal_progress, daily_check):
+        projected = _projection_status(artifact, "monitor_status")
         if projected:
             return projected
-    for packet in (goal_progress, daily_check):
-        checks = _dict(packet.get("checks"))
+    for artifact in (goal_progress, daily_check):
+        checks = _dict(artifact.get("checks"))
         if checks.get("deployment_issue") is True:
             return "deployment_issue"
         if checks.get("monitor_refresh_needed") is True:
@@ -318,27 +322,23 @@ def _completion_monitor_status(
     return "fresh"
 
 
-def _completion_owner_decision_required(
+def _completion_owner_intervention_required(
     *,
     daily_check: dict[str, Any],
     goal_progress: dict[str, Any],
     non_market_gaps: list[dict[str, Any]],
 ) -> bool:
-    for packet in (daily_check, goal_progress):
-        if _packet_status_projection(packet, "owner_status") == "needs_intervention":
+    for artifact in (daily_check, goal_progress):
+        if _projection_status(artifact, "owner_status") == "needs_intervention":
             return True
-        owner_summary = _dict(packet.get("owner_summary"))
+        owner_summary = _dict(artifact.get("owner_summary"))
         if owner_summary.get("owner_intervention_required") is True:
-            return True
-        checks = _dict(packet.get("checks"))
-        if checks.get("owner_decision_required") is True:
             return True
     owner_tokens = (
         "owner_policy",
-        "owner_decision",
         "owner_intervention",
         "capital_adjustment",
-        "pause_decision",
+        "pause_policy",
         "risk_acceptance",
     )
     return any(
@@ -352,9 +352,9 @@ def _completion_owner_status(
     *,
     runtime_status: str,
     monitor_status: str,
-    owner_decision_required: bool,
+    owner_intervention_required: bool,
 ) -> str:
-    if owner_decision_required:
+    if owner_intervention_required:
         return "needs_intervention"
     if runtime_status == "waiting_for_market":
         return "waiting_for_opportunity"
@@ -423,7 +423,7 @@ def _audit_items(
                     "selected_strategy_group_id"
                 ),
                 "first_live_lane": live_cutover.get("first_live_lane"),
-                "strategy_scope_section": _section_status(
+                "strategy_scope_check_group": _check_group_status(
                     live_cutover,
                     "strategy_scope",
                 ),
@@ -459,7 +459,7 @@ def _audit_items(
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market_waiting_live_signal",
             "proof": {
-                "entry_fast_chain_section": _section_status(
+                "entry_fast_chain_check_group": _check_group_status(
                     live_cutover,
                     "entry_fast_chain",
                 ),
@@ -471,9 +471,9 @@ def _audit_items(
                     entry_fast_boundary_ready,
                     _flag(dry_run_audit, "required_facts_readiness_checked"),
                 ),
-                "non_executing_prepare_auto_bridge_checked": _prefer_current_boundary(
+                "execution_attempt_rehearsal_prepare_checked": _prefer_current_boundary(
                     entry_fast_boundary_ready,
-                    _flag(dry_run_audit, "non_executing_prepare_auto_bridge_checked"),
+                    _flag(dry_run_audit, "execution_attempt_rehearsal_prepare_checked"),
                 ),
                 "selected_strategygroup_dispatch_guard_checked": _prefer_current_boundary(
                     entry_fast_boundary_ready,
@@ -489,7 +489,7 @@ def _audit_items(
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market_waiting_live_finalgate_and_operation_layer",
             "proof": {
-                "operation_layer_relay_section": _section_status(
+                "operation_layer_relay_check_group": _check_group_status(
                     live_cutover,
                     "operation_layer_relay",
                 ),
@@ -497,12 +497,12 @@ def _audit_items(
                     entry_fast_boundary_ready,
                     _flag(dry_run_audit, "operation_layer_evidence_relay_checked"),
                 ),
-                "scoped_pipeline_operation_layer_handoff_checked": (
+                "scoped_pipeline_operation_layer_submit_projection_checked": (
                     _prefer_current_boundary(
                         entry_fast_boundary_ready,
                         _flag(
                             dry_run_audit,
-                            "scoped_pipeline_operation_layer_handoff_checked",
+                            "scoped_pipeline_operation_layer_submit_projection_checked",
                         ),
                     )
                 ),
@@ -522,7 +522,7 @@ def _audit_items(
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market",
             "proof": {
-                "hard_blocker_policy_section": _section_status(
+                "hard_blocker_policy_check_group": _check_group_status(
                     live_cutover,
                     "hard_blocker_policy",
                 ),
@@ -580,7 +580,7 @@ def _audit_items(
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market_waiting_real_exchange_acceptance",
             "proof": {
-                "exit_protection_recovery_section": _section_status(
+                "exit_protection_recovery_check_group": _check_group_status(
                     live_cutover,
                     "exit_protection_recovery",
                 ),
@@ -613,7 +613,7 @@ def _audit_items(
             ),
             "status": "ready_non_market_waiting_real_submit_outcome",
             "proof": {
-                "post_submit_close_loop_section": _section_status(
+                "post_submit_close_loop_check_group": _check_group_status(
                     live_cutover,
                     "post_submit_close_loop",
                 ),
@@ -649,7 +649,7 @@ def _audit_items(
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market",
             "proof": {
-                "dry_run_safety_section": _section_status(
+                "dry_run_safety_check_group": _check_group_status(
                     live_cutover,
                     "dry_run_safety",
                 ),
@@ -713,9 +713,7 @@ def _audit_items(
             "status": "ready_non_market",
             "proof": {
                 "daily_status": daily_check.get("status"),
-                "notification_decision": _dict(daily_check.get("notification")).get(
-                    "decision"
-                ),
+                "notification_result": _dict(daily_check.get("notification")).get("notification_result"),
                 "fresh_signal_notification_policy_checked": _dict(
                     daily_check.get("checks")
                 ).get("fresh_signal_notification_policy_checked"),
@@ -828,7 +826,7 @@ def build_completion_audit_report(
         goal_progress=goal_progress,
     )
     monitor_status = _completion_monitor_status(daily_check, goal_progress)
-    owner_decision_required = _completion_owner_decision_required(
+    owner_intervention_required = _completion_owner_intervention_required(
         daily_check=daily_check,
         goal_progress=goal_progress,
         non_market_gaps=non_market_gaps,
@@ -836,7 +834,7 @@ def build_completion_audit_report(
     owner_status = _completion_owner_status(
         runtime_status=runtime_status,
         monitor_status=monitor_status,
-        owner_decision_required=owner_decision_required,
+        owner_intervention_required=owner_intervention_required,
     )
     return {
         "schema": "brc.p0_first_bounded_live_order_completion_audit.v1",
@@ -847,7 +845,7 @@ def build_completion_audit_report(
         "runtime_status": runtime_status,
         "monitor_status": monitor_status,
         "owner_status": owner_status,
-        "owner_decision_required": owner_decision_required,
+        "owner_intervention_required": owner_intervention_required,
         "goal_complete": goal_complete,
         "non_market_gaps": non_market_gaps,
         "market_dependent_remaining": market_dependent_remaining,

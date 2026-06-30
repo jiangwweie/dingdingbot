@@ -2,7 +2,7 @@
 """Execute or dry-run an RTF-038 runtime profile apply plan.
 
 The default mode is dry-run and performs no API calls. Apply mode requires an
-explicit ``--execute`` flag and a ready RTF-038 packet. The apply plan can only
+explicit ``--execute`` flag and ready RTF-038 apply readiness. The apply plan can only
 record a promotion confirmation and create an execution-disabled shadow
 runtime draft; it never submits orders, calls OrderLifecycle, calls exchange,
 withdraws, or transfers funds.
@@ -27,7 +27,7 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 )
 
 
-READY_PACKET_STATUS = "ready_for_runtime_profile_apply_with_trial_binding"
+READY_READINESS_STATUS = "ready_for_runtime_profile_apply_with_trial_binding"
 DRY_RUN_STATUS = "dry_run_runtime_profile_apply_plan_ready"
 APPLIED_STATUS = "runtime_profile_apply_plan_applied"
 BLOCKED_STATUS = "blocked_runtime_profile_apply_plan"
@@ -52,9 +52,9 @@ def _load_json(path: str) -> dict[str, Any]:
     return value
 
 
-def _api_requests(packet: dict[str, Any]) -> list[dict[str, Any]]:
-    apply_packet = packet.get("apply_packet") or {}
-    plan = apply_packet.get("api_apply_plan") or {}
+def _api_requests(apply_readiness_artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    apply_plan = apply_readiness_artifact.get("apply_plan") or {}
+    plan = apply_plan.get("api_apply_plan") or {}
     requests = plan.get("requests") or []
     if not isinstance(requests, list):
         raise ValueError("api_apply_plan.requests must be a list")
@@ -96,7 +96,7 @@ def _safety_invariants() -> dict[str, bool]:
 
 def _blocked(
     *,
-    packet: dict[str, Any],
+    apply_readiness_artifact: dict[str, Any],
     blockers: list[str],
     mode: str,
 ) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def _blocked(
         "scope": "runtime_profile_apply_plan_executor",
         "status": BLOCKED_STATUS,
         "mode": mode,
-        "source_status": packet.get("status"),
+        "source_status": apply_readiness_artifact.get("status"),
         "requests_planned": [],
         "responses": [],
         "ids": {},
@@ -128,20 +128,20 @@ def _blocked(
 
 def build_execution_report(
     *,
-    packet: dict[str, Any],
+    apply_readiness_artifact: dict[str, Any],
     mode: str,
     execute: bool = False,
     client: ApiClient | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
-    if packet.get("status") != READY_PACKET_STATUS:
-        blockers.append("rtf038_apply_readiness_packet_not_ready")
-    apply_packet = packet.get("apply_packet") or {}
-    plan = apply_packet.get("api_apply_plan") or {}
+    if apply_readiness_artifact.get("status") != READY_READINESS_STATUS:
+        blockers.append("rtf038_apply_readiness_not_ready")
+    apply_plan = apply_readiness_artifact.get("apply_plan") or {}
+    plan = apply_plan.get("api_apply_plan") or {}
     plan_ready = plan.get("ready_to_apply") is True
     if not plan_ready:
         blockers.append("api_apply_plan_not_ready")
-    requests = _api_requests(packet)
+    requests = _api_requests(apply_readiness_artifact)
     if plan_ready:
         if plan.get("places_order_when_applied") is not False:
             blockers.append("api_apply_plan_order_effect_not_false")
@@ -161,7 +161,11 @@ def build_execution_report(
     if mode == "apply" and not execute:
         blockers.append("execute_flag_required_for_apply_mode")
     if blockers:
-        return _blocked(packet=packet, blockers=blockers, mode=mode)
+        return _blocked(
+            apply_readiness_artifact=apply_readiness_artifact,
+            blockers=blockers,
+            mode=mode,
+        )
 
     planned = [
         {
@@ -179,7 +183,7 @@ def build_execution_report(
             "scope": "runtime_profile_apply_plan_executor",
             "status": DRY_RUN_STATUS,
             "mode": mode,
-            "source_status": packet.get("status"),
+            "source_status": apply_readiness_artifact.get("status"),
             "requests_planned": planned,
             "responses": [],
             "ids": {},
@@ -229,7 +233,7 @@ def build_execution_report(
                 "scope": "runtime_profile_apply_plan_executor",
                 "status": BLOCKED_STATUS,
                 "mode": mode,
-                "source_status": packet.get("status"),
+                "source_status": apply_readiness_artifact.get("status"),
                 "requests_planned": planned,
                 "responses": responses,
                 "ids": ids,
@@ -264,7 +268,7 @@ def build_execution_report(
                 ids["runtime_instance_id"] = str(runtime_id)
             if runtime.get("execution_enabled") not in {False, None}:
                 return _blocked(
-                    packet=packet,
+                    apply_readiness_artifact=apply_readiness_artifact,
                     blockers=["created_runtime_execution_enabled_not_false"],
                     mode=mode,
                 )
@@ -272,7 +276,7 @@ def build_execution_report(
         "scope": "runtime_profile_apply_plan_executor",
         "status": APPLIED_STATUS,
         "mode": mode,
-        "source_status": packet.get("status"),
+        "source_status": apply_readiness_artifact.get("status"),
         "requests_planned": planned,
         "responses": responses,
         "ids": ids,
@@ -320,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     client = UrlLibApiClient(api_base=args.api_base) if args.mode == "apply" else None
     report = build_execution_report(
-        packet=_load_json(args.apply_readiness_json),
+        apply_readiness_artifact=_load_json(args.apply_readiness_json),
         mode=args.mode,
         execute=args.execute,
         client=client,

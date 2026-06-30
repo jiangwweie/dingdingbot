@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an Owner/operator-readable summary from a supervisor packet.
+"""Build an Owner/operator-readable summary from a supervisor artifact.
 
 RTF-071 consumes the RTF-069/070 live signal operator supervisor JSON and
 summarizes why the runtime is waiting, blocked, or ready for a review gate. It
@@ -42,39 +42,39 @@ FORBIDDEN_EFFECT_KEYS = (
 )
 
 
-def build_summary(supervisor_packet: dict[str, Any]) -> dict[str, Any]:
-    cycles = _as_list(supervisor_packet.get("cycle_summaries"))
+def build_summary(supervisor_artifact: dict[str, Any]) -> dict[str, Any]:
+    cycles = _as_list(supervisor_artifact.get("cycle_summaries"))
     raw_blockers = [
-        *[str(item) for item in _as_list(supervisor_packet.get("blockers"))],
+        *[str(item) for item in _as_list(supervisor_artifact.get("blockers"))],
         *_cycle_blockers(cycles),
     ]
     blockers = _dedupe(raw_blockers)
-    forbidden_effects = _aggregate_forbidden_effects(supervisor_packet, cycles)
+    forbidden_effects = _aggregate_forbidden_effects(supervisor_artifact, cycles)
     status = _summary_status(
-        supervisor_packet=supervisor_packet,
+        supervisor_artifact=supervisor_artifact,
         blockers=blockers,
         forbidden_effects=forbidden_effects,
     )
     latest_cycle = cycles[-1] if cycles and isinstance(cycles[-1], dict) else {}
-    source_status = str(supervisor_packet.get("status") or "")
+    source_status = str(supervisor_artifact.get("status") or "")
 
     return {
         "scope": "runtime_supervisor_operator_summary",
         "status": status,
         "source_supervisor_status": source_status,
-        "runtime_instance_id": supervisor_packet.get("runtime_instance_id"),
-        "cycles_completed": supervisor_packet.get("cycles_completed", len(cycles)),
-        "stop_reason": supervisor_packet.get("stop_reason"),
-        "latest_cycle_status": supervisor_packet.get("latest_cycle_status")
+        "runtime_instance_id": supervisor_artifact.get("runtime_instance_id"),
+        "cycles_completed": supervisor_artifact.get("cycles_completed", len(cycles)),
+        "stop_reason": supervisor_artifact.get("stop_reason"),
+        "latest_cycle_status": supervisor_artifact.get("latest_cycle_status")
         or latest_cycle.get("status"),
-        "latest_cycle_path": supervisor_packet.get("latest_cycle_path")
+        "latest_cycle_path": supervisor_artifact.get("latest_cycle_path")
         or latest_cycle.get("cycle_path"),
         "signal_state": _signal_state(cycles=cycles, blockers=raw_blockers),
         "blockers": blockers,
-        "warnings": _dedupe([str(item) for item in _as_list(supervisor_packet.get("warnings"))]),
-        "operator_command_plan": _operator_command_plan(status=status),
+        "warnings": _dedupe([str(item) for item in _as_list(supervisor_artifact.get("warnings"))]),
+        "summary_plan": _summary_plan(status=status),
         "safety_invariants": _summary_safety(
-            supervisor_packet=supervisor_packet,
+            supervisor_artifact=supervisor_artifact,
             forbidden_effects=forbidden_effects,
         ),
         "right_tail_objective_context": {
@@ -90,11 +90,11 @@ def build_summary(supervisor_packet: dict[str, Any]) -> dict[str, Any]:
 
 def _summary_status(
     *,
-    supervisor_packet: dict[str, Any],
+    supervisor_artifact: dict[str, Any],
     blockers: list[str],
     forbidden_effects: list[str],
 ) -> str:
-    source_status = str(supervisor_packet.get("status") or "")
+    source_status = str(supervisor_artifact.get("status") or "")
     if forbidden_effects or source_status == "supervisor_blocked":
         return "operator_supervisor_blocked"
     if source_status == "supervisor_waiting_for_signal":
@@ -134,7 +134,7 @@ def _signal_state(*, cycles: list[Any], blockers: list[str]) -> dict[str, Any]:
     }
 
 
-def _operator_command_plan(*, status: str) -> dict[str, Any]:
+def _summary_plan(*, status: str) -> dict[str, Any]:
     next_step_by_status = {
         "operator_waiting_for_signal": "continue_live_signal_operator_supervision",
         "operator_profile_review_required": "review_runtime_profile_proposal",
@@ -143,9 +143,9 @@ def _operator_command_plan(*, status: str) -> dict[str, Any]:
         "operator_supervisor_blocked": "stop_and_review_supervisor_blocker",
     }
     return {
+        "not_execution_authority": True,
         "next_step": next_step_by_status.get(status, "review_operator_summary"),
         "summary_only": True,
-        "not_executed": True,
         "creates_runtime": False,
         "mutates_runtime_profile": False,
         "creates_shadow_candidate": False,
@@ -164,13 +164,13 @@ def _operator_command_plan(*, status: str) -> dict[str, Any]:
 
 def _summary_safety(
     *,
-    supervisor_packet: dict[str, Any],
+    supervisor_artifact: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
-    source_safety = _as_dict(supervisor_packet.get("safety_invariants"))
+    source_safety = _as_dict(supervisor_artifact.get("safety_invariants"))
     return {
         "summary_only": True,
-        "read_packet_only": True,
+        "summary_evidence_only": True,
         "database_write": False,
         "exchange_write_called": False,
         "order_created": False,
@@ -184,11 +184,11 @@ def _summary_safety(
 
 
 def _aggregate_forbidden_effects(
-    supervisor_packet: dict[str, Any],
+    supervisor_artifact: dict[str, Any],
     cycles: list[Any],
 ) -> list[str]:
     effects: list[str] = []
-    source_safety = _as_dict(supervisor_packet.get("safety_invariants"))
+    source_safety = _as_dict(supervisor_artifact.get("safety_invariants"))
     if source_safety.get("cycles_have_forbidden_effects") is True:
         effects.append("cycles_have_forbidden_effects")
     for key in FORBIDDEN_EFFECT_KEYS:
@@ -249,7 +249,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a read-only operator summary from a supervisor JSON packet.",
+        description="Build a read-only operator summary from a supervisor JSON artifact.",
     )
     parser.add_argument("--supervisor-json", required=True)
     parser.add_argument("--output-json")
@@ -258,8 +258,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = _read_json(Path(args.supervisor_json).expanduser())
-    summary = build_summary(packet)
+    artifact = _read_json(Path(args.supervisor_json).expanduser())
+    summary = build_summary(artifact)
     if args.output_json:
         _write_json(Path(args.output_json).expanduser(), summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True, default=str))

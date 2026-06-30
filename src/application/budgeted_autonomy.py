@@ -120,7 +120,7 @@ class BudgetedAutonomyCandidateDecision(BudgetedAutonomyModel):
     warnings: list[str] = Field(default_factory=list)
     blockers: list[BlockerRecord] = Field(default_factory=list)
     action_allowed: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -143,7 +143,7 @@ class BudgetedAutonomyLoopEvaluation(BudgetedAutonomyModel):
     retry_condition: str
     action_allowed: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     auto_execution_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
@@ -187,7 +187,7 @@ def evaluate_budgeted_autonomy_loop(
                     "read-only evidence shows no active position and no open protection."
                 ),
                 severity="hard_blocker",
-                bridge="Keep all new actions disabled while reconciliation/review cleanup is pending.",
+                recovery_action="Keep all new actions disabled while reconciliation/review cleanup is pending.",
                 retry_condition=(
                     "Run official reconciliation/review cleanup so PG position, orders, "
                     "review ledger, and exchange evidence agree."
@@ -224,7 +224,7 @@ def evaluate_budgeted_autonomy_loop(
                 f"{authorization.max_active_positions}."
             ),
             severity="hard_blocker",
-            bridge="Hold further candidate execution while protected position remains open.",
+            recovery_action="Hold further candidate execution while protected position remains open.",
             retry_condition="Position closes with PG/exchange evidence and review ledger is updated.",
         )
         for candidate in candidates:
@@ -350,7 +350,7 @@ def _authorization_blockers(
                 path="BudgetEnvelope -> AutonomyAuthorization",
                 evidence="Budgeted autonomy authorization is revoked.",
                 severity="hard_blocker",
-                bridge="Keep all candidate actions disabled.",
+                recovery_action="Keep all candidate actions disabled.",
                 retry_condition="Owner creates a fresh budgeted authorization.",
             )
         )
@@ -362,7 +362,7 @@ def _authorization_blockers(
                 path="BudgetEnvelope -> AutonomyAuthorization",
                 evidence=f"pause_state={authorization.pause_state}.",
                 severity="hard_blocker",
-                bridge="Keep all candidate actions disabled while paused.",
+                recovery_action="Keep all candidate actions disabled while paused.",
                 retry_condition="Owner explicitly resumes the budgeted authorization.",
             )
         )
@@ -374,7 +374,7 @@ def _authorization_blockers(
                 path="BudgetEnvelope -> AutonomyAuthorization",
                 evidence=f"now_ms {now_ms} exceeds valid_until_ms {authorization.valid_until_ms}.",
                 severity="hard_blocker",
-                bridge="Expire all candidate actions.",
+                recovery_action="Expire all candidate actions.",
                 retry_condition="Owner creates a fresh budgeted authorization with a new validity window.",
             )
         )
@@ -386,7 +386,7 @@ def _authorization_blockers(
                 path="BudgetEnvelope -> AutonomyAuthorization",
                 evidence="max_active_positions is 0.",
                 severity="hard_blocker",
-                bridge="Keep all candidate actions disabled.",
+                recovery_action="Keep all candidate actions disabled.",
                 retry_condition="Owner creates a fresh budgeted authorization allowing one active position.",
             )
         )
@@ -404,7 +404,7 @@ def _candidate_blockers(
             path="ActionCandidate -> GenericActionSpec -> FinalGate",
             evidence=reason,
             severity="hard_blocker",
-            bridge="Keep candidate disabled in Owner Action Flow.",
+            recovery_action="Keep candidate disabled in Owner Action Flow.",
             retry_condition="Regenerate candidate after the listed blocker is repaired.",
         )
         for index, reason in enumerate(candidate.hard_blockers)
@@ -417,7 +417,7 @@ def _candidate_blockers(
                 path="ActionCandidate -> GenericActionSpec",
                 evidence=f"GenericActionSpec status is {candidate.status}.",
                 severity="hard_blocker",
-                bridge="Keep candidate as proposal/non-action.",
+                recovery_action="Keep candidate as proposal/non-action.",
                 retry_condition="Candidate must become valid_blocked_final_gate before FinalGate.",
             )
         )
@@ -429,7 +429,7 @@ def _candidate_blockers(
                 path="ActionCandidate -> OfficialActionRegistry",
                 evidence="Carrier is not supported by the official action registry.",
                 severity="hard_blocker",
-                bridge="Do not use unofficial action paths.",
+                recovery_action="Do not use unofficial action paths.",
                 retry_condition="Register carrier in the official action registry and retest.",
             )
         )
@@ -564,14 +564,14 @@ def _scope_blocker(
         path="BudgetEnvelope -> OwnerScope -> ActionCandidate",
         evidence=evidence,
         severity="hard_blocker",
-        bridge="Keep candidate disabled in Owner Action Flow.",
+        recovery_action="Keep candidate disabled in Owner Action Flow.",
         retry_condition=retry_condition,
     )
 
 
 def _ledger_closed_reviewed(ledger: dict[str, object]) -> bool:
     lifecycle = ledger.get("lifecycle_status")
-    review = ledger.get("review_decision")
+    review = ledger.get("review_outcome")
     review_status = review.get("status") if isinstance(review, dict) else None
     closed_lifecycles = {
         "closed_reviewed",
@@ -610,7 +610,7 @@ def _blocker(
     path: str,
     evidence: str,
     severity: Literal["hard_blocker", "warning", "deferred"],
-    bridge: str,
+    recovery_action: str,
     retry_condition: str,
 ) -> BlockerRecord:
     return BlockerRecord(
@@ -619,7 +619,7 @@ def _blocker(
         path=path,
         evidence=evidence,
         severity=severity,
-        bridge=bridge,
+        recovery_action=recovery_action,
         retry_condition=retry_condition,
     )
 

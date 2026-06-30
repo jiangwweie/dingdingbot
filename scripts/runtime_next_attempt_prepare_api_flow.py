@@ -96,15 +96,15 @@ def _summarize_prepare_report(report: dict[str, Any]) -> dict[str, Any]:
     )
     step_names = [str(item.get("name") or "") for item in steps if isinstance(item, dict)]
     return {
-        "scope": "runtime_next_attempt_prepare_packet",
+        "scope": "runtime_next_attempt_prepare_artifact",
         "status": "ready_for_final_gate_preflight" if ready else "blocked",
         "first_real_submit_prepare_report": report,
         "ids": ids,
         "next_attempt_gate": report.get("next_attempt_gate") or {},
         "blockers": blockers,
         "warnings": list(report.get("warnings") or []),
-        "operator_command_plan": {
-            "scope": "runtime_next_attempt_prepare_operator_command_plan",
+        "prepare_artifact_plan": {
+            "scope": "runtime_next_attempt_prepare_artifact_plan",
             "next_step": (
                 "run_official_final_gate_preflight"
                 if ready
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     _load_env_file(args.env_file)
     if not args.order_candidate_id and not args.signal_input_json:
         payload = {
-            "scope": "runtime_next_attempt_prepare_packet",
+            "scope": "runtime_next_attempt_prepare_artifact",
             "status": "blocked",
             "blockers": ["order_candidate_id_or_signal_input_json_required"],
             "safety_invariants": {

@@ -29,7 +29,7 @@ from scripts import runtime_ready_signal_shadow_planning_contract_fixture as sha
 from scripts.runtime_official_exchange_submit_boundary_proof import (  # noqa: E402
     _ExchangeSubmitAdapterResultRepo,
     _exchange_evidence_ids,
-    _exchange_submit_boundary_packet,
+    _exchange_submit_boundary_artifact,
     _prepare_candidate,
     _run_local_registration_stage,
 )
@@ -133,12 +133,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 prepare_report=prepare_report,
                 state=state,
             )
-            exchange_packet_preview = _request(
+            exchange_submit_preview = _request(
                 api_client,
                 "GET",
                 (
                     "/api/trading-console/"
-                    "runtime-execution-exchange-submit-packet-previews/"
+                    "runtime-execution-exchange-submit-previews/"
                     f"authorizations/{authorization_id}"
                 ),
             )
@@ -200,11 +200,11 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                     "exchange_submit_adapter_enabled": True,
                 },
             )
-            exchange_boundary_packet = _exchange_submit_boundary_packet(
+            exchange_boundary_artifact = _exchange_submit_boundary_artifact(
                 shadow_report=shadow_report,
                 prepare_report=prepare_report,
                 local_stage=local_stage,
-                exchange_packet_preview=exchange_packet_preview,
+                exchange_submit_preview=exchange_submit_preview,
                 exchange_action_authorization=exchange_action_authorization,
                 exchange_submit_enablement=exchange_submit_enablement,
                 exchange_adapter_result=exchange_adapter_result,
@@ -229,9 +229,9 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 },
             )
 
-    packet = _controlled_gateway_action_packet(
+    controlled_gateway_action_artifact = _controlled_gateway_action_artifact(
         prepare_report=prepare_report,
-        exchange_boundary_packet=exchange_boundary_packet,
+        exchange_boundary_artifact=exchange_boundary_artifact,
         exchange_execution_result=exchange_execution_result,
         lifecycle=lifecycle,
         gateway=gateway,
@@ -242,13 +242,13 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
     artifacts = {
         "prepare-report.json": prepare_report,
         "local-registration-adapter-result.json": local_stage["adapter_result"],
-        "exchange-submit-packet-preview.json": exchange_packet_preview,
+        "exchange-submit-preview.json": exchange_submit_preview,
         "exchange-submit-action-authorization.json": exchange_action_authorization,
         "exchange-submit-enablement.json": exchange_submit_enablement,
         "exchange-submit-adapter-result.json": exchange_adapter_result,
         "exchange-submit-execution-result.json": exchange_execution_result,
-        "exchange-submit-boundary-packet.json": exchange_boundary_packet,
-        "controlled-gateway-action-packet.json": packet,
+        "exchange-submit-boundary-artifact.json": exchange_boundary_artifact,
+        "controlled-gateway-action-artifact.json": controlled_gateway_action_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -257,24 +257,32 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "scope": "runtime_official_controlled_gateway_action_proof",
         "status": (
             "official_controlled_gateway_action_passed"
-            if _contract_passed(packet["checks"])
+            if _contract_passed(controlled_gateway_action_artifact["checks"])
             else "blocked"
         ),
         "runtime_instance_id": "runtime-rtf075-cpm-long",
         "order_candidate_id": "order-candidate-rtf075-contract",
-        "authorization_id": (packet["ids"] or {}).get("authorization_id"),
-        "execution_intent_id": (packet["ids"] or {}).get("execution_intent_id"),
-        "exchange_submit_execution_result_id": (packet["ids"] or {}).get(
+        "authorization_id": (
+            controlled_gateway_action_artifact["ids"] or {}
+        ).get("authorization_id"),
+        "execution_intent_id": (
+            controlled_gateway_action_artifact["ids"] or {}
+        ).get("execution_intent_id"),
+        "exchange_submit_execution_result_id": (
+            controlled_gateway_action_artifact["ids"] or {}
+        ).get(
             "exchange_submit_execution_result_id"
         ),
-        "controlled_gateway_action_packet": packet,
+        "controlled_gateway_action_artifact": controlled_gateway_action_artifact,
         "exchange_submit_execution_result": exchange_execution_result,
-        "checks": packet["checks"],
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "checks": controlled_gateway_action_artifact["checks"],
+        "safety_invariants": controlled_gateway_action_artifact[
+            "safety_invariants"
+        ],
+        "controlled_gateway_action_plan": {
             "next_step": (
                 "build_runtime_post_submit_finalize_flow"
-                if _contract_passed(packet["checks"])
+                if _contract_passed(controlled_gateway_action_artifact["checks"])
                 else "resolve_controlled_gateway_action_blockers"
             ),
             "uses_official_fastapi_routes": True,
@@ -290,7 +298,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "right_tail_objective_context": {
             "small_bounded_losses_allowed_after_runtime_gate": True,
             "attempt_budget_prefers_max_loss_reference": (
-                exchange_boundary_packet["runtime_attempt_budget_boundary"].get(
+                exchange_boundary_artifact["runtime_attempt_budget_boundary"].get(
                     "budget_reservation_basis"
                 )
                 == "max_loss_reference"
@@ -555,10 +563,10 @@ class _Readiness:
         self.created_at_ms = int(time() * 1000)
 
 
-def _controlled_gateway_action_packet(
+def _controlled_gateway_action_artifact(
     *,
     prepare_report: dict[str, Any],
-    exchange_boundary_packet: dict[str, Any],
+    exchange_boundary_artifact: dict[str, Any],
     exchange_execution_result: dict[str, Any],
     lifecycle: _ControlledOrderLifecycleService,
     gateway: _ControlledExchangeGateway,
@@ -567,7 +575,7 @@ def _controlled_gateway_action_packet(
     position_projection: _PositionProjection,
 ) -> dict[str, Any]:
     checks = _checks(
-        exchange_boundary_packet=exchange_boundary_packet,
+        exchange_boundary_artifact=exchange_boundary_artifact,
         exchange_execution_result=exchange_execution_result,
         lifecycle=lifecycle,
         gateway=gateway,
@@ -577,7 +585,7 @@ def _controlled_gateway_action_packet(
     )
     result_body = _body(exchange_execution_result)
     return {
-        "scope": "runtime_official_controlled_gateway_action_packet",
+        "scope": "runtime_official_controlled_gateway_action_artifact",
         "status": (
             "controlled_gateway_action_submitted"
             if _contract_passed(checks)
@@ -585,13 +593,13 @@ def _controlled_gateway_action_packet(
         ),
         "ids": {
             **dict(prepare_report.get("ids") or {}),
-            **dict(exchange_boundary_packet.get("ids") or {}),
+            **dict(exchange_boundary_artifact.get("ids") or {}),
             "exchange_submit_execution_result_id": result_body.get(
                 "execution_result_id"
             ),
         },
         "statuses": {
-            **dict(exchange_boundary_packet.get("statuses") or {}),
+            **dict(exchange_boundary_artifact.get("statuses") or {}),
             "exchange_submit_execution_result": result_body.get("status"),
         },
         "gateway_action": {
@@ -659,7 +667,7 @@ def _controlled_gateway_action_packet(
 
 def _checks(
     *,
-    exchange_boundary_packet: dict[str, Any],
+    exchange_boundary_artifact: dict[str, Any],
     exchange_execution_result: dict[str, Any],
     lifecycle: _ControlledOrderLifecycleService,
     gateway: _ControlledExchangeGateway,
@@ -668,7 +676,7 @@ def _checks(
     position_projection: _PositionProjection,
 ) -> dict[str, bool]:
     result_body = _body(exchange_execution_result)
-    boundary_statuses = dict(exchange_boundary_packet.get("statuses") or {})
+    boundary_statuses = dict(exchange_boundary_artifact.get("statuses") or {})
     safety = _safety_invariants(
         exchange_execution_result=exchange_execution_result,
         lifecycle=lifecycle,
@@ -678,8 +686,8 @@ def _checks(
     submitted_exchange_ids = list(result_body.get("submitted_exchange_order_ids") or [])
     protection_exchange_ids = list(result_body.get("protection_exchange_order_ids") or [])
     return {
-        "exchange_boundary_packet_passed": (
-            exchange_boundary_packet.get("status")
+        "exchange_boundary_artifact_passed": (
+            exchange_boundary_artifact.get("status")
             == "exchange_submit_adapter_armed_boundary"
         ),
         "exchange_adapter_result_armed": (
@@ -739,7 +747,7 @@ def _checks(
 
 def _contract_passed(checks: dict[str, bool]) -> bool:
     required_true = (
-        "exchange_boundary_packet_passed",
+        "exchange_boundary_artifact_passed",
         "exchange_adapter_result_armed",
         "exchange_execution_result_submitted",
         "exchange_execution_enabled_true",

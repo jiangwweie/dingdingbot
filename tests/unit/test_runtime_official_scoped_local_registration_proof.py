@@ -18,6 +18,17 @@ def test_official_scoped_local_registration_proof_passes(tmp_path):
         "runtime-order-lifecycle-adapter-result-"
     )
     assert len(report["local_order_ids"]) == 2
+    assert "operator_command_plan" not in report
+    assert report["scoped_local_registration_plan"] == {
+        "next_step": "build_exchange_submit_preview",
+        "uses_official_fastapi_routes": True,
+        "uses_fake_console_api": False,
+        "local_created_orders_registered": True,
+        "live_submit_allowed": False,
+        "exchange_submit_enabled": False,
+        "calls_exchange": False,
+        "executes_real_submit": False,
+    }
 
     checks = report["checks"]
     assert checks["shadow_contract_passed"] is True
@@ -48,14 +59,14 @@ def test_official_scoped_local_registration_proof_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_scoped_local_registration_outputs_registration_packet(tmp_path):
+def test_official_scoped_local_registration_outputs_registration_artifact(tmp_path):
     output_dir = tmp_path / "rtf084"
 
     report = script.build_proof_report(output_dir)
 
     expected_files = [
         "contract-report.json",
-        "local-registration-packet.json",
+        "local-registration-artifact.json",
         "local-registration-action-authorization.json",
         "local-registration-enablement.json",
         "local-registration-adapter-result.json",
@@ -67,25 +78,25 @@ def test_official_scoped_local_registration_outputs_registration_packet(tmp_path
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads((output_dir / "local-registration-packet.json").read_text())
-    assert packet["status"] == "local_created_orders_registered"
-    assert packet["statuses"]["local_registration_action_authorization"] == (
+    artifact = json.loads((output_dir / "local-registration-artifact.json").read_text())
+    assert artifact["status"] == "local_created_orders_registered"
+    assert artifact["statuses"]["local_registration_action_authorization"] == (
         "approved_for_local_registration_action"
     )
-    assert packet["statuses"]["local_registration_enablement"] == (
+    assert artifact["statuses"]["local_registration_enablement"] == (
         "ready_for_local_registration_action"
     )
-    assert packet["statuses"]["adapter_result"] == "registered_created_local_orders"
-    assert packet["local_registration"]["registered_order_count"] == 2
-    assert len(packet["local_registration"]["entry_order_ids"]) == 1
-    assert len(packet["local_registration"]["protection_order_ids"]) == 1
-    assert packet["local_registration"]["duplicate_submit_lock_acquired"] is True
-    assert packet["local_registration"]["order_lifecycle_called"] is True
-    assert packet["local_registration"]["exchange_called"] is False
-    assert packet["lifecycle_observation"]["register_call_count"] == 2
-    assert packet["safety_invariants"]["local_created_orders_registered"] is True
-    assert packet["safety_invariants"]["exchange_submit_enabled"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["statuses"]["adapter_result"] == "registered_created_local_orders"
+    assert artifact["local_registration"]["registered_order_count"] == 2
+    assert len(artifact["local_registration"]["entry_order_ids"]) == 1
+    assert len(artifact["local_registration"]["protection_order_ids"]) == 1
+    assert artifact["local_registration"]["duplicate_submit_lock_acquired"] is True
+    assert artifact["local_registration"]["order_lifecycle_called"] is True
+    assert artifact["local_registration"]["exchange_called"] is False
+    assert artifact["lifecycle_observation"]["register_call_count"] == 2
+    assert artifact["safety_invariants"]["local_created_orders_registered"] is True
+    assert artifact["safety_invariants"]["exchange_submit_enabled"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_official_scoped_local_registration_cli_stdout_is_json_only(

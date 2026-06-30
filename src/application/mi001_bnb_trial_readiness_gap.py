@@ -23,7 +23,7 @@ class BnbTrialReadinessGate(BaseModel):
     gap: str
     recommended_action: str
     risk_if_skipped: str
-    owner_decision_required: bool
+    owner_intervention_required: bool
 
 
 class BnbTrialDesignSummary(BaseModel):
@@ -47,7 +47,7 @@ class BnbExecutionBoundaryItem(BaseModel):
     required_control: str
 
 
-class BnbOwnerDecisionItem(BaseModel):
+class BnbOwnerPolicyItem(BaseModel):
     decision_id: str
     question: str
     options: list[str]
@@ -63,12 +63,12 @@ class Mi001BnbTrialReadinessGapResponse(BaseModel):
     side: Literal["long"] = "long"
     current_phase: str
     current_status: list[str]
-    readiness_verdict: Literal["not_testnet_ready_not_live_ready"] = "not_testnet_ready_not_live_ready"
+    readiness_status: Literal["not_testnet_ready_not_live_ready"] = "not_testnet_ready_not_live_ready"
     gap_matrix: list[BnbTrialReadinessGate]
     testnet_rehearsal_design: BnbTrialDesignSummary
     small_live_trial_readiness_draft: BnbTrialDesignSummary
     execution_boundary_audit: list[BnbExecutionBoundaryItem]
-    owner_decision_checklist: list[BnbOwnerDecisionItem]
+    owner_policy_checklist: list[BnbOwnerPolicyItem]
     api_console_impact: dict[str, str | bool]
     non_permissions: dict[str, bool] = Field(default_factory=lambda: _non_permissions())
     source_refs: list[str] = Field(default_factory=lambda: _source_refs())
@@ -91,7 +91,7 @@ def build_mi001_bnb_trial_readiness_gap() -> Mi001BnbTrialReadinessGapResponse:
         testnet_rehearsal_design=_testnet_design(),
         small_live_trial_readiness_draft=_small_live_design(),
         execution_boundary_audit=_execution_boundary_audit(),
-        owner_decision_checklist=_owner_decision_checklist(),
+        owner_policy_checklist=_owner_policy_checklist(),
         api_console_impact={
             "endpoint": "/api/brc/readiness/mi001-bnb/trial-gap",
             "console_surface": "/strategy-groups read-only panel",
@@ -112,7 +112,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             True,
             "src/application/trial_readiness_account_facts.py; reports/.../live_account_facts_readiness_result.md",
             "BNB readiness must refresh account equity and available margin at rehearsal/live decision time.",
-            "Run read-only Binance USDT futures account facts refresh immediately before any rehearsal packet.",
+            "Run read-only Binance USDT futures account facts refresh immediately before any rehearsal artifact.",
             "Sizing and max-loss assumptions may be stale.",
             True,
         ),
@@ -196,7 +196,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             True,
             "reports/.../mi001_bnb_bounded_trial_design_v0.md",
             "Draft says max 5x and min(equity*5, available_margin*5, Operation cap), but BNB cap is missing.",
-            "Freeze BNB max leverage 5x and BNB notional cap before any rehearsal packet.",
+            "Freeze BNB max leverage 5x and BNB notional cap before any rehearsal artifact.",
             "Rehearsal/live review could overstate allowed notional.",
             True,
         ),
@@ -215,7 +215,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
         (
             "G10",
             "Exit / stop model",
-            "draft_only_needs_rehearsal_packet",
+            "draft_only_needs_rehearsal_artifact",
             True,
             True,
             "reports/.../mi001_bnb_bounded_trial_design_v0.md",
@@ -267,7 +267,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             True,
             True,
             "brc_strategy_group_observations; brc_strategy_group_forward_reviews; src/application/brc_operation_layer.py",
-            "Observation and forward review are persisted; rehearsal/live audit packet is not yet defined.",
+            "Observation and forward review are persisted; rehearsal/live audit artifact is not yet defined.",
             "Require Operation Layer preflight/audit records for any rehearsal handoff.",
             "Owner decisions and boundary checks may be hard to reconstruct.",
             True,
@@ -302,7 +302,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             "design_review_only_no_authorization",
             True,
             True,
-            "reports/.../mi001_bnb_owner_decision_checklist.md",
+            "reports/.../mi001_bnb_owner_policy_checklist.md",
             "No Owner testnet rehearsal or small-live final approval exists for BNB.",
             "Use explicit Owner decision checklist and separate final authorization record.",
             "Review artifacts could be misread as start approval.",
@@ -315,8 +315,8 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             True,
             False,
             "docs/ops/plc-phase5e-controlled-multi-symbol-testnet-runtime-rehearsal.md; scripts/start_brc_local_testnet.sh",
-            "Repo has historical testnet surfaces, but no BNB-specific owner-confirmed rehearsal packet.",
-            "Prepare a BNB-specific testnet rehearsal task with isolated testnet config and no live authorization.",
+            "Repo has historical testnet surfaces, but no BNB-specific Owner-confirmed rehearsal artifact.",
+            "Prepare a BNB-specific testnet rehearsal plan with isolated testnet config and no live authorization.",
             "Testing order path could touch wrong environment or symbol.",
             True,
         ),
@@ -344,7 +344,7 @@ def _gap_matrix() -> list[BnbTrialReadinessGate]:
             gap=gap,
             recommended_action=action,
             risk_if_skipped=risk,
-            owner_decision_required=owner_required,
+            owner_intervention_required=owner_required,
         )
         for (
             gate_id,
@@ -435,7 +435,7 @@ def _small_live_design() -> BnbTrialDesignSummary:
             "fresh account facts",
             "preflight audit",
             "entry/exit evidence",
-            "post-trial review packet",
+            "post-trial review artifact",
         ],
         blockers=[
             "not authorized",
@@ -487,37 +487,37 @@ def _execution_boundary_audit() -> list[BnbExecutionBoundaryItem]:
     ]
 
 
-def _owner_decision_checklist() -> list[BnbOwnerDecisionItem]:
+def _owner_policy_checklist() -> list[BnbOwnerPolicyItem]:
     return [
-        BnbOwnerDecisionItem(
+        BnbOwnerPolicyItem(
             decision_id="D01",
             question="Continue observation only?",
             options=["continue_observation_only", "prepare_testnet_rehearsal", "pause_bnb_case"],
             recommended_default="continue_observation_only",
             authorization_effect="No execution or order permission.",
         ),
-        BnbOwnerDecisionItem(
+        BnbOwnerPolicyItem(
             decision_id="D02",
             question="Wait for 12h/24h/72h forward review before any rehearsal prep?",
             options=["wait_all_windows", "wait_12h_24h", "allow_design_only_parallel_work"],
             recommended_default="wait_all_windows",
             authorization_effect="Review timing only; not trial authorization.",
         ),
-        BnbOwnerDecisionItem(
+        BnbOwnerPolicyItem(
             decision_id="D03",
             question="Accept early adverse-path risk as a blocker requiring no-chase and wait-for-confirmation?",
             options=["accept_as_required_gate", "reject_case", "continue_observation"],
             recommended_default="accept_as_required_gate",
             authorization_effect="Adds design constraint only.",
         ),
-        BnbOwnerDecisionItem(
+        BnbOwnerPolicyItem(
             decision_id="D04",
-            question="Prepare owner-confirmed testnet rehearsal packet?",
-            options=["prepare_testnet_packet", "defer", "observation_only"],
+            question="Prepare Owner-confirmed testnet rehearsal artifact?",
+            options=["prepare_testnet_artifact", "defer", "observation_only"],
             recommended_default="defer",
-            authorization_effect="Packet design only unless a separate testnet apply/start task is authorized.",
+            authorization_effect="Artifact design only unless a separate testnet apply/start task is authorized.",
         ),
-        BnbOwnerDecisionItem(
+        BnbOwnerPolicyItem(
             decision_id="D05",
             question="Accept dedicated-account equity as max risk capital model for any future small live trial?",
             options=["accept_model", "require_smaller_cap", "do_not_live_trial"],

@@ -175,7 +175,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 ),
             )
 
-    packet = _submit_adapter_boundary_packet(
+    submit_adapter_boundary_artifact = _submit_adapter_boundary_artifact(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
         final_gate_preview=final_gate_preview,
@@ -201,7 +201,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "order-lifecycle-handoff.json": order_lifecycle_handoff,
         "order-lifecycle-adapter-preview.json": order_lifecycle_adapter_preview,
         "order-registration-draft-preview.json": order_registration_draft_preview,
-        "submit-adapter-boundary-packet.json": packet,
+        "submit-adapter-boundary-artifact.json": submit_adapter_boundary_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -218,7 +218,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         order_lifecycle_handoff=order_lifecycle_handoff,
         order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
         order_registration_draft_preview=order_registration_draft_preview,
-        packet=packet,
+        submit_adapter_boundary_artifact=submit_adapter_boundary_artifact,
         state=state,
     )
     _write_json(output_dir / "contract-report.json", report)
@@ -258,7 +258,7 @@ def _rtf083_state(
     return state
 
 
-def _submit_adapter_boundary_packet(
+def _submit_adapter_boundary_artifact(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
@@ -294,7 +294,7 @@ def _submit_adapter_boundary_packet(
     lifecycle_preview_body = _body(order_lifecycle_adapter_preview)
     registration_body = _body(order_registration_draft_preview)
     return {
-        "scope": "runtime_official_submit_adapter_boundary_packet",
+        "scope": "runtime_official_submit_adapter_boundary_artifact",
         "status": (
             "ready_for_local_registration_boundary_review"
             if _contract_passed(checks)
@@ -389,11 +389,11 @@ def _report(
     order_lifecycle_handoff: dict[str, Any],
     order_lifecycle_adapter_preview: dict[str, Any],
     order_registration_draft_preview: dict[str, Any],
-    packet: dict[str, Any],
+    submit_adapter_boundary_artifact: dict[str, Any],
     state: _ServerProofState,
 ) -> dict[str, Any]:
-    checks = dict(packet["checks"])
-    ids = dict(packet["ids"])
+    checks = dict(submit_adapter_boundary_artifact["checks"])
+    ids = dict(submit_adapter_boundary_artifact["ids"])
     return {
         "scope": "runtime_official_submit_adapter_preview_proof",
         "status": (
@@ -422,7 +422,7 @@ def _report(
         "order_registration_draft_preview_id": ids.get(
             "order_registration_draft_preview_id"
         ),
-        "submit_adapter_boundary_packet": packet,
+        "submit_adapter_boundary_artifact": submit_adapter_boundary_artifact,
         "shadow_contract": shadow_report,
         "first_real_submit_prepare_report": prepare_report,
         "final_gate_preview": final_gate_preview,
@@ -435,7 +435,7 @@ def _report(
         "order_lifecycle_adapter_preview": order_lifecycle_adapter_preview,
         "order_registration_draft_preview": order_registration_draft_preview,
         "checks": checks,
-        "operator_command_plan": {
+        "submit_adapter_preview_plan": {
             "next_step": (
                 "build_scoped_local_registration_enablement"
                 if _contract_passed(checks)
@@ -452,7 +452,9 @@ def _report(
         "right_tail_objective_context": {
             "small_bounded_losses_allowed_after_runtime_gate": True,
             "attempt_budget_prefers_max_loss_reference": (
-                packet["runtime_attempt_budget_boundary"].get(
+                submit_adapter_boundary_artifact[
+                    "runtime_attempt_budget_boundary"
+                ].get(
                     "budget_reservation_basis"
                 )
                 == "max_loss_reference"
@@ -461,7 +463,9 @@ def _report(
             "automatic_withdrawal_assumed": False,
             "not_proven_alpha": True,
         },
-        "safety_invariants": packet["safety_invariants"],
+        "safety_invariants": submit_adapter_boundary_artifact[
+            "safety_invariants"
+        ],
     }
 
 

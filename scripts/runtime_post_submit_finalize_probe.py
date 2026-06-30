@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""PG-backed probe for runtime post-submit finalize.
+"""PG-backed probe artifact for runtime post-submit finalize.
 
 The probe is meant for local and Tokyo integration validation. It resolves
 durable post-submit evidence by authorization ID, reads trusted local position
-projection for the runtime symbol, and builds a RuntimePostSubmitFinalizePacket.
-It never submits, cancels, amends, closes, withdraws, or transfers funds.
+projection for the runtime symbol, and embeds the protected post-submit
+finalize lifecycle payload as read-only evidence. It never submits, cancels,
+amends, closes, withdraws, or transfers funds.
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-async def build_runtime_post_submit_finalize_probe_packet(
+async def build_runtime_post_submit_finalize_probe_artifact(
     *,
     authorization_id: str,
     reservation_id: str,
@@ -115,7 +116,7 @@ async def build_runtime_post_submit_finalize_probe_packet(
             "other_runtime_count": 0,
             "positions": [],
         }
-        packet = await finalize_service.finalize_authorization(
+        post_submit_finalize_payload = await finalize_service.finalize_authorization(
             authorization_id,
             reservation_id=reservation_id,
             active_positions_count=None,
@@ -127,7 +128,7 @@ async def build_runtime_post_submit_finalize_probe_packet(
             runtime_instance_id=result.runtime_instance_id,
             symbol=result.symbol,
         )
-        packet = await finalize_service.finalize_authorization(
+        post_submit_finalize_payload = await finalize_service.finalize_authorization(
             authorization_id,
             reservation_id=reservation_id,
             active_positions_count=active_position_facts["active_positions_count"],
@@ -139,12 +140,16 @@ async def build_runtime_post_submit_finalize_probe_packet(
         "authorization_id": authorization_id,
         "reservation_id": reservation_id,
         "active_position_facts": _json_value(active_position_facts),
-        "post_submit_finalize_packet": _json_value(packet),
-        "status": packet.status.value,
-        "next_attempt_gate_status": packet.next_attempt_gate.status.value,
-        "blockers": list(packet.blockers),
-        "next_attempt_blockers": list(packet.next_attempt_gate.blockers),
-        "warnings": list(packet.warnings),
+        "post_submit_finalize_payload": _json_value(post_submit_finalize_payload),
+        "status": post_submit_finalize_payload.status.value,
+        "next_attempt_gate_status": (
+            post_submit_finalize_payload.next_attempt_gate.status.value
+        ),
+        "blockers": list(post_submit_finalize_payload.blockers),
+        "next_attempt_blockers": list(
+            post_submit_finalize_payload.next_attempt_gate.blockers
+        ),
+        "warnings": list(post_submit_finalize_payload.warnings),
         "safety_invariants": {
             "exchange_write_called": False,
             "exchange_order_submitted": False,
@@ -247,7 +252,7 @@ async def _build_services() -> tuple[
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     finalize_service, execution_result_repo, position_repo = await _build_services()
     try:
-        return await build_runtime_post_submit_finalize_probe_packet(
+        return await build_runtime_post_submit_finalize_probe_artifact(
             authorization_id=args.authorization_id,
             reservation_id=args.reservation_id,
             position_repository=position_repo,
@@ -261,15 +266,15 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a PG-backed runtime post-submit finalize probe packet.",
+        description="Build a PG-backed runtime post-submit finalize probe artifact.",
     )
     parser.add_argument("--authorization-id", required=True)
     parser.add_argument("--reservation-id", required=True)
     parser.add_argument("--closed-review-required", action="store_true")
     args = parser.parse_args()
-    packet = asyncio.run(_run(args))
-    print(json.dumps(packet, ensure_ascii=False, indent=2))
-    return 0 if packet["status"] != "blocked" else 2
+    artifact = asyncio.run(_run(args))
+    print(json.dumps(artifact, ensure_ascii=False, indent=2))
+    return 0 if artifact["status"] != "blocked" else 2
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import build_strategygroup_runtime_goal_status as goal_status
-from scripts.build_strategygroup_runtime_goal_status import build_goal_status_packet
+from scripts.build_strategygroup_runtime_goal_status import build_goal_status_artifact
 
 
 HEAD = "3e08c037a4990a268d1ee2b61861601d57423223"
@@ -17,7 +17,7 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _write_base_packets(report_dir: Path) -> None:
+def _write_base_artifacts(report_dir: Path) -> None:
     report_dir.mkdir(parents=True)
     _write(
         report_dir / "watcher-tick.json",
@@ -61,7 +61,7 @@ def _write_base_packets(report_dir: Path) -> None:
         },
     )
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "waiting_for_market",
             "dispatch_status": "no_action_continue_observation",
@@ -87,9 +87,9 @@ def _write_base_packets(report_dir: Path) -> None:
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_not_real_execution_proof": True,
-                "non_executing_prepare_auto_bridge_checked": True,
+                "execution_attempt_rehearsal_prepare_checked": True,
                 "operation_layer_evidence_relay_checked": True,
-                "scoped_pipeline_operation_layer_handoff_checked": True,
+                "scoped_pipeline_operation_layer_submit_projection_checked": True,
                 "fresh_signal_fast_auto_chain_checked": True,
                 "required_facts_readiness_checked": True,
                 "legacy_local_registration_probe_tolerance_checked": True,
@@ -106,7 +106,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "shared_runtime_pipeline_checked": True,
                 "common_execution_chain_reuse_checked": True,
                 "strategygroup_adapter_boundary_checked": True,
-                "strategy_handoff_no_execution_pipeline_fields_checked": True,
+                "strategy_intake_no_execution_pipeline_fields_checked": True,
                 "runtime_tier_policy_checked": True,
                 "only_mpg_tiny_real_order_eligible_checked": True,
                 "new_strategygroups_default_observe_only_checked": True,
@@ -115,7 +115,7 @@ def _write_base_packets(report_dir: Path) -> None:
             },
             "scenarios": [
                 {
-                    "name": "non_executing_prepare_auto_bridge",
+                    "name": "execution_attempt_rehearsal_prepare",
                     "status": "passed",
                     "artifacts": {
                         "resume_dispatch": {
@@ -211,9 +211,9 @@ def _matrix_by_key(packet: dict) -> dict[str, dict]:
 
 def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -221,9 +221,11 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
 
     assert packet["status"] == "waiting_for_signal"
     assert packet["ready_for_real_order_action"] is False
-    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert "next_safe_checkpoint" not in packet
+    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
     assert packet["owner_state"]["label"] == "等待机会"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert "next_safe_checkpoint" not in packet["owner_state"]
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "continue_watcher_observation"
     )
     assert packet["checks"]["fresh_signal_present"] is False
@@ -231,11 +233,11 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
     assert packet["checks"]["required_facts_readiness_checked"] is True
-    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert packet["checks"]["execution_attempt_rehearsal_prepare_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
     assert (
-        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        packet["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
         is True
     )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
@@ -247,7 +249,7 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         "required_facts_readiness_checked"
     ] is True
     assert packet["evidence"]["dry_run_required_checks"][
-        "non_executing_prepare_auto_bridge_checked"
+        "execution_attempt_rehearsal_prepare_checked"
     ] is True
     assert packet["evidence"]["dry_run_required_checks"][
         "common_execution_chain_reuse_checked"
@@ -256,7 +258,7 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         "strategygroup_adapter_boundary_checked"
     ] is True
     assert packet["evidence"]["dry_run_required_checks"][
-        "strategy_handoff_no_execution_pipeline_fields_checked"
+        "strategy_intake_no_execution_pipeline_fields_checked"
     ] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
@@ -270,12 +272,20 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         "project_progress_allowed": False,
         "continue_observation_allowed": False,
         "real_submit_allowed": False,
-        "next_safe_checkpoint": "continue_watcher_observation",
+        "non_authority_checkpoint": "continue_watcher_observation",
         "blocker_keys": [],
     }
     matrix = _matrix_by_key(packet)
+    assert not any(
+        "-packet.json" in str(item.get("evidence") or "")
+        for item in matrix.values()
+    )
     assert matrix["fresh_signal"]["status"] == "waiting_for_market"
+    assert matrix["candidate_authorization"]["evidence"] == (
+        "post_signal_resume/resume_dispatch"
+    )
     assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
+    assert matrix["official_operation_layer"]["evidence"] == "resume_dispatch"
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
     assert matrix["official_operation_layer"]["blocker_class"] == "waiting_for_market"
     assert matrix["official_operation_layer"]["blocks_real_submit"] is True
@@ -290,11 +300,61 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["safety_invariants"]["calls_operation_layer"] is False
 
 
+def test_goal_status_ignores_legacy_resume_dispatch_packet_source(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    (report_dir / "resume-dispatch-artifact.json").unlink()
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "ready_for_operation_layer",
+            "dispatch_status": "official_operation_layer_evidence_ready",
+            "dispatch_action": "call_official_operation_layer_submit",
+            "ready_runtime_signals": 1,
+            "blockers": [],
+        },
+    )
+
+    artifact = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert artifact["checks"]["required_artifacts_present"] is False
+    assert artifact["checks"]["fresh_signal_present"] is False
+    assert "missing_artifact:resume_dispatch" in artifact["blockers"]
+    assert artifact["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
+def test_goal_status_ignores_legacy_wakeup_packet_source(tmp_path: Path) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    _write(
+        report_dir / "wakeup-packet.json",
+        {
+            "status": "runtime_signal_ready_for_non_executing_prepare",
+            "summary": {"runtime_ready_signal_count": 1},
+        },
+    )
+
+    artifact = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert artifact["checks"]["fresh_signal_present"] is False
+    assert artifact["status"] == "waiting_for_signal"
+
+
 def test_goal_status_requires_specific_dry_run_order_chain_checks(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "runtime-dry-run-audit-chain.json",
         {
@@ -313,21 +373,21 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "dry_run_audit_degraded"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_runtime_dry_run_audit_chain"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["checks"]["common_execution_chain_reuse_checked"] is False
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is False
     assert (
-        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        packet["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
         is False
     )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is False
@@ -354,7 +414,7 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     )
     assert (
         "runtime_dry_run_missing_required_check:"
-        "strategy_handoff_no_execution_pipeline_fields_checked"
+        "strategy_intake_no_execution_pipeline_fields_checked"
     ) in packet["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:"
@@ -406,96 +466,101 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     ) in packet["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:"
-        "non_executing_prepare_auto_bridge_checked"
+        "execution_attempt_rehearsal_prepare_checked"
     ) in packet["blockers"]
 
 
-def test_goal_status_reads_local_nested_dry_run_audit_packet(
+def test_goal_status_ignores_legacy_nested_dry_run_audit_artifact(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
-    root_packet = report_dir / "runtime-dry-run-audit-chain.json"
-    nested_packet = (
+    _write_base_artifacts(report_dir)
+    root_artifact = report_dir / "runtime-dry-run-audit-chain.json"
+    nested_artifact = (
         report_dir
         / "dry-run-audit-chain"
         / "runtime-dry-run-audit-chain.json"
     )
-    root_payload = json.loads(root_packet.read_text(encoding="utf-8"))
-    root_packet.unlink()
-    nested_packet.parent.mkdir(parents=True)
-    _write(nested_packet, root_payload)
+    root_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
+    root_artifact.unlink()
+    nested_artifact.parent.mkdir(parents=True)
+    _write(nested_artifact, root_payload)
 
-    packet = build_goal_status_packet(
+    artifact = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
-    assert packet["checks"]["runtime_dry_run_audit_passed"] is True
-    assert "runtime_dry_run_audit_not_passed" not in packet["blockers"]
-    assert packet["evidence"]["dry_run_scenario_count"] == 14
-    assert packet["status"] == "waiting_for_signal"
+    assert artifact["status"] == "missing_fact"
+    assert artifact["checks"]["runtime_dry_run_audit_passed"] is False
+    assert "missing_artifact:runtime_dry_run_audit" in artifact["blockers"]
+    assert "runtime_dry_run_audit_not_passed" in artifact["blockers"]
+    assert artifact["evidence"]["dry_run_scenario_count"] is None
 
 
-def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
+def test_goal_status_uses_root_dry_run_audit_artifact_even_when_nested_exists(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
-    root_packet = report_dir / "runtime-dry-run-audit-chain.json"
-    nested_packet = (
+    _write_base_artifacts(report_dir)
+    root_artifact = report_dir / "runtime-dry-run-audit-chain.json"
+    nested_artifact = (
         report_dir
         / "dry-run-audit-chain"
         / "runtime-dry-run-audit-chain.json"
     )
-    root_payload = json.loads(root_packet.read_text(encoding="utf-8"))
+    root_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
     root_payload["checks"]["scenario_count"] = 12
-    root_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = False
+    root_payload["checks"]["execution_attempt_rehearsal_prepare_checked"] = False
     root_payload["checks"][
-        "strategy_handoff_no_execution_pipeline_fields_checked"
+        "strategy_intake_no_execution_pipeline_fields_checked"
     ] = False
     root_payload["generated_at_ms"] = 1
-    _write(root_packet, root_payload)
+    _write(root_artifact, root_payload)
 
-    nested_payload = json.loads(root_packet.read_text(encoding="utf-8"))
+    nested_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
     nested_payload["checks"]["scenario_count"] = 14
-    nested_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = True
+    nested_payload["checks"]["execution_attempt_rehearsal_prepare_checked"] = True
     nested_payload["checks"][
-        "strategy_handoff_no_execution_pipeline_fields_checked"
+        "strategy_intake_no_execution_pipeline_fields_checked"
     ] = True
     nested_payload["generated_at_ms"] = 2
-    nested_packet.parent.mkdir(parents=True)
-    _write(nested_packet, nested_payload)
+    nested_artifact.parent.mkdir(parents=True)
+    _write(nested_artifact, nested_payload)
 
-    packet = build_goal_status_packet(
+    artifact = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
-    assert packet["checks"]["runtime_dry_run_audit_passed"] is True
-    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert artifact["checks"]["runtime_dry_run_audit_passed"] is False
+    assert artifact["checks"]["execution_attempt_rehearsal_prepare_checked"] is False
     assert (
-        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
-        is True
+        artifact["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
+        is False
     )
-    assert packet["evidence"]["dry_run_scenario_count"] == 14
+    assert artifact["evidence"]["dry_run_scenario_count"] == 12
     assert (
         "runtime_dry_run_missing_required_check:"
-        "non_executing_prepare_auto_bridge_checked"
-    ) not in packet["blockers"]
+        "execution_attempt_rehearsal_prepare_checked"
+    ) in artifact["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:"
-        "strategy_handoff_no_execution_pipeline_fields_checked"
-    ) not in packet["blockers"]
+        "execution_attempt_rehearsal_prepare_checked"
+    ) in artifact["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "strategy_intake_no_execution_pipeline_fields_checked"
+    ) in artifact["blockers"]
 
 
 def test_goal_status_does_not_treat_missing_position_fact_as_conflict(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "strategy-group-live-facts-readiness.json",
         {
@@ -509,7 +574,7 @@ def test_goal_status_does_not_treat_missing_position_fact_as_conflict(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -526,9 +591,9 @@ def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_action_time_final_gate",
             "dispatch_status": "official_finalgate_preflight_dispatch_ready",
@@ -545,7 +610,7 @@ def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -553,7 +618,7 @@ def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
 
     assert packet["status"] == "action_time_finalgate_ready"
     assert packet["owner_state"]["label"] == "处理中"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "run_official_action_time_finalgate"
     )
     assert packet["checks"]["fresh_signal_present"] is True
@@ -564,7 +629,7 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "watcher-tick.json",
         {
@@ -579,7 +644,7 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
         },
     )
     _write(
-        report_dir / "wakeup-packet.json",
+        report_dir / "wakeup-evidence.json",
         {
             "status": "runtime_signal_ready_for_non_executing_prepare",
             "summary": {
@@ -627,14 +692,14 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "fresh_signal_processing"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "prepare_candidate_grant_authorization_evidence"
     )
     assert packet["checks"]["fresh_signal_present"] is True
@@ -652,7 +717,7 @@ def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "watcher-tick.json",
         {
@@ -667,7 +732,7 @@ def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
         },
     )
     _write(
-        report_dir / "wakeup-packet.json",
+        report_dir / "wakeup-evidence.json",
         {
             "status": "runtime_signal_ready_for_non_executing_prepare",
             "summary": {"runtime_ready_signal_count": 1},
@@ -706,7 +771,7 @@ def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -715,7 +780,7 @@ def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
     assert packet["status"] == "waiting_for_signal"
     assert packet["checks"]["fresh_signal_present"] is False
     assert packet["checks"]["watcher_liveness_healthy"] is True
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "continue_watcher_observation"
     )
     matrix = _matrix_by_key(packet)
@@ -727,7 +792,7 @@ def test_goal_status_surfaces_watcher_liveness_blockers(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "watcher-tick.json",
         {
@@ -762,7 +827,7 @@ def test_goal_status_surfaces_watcher_liveness_blockers(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -770,7 +835,7 @@ def test_goal_status_surfaces_watcher_liveness_blockers(
 
     assert packet["status"] == "runtime_liveness_degraded"
     assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_runtime_attempt_renewal_or_scope"
     )
     assert packet["checks"]["watcher_liveness_healthy"] is False
@@ -792,7 +857,7 @@ def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "strategygroup-runtime-pilot-status.json",
         {
@@ -862,7 +927,7 @@ def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
         },
     )
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "operation_layer_submit_blocked",
             "dispatch_status": "operation_layer_submit_blocked",
@@ -882,7 +947,7 @@ def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -890,7 +955,7 @@ def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
 
     assert packet["status"] == "missing_fact"
     assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_missing_operation_layer_evidence"
     )
     assert packet["checks"]["fresh_signal_present"] is True
@@ -903,9 +968,9 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_operation_layer",
             "dispatch_status": "official_operation_layer_evidence_ready",
@@ -923,7 +988,7 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -947,7 +1012,7 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
         "project_progress_allowed": False,
         "continue_observation_allowed": False,
         "real_submit_allowed": True,
-        "next_safe_checkpoint": "call_official_operation_layer_submit_after_action_time_recheck",
+        "non_authority_checkpoint": "call_official_operation_layer_submit_after_action_time_recheck",
         "blocker_keys": [],
     }
     matrix = _matrix_by_key(packet)
@@ -967,9 +1032,9 @@ def test_goal_status_blocks_real_submit_when_runtime_order_profile_is_not_capabl
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_operation_layer",
             "dispatch_status": "official_operation_layer_evidence_ready",
@@ -987,14 +1052,14 @@ def test_goal_status_blocks_real_submit_when_runtime_order_profile_is_not_capabl
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "deployment_issue"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_runtime_order_capable_profile_or_deploy_channel"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
@@ -1049,31 +1114,31 @@ def test_goal_status_blocks_real_submit_when_runtime_order_profile_is_not_capabl
         (
             "duplicate_submit_risk",
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "duplicate_submit",
         ),
         (
             "symbol_scope_mismatch",
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "symbol_side_notional_leverage_scope",
         ),
         (
             "side_scope_mismatch",
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "symbol_side_notional_leverage_scope",
         ),
         (
             "notional_scope_mismatch",
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "symbol_side_notional_leverage_scope",
         ),
         (
             "leverage_scope_mismatch",
             "hard_safety_stop",
-            "record_submit_blocker_review_packet",
+            "record_submit_blocker_review_artifact",
             "symbol_side_notional_leverage_scope",
         ),
     ],
@@ -1086,9 +1151,9 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_operation_layer",
             "dispatch_status": "official_operation_layer_evidence_ready",
@@ -1106,14 +1171,14 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == expected_status
-    assert packet["owner_state"]["next_safe_checkpoint"] == expected_next_checkpoint
+    assert packet["owner_state"]["non_authority_checkpoint"] == expected_next_checkpoint
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["real_order_boundary"]["submit_blocker_review_required"] is True
     assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is True
@@ -1131,7 +1196,7 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
         "project_progress_allowed": True,
         "continue_observation_allowed": True,
         "real_submit_allowed": False,
-        "next_safe_checkpoint": expected_next_checkpoint,
+        "non_authority_checkpoint": expected_next_checkpoint,
         "blocker_keys": [expected_matrix_key],
     }
     matrix = _matrix_by_key(packet)
@@ -1145,9 +1210,9 @@ def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_operation_layer",
             "dispatch_status": "official_operation_layer_evidence_ready",
@@ -1165,7 +1230,7 @@ def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -1173,7 +1238,7 @@ def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
 
     assert packet["status"] == "runtime_scope_mismatch"
     assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "ignore_out_of_scope_signal_and_continue_selected_scope_observation"
     )
     assert packet["checks"]["fresh_signal_present"] is True
@@ -1198,7 +1263,7 @@ def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "strategy-group-live-facts-readiness.json",
         {
@@ -1207,7 +1272,7 @@ def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
         },
     )
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "ready_for_operation_layer",
             "dispatch_status": "official_operation_layer_evidence_ready",
@@ -1218,14 +1283,14 @@ def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "missing_fact"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "refresh_strategy_group_live_facts_readiness"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
@@ -1242,7 +1307,7 @@ def test_goal_status_open_order_facts_stale_does_not_block_active_position_open_
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "strategy-group-live-facts-readiness.json",
         {
@@ -1251,7 +1316,7 @@ def test_goal_status_open_order_facts_stale_does_not_block_active_position_open_
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -1270,9 +1335,9 @@ def test_goal_status_scope_matching_ignores_benign_symbol_read_errors(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "waiting_for_market",
             "dispatch_status": "no_action_continue_observation",
@@ -1289,7 +1354,7 @@ def test_goal_status_scope_matching_ignores_benign_symbol_read_errors(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -1304,9 +1369,9 @@ def test_goal_status_scope_matching_preserves_true_scope_mismatch_blocker(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "waiting_for_market",
             "dispatch_status": "no_action_continue_observation",
@@ -1323,7 +1388,7 @@ def test_goal_status_scope_matching_preserves_true_scope_mismatch_blocker(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
@@ -1342,9 +1407,9 @@ def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
-        report_dir / "resume-dispatch-packet.json",
+        report_dir / "resume-dispatch-artifact.json",
         {
             "status": "blocked_active_position_resolution",
             "dispatch_status": "blocked_before_operation_layer",
@@ -1355,14 +1420,14 @@ def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "active_position_resolution"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "resolve_active_position_or_open_order_conflict"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
@@ -1379,30 +1444,33 @@ def test_goal_status_blocks_when_required_packet_is_missing(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     (report_dir / "owner-console-source-readiness.json").unlink()
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "missing_fact"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
-        "refresh_required_runtime_packets"
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
+        "refresh_required_runtime_artifacts"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "missing_packet:source_readiness" in packet["blockers"]
+    assert "missing_artifact:source_readiness" in packet["blockers"]
+    assert "required_artifacts_present" in packet["checks"]
+    assert "required_packets_present" not in packet["checks"]
+    assert "missing_packet:source_readiness" not in packet["blockers"]
 
 
 def test_goal_status_blocks_when_deployed_head_is_not_expected(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json", head="old"),
         expected_head=HEAD,
@@ -1410,7 +1478,7 @@ def test_goal_status_blocks_when_deployed_head_is_not_expected(
 
     assert packet["status"] == "deployment_issue"
     assert packet["blockers"] == ["deployed_head_mismatch"]
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_deploy_channel_while_continuing_watcher_observation"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
@@ -1420,7 +1488,7 @@ def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "owner-console-source-readiness.json",
         {
@@ -1450,14 +1518,14 @@ def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
         },
     )
 
-    packet = build_goal_status_packet(
+    packet = build_goal_status_artifact(
         report_dir=report_dir,
         release_manifest=_manifest(tmp_path / "manifest.json"),
         expected_head=HEAD,
     )
 
     assert packet["status"] == "deployment_issue"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
+    assert packet["owner_state"]["non_authority_checkpoint"] == (
         "repair_deploy_channel_while_continuing_watcher_observation"
     )
     assert packet["checks"]["source_readiness_ready"] is True
@@ -1478,7 +1546,7 @@ def test_goal_status_does_not_block_local_dry_run_on_deploy_channel_degraded(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
     _write(
         report_dir / "owner-console-source-readiness.json",
         {
@@ -1508,10 +1576,10 @@ def test_goal_status_does_not_block_local_dry_run_on_deploy_channel_degraded(
         },
     )
 
-    packet = build_goal_status_packet(report_dir=report_dir)
+    packet = build_goal_status_artifact(report_dir=report_dir)
 
     assert packet["status"] == "waiting_for_signal"
-    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
     assert packet["checks"]["deployment_aligned"] is True
     assert packet["evidence"]["deploy_channel_enforced"] is False
     assert "deploy_channel:tokyo_tcp_22_unreachable" not in packet["blockers"]
@@ -1530,7 +1598,7 @@ def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     report_dir = tmp_path / "reports"
-    _write_base_packets(report_dir)
+    _write_base_artifacts(report_dir)
 
     monkeypatch.setattr(
         sys,
@@ -1550,9 +1618,9 @@ def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
     packet = json.loads(output_path.read_text(encoding="utf-8"))
     assert packet["status"] == "waiting_for_signal"
     assert packet["ready_for_real_order_action"] is False
-    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
     assert list(report_dir.glob(".strategygroup-runtime-goal-status.json.*.tmp")) == []
     stdout_packet = json.loads(capsys.readouterr().out)
     assert stdout_packet["status"] == "waiting_for_signal"
     assert stdout_packet["ready_for_real_order_action"] is False
-    assert stdout_packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert stdout_packet["non_authority_checkpoint"] == "continue_watcher_observation"

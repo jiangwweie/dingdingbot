@@ -115,7 +115,9 @@ def _preview(*, would_enter: bool = True, forbidden: bool = False) -> dict:
         "would_enter_signals": would_enter_rows,
         "no_action_signals": no_action_rows,
         "invalid_signals": [],
-        "operator_command_plan": {
+        "interaction": {
+            "preview_only": True,
+            "not_execution_authority": True,
             "places_order": forbidden,
             "calls_order_lifecycle": False,
             "withdrawal_or_transfer_requested": False,
@@ -172,32 +174,34 @@ def _expansion_policy() -> dict:
 def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     module = _load_module()
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(),
-        broader_preview_packet=_preview(would_enter=True),
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(),
+        broader_preview_artifact=_preview(would_enter=True),
         source_name="sample",
         expansion_policy=_expansion_policy(),
     )
 
-    assert packet["status"] == "mainline_no_signal_broader_would_enter"
-    assert packet["owner_state"] == "coverage_review_needed"
-    assert packet["checks"]["runtime_ready_signal_count"] == 0
-    assert packet["checks"]["broader_would_enter_signal_count"] == 1
-    assert packet["checks"]["broader_actionable_would_enter_signal_count"] == 1
-    assert packet["checks"]["broader_low_priority_would_enter_signal_count"] == 0
-    assert packet["checks"]["broader_high_priority_no_action_signal_count"] == 1
-    assert packet["checks"]["coverage_gap"] is True
-    assert packet["interaction"]["level"] == "L0_local_signal_coverage"
-    assert packet["interaction"]["remote_interaction_count"] == 0
-    assert packet["interaction"]["mutates_remote_files"] is False
-    assert packet["interaction"]["approaches_real_order"] is False
-    assert packet["diagnosis"]["broader_signals_are_observe_only"] is True
-    assert packet["diagnosis"]["does_not_authorize_real_order"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["calls_final_gate"] is False
-    assert packet["operator_command_plan"]["calls_operation_layer"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"][
+    assert artifact["status"] == "mainline_no_signal_broader_would_enter"
+    assert artifact["owner_state"] == "coverage_review_needed"
+    assert artifact["checks"]["runtime_ready_signal_count"] == 0
+    assert artifact["checks"]["broader_would_enter_signal_count"] == 1
+    assert artifact["checks"]["broader_actionable_would_enter_signal_count"] == 1
+    assert artifact["checks"]["broader_low_priority_would_enter_signal_count"] == 0
+    assert artifact["checks"]["broader_high_priority_no_action_signal_count"] == 1
+    assert artifact["checks"]["coverage_gap"] is True
+    assert artifact["interaction"]["level"] == "L0_local_signal_coverage"
+    assert artifact["interaction"]["remote_interaction_count"] == 0
+    assert artifact["interaction"]["mutates_remote_files"] is False
+    assert artifact["interaction"]["approaches_real_order"] is False
+    assert artifact["diagnosis"]["broader_signals_are_observe_only"] is True
+    assert artifact["diagnosis"]["does_not_authorize_real_order"] is True
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["interaction"]["calls_finalgate"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]
+    assert artifact["safety_invariants"][
         "broader_signals_are_not_execution_authority"
     ] is True
 
@@ -205,17 +209,17 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
 def test_diagnostic_enriches_high_priority_no_action_rows_for_review():
     module = _load_module()
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(),
-        broader_preview_packet=_preview(would_enter=False),
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(),
+        broader_preview_artifact=_preview(would_enter=False),
         source_name="sample",
         expansion_policy=_expansion_policy(),
     )
 
-    assert packet["status"] == "mainline_and_broader_no_signal"
-    assert packet["checks"]["broader_high_priority_no_action_signal_count"] == 1
-    assert packet["diagnosis"]["broader_high_priority_no_action_review_available"] is True
-    rows = packet["broader_observation"]["high_priority_no_action_signals"]
+    assert artifact["status"] == "mainline_and_broader_no_signal"
+    assert artifact["checks"]["broader_high_priority_no_action_signal_count"] == 1
+    assert artifact["diagnosis"]["broader_high_priority_no_action_review_available"] is True
+    rows = artifact["broader_observation"]["high_priority_no_action_signals"]
     assert [row["strategy_group_id"] for row in rows] == ["BRF-001"]
     assert rows[0]["coverage_review_priority"] == "P0_5"
     assert rows[0]["policy_l2_readiness"] == (
@@ -247,24 +251,24 @@ def test_diagnostic_records_low_priority_broader_would_enter_without_coverage_ga
         }
     ]
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(),
-        broader_preview_packet=preview,
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(),
+        broader_preview_artifact=preview,
         source_name="sample",
         expansion_policy=_expansion_policy(),
     )
 
-    assert packet["status"] == "mainline_no_signal_low_priority_broader_would_enter"
-    assert packet["owner_state"] == "waiting_for_opportunity"
-    assert packet["checks"]["broader_would_enter_signal_count"] == 1
-    assert packet["checks"]["broader_actionable_would_enter_signal_count"] == 0
-    assert packet["checks"]["broader_low_priority_would_enter_signal_count"] == 1
-    assert packet["checks"]["coverage_gap"] is False
-    assert packet["diagnosis"]["broader_observation_has_would_enter"] is True
+    assert artifact["status"] == "mainline_no_signal_low_priority_broader_would_enter"
+    assert artifact["owner_state"] == "waiting_for_opportunity"
+    assert artifact["checks"]["broader_would_enter_signal_count"] == 1
+    assert artifact["checks"]["broader_actionable_would_enter_signal_count"] == 0
+    assert artifact["checks"]["broader_low_priority_would_enter_signal_count"] == 1
+    assert artifact["checks"]["coverage_gap"] is False
+    assert artifact["diagnosis"]["broader_observation_has_would_enter"] is True
     assert (
-        packet["diagnosis"]["broader_observation_has_actionable_would_enter"] is False
+        artifact["diagnosis"]["broader_observation_has_actionable_would_enter"] is False
     )
-    row = packet["broader_observation"]["would_enter_signals"][0]
+    row = artifact["broader_observation"]["would_enter_signals"][0]
     assert row["coverage_review_priority"] == "P2"
     assert row["policy_l2_readiness"] == "blocked_parked_negative_evidence"
     assert row["not_order"] is True
@@ -273,32 +277,32 @@ def test_diagnostic_records_low_priority_broader_would_enter_without_coverage_ga
 def test_diagnostic_reports_waiting_when_mainline_and_broader_have_no_signal():
     module = _load_module()
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(),
-        broader_preview_packet=_preview(would_enter=False),
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(),
+        broader_preview_artifact=_preview(would_enter=False),
         source_name="sample",
     )
 
-    assert packet["status"] == "mainline_and_broader_no_signal"
-    assert packet["owner_state"] == "waiting_for_opportunity"
-    assert packet["checks"]["coverage_gap"] is False
-    assert packet["diagnosis"]["mainline_runtime_is_waiting"] is True
-    assert packet["diagnosis"]["broader_observation_has_would_enter"] is False
+    assert artifact["status"] == "mainline_and_broader_no_signal"
+    assert artifact["owner_state"] == "waiting_for_opportunity"
+    assert artifact["checks"]["coverage_gap"] is False
+    assert artifact["diagnosis"]["mainline_runtime_is_waiting"] is True
+    assert artifact["diagnosis"]["broader_observation_has_would_enter"] is False
 
 
 def test_diagnostic_defers_to_mainline_ready_signal():
     module = _load_module()
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(ready=True),
-        broader_preview_packet=_preview(would_enter=True),
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(ready=True),
+        broader_preview_artifact=_preview(would_enter=True),
         source_name="sample",
     )
 
-    assert packet["status"] == "mainline_runtime_signal_ready"
-    assert packet["owner_state"] == "processing"
-    assert packet["checks"]["runtime_ready_signal_count"] == 1
-    assert packet["diagnosis"]["next_step"] == (
+    assert artifact["status"] == "mainline_runtime_signal_ready"
+    assert artifact["owner_state"] == "processing"
+    assert artifact["checks"]["runtime_ready_signal_count"] == 1
+    assert artifact["diagnosis"]["next_step"] == (
         "pause_lower_priority_work_and_continue_official_runtime_chain"
     )
 
@@ -306,21 +310,22 @@ def test_diagnostic_defers_to_mainline_ready_signal():
 def test_diagnostic_blocks_forbidden_source_effects():
     module = _load_module()
 
-    packet = module.build_signal_coverage_diagnostic_packet(
-        runtime_summary_packet=_runtime_summary(forbidden=True),
-        broader_preview_packet=_preview(would_enter=True, forbidden=True),
+    artifact = module.build_signal_coverage_diagnostic_artifact(
+        runtime_summary_artifact=_runtime_summary(forbidden=True),
+        broader_preview_artifact=_preview(would_enter=True, forbidden=True),
         source_name="sample",
     )
 
-    assert packet["status"] == "blocked_forbidden_effect"
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert "runtime.order_created" in packet["checks"]["forbidden_effects"]
-    assert "preview.command_plan.places_order" in packet["checks"][
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert "runtime.order_created" in artifact["checks"]["forbidden_effects"]
+    assert "preview.interaction.places_order" in artifact["checks"][
         "forbidden_effects"
     ]
 
 
-def test_cli_writes_packet_and_owner_progress(tmp_path, capsys):
+def test_cli_writes_artifact_and_owner_progress(tmp_path, capsys):
     module = _load_module()
     runtime_path = tmp_path / "runtime.json"
     preview_path = tmp_path / "preview.json"
@@ -381,11 +386,13 @@ def test_cli_treats_missing_runtime_summary_as_non_executing_no_signal(
     )
 
     assert exit_code == 0
-    packet = json.loads(capsys.readouterr().out)
-    assert packet["source"]["runtime_summary_status"] == "runtime_summary_missing"
-    assert packet["checks"]["runtime_ready_signal_count"] == 0
-    assert packet["diagnosis"]["mainline_runtime_is_waiting"] is True
-    assert packet["operator_command_plan"]["places_order"] is False
-    assert packet["operator_command_plan"]["calls_final_gate"] is False
-    assert packet["operator_command_plan"]["calls_operation_layer"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    artifact = json.loads(capsys.readouterr().out)
+    assert artifact["source"]["runtime_summary_status"] == "runtime_summary_missing"
+    assert artifact["checks"]["runtime_ready_signal_count"] == 0
+    assert artifact["diagnosis"]["mainline_runtime_is_waiting"] is True
+    assert artifact["interaction"]["places_order"] is False
+    assert artifact["interaction"]["calls_finalgate"] is False
+    assert artifact["interaction"]["calls_operation_layer"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert "execution_intent_created" not in artifact["safety_invariants"]

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from scripts.build_strategygroup_pre_live_rehearsal_readiness import (
     build_pre_live_rehearsal_readiness,
-    validate_packet,
+    validate_artifact,
 )
 
 
@@ -23,8 +23,6 @@ def _minimal_packet(status: str) -> dict:
             "places_order": False,
         },
         "safety_invariants": {
-            "actionable_now": False,
-            "real_order_authority": False,
             "final_gate_called": False,
             "operation_layer_called": False,
             "exchange_write_called": False,
@@ -37,15 +35,22 @@ def _minimal_packet(status: str) -> dict:
 
 
 def _quality_wave() -> dict:
-    packet = _minimal_packet("quality_wave_ready")
-    packet["rows"] = [
+    artifact = _minimal_packet("quality_wave_ready")
+    rows = [
         {"strategy_group_id": "BTPC-001", "current_tier": "L2", "current_decision": "revise"},
         {"strategy_group_id": "VCB-001", "current_tier": "L1", "current_decision": "keep_observing"},
         {"strategy_group_id": "LSR-001", "current_tier": "L1", "current_decision": "keep_observing"},
         {"strategy_group_id": "BRF-001", "current_tier": "L1", "current_decision": "keep_observing"},
         {"strategy_group_id": "RBR-001", "current_tier": "L1", "current_decision": "park"},
     ]
-    return packet
+    artifact["rows"] = rows
+    artifact["strategy_asset_state_provenance"] = {
+        "source_role": "quality_evidence_provenance",
+        "primary_judgment_source": False,
+        "primary_judgment_source_name": "strategy_asset_state",
+        "rows": rows,
+    }
+    return artifact
 
 
 def _readiness_packet() -> dict:
@@ -58,37 +63,157 @@ def _readiness_packet() -> dict:
 
 
 def test_pre_live_readiness_separates_rehearsal_from_live_submit() -> None:
-    packet = _readiness_packet()
+    artifact = _readiness_packet()
 
-    assert packet["status"] == "pre_live_rehearsal_ready"
-    assert validate_packet(packet) == []
-    assert packet["decision"]["pre_live_rehearsal_ready"] is True
-    assert packet["decision"]["live_submit_ready"] is False
-    assert packet["decision"]["live_outcome_calibrated"] is False
-    assert packet["decision"]["real_order_authority"] is False
-    assert packet["remaining_live_submit_dependencies"]
-    assert packet["remaining_live_outcome_calibration_dependencies"]
+    assert artifact["status"] == "pre_live_rehearsal_ready"
+    assert "decision" not in artifact
+    assert validate_artifact(artifact) == []
+    readiness = artifact["runtime_readiness_state"]
+    assert readiness["state_family"] == "Runtime Readiness State"
+    assert readiness["source_role"] == "pre_live_rehearsal_readiness_evidence"
+    assert readiness["primary_judgment_source"] is False
+    assert readiness["tradeability_decision_source"] is False
+    assert readiness["execution_attempt_source"] is False
+    assert readiness["pre_live_rehearsal_ready"] is True
+    assert readiness["live_submit_ready"] is False
+    assert readiness["live_outcome_calibrated"] is False
+    assert "actionable_now" not in readiness
+    assert "real_order_authority" not in readiness
+    assert "actionable_now" not in artifact["safety_invariants"]
+    assert "real_order_authority" not in artifact["safety_invariants"]
+    assert artifact["remaining_live_submit_dependencies"]
+    assert artifact["remaining_live_outcome_calibration_dependencies"]
+
+
+def test_pre_live_readiness_consumes_quality_wave_as_provenance() -> None:
+    artifact = _readiness_packet()
+
+    impacts = artifact["strategygroup_decision_impact"]
+    assert len(impacts) == 5
+    assert {row["source_role"] for row in impacts} == {
+        "quality_evidence_provenance"
+    }
+    assert all(row["primary_judgment_source"] is False for row in impacts)
+    assert all("actionable_now" not in row for row in impacts)
+    assert all("real_order_authority" not in row for row in impacts)
+
+
+def test_pre_live_readiness_rejects_quality_wave_without_strategy_asset_provenance() -> None:
+    quality_wave = _quality_wave()
+    quality_wave.pop("strategy_asset_state_provenance")
+
+    artifact = build_pre_live_rehearsal_readiness(
+        quality_wave=quality_wave,
+        handoff_boundary=_minimal_packet("handoff_boundary_closure_ready"),
+        btpc_guard=_minimal_packet("btpc_fact_classifier_guard_ready"),
+        lifecycle_rehearsal=_minimal_packet("lifecycle_rehearsal_ready"),
+    )
+
+    assert artifact["status"] == "pre_live_rehearsal_not_ready"
+    assert "quality_wave.strategy_asset_state_provenance_missing" in artifact[
+        "validation_errors"
+    ]
+    assert "quality_wave.strategy_asset_state_provenance_rows_missing" in artifact[
+        "validation_errors"
+    ]
+    assert artifact["strategygroup_decision_impact"] == []
 
 
 def test_negative_missing_lifecycle_readiness_is_not_ready() -> None:
-    packet = build_pre_live_rehearsal_readiness(
+    artifact = build_pre_live_rehearsal_readiness(
         quality_wave=_quality_wave(),
         handoff_boundary=_minimal_packet("handoff_boundary_closure_ready"),
         btpc_guard=_minimal_packet("btpc_fact_classifier_guard_ready"),
         lifecycle_rehearsal=_minimal_packet("wrong_status"),
     )
 
-    assert packet["status"] == "pre_live_rehearsal_not_ready"
-    assert "lifecycle_rehearsal.unexpected_status:wrong_status" in packet["validation_errors"]
+    assert artifact["status"] == "pre_live_rehearsal_not_ready"
+    assert "lifecycle_rehearsal.unexpected_status:wrong_status" in artifact["validation_errors"]
+
+
+def test_negative_input_legacy_actionability_mirror_is_not_current_effect() -> None:
+    quality_wave = _quality_wave()
+    quality_wave["safety_invariants"]["actionable_now"] = True
+
+    artifact = build_pre_live_rehearsal_readiness(
+        quality_wave=quality_wave,
+        handoff_boundary=_minimal_packet("handoff_boundary_closure_ready"),
+        btpc_guard=_minimal_packet("btpc_fact_classifier_guard_ready"),
+        lifecycle_rehearsal=_minimal_packet("lifecycle_rehearsal_ready"),
+    )
+
+    assert (
+        "quality_wave.safety_invariants.legacy_authority_mirror_present:"
+        "actionable_now"
+    ) in artifact["validation_errors"]
+    assert "quality_wave.safety_invariants.actionable_now" not in artifact[
+        "validation_errors"
+    ]
 
 
 def test_negative_live_authority_is_rejected() -> None:
-    packet = _readiness_packet()
-    packet["decision"]["real_order_authority"] = True
+    artifact = _readiness_packet()
+    artifact["runtime_readiness_state"]["real_order_authority"] = True
 
-    errors = validate_packet(packet)
+    errors = validate_artifact(artifact)
 
-    assert "decision_not_false:real_order_authority" in errors
+    assert (
+        "runtime_readiness_state.legacy_authority_mirror_present:real_order_authority"
+        in errors
+    )
+
+
+def test_negative_legacy_actionability_mirrors_are_rejected() -> None:
+    artifact = _readiness_packet()
+    artifact["runtime_readiness_state"]["actionable_now"] = False
+    artifact["runtime_readiness_state"]["real_order_authority"] = False
+    artifact["safety_invariants"]["actionable_now"] = False
+    artifact["safety_invariants"]["real_order_authority"] = False
+
+    errors = validate_artifact(artifact)
+
+    assert (
+        "runtime_readiness_state.legacy_authority_mirror_present:actionable_now"
+        in errors
+    )
+    assert (
+        "runtime_readiness_state.legacy_authority_mirror_present:real_order_authority"
+        in errors
+    )
+    assert "safety_invariant.legacy_authority_mirror_present:actionable_now" in errors
+    assert (
+        "safety_invariant.legacy_authority_mirror_present:real_order_authority"
+        in errors
+    )
+
+
+def test_negative_top_level_decision_is_rejected() -> None:
+    artifact = _readiness_packet()
+    artifact["decision"] = {
+        "default_next_step": "legacy_parallel_readiness_judgment_source",
+    }
+
+    errors = validate_artifact(artifact)
+
+    assert "top_level_decision_removed" in errors
+
+
+def test_negative_runtime_readiness_cannot_answer_tradeability() -> None:
+    artifact = _readiness_packet()
+    artifact["runtime_readiness_state"]["tradeability_decision_source"] = True
+
+    errors = validate_artifact(artifact)
+
+    assert "runtime_readiness_state_must_not_answer_tradeability" in errors
+
+
+def test_negative_runtime_readiness_cannot_open_execution_attempt() -> None:
+    artifact = _readiness_packet()
+    artifact["runtime_readiness_state"]["execution_attempt_source"] = True
+
+    errors = validate_artifact(artifact)
+
+    assert "runtime_readiness_state_must_not_open_execution_attempt" in errors
 
 
 def test_check_mode_passes_after_real_readiness_generation() -> None:

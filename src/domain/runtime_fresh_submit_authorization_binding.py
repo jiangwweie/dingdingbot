@@ -11,10 +11,10 @@ from src.domain.runtime_execution_submit_authorization import (
     RuntimeExecutionSubmitAuthorization,
 )
 from src.domain.runtime_fresh_submit_authorization_resolution import (
-    RuntimeFreshSubmitAuthorizationResolutionPacket,
+    RuntimeFreshSubmitAuthorizationResolutionArtifact,
     RuntimeFreshSubmitAuthorizationResolutionStatus,
 )
-from src.domain.runtime_official_submit_handoff import RuntimeOfficialSubmitHandoffPacket
+from src.domain.runtime_official_submit_handoff import RuntimeOfficialSubmitHandoffArtifact
 
 
 class RuntimeFreshSubmitAuthorizationBindingModel(BaseModel):
@@ -35,13 +35,13 @@ class RuntimeFreshSubmitAuthorizationBindingSource(str, Enum):
     UNRESOLVED = "unresolved"
 
 
-class RuntimeFreshSubmitAuthorizationBindingPacket(
+class RuntimeFreshSubmitAuthorizationBindingArtifact(
     RuntimeFreshSubmitAuthorizationBindingModel
 ):
     binding_id: str = Field(min_length=1, max_length=900)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     handoff_id: str = Field(min_length=1, max_length=840)
-    readiness_packet_id: str = Field(min_length=1, max_length=720)
+    readiness_artifact_id: str = Field(min_length=1, max_length=720)
     status: RuntimeFreshSubmitAuthorizationBindingStatus
     binding_source: RuntimeFreshSubmitAuthorizationBindingSource
     order_candidate_id: str | None = Field(default=None, max_length=128)
@@ -69,7 +69,7 @@ class RuntimeFreshSubmitAuthorizationBindingPacket(
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_binding(self) -> "RuntimeFreshSubmitAuthorizationBindingPacket":
+    def _validate_binding(self) -> "RuntimeFreshSubmitAuthorizationBindingArtifact":
         if self.status != RuntimeFreshSubmitAuthorizationBindingStatus.BLOCKED:
             if self.blockers:
                 raise ValueError("ready fresh authorization binding cannot have blockers")
@@ -84,10 +84,10 @@ class RuntimeFreshSubmitAuthorizationBindingPacket(
         return self
 
 
-def build_runtime_fresh_submit_authorization_binding_packet(
+def build_runtime_fresh_submit_authorization_binding_artifact(
     *,
-    handoff: RuntimeOfficialSubmitHandoffPacket,
-    resolution: RuntimeFreshSubmitAuthorizationResolutionPacket | None,
+    handoff: RuntimeOfficialSubmitHandoffArtifact,
+    resolution: RuntimeFreshSubmitAuthorizationResolutionArtifact | None,
     authorization: RuntimeExecutionSubmitAuthorization | None,
     status: RuntimeFreshSubmitAuthorizationBindingStatus,
     binding_source: RuntimeFreshSubmitAuthorizationBindingSource,
@@ -98,7 +98,7 @@ def build_runtime_fresh_submit_authorization_binding_packet(
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
-) -> RuntimeFreshSubmitAuthorizationBindingPacket:
+) -> RuntimeFreshSubmitAuthorizationBindingArtifact:
     blockers = _dedupe(additional_blockers or [])
     warnings = _dedupe(list(handoff.warnings) + list(additional_warnings or []))
     if (
@@ -107,14 +107,14 @@ def build_runtime_fresh_submit_authorization_binding_packet(
     ):
         blockers.append("fresh_submit_authorization_missing_after_binding")
         status = RuntimeFreshSubmitAuthorizationBindingStatus.BLOCKED
-    return RuntimeFreshSubmitAuthorizationBindingPacket(
+    return RuntimeFreshSubmitAuthorizationBindingArtifact(
         binding_id=(
             "runtime-fresh-submit-authorization-binding-"
-            f"{handoff.runtime_instance_id}-{handoff.readiness_packet_id}"
+            f"{handoff.runtime_instance_id}-{handoff.readiness_artifact_id}"
         ),
         runtime_instance_id=handoff.runtime_instance_id,
         handoff_id=handoff.handoff_id,
-        readiness_packet_id=handoff.readiness_packet_id,
+        readiness_artifact_id=handoff.readiness_artifact_id,
         status=status,
         binding_source=binding_source,
         order_candidate_id=_optional_str(
@@ -156,7 +156,7 @@ def build_runtime_fresh_submit_authorization_binding_packet(
 
 
 def _resolution_snapshot(
-    resolution: RuntimeFreshSubmitAuthorizationResolutionPacket | None,
+    resolution: RuntimeFreshSubmitAuthorizationResolutionArtifact | None,
 ) -> dict[str, Any]:
     if resolution is None:
         return {}

@@ -909,10 +909,10 @@ class DonchianDistanceFilterDynamic(FilterBase):
 
 
 # ============================================================
-# Placeholder Filters for newly requested React integrations
+# Placeholder filters for newly requested query integrations
 # ============================================================
 class PlaceholderFilter(FilterBase):
-    """Generic placeholder for unimplemented UI filters."""
+    """Generic placeholder for unimplemented query filters."""
     def __init__(self, name: str, enabled: bool = True, **kwargs):
         self._name_val = name
         self._enabled = enabled

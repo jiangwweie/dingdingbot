@@ -16,6 +16,7 @@ from src.domain.models import (
     Direction,
     Order,
     OrderRole,
+    OrderResponse,
     OrderStatus,
     OrderType,
     PositionInfo,
@@ -99,6 +100,15 @@ class _FakeOrderRepository:
         ]
 
 
+class _ImportingOrderRepository(_FakeOrderRepository):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.imported_orders: list[OrderResponse] = []
+
+    async def import_order(self, order: OrderResponse) -> None:
+        self.imported_orders.append(order)
+
+
 class _ConditionalOnlyGateway(_FakeGateway):
     async def fetch_open_orders(self, symbol: str, params=None):
         self.fetch_open_order_params.append(params or {})
@@ -176,6 +186,24 @@ def _exchange_order(
 
 def _exchange_sl(order_id: str = "ex-sl"):
     return _exchange_order(order_id, order_type="stop", trigger_price="90")
+
+
+def _orphan_entry_order(order_id: str = "ex-entry") -> OrderResponse:
+    return OrderResponse(
+        order_id=order_id,
+        exchange_order_id=order_id,
+        symbol=SYMBOL,
+        order_type=OrderType.LIMIT,
+        direction=Direction.LONG,
+        order_role=OrderRole.ENTRY,
+        status=OrderStatus.OPEN,
+        amount=Decimal("1"),
+        filled_amount=Decimal("0"),
+        price=Decimal("100"),
+        reduce_only=False,
+        created_at=1,
+        updated_at=1,
+    )
 
 
 def _service(
@@ -318,6 +346,41 @@ async def test_exchange_open_order_missing_locally_reports_warning():
         and mismatch.severity == "WARNING"
         for mismatch in result.mismatches
     )
+
+
+@pytest.mark.asyncio
+async def test_orphan_entry_order_without_import_contract_stays_import_pending():
+    service = ReconciliationService(
+        gateway=_FakeGateway(),
+        order_repository=_FakeOrderRepository(),
+    )
+
+    imported, canceled = await service._process_orphan_orders(
+        [_orphan_entry_order("ex-entry-pending")],
+        SYMBOL,
+    )
+
+    assert canceled == []
+    assert len(imported) == 1
+    assert imported[0].order_id == "ex-entry-pending"
+    assert imported[0].action_taken == "IMPORT_NOT_AVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_orphan_entry_order_uses_import_contract_when_available():
+    order_repository = _ImportingOrderRepository()
+    service = ReconciliationService(
+        gateway=_FakeGateway(),
+        order_repository=order_repository,
+    )
+    order = _orphan_entry_order("ex-entry-importable")
+
+    imported, canceled = await service._process_orphan_orders([order], SYMBOL)
+
+    assert canceled == []
+    assert len(imported) == 1
+    assert imported[0].action_taken == "IMPORTED_TO_DB"
+    assert order_repository.imported_orders == [order]
 
 
 @pytest.mark.asyncio

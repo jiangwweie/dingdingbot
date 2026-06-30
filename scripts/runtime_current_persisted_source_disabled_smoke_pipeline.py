@@ -182,7 +182,7 @@ def _readiness_args(
         runtime_instance_id=args.runtime_instance_id,
         intent_draft_source_json=str(source_path),
         evidence_json=evidence_json,
-        first_real_submit_packet_json=None,
+        first_real_submit_evidence_json=None,
         additional_warning=["rtf061_current_persisted_source_disabled_smoke"],
         additional_blocker=None,
         env_file=args.env_file,
@@ -197,7 +197,7 @@ def _binding_args(
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        handoff_json=str(handoff_path),
+        handoff_artifact_json=str(handoff_path),
         requested_fresh_submit_authorization_id=(
             args.requested_fresh_submit_authorization_id
         ),
@@ -217,7 +217,7 @@ def _disabled_smoke_args(
     output_path: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        handoff_json=str(handoff_path),
+        handoff_artifact_json=str(handoff_path),
         output=str(output_path),
         env_file=args.env_file,
         api_base=_api_base(args),
@@ -345,7 +345,7 @@ def _build_report(
             extra_blockers=["readiness_evidence_json_required_after_source_ready"],
         )
 
-    readiness = readiness_flow._build_packet(
+    readiness = readiness_flow._build_artifact(
         _readiness_args(args, source_path=source_path, evidence_json=str(evidence_json)),
         client=api_client,
     )
@@ -397,8 +397,8 @@ def _build_report(
     reports["final_handoff"] = final_handoff
     final_handoff_path = artifact_root / "06-final-handoff.json"
     _write_json(final_handoff_path, final_handoff)
-    final_packet = final_handoff.get("packet")
-    if not isinstance(final_packet, dict) or _status(final_packet) != (
+    final_handoff_artifact = _handoff_artifact(final_handoff)
+    if _status(final_handoff_artifact) != (
         "ready_for_official_submit_call"
     ):
         return _final_report(
@@ -454,7 +454,7 @@ def _final_report(
         "runtime_instance_id": args.runtime_instance_id,
         "artifact_dir": str(artifact_root),
         "stage_statuses": {
-            key: _packet_status(value) for key, value in reports.items()
+            key: _report_status(value) for key, value in reports.items()
             if isinstance(value, dict)
         },
         "fresh_submit_authorization_id": _fresh_submit_authorization_id(
@@ -470,10 +470,19 @@ def _final_report(
     return result
 
 
-def _packet_status(report: dict[str, Any]) -> str:
-    if "packet" in report and isinstance(report.get("packet"), dict):
-        return _status(report["packet"])
+def _report_status(report: dict[str, Any]) -> str:
+    if "handoff_artifact" in report and isinstance(
+        report.get("handoff_artifact"), dict
+    ):
+        return _status(report["handoff_artifact"])
     return _status(report)
+
+
+def _handoff_artifact(report: dict[str, Any]) -> dict[str, Any]:
+    artifact = report.get("handoff_artifact")
+    if isinstance(artifact, dict):
+        return artifact
+    return {}
 
 
 def _safety(reports: dict[str, dict[str, Any] | None]) -> dict[str, bool]:

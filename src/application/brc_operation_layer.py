@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Optional, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.application.execution_permission import (
     ExecutionPermission,
@@ -36,7 +36,7 @@ from src.domain.bounded_risk_campaign import (
 OperationType = Literal[
     "switch_playbook",
     "start_review",
-    "write_review_decision",
+    "write_review_outcome",
     "run_fixed_testnet_rehearsal",
     "enter_observe",
     "enter_pause",
@@ -224,11 +224,456 @@ class ExecutionResult(BaseModel):
     occurred_at_ms: int = Field(default_factory=now_ms)
 
 
+class OperationAdapterPayloadMetadata(BaseModel):
+    operation_id: str
+    preflight_id: str
+    confirmed_by: str
+    authorization_source: Literal["brc_operation_layer"] = "brc_operation_layer"
+
+
+class BudgetRevokeAdapterPayload(OperationAdapterPayloadMetadata):
+    model_config = ConfigDict(extra="allow")
+
+    revoked_by: str
+    places_orders: Literal[False] = False
+    closes_positions: Literal[False] = False
+    cancels_orders: Literal[False] = False
+    withdrawal_executed: Literal[False] = False
+    transfer_executed: Literal[False] = False
+    live_ready: Literal[False] = False
+
+
+class FixedTestnetRehearsalAdapterPayload(OperationAdapterPayloadMetadata):
+    model_config = ConfigDict(extra="allow")
+
+    idempotency_key: str
+    workflow_carrier_role: Literal["internal_ref_only"] = "internal_ref_only"
+    allowed_symbols: list[str] = Field(default_factory=lambda: ["ETH/USDT:USDT", "BTC/USDT:USDT"])
+    live_ready: Literal[False] = False
+
+
+class RuntimeStopAdapterPayload(OperationAdapterPayloadMetadata):
+    model_config = ConfigDict(extra="allow")
+
+    idempotency_key: str
+    updated_by: str
+    does_not_flatten: Literal[True] = True
+    does_not_cancel_orders: Literal[True] = True
+    does_not_place_orders: Literal[True] = True
+    does_not_withdraw_or_transfer: Literal[True] = True
+    live_ready: Literal[False] = False
+
+
+class AdmissionRuntimeAdapterPayload(OperationAdapterPayloadMetadata):
+    model_config = ConfigDict(extra="allow")
+
+    live_ready: Optional[Literal[False]] = None
+    order_created: Optional[Literal[False]] = None
+    orders_placed: Optional[Literal[False]] = None
+    execution_intent_created: Optional[Literal[False]] = None
+    withdrawal_executed: Optional[Literal[False]] = None
+    transfer_executed: Optional[Literal[False]] = None
+    auto_execution_enabled: Optional[Literal[False]] = None
+
+
+class SignalTradeIntentRecorderAdapterPayload(AdmissionRuntimeAdapterPayload):
+    execution_permission_resolution: dict[str, Any] = Field(default_factory=dict)
+
+
+_ADMISSION_RUNTIME_FORCED_FALSE_FIELDS = (
+    "live_ready",
+    "order_created",
+    "orders_placed",
+    "execution_intent_created",
+    "withdrawal_executed",
+    "transfer_executed",
+    "auto_execution_enabled",
+)
+
+
+def _operation_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    metadata = OperationAdapterPayloadMetadata(
+        operation_id=operation.operation_id,
+        preflight_id=preflight.preflight_id,
+        confirmed_by=operation.confirmed_by or "owner",
+    )
+    payload = dict(operation.input_params)
+    payload.update(metadata.model_dump(mode="json"))
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _budget_revoke_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+) -> dict[str, Any]:
+    return BudgetRevokeAdapterPayload.model_validate(
+        _operation_adapter_payload(
+            operation,
+            preflight,
+            {
+                "revoked_by": operation.requested_by,
+                "places_orders": False,
+                "closes_positions": False,
+                "cancels_orders": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+            },
+        )
+    ).model_dump(mode="json")
+
+
+def _fixed_testnet_rehearsal_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+) -> dict[str, Any]:
+    return FixedTestnetRehearsalAdapterPayload.model_validate(
+        _operation_adapter_payload(
+            operation,
+            preflight,
+            {
+                "idempotency_key": preflight.idempotency_key,
+                "workflow_carrier_role": "internal_ref_only",
+                "allowed_symbols": ["ETH/USDT:USDT", "BTC/USDT:USDT"],
+                "live_ready": False,
+            },
+        )
+    ).model_dump(mode="json")
+
+
+def _runtime_stop_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+) -> dict[str, Any]:
+    return RuntimeStopAdapterPayload.model_validate(
+        _operation_adapter_payload(
+            operation,
+            preflight,
+            {
+                "idempotency_key": preflight.idempotency_key,
+                "updated_by": operation.requested_by,
+                "does_not_flatten": True,
+                "does_not_cancel_orders": True,
+                "does_not_place_orders": True,
+                "does_not_withdraw_or_transfer": True,
+                "live_ready": False,
+            },
+        )
+    ).model_dump(mode="json")
+
+
+def _admission_runtime_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    payload = _operation_adapter_payload(operation, preflight, extra)
+    for field in _ADMISSION_RUNTIME_FORCED_FALSE_FIELDS:
+        if field in payload:
+            payload[field] = False
+    return AdmissionRuntimeAdapterPayload.model_validate(payload).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+
+
+def _signal_trade_intent_recorder_adapter_payload(
+    operation: OperationRecord,
+    preflight: PreflightSnapshot,
+) -> dict[str, Any]:
+    return SignalTradeIntentRecorderAdapterPayload.model_validate(
+        _admission_runtime_adapter_payload(
+            operation,
+            preflight,
+            {
+                "execution_permission_resolution": dict(
+                    preflight.after.get("execution_permission_resolution") or {}
+                )
+            },
+        )
+    ).model_dump(mode="json", exclude_none=True)
+
+
+def _idempotent_metadata_status(idempotent: bool) -> ExecutionStatus:
+    return "noop" if idempotent else "executed"
+
+
+def _idempotent_metadata_recheck_result(
+    marker: str,
+    idempotent: bool,
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"passed": True, marker: True, "idempotent": idempotent}
+    if extra:
+        result.update(extra)
+    return result
+
+
+def _admission_campaign_ref(
+    ref_type: str,
+    campaign_id: Optional[str],
+    binding_id: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "type": ref_type,
+        "campaign_id": campaign_id,
+        "ref_id": campaign_id,
+        "admission_binding_id": binding_id,
+    }
+
+
+def _admission_trial_binding_ref(
+    binding: dict[str, Any],
+    binding_id: Optional[str],
+    campaign_id: Optional[str] = None,
+    *,
+    include_campaign_id: bool = True,
+) -> dict[str, Any]:
+    ref = {
+        "type": "admission_trial_binding",
+        "ref_id": binding_id,
+        "binding_status": binding.get("binding_status"),
+    }
+    if include_campaign_id:
+        ref["campaign_id"] = campaign_id
+    return ref
+
+
+def _no_live_exchange_result_fields() -> dict[str, bool]:
+    return {
+        "orders_placed": False,
+        "withdrawal_executed": False,
+        "transfer_executed": False,
+        "live_ready": False,
+    }
+
+
+def _no_exchange_or_account_side_effect_result_fields() -> dict[str, bool]:
+    return {
+        "places_orders": False,
+        "closes_positions": False,
+        "cancels_orders": False,
+        "withdrawal_executed": False,
+        "transfer_executed": False,
+        "live_ready": False,
+    }
+
+
+def _no_fund_movement_live_result_fields() -> dict[str, bool]:
+    return {
+        "withdrawal_executed": False,
+        "transfer_executed": False,
+        "live_ready": False,
+    }
+
+
+def _runtime_not_started_result_fields() -> dict[str, bool]:
+    return {
+        "runtime_started": False,
+        "runtime_active": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "owner_confirm_each_entry_enabled": False,
+    }
+
+
+def _auto_execution_disabled_result_fields() -> dict[str, bool]:
+    return {
+        "auto_within_budget_enabled": False,
+        "auto_execution_enabled": False,
+    }
+
+
+def _admission_runtime_inactive_result_fields() -> dict[str, bool]:
+    return {
+        "runtime_started": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "auto_within_budget_enabled": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _admission_binding_not_reserved_result_fields() -> dict[str, bool]:
+    return {
+        "binding_persisted": False,
+        "runtime_mutation_executed": False,
+        "campaign_creation_executed": False,
+        "runtime_constraints_installed": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _admission_runtime_creation_not_executed_result_fields() -> dict[str, bool]:
+    return {
+        "runtime_creation_executed": False,
+        "campaign_creation_executed": False,
+        "runtime_constraints_installed": False,
+    }
+
+
+def _runtime_start_blocked_strategy_inactive_result_fields() -> dict[str, bool]:
+    return {
+        "runtime_started": False,
+        "strategy_active": False,
+        "trial_started": False,
+        **_auto_execution_disabled_result_fields(),
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _runtime_stop_no_mutation_result_fields() -> dict[str, bool]:
+    return {
+        "mutation_executed": False,
+        "does_not_flatten": True,
+        "does_not_cancel_orders": True,
+        "live_ready": False,
+    }
+
+
+def _admission_campaign_not_created_result_fields() -> dict[str, bool]:
+    return {
+        "campaign_created": False,
+        "runtime_installed": False,
+        "runtime_started": False,
+        "strategy_active": False,
+        "constraints_installed": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _admission_constraints_not_installed_result_fields() -> dict[str, bool]:
+    return {
+        "constraints_installed": False,
+        "runtime_started": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _strategy_activation_blocked_no_execution_result_fields() -> dict[str, bool]:
+    return {
+        "strategy_active": False,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+        "signal_loop_enabled": False,
+        "signal_loop_started": False,
+    }
+
+
+def _strategy_activation_readiness_blocked_result_fields() -> dict[str, bool]:
+    return {
+        "strategy_activation_ready": False,
+        "strategy_active": False,
+        "trial_started": False,
+        "signal_loop_started": False,
+        **_auto_execution_disabled_result_fields(),
+        "execution_intent_created": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _strategy_active_execution_disabled_result_fields() -> dict[str, bool]:
+    return {
+        "runtime_started": True,
+        "strategy_active": True,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+        "signal_loop_enabled": False,
+        "signal_loop_started": False,
+    }
+
+
+def _signal_loop_readiness_not_prepared_result_fields() -> dict[str, bool]:
+    return {
+        "signal_loop_ready": False,
+        "signal_loop_enabled": False,
+        "signal_loop_started": False,
+        "signal_generated": False,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+    }
+
+
+def _signal_loop_start_no_signal_result_fields() -> dict[str, bool]:
+    return {
+        "signal_loop_started": False,
+        "signal_loop_enabled": False,
+        "signal_generated": False,
+        "strategy_execution_enabled": False,
+        "trial_started": False,
+    }
+
+
+def _no_execution_intent_or_order_result_fields() -> dict[str, bool]:
+    return {
+        "execution_intent_created": False,
+        "order_created": False,
+        "orders_placed": False,
+    }
+
+
+def _trial_trade_intent_non_order_result_fields() -> dict[str, bool]:
+    return {
+        "trial_trade_intent_is_order": False,
+        "order_created": False,
+        "execution_intent_created": False,
+    }
+
+
+def _no_trade_intent_or_execution_result_fields() -> dict[str, bool]:
+    return {
+        "trade_intent_created": False,
+        **_no_execution_intent_or_order_result_fields(),
+    }
+
+
+def _owner_confirm_disabled_no_trade_result_fields() -> dict[str, bool]:
+    return {
+        "owner_confirm_each_entry_enabled": False,
+        **_no_trade_intent_or_execution_result_fields(),
+    }
+
+
+def _trial_trade_intent_not_persisted_result_fields() -> dict[str, bool]:
+    return {
+        "intent_persisted": False,
+        "order_created": False,
+        "execution_intent_created": False,
+        "runtime_started": False,
+        "strategy_active": False,
+        "orders_placed": False,
+        "live_ready": False,
+    }
+
+
+def _dry_run_no_actual_execution_result_fields() -> dict[str, bool]:
+    return {
+        "dry_run_only": True,
+        "actual_execution": False,
+        "mutation_executed": False,
+    }
+
+
 class OperationPreflightResponse(BaseModel):
     operation_id: str
     preflight_id: str
     operation_type: str
-    decision: PreflightDecision
+    preflight_result: PreflightDecision
     summary: str
     before: dict[str, Any] = Field(default_factory=dict)
     after: dict[str, Any] = Field(default_factory=dict)
@@ -349,7 +794,7 @@ class OperationLayerReaders:
     markets_orders_summary: Callable[[], Awaitable[dict[str, Any]]]
     audit_writable: Callable[[], Awaitable[bool]]
     runtime_safety_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
-    review_packet_reader: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    review_artifact_reader: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     runtime_transition: Optional[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     budget_authorization_summary: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None
     budget_revoke_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
@@ -710,9 +1155,7 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "binding_persisted": False,
-                    "runtime_creation_executed": False,
-                    "campaign_creation_executed": False,
-                    "runtime_constraints_installed": False,
+                    **_admission_runtime_creation_not_executed_result_fields(),
                     "live_ready": False,
                 }
             if operation.operation_type == "create_campaign_from_admission_binding":
@@ -724,13 +1167,7 @@ class BrcOperationService:
                         "No runtime carrier, runtime constraints, strategy execution, order, live execution, withdrawal, or transfer was created."
                     ),
                     "mutation_executed": False,
-                    "campaign_created": False,
-                    "runtime_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "constraints_installed": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_campaign_not_created_result_fields(),
                 }
             if operation.operation_type == "install_runtime_constraints_from_admission_campaign":
                 result_summary = {
@@ -742,12 +1179,7 @@ class BrcOperationService:
                         "no order, live execution, withdrawal, transfer, cancel, close, or flatten action occurred."
                     ),
                     "mutation_executed": False,
-                    "constraints_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_constraints_not_installed_result_fields(),
                 }
             if operation.operation_type == "prepare_runtime_carrier_from_admission_campaign":
                 result_summary = {
@@ -761,12 +1193,7 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "carrier_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 }
             if operation.operation_type == "prepare_runtime_start_from_admission_carrier":
                 result_summary = {
@@ -780,12 +1207,7 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "runtime_start_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 }
             if operation.operation_type == "evaluate_trial_trade_intent":
                 result_summary = {
@@ -798,15 +1220,8 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "intent_persisted": False,
-                    "trial_trade_intent_is_order": False,
-                    "order_created": False,
-                    "execution_intent_created": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_trial_trade_intent_non_order_result_fields(),
+                    **_admission_runtime_inactive_result_fields(),
                 }
             if operation.operation_type == "prepare_runtime_handoff_from_admission_campaign":
                 result_summary = {
@@ -820,12 +1235,7 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "runtime_handoff_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 }
             if operation.operation_type == "start_runtime_from_admission_handoff":
                 result_summary = {
@@ -840,8 +1250,7 @@ class BrcOperationService:
                     "runtime_started": False,
                     "strategy_active": False,
                     "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "order_created": False,
                     "execution_intent_created": False,
                     "orders_placed": False,
@@ -863,12 +1272,8 @@ class BrcOperationService:
                     "strategy_active": False,
                     "trial_started": False,
                     "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 }
             if operation.operation_type == "activate_strategy_from_admission_runtime":
@@ -883,17 +1288,9 @@ class BrcOperationService:
                     ),
                     "mutation_executed": False,
                     "strategy_state": None,
-                    "strategy_active": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_strategy_activation_blocked_no_execution_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 }
             if operation.operation_type == "prepare_signal_loop_from_admission_strategy":
@@ -906,18 +1303,9 @@ class BrcOperationService:
                         "auto execution was not enabled; no trade intent, execution intent, order, or live execution path was created."
                     ),
                     "mutation_executed": False,
-                    "signal_loop_ready": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_readiness_not_prepared_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 }
             if operation.operation_type == "start_signal_loop_from_admission_strategy":
@@ -930,17 +1318,9 @@ class BrcOperationService:
                         "was not enabled; no trade intent, execution intent, order, or live execution path was created."
                     ),
                     "mutation_executed": False,
-                    "signal_loop_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_start_no_signal_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 }
             if operation.operation_type == "evaluate_signal_from_admission_strategy":
@@ -955,14 +1335,10 @@ class BrcOperationService:
                     "mutation_executed": False,
                     "signal_evaluated": False,
                     "signal_generated": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_no_trade_intent_or_execution_result_fields(),
                     "strategy_execution_enabled": False,
                     "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "live_ready": False,
                 }
             result = await self._persist_result(
@@ -1037,8 +1413,8 @@ class BrcOperationService:
         operation: OperationRecord,
         preflight: PreflightSnapshot,
     ) -> ExecutionResult:
-        if operation.operation_type == "write_review_decision":
-            return await self._execute_write_review_decision(operation=operation, preflight=preflight)
+        if operation.operation_type == "write_review_outcome":
+            return await self._execute_write_review_outcome(operation=operation, preflight=preflight)
         if operation.operation_type == "start_review":
             return await self._execute_start_review(operation=operation, preflight=preflight)
         if operation.operation_type == "enter_observe":
@@ -1217,7 +1593,7 @@ class BrcOperationService:
             final_state_snapshot={"campaign": final_campaign},
         )
 
-    async def _execute_write_review_decision(
+    async def _execute_write_review_outcome(
         self,
         *,
         operation: OperationRecord,
@@ -1258,7 +1634,7 @@ class BrcOperationService:
             record = await self._brc.record_review_decision(
                 campaign_id=campaign_id,
                 source_action_id=_optional_str(operation.input_params.get("source_action_id")),
-                decision=BrcReviewDecision(str(operation.input_params.get("decision") or "")),
+                decision=BrcReviewDecision(str(operation.input_params.get("review_outcome") or "")),
                 reason_text=str(operation.input_params.get("reason_text") or ""),
                 next_recommended_task=str(operation.input_params.get("next_recommended_task") or ""),
                 created_by=str(operation.input_params.get("created_by") or operation.requested_by or "owner"),
@@ -1279,17 +1655,17 @@ class BrcOperationService:
             preflight=preflight,
             status="executed",
             recheck_result={"passed": True},
-            adapter_result={"review_decision": payload},
+            adapter_result={"review_outcome": payload},
             result_summary={
                 "operation_type": operation.operation_type,
-                "message": "Review decision persisted through Operation Layer. No runtime or exchange action was executed.",
+                "message": "Review outcome persisted through Operation Layer. No runtime or exchange action was executed.",
                 "review_id": record.review_id,
                 "campaign_id": record.campaign_id,
-                "decision": record.decision.value,
+                "review_outcome": record.decision.value,
             },
             review_refs=[
                 {
-                    "type": "review_decision",
+                    "type": "review_outcome",
                     "campaign_id": record.campaign_id,
                     "ref_id": record.review_id,
                 }
@@ -1301,7 +1677,7 @@ class BrcOperationService:
                     "ref_id": record.campaign_id,
                 }
             ],
-            final_state_snapshot={"review_decision": payload},
+            final_state_snapshot={"review_outcome": payload},
         )
 
     async def _execute_start_review(
@@ -1310,9 +1686,9 @@ class BrcOperationService:
         operation: OperationRecord,
         preflight: PreflightSnapshot,
     ) -> ExecutionResult:
-        packet: dict[str, Any] = {}
-        if self._readers.review_packet_reader is not None:
-            packet = await self._readers.review_packet_reader(
+        artifact: dict[str, Any] = {}
+        if self._readers.review_artifact_reader is not None:
+            artifact = await self._readers.review_artifact_reader(
                 {
                     **operation.input_params,
                     "operation_id": operation.operation_id,
@@ -1320,16 +1696,16 @@ class BrcOperationService:
                 }
             )
             status: ExecutionStatus = "executed"
-            message = "Review packet read through Operation Layer. No mutation was executed."
+            message = "Review artifact read through Operation Layer. No mutation was executed."
         else:
             status = "noop"
-            message = "Review start recorded as noop; no review packet reader is wired."
+            message = "Review start recorded as noop; no review artifact reader is wired."
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
             status=status,
             recheck_result={"passed": True},
-            adapter_result={"review_packet": packet} if packet else {"reason": "no review packet reader wired"},
+            adapter_result={"review_artifact": artifact} if artifact else {"reason": "no review artifact reader wired"},
             result_summary={
                 "operation_type": operation.operation_type,
                 "message": message,
@@ -1338,11 +1714,11 @@ class BrcOperationService:
             },
             review_refs=[
                 {
-                    "type": "review_packet",
+                    "type": "review_artifact",
                     "ref_id": operation.operation_id,
                 }
             ],
-            final_state_snapshot={"review_packet": packet} if packet else {},
+            final_state_snapshot={"review_artifact": artifact} if artifact else {},
         )
 
     async def _execute_runtime_transition(
@@ -1387,12 +1763,7 @@ class BrcOperationService:
                 "next_state": next_state,
                 "mutation_executed": not is_noop,
                 "pg_state_mutated": not is_noop,
-                "places_orders": False,
-                "closes_positions": False,
-                "cancels_orders": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_exchange_or_account_side_effect_result_fields(),
             },
             audit_refs=[
                 {
@@ -1415,19 +1786,7 @@ class BrcOperationService:
             return await self._execute_no_safe_executor(operation=operation, preflight=preflight)
         try:
             revoked = await self._readers.budget_revoke_executor(
-                {
-                    **operation.input_params,
-                    "operation_id": operation.operation_id,
-                    "preflight_id": preflight.preflight_id,
-                    "revoked_by": operation.requested_by,
-                    "authorization_source": "brc_operation_layer",
-                    "places_orders": False,
-                    "closes_positions": False,
-                    "cancels_orders": False,
-                    "withdrawal_executed": False,
-                    "transfer_executed": False,
-                    "live_ready": False,
-                }
+                _budget_revoke_adapter_payload(operation, preflight)
             )
         except Exception as exc:
             return await self._persist_result(
@@ -1464,12 +1823,7 @@ class BrcOperationService:
                 "future_budgeted_actions_allowed": False,
                 "already_revoked": already_revoked,
                 "mutation_executed": not already_revoked,
-                "places_orders": False,
-                "closes_positions": False,
-                "cancels_orders": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_exchange_or_account_side_effect_result_fields(),
             },
             audit_refs=[
                 {
@@ -1521,16 +1875,7 @@ class BrcOperationService:
             )
         try:
             payload = await self._readers.fixed_rehearsal_executor(
-                {
-                    **operation.input_params,
-                    "operation_id": operation.operation_id,
-                    "preflight_id": preflight.preflight_id,
-                    "idempotency_key": preflight.idempotency_key,
-                    "authorization_source": "brc_operation_layer",
-                    "workflow_carrier_role": "internal_ref_only",
-                    "allowed_symbols": ["ETH/USDT:USDT", "BTC/USDT:USDT"],
-                    "live_ready": False,
-                }
+                _fixed_testnet_rehearsal_adapter_payload(operation, preflight)
             )
         except BrcRuleViolation as exc:
             return await self._persist_result(
@@ -1585,7 +1930,7 @@ class BrcOperationService:
                     "workflow_run_id": workflow_run_id,
                     "campaign_id": campaign_id,
                     "final_inventory": payload.get("final_inventory"),
-                    "review_packet": payload.get("review_packet"),
+                    "review_artifact": payload.get("review_artifact"),
                     "evidence": payload.get("evidence"),
                     "readiness": payload.get("readiness"),
                 }
@@ -1609,9 +1954,7 @@ class BrcOperationService:
                 result_summary={
                     "operation_type": operation.operation_type,
                     "message": "No flatten dry-run plan was available to persist. No order, cancel, close, or flatten action was executed.",
-                    "dry_run_only": True,
-                    "actual_execution": False,
-                    "mutation_executed": False,
+                    **_dry_run_no_actual_execution_result_fields(),
                     "live_ready": False,
                 },
             )
@@ -1629,9 +1972,7 @@ class BrcOperationService:
             "estimated_actions_count": dry_run_plan.get("estimated_actions_count", 0),
             "cancel_order_candidate_count": len(dry_run_plan.get("cancel_order_candidates") or []),
             "close_position_candidate_count": len(dry_run_plan.get("close_position_candidates") or []),
-            "dry_run_only": True,
-            "actual_execution": False,
-            "mutation_executed": False,
+            **_dry_run_no_actual_execution_result_fields(),
             "orders_cancelled": False,
             "positions_closed": False,
             "orders_placed": False,
@@ -1671,10 +2012,7 @@ class BrcOperationService:
                 result_summary={
                     "operation_type": operation.operation_type,
                     "message": "No safe runtime stop executor is wired; no runtime mutation was performed.",
-                    "mutation_executed": False,
-                    "does_not_flatten": True,
-                    "does_not_cancel_orders": True,
-                    "live_ready": False,
+                    **_runtime_stop_no_mutation_result_fields(),
                 },
             )
         runtime_summary = await self._readers.runtime_summary()
@@ -1690,10 +2028,7 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "message": "Runtime was already stopped or hard-locked. No flatten, cancel, close, order, withdrawal, transfer, or live action was executed.",
                     "runtime_state": current_state,
-                    "mutation_executed": False,
-                    "does_not_flatten": True,
-                    "does_not_cancel_orders": True,
-                    "live_ready": False,
+                    **_runtime_stop_no_mutation_result_fields(),
                 },
                 audit_refs=[
                     {
@@ -1707,19 +2042,7 @@ class BrcOperationService:
             )
         try:
             payload = await self._readers.runtime_stop_executor(
-                {
-                    **operation.input_params,
-                    "operation_id": operation.operation_id,
-                    "preflight_id": preflight.preflight_id,
-                    "idempotency_key": preflight.idempotency_key,
-                    "authorization_source": "brc_operation_layer",
-                    "updated_by": operation.requested_by,
-                    "does_not_flatten": True,
-                    "does_not_cancel_orders": True,
-                    "does_not_place_orders": True,
-                    "does_not_withdraw_or_transfer": True,
-                    "live_ready": False,
-                }
+                _runtime_stop_adapter_payload(operation, preflight)
             )
         except Exception as exc:
             return await self._persist_result(
@@ -1731,10 +2054,7 @@ class BrcOperationService:
                 result_summary={
                     "operation_type": operation.operation_type,
                     "message": "Runtime stop adapter failed; no flatten, cancel, close, order, withdrawal, transfer, or live action was executed.",
-                    "mutation_executed": False,
-                    "does_not_flatten": True,
-                    "does_not_cancel_orders": True,
-                    "live_ready": False,
+                    **_runtime_stop_no_mutation_result_fields(),
                 },
             )
         if payload.get("live_ready") is True or payload.get("flatten_executed") is True or payload.get("orders_cancelled") is True:
@@ -1748,10 +2068,7 @@ class BrcOperationService:
                 result_summary={
                     "operation_type": operation.operation_type,
                     "message": "Runtime stop adapter returned forbidden flags; result was failed closed.",
-                    "mutation_executed": False,
-                    "does_not_flatten": True,
-                    "does_not_cancel_orders": True,
-                    "live_ready": False,
+                    **_runtime_stop_no_mutation_result_fields(),
                 },
             )
         next_state = str(
@@ -1830,25 +2147,12 @@ class BrcOperationService:
                         "Binding reservation adapter is not wired. No trial, campaign, runtime carrier, "
                         "runtime constraints, order, live execution, withdrawal, or transfer was created."
                     ),
-                    "binding_persisted": False,
-                    "runtime_mutation_executed": False,
-                    "campaign_creation_executed": False,
-                    "runtime_constraints_installed": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_binding_not_reserved_result_fields(),
                 },
                 final_state_snapshot={"admission_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             binding = await self._readers.admission_binding_reserver(payload)
         except ValueError as exc:
@@ -1865,21 +2169,16 @@ class BrcOperationService:
                         "Admission-trial binding reservation was blocked. No trial, campaign, runtime carrier, "
                         "runtime constraints, order, live execution, withdrawal, or transfer was created."
                     ),
-                    "binding_persisted": False,
-                    "runtime_mutation_executed": False,
-                    "campaign_creation_executed": False,
-                    "runtime_constraints_installed": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_binding_not_reserved_result_fields(),
                 },
                 final_state_snapshot={"admission_readiness": preflight.after},
             )
         binding_id = _optional_str(binding.get("binding_id"))
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-        }
+        binding_ref = _admission_trial_binding_ref(
+            binding,
+            binding_id,
+            include_campaign_id=False,
+        )
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
@@ -1897,13 +2196,8 @@ class BrcOperationService:
                 "binding_status": binding.get("binding_status"),
                 "binding_persisted": True,
                 "runtime_mutation_executed": False,
-                "runtime_creation_executed": False,
-                "campaign_creation_executed": False,
-                "runtime_constraints_installed": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_admission_runtime_creation_not_executed_result_fields(),
+                **_no_live_exchange_result_fields(),
             },
             audit_refs=[binding_ref],
             campaign_refs=[],
@@ -1928,29 +2222,15 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "campaign_created",
                     "message": (
-                        "Campaign shell creator is not wired. No campaign, runtime carrier, runtime constraints, "
-                        "strategy execution, order, live execution, withdrawal, or transfer was created."
+                    "Campaign shell creator is not wired. No campaign, runtime carrier, runtime constraints, "
+                    "strategy execution, order, live execution, withdrawal, or transfer was created."
                     ),
-                    "campaign_created": False,
-                    "runtime_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "constraints_installed": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_campaign_not_created_result_fields(),
                 },
                 final_state_snapshot={"campaign_shell_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             created = await self._readers.admission_campaign_creator(payload)
         except ValueError as exc:
@@ -1964,16 +2244,10 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "campaign_created",
                     "message": (
-                        "Admission campaign shell creation was blocked. No runtime carrier, runtime constraints, "
-                        "strategy execution, order, live execution, withdrawal, or transfer was created."
+                    "Admission campaign shell creation was blocked. No runtime carrier, runtime constraints, "
+                    "strategy execution, order, live execution, withdrawal, or transfer was created."
                     ),
-                    "campaign_created": False,
-                    "runtime_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "constraints_installed": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_campaign_not_created_result_fields(),
                 },
                 final_state_snapshot={"campaign_shell_readiness": preflight.after},
             )
@@ -1982,18 +2256,8 @@ class BrcOperationService:
         binding = dict(created.get("binding") or {})
         campaign_id = _optional_str(campaign.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
-        campaign_ref = {
-            "type": "admission_campaign_shell",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_campaign_shell", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
@@ -2016,10 +2280,7 @@ class BrcOperationService:
                 "runtime_creation_executed": False,
                 "strategy_active": False,
                 "constraints_installed": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_live_exchange_result_fields(),
             },
             audit_refs=[binding_ref],
             campaign_refs=[campaign_ref],
@@ -2049,28 +2310,15 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "runtime_constraints_installed",
                     "message": (
-                        "Runtime constraint installer is not wired. No constraints metadata, runtime start, "
-                        "strategy activation, order, live execution, withdrawal, or transfer was created."
+                    "Runtime constraint installer is not wired. No constraints metadata, runtime start, "
+                    "strategy activation, order, live execution, withdrawal, or transfer was created."
                     ),
-                    "constraints_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_constraints_not_installed_result_fields(),
                 },
                 final_state_snapshot={"runtime_constraint_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             installed = await self._readers.admission_runtime_constraint_installer(payload)
         except ValueError as exc:
@@ -2084,15 +2332,10 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "runtime_constraints_installed",
                     "message": (
-                        "Runtime constraint metadata installation was blocked. Runtime was not started; "
-                        "strategy was not activated; no order, live execution, withdrawal, or transfer occurred."
+                    "Runtime constraint metadata installation was blocked. Runtime was not started; "
+                    "strategy was not activated; no order, live execution, withdrawal, or transfer occurred."
                     ),
-                    "constraints_installed": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_constraints_not_installed_result_fields(),
                 },
                 final_state_snapshot={"runtime_constraint_readiness": preflight.after},
             )
@@ -2102,27 +2345,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(installed.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_runtime_constraints",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_runtime_constraints", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "constraints_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "constraints_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_runtime_constraints": installed},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2140,16 +2372,8 @@ class BrcOperationService:
                 "installed_constraint_snapshot_id": installed.get("installed_constraint_snapshot_id"),
                 "installed_constraints_summary": dict(installed.get("installed_constraints_summary") or {}),
                 "runtime_status": "constraints_installed_not_started",
-                "runtime_started": False,
-                "runtime_active": False,
-                "strategy_active": False,
-                "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_runtime_not_started_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -2186,25 +2410,12 @@ class BrcOperationService:
                         "strategy activation, auto execution, order, live execution, withdrawal, or transfer was created."
                     ),
                     "carrier_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_carrier_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             prepared = await self._readers.admission_runtime_carrier_preparer(payload)
         except ValueError as exc:
@@ -2223,12 +2434,7 @@ class BrcOperationService:
                         "withdrawal, or transfer occurred."
                     ),
                     "carrier_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_carrier_readiness": preflight.after},
             )
@@ -2238,27 +2444,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(prepared.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_runtime_carrier_ready",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_runtime_carrier_ready", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "carrier_readiness_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "carrier_readiness_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_runtime_carrier": prepared},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2275,16 +2470,8 @@ class BrcOperationService:
                 "carrier_ready": True,
                 "carrier_readiness_summary": dict(prepared.get("carrier_readiness_summary") or {}),
                 "runtime_status": "carrier_ready_not_started",
-                "runtime_started": False,
-                "runtime_active": False,
-                "strategy_active": False,
-                "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_runtime_not_started_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -2321,25 +2508,12 @@ class BrcOperationService:
                         "strategy activation, auto execution, order, live execution, withdrawal, or transfer was created."
                     ),
                     "runtime_start_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_start_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             prepared = await self._readers.admission_runtime_start_preparer(payload)
         except ValueError as exc:
@@ -2358,12 +2532,7 @@ class BrcOperationService:
                         "withdrawal, or transfer occurred."
                     ),
                     "runtime_start_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_start_readiness": preflight.after},
             )
@@ -2373,27 +2542,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(prepared.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_runtime_start_ready",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_runtime_start_ready", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "runtime_start_readiness_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "runtime_start_readiness_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_runtime_start": prepared},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2410,16 +2568,8 @@ class BrcOperationService:
                 "runtime_start_ready": True,
                 "runtime_start_readiness_summary": dict(prepared.get("runtime_start_readiness_summary") or {}),
                 "runtime_status": "runtime_start_ready_not_started",
-                "runtime_started": False,
-                "runtime_active": False,
-                "strategy_active": False,
-                "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_runtime_not_started_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -2455,26 +2605,12 @@ class BrcOperationService:
                         "Trial trade intent evaluator is not wired. No runtime, strategy, order, "
                         "execution intent, live action, withdrawal, or transfer was created."
                     ),
-                    "intent_persisted": False,
-                    "order_created": False,
-                    "execution_intent_created": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_trial_trade_intent_not_persisted_result_fields(),
                 },
                 final_state_snapshot={"trade_intent": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             evaluated = await self._readers.trial_trade_intent_evaluator(payload)
         except ValueError as exc:
@@ -2491,13 +2627,7 @@ class BrcOperationService:
                         "Trial trade intent evaluation was blocked. Runtime was not started; strategy was "
                         "not activated; no order or execution intent was created."
                     ),
-                    "intent_persisted": False,
-                    "order_created": False,
-                    "execution_intent_created": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_trial_trade_intent_not_persisted_result_fields(),
                 },
                 final_state_snapshot={"trade_intent": preflight.after},
             )
@@ -2510,7 +2640,7 @@ class BrcOperationService:
                 "type": "trial_trade_intent",
                 "ref_id": intent_id,
                 "campaign_id": campaign_id or intent.get("campaign_id"),
-                "decision": evaluated.get("decision"),
+                "trial_trade_intent_result": evaluated.get("trial_trade_intent_result"),
                 "non_executable_evidence_only": True,
             }
             if intent_id is not None
@@ -2518,7 +2648,7 @@ class BrcOperationService:
                 "type": "trial_trade_intent_check",
                 "ref_id": operation.operation_id,
                 "campaign_id": campaign_id,
-                "decision": evaluated.get("decision"),
+                "trial_trade_intent_result": evaluated.get("trial_trade_intent_result"),
                 "non_executable_evidence_only": True,
             }
         )
@@ -2541,26 +2671,16 @@ class BrcOperationService:
                 ),
                 "intent_id": intent_id,
                 "intent_persisted": bool(evaluated.get("intent_persisted", False)),
-                "decision": evaluated.get("decision"),
+                "trial_trade_intent_result": evaluated.get("trial_trade_intent_result"),
                 "not_executed_reason": evaluated.get("not_executed_reason"),
                 "execution_mode": evaluated.get("execution_mode"),
                 "constraints_check": dict(evaluated.get("constraints_check") or {}),
                 "would_require_runtime_execution": bool(
                     evaluated.get("would_require_runtime_execution", False)
                 ),
-                "trial_trade_intent_is_order": False,
-                "order_created": False,
-                "execution_intent_created": False,
-                "runtime_started": False,
-                "runtime_active": False,
-                "strategy_active": False,
-                "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_trial_trade_intent_non_order_result_fields(),
+                **_runtime_not_started_result_fields(),
+                **_no_live_exchange_result_fields(),
             },
             audit_refs=[intent_ref],
             campaign_refs=[intent_ref] if campaign_id is not None else [],
@@ -2596,25 +2716,12 @@ class BrcOperationService:
                         "or transfer was created."
                     ),
                     "runtime_handoff_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_handoff_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             prepared = await self._readers.admission_runtime_handoff_preparer(payload)
         except ValueError as exc:
@@ -2633,12 +2740,7 @@ class BrcOperationService:
                         "not enabled; no order or execution intent was created."
                     ),
                     "runtime_handoff_ready": False,
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_admission_runtime_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_handoff_readiness": preflight.after},
             )
@@ -2648,27 +2750,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(prepared.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_runtime_handoff_ready",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_runtime_handoff_ready", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "runtime_handoff_readiness_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "runtime_handoff_readiness_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_runtime_handoff": prepared},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2685,18 +2776,10 @@ class BrcOperationService:
                 "runtime_handoff_ready": True,
                 "runtime_handoff_readiness_summary": dict(prepared.get("runtime_handoff_readiness_summary") or {}),
                 "runtime_status": "runtime_handoff_ready_not_started",
-                "runtime_started": False,
-                "runtime_active": False,
-                "strategy_active": False,
-                "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
+                **_runtime_not_started_result_fields(),
                 "order_created": False,
                 "execution_intent_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -2732,26 +2815,12 @@ class BrcOperationService:
                         "Runtime start was blocked before metadata transition. Strategy was not activated; "
                         "trial was not started; auto execution was not enabled; no order or execution intent was created."
                     ),
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_runtime_start_blocked_strategy_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_start": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             started = await self._readers.admission_runtime_start_from_handoff_starter(payload)
         except Exception as exc:
@@ -2768,13 +2837,7 @@ class BrcOperationService:
                         "Runtime start state transition was blocked. Strategy was not activated; "
                         "trial was not started; auto execution was not enabled; no order or execution intent was created."
                     ),
-                    "runtime_started": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_runtime_start_blocked_strategy_inactive_result_fields(),
                 },
                 final_state_snapshot={"runtime_start": preflight.after},
             )
@@ -2784,27 +2847,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(started.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_runtime_started",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_runtime_started", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "runtime_state_started_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "runtime_state_started_only",
+                idempotent,
+            ),
             adapter_result={"admission_runtime_start": started},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2824,15 +2876,11 @@ class BrcOperationService:
                 "runtime_active": False,
                 "strategy_active": False,
                 "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
+                **_auto_execution_disabled_result_fields(),
                 "owner_confirm_each_entry_enabled": False,
                 "order_created": False,
                 "execution_intent_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -2868,28 +2916,12 @@ class BrcOperationService:
                         "Strategy activation readiness preparation was blocked. Strategy was not activated; "
                         "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
                     ),
-                    "strategy_activation_ready": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "execution_intent_created": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_strategy_activation_readiness_blocked_result_fields(),
                 },
                 final_state_snapshot={"strategy_activation_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             prepared = await self._readers.admission_strategy_activation_preparer(payload)
         except Exception as exc:
@@ -2906,15 +2938,7 @@ class BrcOperationService:
                         "Strategy activation readiness metadata preparation was blocked. Strategy was not activated; "
                         "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
                     ),
-                    "strategy_activation_ready": False,
-                    "strategy_active": False,
-                    "trial_started": False,
-                    "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "execution_intent_created": False,
-                    "orders_placed": False,
-                    "live_ready": False,
+                    **_strategy_activation_readiness_blocked_result_fields(),
                 },
                 final_state_snapshot={"strategy_activation_readiness": preflight.after},
             )
@@ -2924,27 +2948,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(prepared.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_strategy_activation_ready",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_strategy_activation_ready", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "strategy_activation_readiness_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "strategy_activation_readiness_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_strategy_activation": prepared},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -2967,16 +2980,9 @@ class BrcOperationService:
                 "strategy_active": False,
                 "trial_started": False,
                 "signal_loop_started": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_auto_execution_disabled_result_fields(),
+                **_owner_confirm_disabled_no_trade_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -3012,31 +3018,15 @@ class BrcOperationService:
                         "Strategy state activation was blocked. Strategy runner was not started; "
                         "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
                     ),
-                    "strategy_active": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_strategy_activation_blocked_no_execution_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"strategy_state_activation": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             activated = await self._readers.admission_strategy_state_activator(payload)
         except Exception as exc:
@@ -3053,17 +3043,9 @@ class BrcOperationService:
                         "Strategy state activation metadata transition was blocked. Strategy runner was not started; "
                         "signal loop was not started; auto execution was not enabled; no execution intent or order was created."
                     ),
-                    "strategy_active": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_strategy_activation_blocked_no_execution_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"strategy_state_activation": preflight.after},
@@ -3074,27 +3056,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(activated.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_strategy_activated_no_execution",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_strategy_activated_no_execution", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "strategy_state_activation_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "strategy_state_activation_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_strategy_state_activation": activated},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -3114,22 +3085,10 @@ class BrcOperationService:
                     activated.get("strategy_state_activation_summary") or {}
                 ),
                 "runtime_status": "strategy_active_no_execution",
-                "runtime_started": True,
-                "strategy_active": True,
-                "strategy_execution_enabled": False,
-                "trial_started": False,
-                "signal_loop_enabled": False,
-                "signal_loop_started": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_strategy_active_execution_disabled_result_fields(),
+                **_auto_execution_disabled_result_fields(),
+                **_owner_confirm_disabled_no_trade_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -3165,35 +3124,18 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "signal_loop_ready_not_started",
                     "message": (
-                        "Signal loop readiness preparation was blocked. Signal loop was not started; "
-                        "no signal was generated; no trade intent, execution intent, or order was created."
+                    "Signal loop readiness preparation was blocked. Signal loop was not started; "
+                    "no signal was generated; no trade intent, execution intent, or order was created."
                     ),
-                    "signal_loop_ready": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_readiness_not_prepared_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_loop_readiness": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             prepared = await self._readers.admission_signal_loop_preparer(payload)
         except Exception as exc:
@@ -3207,21 +3149,12 @@ class BrcOperationService:
                     "operation_type": operation.operation_type,
                     "planned_result_status": "signal_loop_ready_not_started",
                     "message": (
-                        "Signal loop readiness metadata preparation was blocked. Signal loop was not started; "
-                        "no signal was generated; no trade intent, execution intent, or order was created."
+                    "Signal loop readiness metadata preparation was blocked. Signal loop was not started; "
+                    "no signal was generated; no trade intent, execution intent, or order was created."
                     ),
-                    "signal_loop_ready": False,
-                    "signal_loop_enabled": False,
-                    "signal_loop_started": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_readiness_not_prepared_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_loop_readiness": preflight.after},
@@ -3232,27 +3165,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(prepared.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_signal_loop_ready",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_signal_loop_ready", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "signal_loop_readiness_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "signal_loop_readiness_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_signal_loop_readiness": prepared},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -3271,23 +3193,11 @@ class BrcOperationService:
                     prepared.get("signal_loop_readiness_summary") or {}
                 ),
                 "runtime_status": "signal_loop_ready_not_started",
-                "runtime_started": True,
-                "strategy_active": True,
-                "strategy_execution_enabled": False,
-                "trial_started": False,
-                "signal_loop_enabled": False,
-                "signal_loop_started": False,
+                **_strategy_active_execution_disabled_result_fields(),
                 "signal_generated": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_auto_execution_disabled_result_fields(),
+                **_owner_confirm_disabled_no_trade_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -3325,31 +3235,15 @@ class BrcOperationService:
                         "Signal loop state start was blocked. No signal was generated; "
                         "no trade intent, execution intent, or order was created."
                     ),
-                    "signal_loop_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_start_no_signal_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_loop_start": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             started = await self._readers.admission_signal_loop_starter(payload)
         except Exception as exc:
@@ -3366,17 +3260,9 @@ class BrcOperationService:
                         "Signal loop state metadata transition was blocked. No signal was generated; "
                         "no trade intent, execution intent, or order was created."
                     ),
-                    "signal_loop_started": False,
-                    "signal_loop_enabled": False,
-                    "signal_generated": False,
-                    "strategy_execution_enabled": False,
-                    "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_signal_loop_start_no_signal_result_fields(),
+                    **_auto_execution_disabled_result_fields(),
+                    **_no_trade_intent_or_execution_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_loop_start": preflight.after},
@@ -3387,27 +3273,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(started.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_signal_loop_started_no_signal",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_signal_loop_started_no_signal", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "signal_loop_start_state_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "signal_loop_start_state_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_signal_loop_start": started},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -3434,16 +3309,9 @@ class BrcOperationService:
                 "signal_loop_started": True,
                 "signal_generated": False,
                 "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
-                "owner_confirm_each_entry_enabled": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_auto_execution_disabled_result_fields(),
+                **_owner_confirm_disabled_no_trade_result_fields(),
+                **_no_live_exchange_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -3457,10 +3325,7 @@ class BrcOperationService:
                 "signal_loop_enabled_scope": "non_trading_loop_state",
                 "signal_loop_started": True,
                 "signal_generated": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
+                **_no_trade_intent_or_execution_result_fields(),
             },
         )
 
@@ -3486,28 +3351,16 @@ class BrcOperationService:
                     ),
                     "signal_evaluated": False,
                     "signal_generated": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_no_trade_intent_or_execution_result_fields(),
                     "strategy_execution_enabled": False,
                     "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_evaluation": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-            }
-        )
+        payload = _admission_runtime_adapter_payload(operation, preflight)
         try:
             evaluated = await self._readers.admission_signal_evaluator(payload)
         except Exception as exc:
@@ -3526,14 +3379,10 @@ class BrcOperationService:
                     ),
                     "signal_evaluated": False,
                     "signal_generated": False,
-                    "trade_intent_created": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_no_trade_intent_or_execution_result_fields(),
                     "strategy_execution_enabled": False,
                     "trial_started": False,
-                    "auto_within_budget_enabled": False,
-                    "auto_execution_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"signal_evaluation": preflight.after},
@@ -3544,27 +3393,16 @@ class BrcOperationService:
         campaign_id = _optional_str(campaign.get("campaign_id") or operation.input_params.get("campaign_id"))
         binding_id = _optional_str(binding.get("binding_id") or operation.input_params.get("admission_binding_id"))
         idempotent = bool(evaluated.get("idempotent", False))
-        campaign_ref = {
-            "type": "admission_signal_evaluated_no_intent",
-            "campaign_id": campaign_id,
-            "ref_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
-        binding_ref = {
-            "type": "admission_trial_binding",
-            "ref_id": binding_id,
-            "binding_status": binding.get("binding_status"),
-            "campaign_id": campaign_id,
-        }
+        campaign_ref = _admission_campaign_ref("admission_signal_evaluated_no_intent", campaign_id, binding_id)
+        binding_ref = _admission_trial_binding_ref(binding, binding_id, campaign_id)
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "signal_evaluation_metadata_only": True,
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "signal_evaluation_metadata_only",
+                idempotent,
+            ),
             adapter_result={"admission_signal_evaluation": evaluated},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -3590,17 +3428,11 @@ class BrcOperationService:
                 "signal_evaluated": True,
                 "signal_generated": True,
                 "signal_is_trade_intent": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
+                **_no_trade_intent_or_execution_result_fields(),
                 "trial_started": False,
-                "auto_within_budget_enabled": False,
-                "auto_execution_enabled": False,
+                **_auto_execution_disabled_result_fields(),
                 "owner_confirm_each_entry_enabled": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_no_fund_movement_live_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[binding_ref],
@@ -3613,10 +3445,7 @@ class BrcOperationService:
                 "signal_evaluated": True,
                 "signal_generated": True,
                 "signal_is_trade_intent": False,
-                "trade_intent_created": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
+                **_no_trade_intent_or_execution_result_fields(),
             },
         )
 
@@ -3641,29 +3470,15 @@ class BrcOperationService:
                         "order, auto execution, live action, withdrawal, or transfer was created."
                     ),
                     "intent_persisted": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_no_execution_intent_or_order_result_fields(),
                     "trial_started": False,
-                    "auto_execution_enabled": False,
-                    "auto_within_budget_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"trade_intent": preflight.after},
             )
 
-        payload = dict(operation.input_params)
-        payload.update(
-            {
-                "operation_id": operation.operation_id,
-                "preflight_id": preflight.preflight_id,
-                "confirmed_by": operation.confirmed_by or "owner",
-                "authorization_source": "brc_operation_layer",
-                "execution_permission_resolution": dict(
-                    preflight.after.get("execution_permission_resolution") or {}
-                ),
-            }
-        )
+        payload = _signal_trade_intent_recorder_adapter_payload(operation, preflight)
         try:
             recorded = await self._readers.signal_trade_intent_recorder(payload)
         except Exception as exc:
@@ -3681,12 +3496,9 @@ class BrcOperationService:
                         "order, auto execution, live action, withdrawal, or transfer was created."
                     ),
                     "intent_persisted": False,
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "orders_placed": False,
+                    **_no_execution_intent_or_order_result_fields(),
                     "trial_started": False,
-                    "auto_execution_enabled": False,
-                    "auto_within_budget_enabled": False,
+                    **_auto_execution_disabled_result_fields(),
                     "live_ready": False,
                 },
                 final_state_snapshot={"trade_intent": preflight.after},
@@ -3707,25 +3519,23 @@ class BrcOperationService:
             "type": "trial_trade_intent",
             "ref_id": intent_id,
             "campaign_id": campaign_id,
-            "decision": recorded.get("decision"),
+            "trial_trade_intent_result": recorded.get("trial_trade_intent_result"),
             "non_executable_evidence_only": True,
         }
-        campaign_ref = {
-            "type": "admission_trial_trade_intent_recorded_no_execution",
-            "ref_id": campaign_id,
-            "campaign_id": campaign_id,
-            "admission_binding_id": binding_id,
-        }
+        campaign_ref = _admission_campaign_ref(
+            "admission_trial_trade_intent_recorded_no_execution",
+            campaign_id,
+            binding_id,
+        )
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if idempotent else "executed",
-            recheck_result={
-                "passed": True,
-                "trial_trade_intent_evidence_only": True,
-                "intent_persisted": bool(recorded.get("intent_persisted", False)),
-                "idempotent": idempotent,
-            },
+            status=_idempotent_metadata_status(idempotent),
+            recheck_result=_idempotent_metadata_recheck_result(
+                "trial_trade_intent_evidence_only",
+                idempotent,
+                {"intent_persisted": bool(recorded.get("intent_persisted", False))},
+            ),
             adapter_result={"signal_trial_trade_intent": recorded},
             result_summary={
                 "operation_type": operation.operation_type,
@@ -3739,7 +3549,7 @@ class BrcOperationService:
                 "binding_id": binding_id,
                 "intent_id": intent_id,
                 "intent_persisted": bool(recorded.get("intent_persisted", False)),
-                "decision": recorded.get("decision"),
+                "trial_trade_intent_result": recorded.get("trial_trade_intent_result"),
                 "not_executed_reason": recorded.get("not_executed_reason"),
                 "execution_mode": recorded.get("execution_mode"),
                 "execution_permission_resolution": dict(
@@ -3748,15 +3558,10 @@ class BrcOperationService:
                 "runtime_status": "trial_trade_intent_recorded_no_execution",
                 "trial_trade_intent_created": bool(recorded.get("intent_persisted", False)),
                 "trial_trade_intent_is_order": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
+                **_no_execution_intent_or_order_result_fields(),
                 "trial_started": False,
-                "auto_execution_enabled": False,
-                "auto_within_budget_enabled": False,
-                "withdrawal_executed": False,
-                "transfer_executed": False,
-                "live_ready": False,
+                **_auto_execution_disabled_result_fields(),
+                **_no_fund_movement_live_result_fields(),
                 "idempotent": idempotent,
             },
             audit_refs=[intent_ref],
@@ -3766,9 +3571,7 @@ class BrcOperationService:
                 "trial_trade_intent": intent,
                 "campaign": campaign,
                 "runtime_status": "trial_trade_intent_recorded_no_execution",
-                "execution_intent_created": False,
-                "order_created": False,
-                "orders_placed": False,
+                **_no_execution_intent_or_order_result_fields(),
             },
         )
 
@@ -3793,9 +3596,7 @@ class BrcOperationService:
                     "runtime constraints, order, live execution, withdrawal, or transfer was created."
                 ),
                 "mutation_executed": False,
-                "runtime_creation_executed": False,
-                "campaign_creation_executed": False,
-                "runtime_constraints_installed": False,
+                **_admission_runtime_creation_not_executed_result_fields(),
                 "live_ready": False,
             },
             final_state_snapshot={"admission_readiness": preflight.after},
@@ -3839,15 +3640,15 @@ class BrcOperationService:
             target_playbook_id = _target_playbook_id(operation.input_params)
             if target_playbook_id not in self._catalog:
                 return f"unknown playbook: {target_playbook_id}"
-        if operation.operation_type == "write_review_decision":
+        if operation.operation_type == "write_review_outcome":
             if not str(operation.input_params.get("reason_text") or "").strip():
                 return "reason_text required"
             if not str(operation.input_params.get("next_recommended_task") or "").strip():
                 return "next_recommended_task required"
             try:
-                BrcReviewDecision(str(operation.input_params.get("decision") or ""))
+                BrcReviewDecision(str(operation.input_params.get("review_outcome") or ""))
             except ValueError:
-                return "unknown review decision"
+                return "unknown review outcome"
         if operation.operation_type == "run_fixed_testnet_rehearsal":
             if self._readers.fixed_rehearsal_executor is None:
                 return "fixed rehearsal Operation executor unavailable"
@@ -4246,7 +4047,7 @@ class BrcOperationService:
                 "warnings": [],
                 "constraints_check": {},
                 "enforcement": {
-                    "decision": "unavailable",
+                    "trial_trade_intent_result": "unavailable",
                     "not_executed_reason": "trial trade intent readiness reader unavailable",
                     "order_would_be_created": False,
                     "execution_intent_would_be_created": False,
@@ -4561,7 +4362,7 @@ class BrcOperationService:
                 warnings.append("local active positions exist; switch does not place or close orders")
             if int(market_summary.get("open_order_count") or 0) > 0:
                 warnings.append("local open orders exist; switch does not place or cancel orders")
-        elif policy.operation_type == "write_review_decision":
+        elif policy.operation_type == "write_review_outcome":
             if self._brc is None:
                 blockers.append("BRC campaign service unavailable")
             campaign_id = str(input_params.get("campaign_id") or campaign_summary.get("campaign_id") or "")
@@ -4572,20 +4373,20 @@ class BrcOperationService:
             if not str(input_params.get("next_recommended_task") or "").strip():
                 blockers.append("next_recommended_task required")
             try:
-                BrcReviewDecision(str(input_params.get("decision") or ""))
+                BrcReviewDecision(str(input_params.get("review_outcome") or ""))
             except ValueError:
-                blockers.append("unknown review decision")
+                blockers.append("unknown review outcome")
             after.update(
                 {
                     "campaign_id": campaign_id,
-                    "review_decision": input_params.get("decision"),
+                    "review_outcome": input_params.get("review_outcome"),
                     "mutation_executed": False,
                 }
             )
         elif policy.operation_type == "start_review":
-            after.update({"review_packet": "read", "mutation_executed": False})
-            if self._readers.review_packet_reader is None:
-                warnings.append("review packet reader is not wired; confirm will record a noop")
+            after.update({"review_artifact": "read", "mutation_executed": False})
+            if self._readers.review_artifact_reader is None:
+                warnings.append("review artifact reader is not wired; confirm will record a noop")
         elif policy.operation_type == "run_fixed_testnet_rehearsal":
             blockers.extend(
                 self._fixed_rehearsal_safety_blockers(
@@ -4859,7 +4660,9 @@ class BrcOperationService:
             "campaign_creation_implemented": False,
             "runtime_constraints_installation_implemented": False,
             "planned_result_status": "binding_reserved",
-            "admission_summary": dict(admission_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                admission_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(admission_readiness.get("strategy_family_summary") or {}),
             "trial_env": admission_readiness.get("trial_env"),
             "trial_stage": admission_readiness.get("trial_stage"),
@@ -4917,7 +4720,9 @@ class BrcOperationService:
             "runtime_constraints_installation_implemented": False,
             "strategy_execution_implemented": False,
             "planned_result_status": "campaign_created",
-            "admission_summary": dict(admission_campaign_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                admission_campaign_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(admission_campaign_readiness.get("strategy_family_summary") or {}),
             "trial_env": admission_campaign_readiness.get("trial_env"),
             "trial_stage": admission_campaign_readiness.get("trial_stage"),
@@ -4977,7 +4782,9 @@ class BrcOperationService:
             "runtime_carrier_switch_implemented": False,
             "strategy_execution_implemented": False,
             "planned_result_status": "runtime_constraints_installed",
-            "admission_summary": dict(runtime_constraint_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                runtime_constraint_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 runtime_constraint_readiness.get("strategy_family_summary") or {}
             ),
@@ -5049,7 +4856,9 @@ class BrcOperationService:
             "strategy_execution_implemented": False,
             "auto_execution_implemented": False,
             "planned_result_status": "carrier_ready",
-            "admission_summary": dict(runtime_carrier_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                runtime_carrier_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 runtime_carrier_readiness.get("strategy_family_summary") or {}
             ),
@@ -5124,7 +4933,9 @@ class BrcOperationService:
             "strategy_execution_implemented": False,
             "auto_execution_implemented": False,
             "planned_result_status": "runtime_start_ready",
-            "admission_summary": dict(runtime_start_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                runtime_start_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 runtime_start_readiness.get("strategy_family_summary") or {}
             ),
@@ -5353,7 +5164,9 @@ class BrcOperationService:
             "strategy_execution_implemented": False,
             "auto_execution_implemented": False,
             "planned_result_status": "runtime_handoff_ready",
-            "admission_summary": dict(runtime_handoff_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                runtime_handoff_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 runtime_handoff_readiness.get("strategy_family_summary") or {}
             ),
@@ -5429,7 +5242,9 @@ class BrcOperationService:
             "idempotent_start": idempotent_start,
             "runtime_start_would_be_possible": start_would_be_possible,
             "planned_result_status": "runtime_started_strategy_inactive",
-            "admission_summary": dict(start_runtime_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                start_runtime_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 start_runtime_readiness.get("strategy_family_summary") or {}
             ),
@@ -5498,7 +5313,9 @@ class BrcOperationService:
             "actual_order_execution_available": False,
             "planned_result_status": "strategy_activation_ready",
             "idempotent_prepare": idempotent_prepare,
-            "admission_summary": dict(strategy_activation_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                strategy_activation_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 strategy_activation_readiness.get("strategy_family_summary") or {}
             ),
@@ -5570,7 +5387,9 @@ class BrcOperationService:
             "actual_order_execution_available": False,
             "planned_result_status": "strategy_active_no_execution",
             "idempotent_activate": idempotent_activate,
-            "admission_summary": dict(strategy_state_activation_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                strategy_state_activation_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(
                 strategy_state_activation_readiness.get("strategy_family_summary") or {}
             ),
@@ -5646,7 +5465,9 @@ class BrcOperationService:
             "actual_order_execution_available": False,
             "planned_result_status": "signal_loop_ready_not_started",
             "idempotent_prepare": idempotent_prepare,
-            "admission_summary": dict(signal_loop_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                signal_loop_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(signal_loop_readiness.get("strategy_family_summary") or {}),
             "trial_env": signal_loop_readiness.get("trial_env"),
             "trial_stage": signal_loop_readiness.get("trial_stage"),
@@ -5713,7 +5534,9 @@ class BrcOperationService:
             "actual_order_execution_available": False,
             "planned_result_status": "signal_loop_started_no_signal",
             "idempotent_start": idempotent_start,
-            "admission_summary": dict(signal_loop_start_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                signal_loop_start_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(signal_loop_start_readiness.get("strategy_family_summary") or {}),
             "trial_env": signal_loop_start_readiness.get("trial_env"),
             "trial_stage": signal_loop_start_readiness.get("trial_stage"),
@@ -5778,7 +5601,9 @@ class BrcOperationService:
             "actual_order_execution_available": False,
             "planned_result_status": "signal_evaluated_no_intent",
             "idempotent_evaluation": idempotent_evaluation,
-            "admission_summary": dict(signal_evaluation_readiness.get("admission_summary") or {}),
+            "admission_summary": _summary_result_projection(
+                signal_evaluation_readiness.get("admission_summary")
+            ),
             "strategy_family_summary": dict(signal_evaluation_readiness.get("strategy_family_summary") or {}),
             "trial_env": signal_evaluation_readiness.get("trial_env"),
             "trial_stage": signal_evaluation_readiness.get("trial_stage"),
@@ -6034,7 +5859,7 @@ class BrcOperationService:
             operation_id=operation.operation_id,
             preflight_id=preflight.preflight_id,
             operation_type=operation.operation_type,
-            decision=preflight.decision,
+            preflight_result=preflight.decision,
             summary=preflight.summary,
             before=preflight.before,
             after=preflight.after,
@@ -6104,19 +5929,19 @@ def _build_default_policies() -> dict[str, OperationPolicy]:
             allowed_env=["local", "testnet"],
             confirmation_phrase="CONFIRM_START_REVIEW",
             capability_status="enabled",
-            current_reason="Operation can start/read the review packet boundary without mutation.",
-            backend_executor="brc_start_review_packet",
+            current_reason="Operation can start/read the review artifact boundary without mutation.",
+            backend_executor="brc_start_review_artifact",
             executable_through_operation=True,
         ),
         OperationPolicy(
-            operation_type="write_review_decision",
-            display_name="Write Review Decision",
+            operation_type="write_review_outcome",
+            display_name="Write Review Outcome",
             risk_level="low",
             allowed_env=["local", "testnet"],
             confirmation_phrase="CONFIRM_WRITE_REVIEW",
             capability_status="enabled",
-            current_reason="Operation-backed review decision write is enabled and remains testnet-only/non-execution.",
-            backend_executor="brc_write_review_decision",
+            current_reason="Operation-backed review outcome write is enabled and remains testnet-only/non-execution.",
+            backend_executor="brc_write_review_outcome",
             executable_through_operation=True,
         ),
         OperationPolicy(
@@ -6433,6 +6258,12 @@ def _optional_str(value: Any) -> Optional[str]:
     return text or None
 
 
+def _summary_result_projection(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if key != "decision"}
+
+
 def _explicit_runtime_instance_id(input_params: dict[str, Any]) -> Optional[str]:
     for key in ("runtime_instance_id", "strategy_runtime_instance_id"):
         runtime_instance_id = _optional_str(input_params.get(key))
@@ -6484,13 +6315,13 @@ def _operation_summary(operation_type: str, after: dict[str, Any]) -> str:
             f"Switch playbook to {after.get('current_playbook_id')} after Owner confirmation. "
             "This does not place orders, reset attempts, reset PnL, or reset loss lock."
         )
-    if operation_type == "write_review_decision":
+    if operation_type == "write_review_outcome":
         return (
-            f"Write review decision {after.get('review_decision')} after Owner confirmation. "
+            f"Write review outcome {after.get('review_outcome')} after Owner confirmation. "
             "This records review evidence only and cannot authorize live, withdrawal, or strategy execution."
         )
     if operation_type == "start_review":
-        return "Start/read review packet after Owner confirmation. This is read-only and may complete as noop."
+        return "Start/read review artifact after Owner confirmation. This is read-only and may complete as noop."
     if operation_type == "run_fixed_testnet_rehearsal":
         return (
             "Run the fixed ETH/BTC testnet rehearsal after Owner confirmation. "
@@ -6628,12 +6459,12 @@ def _extract_rehearsal_refs(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         name = str(step.get("name") or "")
         step_payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
-        if name == "review_decision":
+        if name == "review_recorded":
             review_id = _optional_str(step_payload.get("review_id"))
             if review_id is not None:
                 review_refs.append(
                     {
-                        "type": "review_decision",
+                        "type": "review_outcome",
                         "campaign_id": campaign_id,
                         "ref_id": review_id,
                     }
@@ -6648,10 +6479,10 @@ def _extract_rehearsal_refs(payload: dict[str, Any]) -> dict[str, Any]:
                         "ref_id": step_campaign_id,
                     }
                 )
-    if payload.get("review_packet") is not None:
-        review_refs.append({"type": "review_packet", "campaign_id": campaign_id, "ref_id": workflow_run_id})
+    if payload.get("review_artifact") is not None:
+        review_refs.append({"type": "review_artifact", "campaign_id": campaign_id, "ref_id": workflow_run_id})
     if payload.get("evidence") is not None:
-        audit_refs.append({"type": "evidence_packet", "ref_id": workflow_run_id})
+        audit_refs.append({"type": "evidence_artifact", "ref_id": workflow_run_id})
     return {
         "workflow_run_id": workflow_run_id,
         "campaign_id": campaign_id,

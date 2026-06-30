@@ -86,15 +86,15 @@ def _ready_plan(tmp_path: Path) -> dict:
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_remote_migration_count=79,
         expected_remote_latest_migration=(
-            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+            "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
         ),
         expected_latest_migration=(
-            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+            "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
         ),
     )
 
 
-def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
+def _owner_evidence_for_plan(plan: dict, *, head: str | None = None) -> dict:
     return {
         "status": "ready_for_owner_deploy_decision",
         "candidate": {
@@ -159,7 +159,7 @@ def test_deploy_executor_applies_with_standing_authorization_without_confirmatio
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 
@@ -179,7 +179,7 @@ def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
         apply=True,
         confirmation_phrase=None,
         require_confirmation_phrase=True,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
@@ -191,7 +191,7 @@ def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
     )
 
 
-def test_deploy_executor_applies_with_standing_authorization_without_owner_packet(
+def test_deploy_executor_applies_with_standing_authorization_without_owner_evidence(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -216,7 +216,7 @@ def test_deploy_executor_applies_with_standing_authorization_without_owner_packe
     assert calls
 
 
-def test_deploy_executor_blocks_apply_with_stale_owner_deploy_packet(tmp_path: Path):
+def test_deploy_executor_blocks_apply_with_stale_owner_deploy_artifact(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
 
@@ -224,13 +224,13 @@ def test_deploy_executor_blocks_apply_with_stale_owner_deploy_packet(tmp_path: P
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan, head="stale-head"),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan, head="stale-head"),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
     assert report["status"] == "blocked"
     assert report["checks"]["commands_executed"] == 0
-    assert "owner_deploy_packet_head_mismatch" in report["checks"]["blockers"]
+    assert "owner_deploy_artifact_head_mismatch" in report["checks"]["blockers"]
     assert report["effects"]["remote_files_modified"] is False
 
 
@@ -247,7 +247,7 @@ def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 
@@ -278,7 +278,7 @@ def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 
@@ -301,7 +301,7 @@ def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: P
         plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 
@@ -338,7 +338,7 @@ def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Pat
         mutated_plan,
         apply=True,
         confirmation_phrase=None,
-        owner_deploy_packet=_owner_packet_for_plan(plan),
+        owner_deploy_artifact=_owner_evidence_for_plan(plan),
         runner=runner,
     )
 

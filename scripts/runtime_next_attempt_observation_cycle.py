@@ -21,9 +21,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import build_runtime_strategy_signal_input_packet as signal_script  # noqa: E402
+from scripts import build_runtime_strategy_signal_input_artifact as signal_script  # noqa: E402
 from scripts import runtime_next_attempt_prepare_api_flow as prepare_script  # noqa: E402
-from scripts import verify_runtime_next_attempt_gate_packet as gate_script  # noqa: E402
+from scripts import verify_runtime_next_attempt_gate_evidence as gate_script  # noqa: E402
 
 
 def _load_env_file(path: str | None) -> None:
@@ -114,20 +114,20 @@ def _prepare_args(
     )
 
 
-def _signal_is_ready(packet: dict[str, Any]) -> bool:
-    return packet.get("status") == "ready_for_shadow_candidate_prepare"
+def _signal_is_ready(artifact: dict[str, Any]) -> bool:
+    return artifact.get("status") == "ready_for_shadow_candidate_prepare"
 
 
-async def _build_gate_packet(args: argparse.Namespace) -> dict[str, Any]:
-    return await gate_script._build_packet(_gate_args(args))
+async def _build_gate_artifact(args: argparse.Namespace) -> dict[str, Any]:
+    return await gate_script._build_gate_evidence(_gate_args(args))
 
 
-async def _build_signal_packet(
+async def _build_signal_artifact(
     args: argparse.Namespace,
     *,
     output_path: str | None,
 ) -> dict[str, Any]:
-    return await signal_script._build_packet(_signal_args(args, output_path))
+    return await signal_script._build_artifact(_signal_args(args, output_path))
 
 
 def _run_prepare_flow(
@@ -163,23 +163,23 @@ def _base_safety(*, allow_prepare_records: bool) -> dict[str, Any]:
     }
 
 
-async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
+async def _build_cycle_artifact(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
     signal_output_path = _signal_output_path(args)
 
-    gate_packet = await _build_gate_packet(args)
-    if gate_packet.get("status") != "clear_for_next_attempt_preflight":
+    gate_artifact = await _build_gate_artifact(args)
+    if gate_artifact.get("status") != "clear_for_next_attempt_preflight":
         return {
             "scope": "runtime_next_attempt_observation_cycle",
             "status": "blocked",
             "blocked_stage": "next_attempt_gate",
             "runtime_instance_id": args.runtime_instance_id,
-            "gate_packet": gate_packet,
-            "signal_packet": None,
-            "prepare_packet": None,
-            "blockers": gate_packet.get("blockers") or ["next_attempt_gate_blocked"],
-            "warnings": gate_packet.get("warnings") or [],
-            "operator_command_plan": {
+            "gate_artifact": gate_artifact,
+            "signal_artifact": None,
+            "prepare_artifact": None,
+            "blockers": gate_artifact.get("blockers") or ["next_attempt_gate_blocked"],
+            "warnings": gate_artifact.get("warnings") or [],
+            "observation_cycle_plan": {
                 "next_step": "resolve_next_attempt_gate_blocker",
                 "not_executed": True,
                 "creates_shadow_candidate": False,
@@ -192,21 +192,21 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             ),
         }
 
-    signal_packet = await _build_signal_packet(args, output_path=signal_output_path)
-    if not _signal_is_ready(signal_packet):
+    signal_artifact = await _build_signal_artifact(args, output_path=signal_output_path)
+    if not _signal_is_ready(signal_artifact):
         return {
             "scope": "runtime_next_attempt_observation_cycle",
             "status": "waiting_for_signal",
             "blocked_stage": "strategy_signal",
             "runtime_instance_id": args.runtime_instance_id,
-            "gate_packet": gate_packet,
-            "signal_packet": signal_packet,
-            "prepare_packet": None,
+            "gate_artifact": gate_artifact,
+            "signal_artifact": signal_artifact,
+            "prepare_artifact": None,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
-            "warnings": signal_packet.get("warnings") or [],
-            "operator_command_plan": {
+            "warnings": signal_artifact.get("warnings") or [],
+            "observation_cycle_plan": {
                 "next_step": "observe_only_or_wait_for_next_closed_bar",
-                "signal_input_json": signal_packet.get("output_signal_input_json"),
+                "signal_input_json": signal_artifact.get("output_signal_input_json"),
                 "not_executed": True,
                 "creates_shadow_candidate": False,
                 "creates_execution_intent": False,
@@ -218,20 +218,20 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             ),
         }
 
-    resolved_signal_path = signal_packet.get("output_signal_input_json") or signal_output_path
+    resolved_signal_path = signal_artifact.get("output_signal_input_json") or signal_output_path
     if not resolved_signal_path:
         return {
             "scope": "runtime_next_attempt_observation_cycle",
             "status": "ready_for_prepare",
             "runtime_instance_id": args.runtime_instance_id,
-            "gate_packet": gate_packet,
-            "signal_packet": signal_packet,
-            "prepare_packet": None,
+            "gate_artifact": gate_artifact,
+            "signal_artifact": signal_artifact,
+            "prepare_artifact": None,
             "blockers": [],
             "warnings": [
                 "signal_input_json_not_written; rerun with --signal-output-json before prepare"
             ],
-            "operator_command_plan": {
+            "observation_cycle_plan": {
                 "next_step": "run_runtime_next_attempt_prepare_with_signal_input_json",
                 "signal_input_json": None,
                 "not_executed": True,
@@ -250,12 +250,12 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             "scope": "runtime_next_attempt_observation_cycle",
             "status": "ready_for_prepare",
             "runtime_instance_id": args.runtime_instance_id,
-            "gate_packet": gate_packet,
-            "signal_packet": signal_packet,
-            "prepare_packet": None,
+            "gate_artifact": gate_artifact,
+            "signal_artifact": signal_artifact,
+            "prepare_artifact": None,
             "blockers": [],
-            "warnings": signal_packet.get("warnings") or [],
-            "operator_command_plan": {
+            "warnings": signal_artifact.get("warnings") or [],
+            "observation_cycle_plan": {
                 "next_step": "rerun_with_allow_prepare_records_after_owner_review",
                 "signal_input_json": resolved_signal_path,
                 "not_executed": True,
@@ -269,19 +269,19 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             ),
         }
 
-    prepare_packet = _run_prepare_flow(args, signal_input_json=resolved_signal_path)
-    ready = prepare_packet.get("status") == "ready_for_final_gate_preflight"
+    prepare_artifact = _run_prepare_flow(args, signal_input_json=resolved_signal_path)
+    ready = prepare_artifact.get("status") == "ready_for_final_gate_preflight"
     return {
         "scope": "runtime_next_attempt_observation_cycle",
         "status": "ready_for_final_gate_preflight" if ready else "blocked",
         "blocked_stage": None if ready else "prepare_records",
         "runtime_instance_id": args.runtime_instance_id,
-        "gate_packet": gate_packet,
-        "signal_packet": signal_packet,
-        "prepare_packet": prepare_packet,
-        "blockers": prepare_packet.get("blockers") or [],
-        "warnings": prepare_packet.get("warnings") or [],
-        "operator_command_plan": {
+        "gate_artifact": gate_artifact,
+        "signal_artifact": signal_artifact,
+        "prepare_artifact": prepare_artifact,
+        "blockers": prepare_artifact.get("blockers") or [],
+        "warnings": prepare_artifact.get("warnings") or [],
+        "observation_cycle_plan": {
             "next_step": (
                 "run_official_final_gate_preflight"
                 if ready
@@ -290,12 +290,12 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             "signal_input_json": resolved_signal_path,
             "not_executed": True,
             "creates_shadow_candidate": bool(
-                (prepare_packet.get("created_records") or {}).get(
+                (prepare_artifact.get("created_records") or {}).get(
                     "shadow_candidate_created"
                 )
             ),
             "creates_execution_intent": bool(
-                (prepare_packet.get("created_records") or {}).get(
+                (prepare_artifact.get("created_records") or {}).get(
                     "execution_intent_created"
                 )
             ),
@@ -311,12 +311,12 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             **_base_safety(allow_prepare_records=True),
             "prepare_records_created": ready,
             "shadow_candidate_created": bool(
-                (prepare_packet.get("created_records") or {}).get(
+                (prepare_artifact.get("created_records") or {}).get(
                     "shadow_candidate_created"
                 )
             ),
             "execution_intent_created": bool(
-                (prepare_packet.get("created_records") or {}).get(
+                (prepare_artifact.get("created_records") or {}).get(
                     "execution_intent_created"
                 )
             ),
@@ -388,7 +388,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        payload = asyncio.run(_build_cycle_packet(args))
+        payload = asyncio.run(_build_cycle_artifact(args))
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if payload["status"] in {
         "waiting_for_signal",

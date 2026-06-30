@@ -178,9 +178,9 @@ def test_tokyo_deploy_executor_is_mutation_restricted_without_exchange_write() -
     assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
 
 
-def test_tokyo_owner_deploy_packet_builder_is_readonly_not_mutating() -> None:
+def test_tokyo_owner_deploy_artifact_builder_is_readonly_not_mutating() -> None:
     result = classify_script_path(
-        REPO_ROOT / "scripts/build_tokyo_runtime_governance_owner_deploy_packet.py"
+        REPO_ROOT / "scripts/build_tokyo_runtime_governance_owner_deploy_policy_artifact.py"
     )
 
     assert result.level == ScriptRiskLevel.READ_ONLY
@@ -194,10 +194,10 @@ def test_tokyo_owner_deploy_packet_builder_is_readonly_not_mutating() -> None:
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_tokyo_postdeploy_acceptance_packet_builder_is_readonly_not_mutating() -> None:
+def test_tokyo_postdeploy_acceptance_evidence_builder_is_readonly_not_mutating() -> None:
     result = classify_script_path(
         REPO_ROOT
-        / "scripts/build_tokyo_runtime_governance_postdeploy_acceptance_packet.py"
+        / "scripts/build_tokyo_runtime_governance_postdeploy_acceptance_evidence.py"
     )
 
     assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}
@@ -210,9 +210,9 @@ def test_tokyo_postdeploy_acceptance_packet_builder_is_readonly_not_mutating() -
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_runtime_first_real_submit_owner_packet_is_readonly_not_mutating() -> None:
+def test_runtime_first_real_submit_owner_evidence_is_readonly_not_mutating() -> None:
     result = classify_script_path(
-        REPO_ROOT / "scripts/build_runtime_first_real_submit_owner_packet.py"
+        REPO_ROOT / "scripts/build_runtime_first_real_submit_owner_evidence.py"
     )
 
     assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}
@@ -226,9 +226,9 @@ def test_runtime_first_real_submit_owner_packet_is_readonly_not_mutating() -> No
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_order_lifecycle_adapter_enablement_packet_is_readonly_not_mutating() -> None:
+def test_order_lifecycle_adapter_enablement_evidence_is_readonly_not_mutating() -> None:
     result = classify_script_path(
-        REPO_ROOT / "scripts/build_order_lifecycle_adapter_enablement_packet.py"
+        REPO_ROOT / "scripts/build_order_lifecycle_adapter_enablement_evidence.py"
     )
 
     assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}

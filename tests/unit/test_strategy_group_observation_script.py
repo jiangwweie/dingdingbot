@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import importlib.util
 from pathlib import Path
 
@@ -26,6 +27,35 @@ def _load_script_module():
     return module
 
 
+def test_observation_script_load_env_ignores_missing_dotenv(monkeypatch):
+    module = _load_script_module()
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "dotenv":
+            raise ModuleNotFoundError("No module named 'dotenv'")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    module._load_env()
+
+
+def test_observation_script_load_env_surfaces_dotenv_import_error(monkeypatch):
+    module = _load_script_module()
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "dotenv":
+            raise RuntimeError("dotenv import failed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(RuntimeError, match="dotenv import failed"):
+        module._load_env()
+
+
 class _FakeResult:
     market_source = "unit_test_market_source"
     sink = "unit_test_sink"
@@ -45,7 +75,7 @@ class _FakeResult:
 
 def _args(**overrides):
     values = {
-        "source": "local_sqlite_fallback",
+        "source": "local_sqlite_read_only",
         "json": True,
         "shadow_plan": False,
         "allow_shadow_candidate_creation": False,
@@ -80,7 +110,7 @@ async def test_observation_script_defaults_to_observation_only(monkeypatch, caps
     code = await module._run(_args())
 
     assert code == 0
-    assert captured == {"source_name": "local_sqlite_fallback"}
+    assert captured == {"source_name": "local_sqlite_read_only"}
     assert '"inserted_count": 1' in capsys.readouterr().out
 
 
@@ -146,7 +176,7 @@ async def test_observation_script_shadow_plan_injects_resolver_and_planner(
     )
 
     assert code == 0
-    assert captured["source_name"] == "local_sqlite_fallback"
+    assert captured["source_name"] == "local_sqlite_read_only"
     assert captured["runtime_resolver"] == "runtime-resolver"
     assert captured["runtime_signal_planning_service"] == "scheduler-planning-service"
     assert captured["allow_shadow_candidate_creation"] is True

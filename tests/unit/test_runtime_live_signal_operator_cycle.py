@@ -10,7 +10,7 @@ def test_operator_cycle_waits_without_prepare_records(tmp_path):
     calls = {"prepare": 0}
 
     async def routing_builder(args):
-        return _routing_packet(
+        return _routing_artifact(
             status="waiting_for_runtime_compatible_signal",
             blockers=["runtime_strategy_signal_not_found_in_strategy_shelf"],
         )
@@ -19,28 +19,30 @@ def test_operator_cycle_waits_without_prepare_records(tmp_path):
         calls["prepare"] += 1
         raise AssertionError("prepare must not run while waiting")
 
-    packet = _run_packet(
+    artifact = _run_artifact(
         tmp_path,
         routing_builder=routing_builder,
         prepare_runner=prepare_runner,
     )
 
-    assert packet["status"] == "waiting_for_runtime_compatible_signal"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "waiting_for_runtime_compatible_signal"
+    assert "routing_artifact" not in artifact
+    assert "prepare_artifact" not in artifact
+    assert artifact["live_operator_plan"]["next_step"] == (
         "continue_live_signal_observation_without_forcing_entry"
     )
-    assert packet["prepare_packet"] is None
+    assert artifact["prepare_evidence"] is None
     assert calls["prepare"] == 0
-    assert packet["safety_invariants"]["prepare_flow_called"] is False
-    assert packet["safety_invariants"]["order_created"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["prepare_flow_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_operator_cycle_surfaces_profile_proposal_without_prepare(tmp_path):
     async def routing_builder(args):
-        return _routing_packet(
+        return _routing_artifact(
             status="ready_for_owner_runtime_profile_decision",
-            profile_proposal_packet={
+            profile_proposal_artifact={
                 "status": "ready_for_owner_runtime_profile_decision",
                 "experimental_runtime_profile_proposal": {
                     "strategy_family_id": "RBR-001",
@@ -49,42 +51,63 @@ def test_operator_cycle_surfaces_profile_proposal_without_prepare(tmp_path):
             },
         )
 
-    packet = _run_packet(tmp_path, routing_builder=routing_builder)
+    artifact = _run_artifact(tmp_path, routing_builder=routing_builder)
 
-    assert packet["status"] == "ready_for_owner_runtime_profile_decision"
-    assert packet["profile_proposal_packet"]["experimental_runtime_profile_proposal"][
+    assert artifact["status"] == "ready_for_owner_runtime_profile_decision"
+    assert "profile_proposal_artifact" not in artifact
+    assert artifact["runtime_profile_proposal"]["experimental_runtime_profile_proposal"][
         "strategy_family_id"
     ] == "RBR-001"
-    assert packet["operator_command_plan"]["requires_owner_runtime_profile_confirmation"] is True
-    assert packet["operator_command_plan"]["creates_runtime"] is False
-    assert packet["prepare_packet"] is None
-    assert packet["safety_invariants"]["runtime_profile_mutated"] is False
+    assert artifact["live_operator_plan"]["requires_owner_runtime_profile_confirmation"] is True
+    assert artifact["live_operator_plan"]["creates_runtime"] is False
+    assert artifact["prepare_evidence"] is None
+    assert artifact["safety_invariants"]["runtime_profile_mutated"] is False
+
+
+def test_operator_cycle_ignores_legacy_profile_proposal_packet_input(tmp_path):
+    async def routing_builder(args):
+        return {
+            **_routing_artifact(status="ready_for_owner_runtime_profile_decision"),
+            "profile_proposal_packet": {
+                "status": "ready_for_owner_runtime_profile_decision",
+                "experimental_runtime_profile_proposal": {
+                    "strategy_family_id": "LEGACY-001",
+                    "symbol": "SOL/USDT:USDT",
+                },
+            },
+        }
+
+    artifact = _run_artifact(tmp_path, routing_builder=routing_builder)
+
+    assert artifact["runtime_profile_proposal"] is None
+    assert "profile_proposal_packet" not in artifact
 
 
 def test_operator_cycle_ready_signal_requires_explicit_prepare_flag(tmp_path):
     async def routing_builder(args):
-        return _routing_packet(
+        return _routing_artifact(
             status="ready_for_current_runtime_signal_prepare",
             signal_input_json=str(tmp_path / "ready-signal.json"),
         )
 
-    packet = _run_packet(tmp_path, routing_builder=routing_builder)
+    artifact = _run_artifact(tmp_path, routing_builder=routing_builder)
 
-    assert packet["status"] == "ready_for_prepare"
-    assert packet["signal_input_json"].endswith("ready-signal.json")
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "ready_for_prepare"
+    assert "prepare_artifact" not in artifact
+    assert artifact["signal_input_json"].endswith("ready-signal.json")
+    assert artifact["live_operator_plan"]["next_step"] == (
         "rerun_with_allow_prepare_records_after_operator_review"
     )
-    assert packet["prepare_packet"] is None
-    assert packet["safety_invariants"]["prepare_records_created"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert artifact["prepare_evidence"] is None
+    assert artifact["safety_invariants"]["prepare_records_created"] is False
+    assert artifact["live_operator_plan"]["places_order"] is False
 
 
 def test_operator_cycle_runs_prepare_only_with_explicit_flag(tmp_path):
     signal_path = str(tmp_path / "ready-signal.json")
 
     async def routing_builder(args):
-        return _routing_packet(
+        return _routing_artifact(
             status="ready_for_current_runtime_signal_prepare",
             signal_input_json=signal_path,
         )
@@ -96,8 +119,8 @@ def test_operator_cycle_runs_prepare_only_with_explicit_flag(tmp_path):
             "status": "ready_for_final_gate_preflight",
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {
-                "prepared_authorization_id": "auth-rtf067",
+            "ids": {
+                "authorization_id": "auth-rtf067",
             },
             "created_records": {
                 "shadow_candidate_created": True,
@@ -117,27 +140,28 @@ def test_operator_cycle_runs_prepare_only_with_explicit_flag(tmp_path):
             },
         }
 
-    packet = _run_packet(
+    artifact = _run_artifact(
         tmp_path,
         extra_args=["--allow-prepare-records"],
         routing_builder=routing_builder,
         prepare_runner=prepare_runner,
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["operator_command_plan"]["prepared_authorization_id"] == "auth-rtf067"
-    assert packet["operator_command_plan"]["requires_real_submit_gate"] is True
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert artifact["prepare_evidence"]["status"] == "ready_for_final_gate_preflight"
+    assert artifact["live_operator_plan"]["prepared_authorization_id"] == "auth-rtf067"
+    assert artifact["live_operator_plan"]["requires_real_submit_gate"] is True
+    assert artifact["safety_invariants"]["prepare_records_created"] is True
+    assert artifact["safety_invariants"]["shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_operator_cycle_cli_stdout_is_json_only(monkeypatch, capsys, tmp_path):
     async def routing_builder(args):
         print("inner noisy operator cycle")
-        return _routing_packet(status="waiting_for_runtime_compatible_signal")
+        return _routing_artifact(status="waiting_for_runtime_compatible_signal")
 
     monkeypatch.setattr(
         sys,
@@ -159,7 +183,7 @@ def test_operator_cycle_cli_stdout_is_json_only(monkeypatch, capsys, tmp_path):
     assert "inner noisy operator cycle" in captured.err
 
 
-def _run_packet(
+def _run_artifact(
     tmp_path,
     *,
     extra_args=None,
@@ -182,15 +206,15 @@ def _run_packet(
     return json.loads((tmp_path / "cycle.json").read_text())
 
 
-def _routing_packet(
+def _routing_artifact(
     *,
     status: str,
     signal_input_json: str | None = None,
     blockers: list[str] | None = None,
-    profile_proposal_packet: dict | None = None,
+    profile_proposal_artifact: dict | None = None,
 ):
     return {
-        "scope": "runtime_live_signal_routing_packet",
+        "scope": "runtime_live_signal_routing_artifact",
         "status": status,
         "runtime_instance_id": "runtime-1",
         "runtime_profile": {
@@ -201,10 +225,10 @@ def _routing_packet(
             "side": "short",
         },
         "signal_input_json": signal_input_json,
-        "profile_proposal_packet": profile_proposal_packet,
+        "profile_proposal_artifact": profile_proposal_artifact,
         "blockers": blockers or [],
         "warnings": [],
-        "operator_command_plan": {
+        "signal_routing_plan": {
             "places_order": False,
             "calls_order_lifecycle": False,
         },

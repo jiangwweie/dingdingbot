@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build a local P0 live cutover readiness packet.
+"""Build a local P0 live cutover readiness artifact.
 
-This packet compresses the existing non-executing runtime audit chain into an
+This artifact compresses the existing non-executing runtime audit chain into an
 Owner-readable answer: are non-market blockers cleared for the next fresh
 selected StrategyGroup signal?
 
@@ -25,6 +25,10 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_dry_run_audit_chain as dry_run_audit  # noqa: E402
+from scripts.runtime_live_closure_evidence_contract import (  # noqa: E402
+    ACTION_TIME_FINALGATE_CHAIN_KEY,
+    LIVE_SIGNAL_CHAIN_KEY,
+)
 
 
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/live-cutover-readiness")
@@ -50,25 +54,25 @@ RUNTIME_BOUNDARY_MISSING_REJECT_IF = [
     "leverage_boundary_missing",
 ]
 
-SECTION_CHECKS: dict[str, list[str]] = {
+CHECK_GROUP_CHECKS: dict[str, list[str]] = {
     "strategy_scope": [
         "runtime_tier_policy_checked",
         "only_mpg_tiny_real_order_eligible_checked",
         "allocated_subaccount_profile_boundary_checked",
         "common_execution_chain_reuse_checked",
         "strategygroup_adapter_boundary_checked",
-        "strategy_handoff_no_execution_pipeline_fields_checked",
+        "strategy_intake_no_execution_pipeline_fields_checked",
     ],
     "entry_fast_chain": [
         "fresh_signal_fast_auto_chain_checked",
         "required_facts_readiness_checked",
-        "non_executing_prepare_auto_bridge_checked",
+        "execution_attempt_rehearsal_prepare_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     ],
     "operation_layer_relay": [
         "operation_layer_evidence_relay_checked",
-        "scoped_pipeline_operation_layer_handoff_checked",
+        "scoped_pipeline_operation_layer_submit_projection_checked",
         "operation_layer_authorization_chain_guard_checked",
     ],
     "hard_blocker_policy": [
@@ -123,14 +127,14 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
     {
         "name": "live_fresh_signal",
         "market_dependent": True,
-        "required_evidence_keys": ["live_watcher_signal_packet_id"],
+        "required_evidence_keys": [LIVE_SIGNAL_CHAIN_KEY],
         "reject_if": ["synthetic_signal", "replay_signal", "stale_signal"],
-        "next_action": "build_required_facts_readiness",
+        "next_lifecycle_checkpoint": "build_required_facts_readiness",
     },
     {
         "name": "required_facts_ready",
         "market_dependent": True,
-        "required_evidence_keys": ["required_facts_readiness_packet_id"],
+        "required_evidence_keys": ["required_facts_readiness_artifact_id"],
         "reject_if": [
             "missing_fact",
             "stale_fact",
@@ -138,7 +142,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "live_signal_chain_id_mismatch",
             "required_facts_signal_source_missing",
         ],
-        "next_action": "prepare_candidate_authorization",
+        "next_lifecycle_checkpoint": "prepare_candidate_authorization",
     },
     {
         "name": "candidate_authorization_bound",
@@ -167,12 +171,12 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "candidate_signal_source_missing",
             "candidate_authorization_chain_source_missing",
         ],
-        "next_action": "run_action_time_finalgate",
+        "next_lifecycle_checkpoint": "run_action_time_finalgate",
     },
     {
         "name": "action_time_finalgate_passed",
         "market_dependent": True,
-        "required_evidence_keys": ["action_time_finalgate_packet_id"],
+        "required_evidence_keys": [ACTION_TIME_FINALGATE_CHAIN_KEY],
         "reject_if": [
             "active_position",
             "open_order",
@@ -191,7 +195,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "pre_submit_authorization_chain_id_mismatch",
             "finalgate_authorization_chain_source_missing",
         ],
-        "next_action": "prepare_official_operation_layer_submit",
+        "next_lifecycle_checkpoint": "prepare_official_operation_layer_submit",
     },
     {
         "name": "official_operation_layer_ready",
@@ -213,7 +217,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "pre_submit_authorization_chain_id_mismatch",
             "operation_layer_authorization_chain_source_missing",
         ],
-        "next_action": "submit_through_official_operation_layer",
+        "next_lifecycle_checkpoint": "submit_through_official_operation_layer",
     },
     {
         "name": "real_exchange_acceptance",
@@ -238,7 +242,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "notional_boundary_mismatch",
             "leverage_boundary_mismatch",
         ],
-        "next_action": "attach_exchange_native_protection",
+        "next_lifecycle_checkpoint": "attach_exchange_native_protection",
     },
     {
         "name": "exchange_native_protection",
@@ -262,12 +266,12 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "notional_boundary_mismatch",
             "leverage_boundary_mismatch",
         ],
-        "next_action": "run_post_submit_finalize",
+        "next_lifecycle_checkpoint": "run_post_submit_finalize",
     },
     {
         "name": "post_submit_finalize",
         "market_dependent": True,
-        "required_evidence_keys": ["runtime_post_submit_finalize_packet_id"],
+        "required_evidence_keys": ["runtime_post_submit_finalize_payload_id"],
         "reject_if": [
             "finalize_missing",
             "next_attempt_gate_missing",
@@ -284,7 +288,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "notional_boundary_mismatch",
             "leverage_boundary_mismatch",
         ],
-        "next_action": "reconcile_settle_and_review",
+        "next_lifecycle_checkpoint": "reconcile_settle_and_review",
     },
     {
         "name": "reconciliation_settlement_review",
@@ -313,7 +317,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "notional_boundary_mismatch",
             "leverage_boundary_mismatch",
         ],
-        "next_action": "mark_first_bounded_live_order_closure_complete",
+        "next_lifecycle_checkpoint": "mark_first_bounded_live_order_closure_complete",
     },
 ]
 
@@ -331,8 +335,8 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _section(name: str, checks: dict[str, Any]) -> dict[str, Any]:
-    required = SECTION_CHECKS[name]
+def _check_group(name: str, checks: dict[str, Any]) -> dict[str, Any]:
+    required = CHECK_GROUP_CHECKS[name]
     missing = [check for check in required if checks.get(check) is not True]
     return {
         "name": name,
@@ -343,11 +347,11 @@ def _section(name: str, checks: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scenario_artifact(
-    dry_run_packet: dict[str, Any],
+    dry_run_artifact: dict[str, Any],
     scenario_name: str,
     artifact_name: str,
 ) -> dict[str, Any]:
-    scenarios = dry_run_packet.get("scenarios")
+    scenarios = dry_run_artifact.get("scenarios")
     if not isinstance(scenarios, list):
         return {}
     for scenario in scenarios:
@@ -364,11 +368,11 @@ def _scenario_artifact(
 
 
 def _legacy_confirmation_regression_checks(
-    dry_run_packet: dict[str, Any],
+    dry_run_artifact: dict[str, Any],
     checks: dict[str, Any],
 ) -> dict[str, bool]:
     guard = _scenario_artifact(
-        dry_run_packet,
+        dry_run_artifact,
         "post_submit_closed_loop_evidence_guard",
         "post_submit_closed_loop_evidence_guard",
     )
@@ -486,7 +490,7 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_has_no_owner_chat_confirmation_stage": all(
             "owner_chat_confirmation" not in stage["name"]
-            and "owner_chat_confirmation" not in stage["next_action"]
+            and "owner_chat_confirmation" not in stage["next_lifecycle_checkpoint"]
             and "owner_chat_confirmation" not in stage["required_evidence_keys"]
             for stage in LIVE_CLOSURE_CUTOVER_STAGES
         ),
@@ -521,8 +525,8 @@ class _FakeReadModelResponse:
 
 
 def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, Any]:
-    from scripts.refresh_strategygroup_runtime_product_state_packets import (
-        refresh_packets,
+    from scripts.refresh_strategygroup_runtime_product_state_artifacts import (
+        refresh_product_state_artifacts,
     )
 
     contract_dir = output_dir / "same-tick-product-state-refresh"
@@ -603,12 +607,12 @@ def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, 
             },
             "owner_state": {
                 "status": "waiting_for_opportunity",
-                "next_safe_checkpoint": "continue_watcher_observation",
+                "non_authority_checkpoint": "continue_watcher_observation",
             },
             "real_order_boundary": {"ready_for_real_order_action": False},
         }
 
-    refresh = refresh_packets(
+    refresh = refresh_product_state_artifacts(
         api_base="http://cutover.local",
         output_dir=contract_dir,
         label="local-cutover-contract",
@@ -687,8 +691,8 @@ def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, 
     }
 
 
-def _safety_invariants(dry_run_packet: dict[str, Any]) -> dict[str, bool]:
-    safety = dry_run_packet.get("safety_invariants")
+def _safety_invariants(dry_run_artifact: dict[str, Any]) -> dict[str, bool]:
+    safety = dry_run_artifact.get("safety_invariants")
     if not isinstance(safety, dict):
         safety = {}
     return {
@@ -733,21 +737,21 @@ def _dangerous_effect_found(safety: dict[str, bool]) -> bool:
     )
 
 
-def _owner_markdown(packet: dict[str, Any]) -> str:
-    non_market = "无" if not packet["non_market_blockers"] else ", ".join(
-        packet["non_market_blockers"]
+def _owner_markdown(artifact: dict[str, Any]) -> str:
+    non_market = "无" if not artifact["non_market_blockers"] else ", ".join(
+        artifact["non_market_blockers"]
     )
-    sections = "\n".join(
-        f"- {item['name']}: {item['status']}" for item in packet["sections"]
+    check_groups = "\n".join(
+        f"- {item['name']}: {item['status']}" for item in artifact["check_groups"]
     )
     return "\n".join(
         [
             "## P0 Live Cutover Readiness",
             "",
             "- 当前状态: 等待真实 fresh signal"
-            if packet["status"] == "live_cutover_waiting_for_fresh_signal"
+            if artifact["status"] == "live_cutover_waiting_for_fresh_signal"
             else "- 当前状态: 非市场阻断待修复",
-            f"- Owner 状态: {packet['owner_state']}",
+            f"- Owner 状态: {artifact['owner_state']}",
             f"- 非市场阻断: {non_market}",
             "- 服务器修改: 否",
             "- Live FinalGate: 否",
@@ -755,33 +759,33 @@ def _owner_markdown(packet: dict[str, Any]) -> str:
             "- Exchange write: 否",
             "- 接近真实订单: 否",
             "",
-            "## Sections",
+            "## Check Groups",
             "",
-            sections,
+            check_groups,
             "",
             "## Boundary",
             "",
-            "- 本包只读取本地 dry-run audit 语义。",
-            "- 本包不把 replay / synthetic signal 伪造成真实市场信号。",
-            "- 本包不是真实 submit authority。",
+            "- 本 artifact 只读取本地 dry-run audit 语义。",
+            "- 本 artifact 不把 replay / synthetic signal 伪造成真实市场信号。",
+            "- 本 artifact 不是真实 submit authority。",
         ]
     )
 
 
-def build_cutover_readiness_packet(
+def build_cutover_readiness_artifact(
     output_dir: Path,
     *,
-    dry_run_packet: dict[str, Any] | None = None,
+    dry_run_artifact: dict[str, Any] | None = None,
     generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    dry_run_packet = dry_run_packet or dry_run_audit.build_audit_chain(
+    dry_run_artifact = dry_run_artifact or dry_run_audit.build_audit_artifact(
         output_dir / "dry-run-audit-chain"
     )
-    checks = dry_run_packet.get("checks")
+    checks = dry_run_artifact.get("checks")
     if not isinstance(checks, dict):
         checks = {}
-    legacy_checks = _legacy_confirmation_regression_checks(dry_run_packet, checks)
+    legacy_checks = _legacy_confirmation_regression_checks(dry_run_artifact, checks)
     live_closure_contract = _live_closure_cutover_contract()
     contract_checks = live_closure_contract.get("checks")
     if not isinstance(contract_checks, dict):
@@ -796,17 +800,19 @@ def build_cutover_readiness_packet(
         **contract_checks,
         **same_tick_checks,
     }
-    sections = [_section(name, effective_checks) for name in SECTION_CHECKS]
-    non_market_blockers = [
-        f"{section['name']}:{check}"
-        for section in sections
-        for check in section["missing_checks"]
+    check_groups = [
+        _check_group(name, effective_checks) for name in CHECK_GROUP_CHECKS
     ]
-    safety = _safety_invariants(dry_run_packet)
+    non_market_blockers = [
+        f"{check_group['name']}:{check}"
+        for check_group in check_groups
+        for check in check_group["missing_checks"]
+    ]
+    safety = _safety_invariants(dry_run_artifact)
     if _dangerous_effect_found(safety):
         non_market_blockers.append("dry_run_safety:dangerous_effect_found")
-    if dry_run_packet.get("status") != "passed":
-        for blocker in dry_run_packet.get("blockers") or []:
+    if dry_run_artifact.get("status") != "passed":
+        for blocker in dry_run_artifact.get("blockers") or []:
             non_market_blockers.append(f"dry_run_audit:{blocker}")
 
     ready = not non_market_blockers
@@ -829,16 +835,16 @@ def build_cutover_readiness_packet(
         ),
         "next_fresh_signal_cutover_ready": ready,
         "current_real_submit_allowed": False,
-        "current_real_submit_blocker": "no_live_fresh_signal_in_this_local_packet",
+        "current_real_submit_blocker": "no_live_fresh_signal_in_this_local_artifact",
         "market_dependent_waiting_keys": MARKET_DEPENDENT_WAITING_KEYS,
         "non_market_blockers": non_market_blockers,
-        "sections": sections,
+        "check_groups": check_groups,
         "live_closure_cutover_contract": live_closure_contract,
         "same_tick_product_state_visibility_contract": same_tick_visibility,
-        "source_packets": {
-            "dry_run_audit_scope": dry_run_packet.get("scope"),
-            "dry_run_audit_status": dry_run_packet.get("status"),
-            "dry_run_scenario_count": dry_run_packet.get("scenario_count"),
+        "source_artifacts": {
+            "dry_run_audit_scope": dry_run_artifact.get("scope"),
+            "dry_run_audit_status": dry_run_artifact.get("status"),
+            "dry_run_scenario_count": dry_run_artifact.get("scenario_count"),
         },
         "legacy_confirmation_regression_checks": legacy_checks,
         "safety_invariants": safety,
@@ -847,7 +853,7 @@ def build_cutover_readiness_packet(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build local P0 live cutover readiness packet."
+        description="Build local P0 live cutover readiness artifact."
     )
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
@@ -857,13 +863,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_cutover_readiness_packet(Path(args.output_dir).expanduser())
+    artifact = build_cutover_readiness_artifact(Path(args.output_dir).expanduser())
     output_json = Path(args.output_json).expanduser()
     owner_progress = Path(args.output_owner_progress).expanduser()
-    _write_json(output_json, packet)
-    _write_text(owner_progress, _owner_markdown(packet) + "\n")
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if packet["status"] == "live_cutover_waiting_for_fresh_signal" else 2
+    _write_json(output_json, artifact)
+    _write_text(owner_progress, _owner_markdown(artifact) + "\n")
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if artifact["status"] == "live_cutover_waiting_for_fresh_signal" else 2
 
 
 if __name__ == "__main__":

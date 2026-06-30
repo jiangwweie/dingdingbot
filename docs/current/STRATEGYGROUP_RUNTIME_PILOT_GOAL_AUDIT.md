@@ -2,6 +2,13 @@
 
 Last updated: 2026-06-19
 
+## Current State-Model Note
+
+`Signal Observation grade` in this audit is a historical checkpoint label and now maps to Signal
+Observation grade. It is not a lifecycle layer, not a runtime authority source,
+and not an alternative to Tradeability Decision, Runtime Safety State,
+Execution Attempt, or Review Outcome State.
+
 ## Purpose
 
 This file is the current audit surface for the active StrategyGroup Runtime
@@ -14,7 +21,7 @@ P1 StrategyGroup tier governance
 ```
 
 It separates proven engineering readiness from the remaining market-dependent
-first real-order closure. It is not a frontend plan and not a historical-debt
+first real-order closure. It is not a product-client plan and not a historical-debt
 cleanup plan.
 
 ## Current State
@@ -28,7 +35,7 @@ cleanup plan.
 | Latest Tokyo release | `brc-runtime-governance-c8304bec-l2-shadow-decision-loop` |
 | Latest deploy apply | `output/tokyo-git-deploy-apply-c8304bec.json` |
 | Latest postdeploy acceptance | `output/tokyo-runtime-deploy-session-c8304bec-l2-shadow-decision-loop.json` |
-| Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
+| Goal progress | `P0=waiting_for_market`, `Signal Observation grade=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
 | Product gaps | none |
@@ -51,7 +58,7 @@ the goal-progress layer must preserve the first-order truth:
 
 ```text
 P0 = waiting_for_market
-P0.5 = ready
+Signal Observation grade = ready
 Owner intervention = false
 checks.blockers = []
 ```
@@ -62,10 +69,10 @@ checks.blockers = []
 
 | Requirement | Current Proof | Status |
 | --- | --- | --- |
-| fresh signal -> candidate/auth automatic chain | `runtime-dry-run-audit-chain-current.json` has `fresh_signal_fast_auto_chain_checked=true` and `non_executing_prepare_auto_bridge_checked=true` | Proven by dry-run |
+| fresh signal -> candidate/auth automatic chain | `runtime-dry-run-audit-chain-current.json` has `fresh_signal_fast_auto_chain_checked=true` and `execution_attempt_rehearsal_prepare_checked=true` | Proven by dry-run |
 | RequiredFacts readiness | Dry-run audit has `required_facts_readiness_checked=true`; daily check has `runtime_dry_run_missing_required_checks=[]` | Proven by dry-run |
 | action-time FinalGate sequence | Dry-run audit has `all_selected_strategygroups_reach_finalgate_dispatch_checked=true` and `selected_strategygroup_dispatch_guard_checked=true` | Proven by dry-run |
-| official Operation Layer evidence relay | Dry-run audit has `operation_layer_evidence_relay_checked=true`, `operation_layer_authorization_chain_guard_checked=true`, and `scoped_pipeline_operation_layer_handoff_checked=true` | Proven by dry-run |
+| official Operation Layer evidence relay | Dry-run audit has `operation_layer_evidence_relay_checked=true`, `operation_layer_authorization_chain_guard_checked=true`, and `scoped_pipeline_operation_layer_submit_projection_checked=true` | Proven by dry-run |
 | hard submit blocker matrix | Dry-run audit has `operation_layer_hard_safety_blocker_matrix_checked=true` and `operation_layer_blocker_review_policy_checked=true` | Proven by dry-run |
 | real exchange submit | Not proven because no fresh market signal currently exists; daily check reports `waiting_for_market=true` | Market-dependent |
 
@@ -77,7 +84,7 @@ checks.blockers = []
 | CCXT/Binance nested reduce-only shape | `test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload` covers `info.reduceOnly=true` | Proven by unit tests |
 | TP1 first-stage shape | `runtime_position_exit_plan` preserves default TP1 review shape and blocks fake TP orders when min qty / step makes partial TP infeasible | Proven by unit tests |
 | runner first-stage rule | `runner_primary_exit_rule=structure_invalidation_first`, ATR trailing and time stop are review-only helpers | Proven by domain model/tests |
-| standing reduce-only recovery authorization packet | `test_runtime_reduce_only_close_authorization.py` proves ready and blocked recovery-packet shapes; no per-order chat confirmation is required inside the official recovery boundary | Proven by unit tests |
+| standing reduce-only recovery authorization evidence | `test_runtime_reduce_only_close_authorization.py` proves ready and blocked recovery evidence shapes; no per-order chat confirmation is required inside the official recovery boundary | Proven by unit tests |
 | post-submit exit outcome matrix | Dry-run audit has `post_submit_exit_outcome_matrix_checked=true` | Proven by dry-run |
 | protection-failure reduce-only recovery route | Dry-run audit has `reduce_only_recovery_standing_authorization_checked=true`; recovery still requires action-time FinalGate and official Operation Layer | Proven by dry-run |
 | entry filled + protection failure handling | Dry-run outcome matrix includes protection-failed path and recovery/review shape | Proven by dry-run |
@@ -91,14 +98,14 @@ checks.blockers = []
 | first live lane limited to MPG-001 | Dry-run audit has `only_mpg_tiny_real_order_eligible_checked=true`; L4 list is `["MPG-001"]` | Proven |
 | TEQ/BTPC/FBS/SOR/PMR remain non-L4 | Dry-run tier rows: `TEQ-001=L2`, `BTPC-001=L2`, `FBS-001=L3`, `SOR-001=L3`, `PMR-001=L1` | Proven |
 | new BRF/VCB/LSR/RBR default non-L4 | Dry-run audit has `new_strategygroups_default_observe_only_checked=true` and all default new groups at `L1` | Proven |
-| strategy handoffs cannot define custom execution pipeline | Dry-run audit has `strategy_handoff_no_execution_pipeline_fields_checked=true` and `strategygroup_adapter_boundary_checked=true` | Proven |
+| strategy intake sources cannot define custom execution pipeline | Dry-run audit has `strategy_intake_no_execution_pipeline_fields_checked=true` and `strategygroup_adapter_boundary_checked=true` | Proven |
 
 ## Current Verification Commands
 
 | Command | Result |
 | --- | --- |
 | `python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md` | `DONT_NOTIFY`, waiting for market |
-| `python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md` | `P0=waiting_for_market`, `P0.5=ready`, no blockers |
+| `python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md` | `P0=waiting_for_market`, `Signal Observation grade=ready`, no blockers |
 | `python3 scripts/runtime_dry_run_audit_chain.py --output-json output/strategygroup-runtime-pilot/runtime-dry-run-audit-chain-current.json` | `status=passed`, `scenario_count=14`, all required checks true |
 | `python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/strategygroup-runtime-pilot/replay-lab/runtime-replay-report.json --output-owner-progress output/strategygroup-runtime-pilot/replay-lab/runtime-replay-owner-progress.md` | `status=passed`, `strategy_group_id=MPG-001`, replay-only safety flags true |
 | `python3 scripts/runtime_live_cutover_readiness.py --output-json output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json --output-owner-progress output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.md` | `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]` |
@@ -162,32 +169,32 @@ healthy waiting-for-market with no blockers or product gaps.
 
 ### 2026-06-18 Live Cutover Same-Tick Visibility Contract
 
-The local live-cutover readiness packet now includes a
+The local live-cutover readiness artifact now includes a
 `same_tick_product_state_visibility_contract`. This upgrades the source-readiness
-ordering fix from unit-test coverage into the same P0.5 readiness surface used
-by goal-progress and Owner-readable status checks.
+ordering fix from unit-test coverage into the same Signal Observation grade
+readiness surface used by goal-progress and Owner-readable status checks.
 
 | Item | Evidence |
 | --- | --- |
-| Cutover section | `runtime_live_cutover_readiness.py` adds `same_tick_product_state_visibility` with four required checks |
+| Cutover check group | `runtime_live_cutover_readiness.py` adds `same_tick_product_state_visibility` with four required checks |
 | Required order | The local contract verifies `dry_run -> chain_closure -> live_closure -> goal_status -> owner-console-source-readiness API` |
 | Current run | `runtime-live-cutover-readiness.json` reports `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]`, and same-tick visibility `status=ready` |
-| Goal progress | Latest local goal-progress reports `P0=waiting_for_market`, `P0.5=ready`, `blockers=none`, `product_gaps=none` |
+| Goal progress | Latest local goal-progress reports `P0=waiting_for_market`, `Signal Observation grade=ready`, `blockers=none`, `product_gaps=none` |
 | Boundary | Local readiness/audit projection only; no server file mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Same-Tick Source Readiness Visibility Fix
 
 The watcher product-state post-step now refreshes
 `strategygroup-runtime-goal-status.json` before it refreshes
-`owner-console-source-readiness.json` and the other local readmodel packets.
+`owner-console-source-readiness.json` and the other local readmodel artifacts.
 This closes the remaining one-tick visibility gap after the live closure
 evidence and goal-status refresh hook.
 
 | Item | Evidence |
 | --- | --- |
-| Refresh order | `refresh_strategygroup_runtime_product_state_packets.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, goal-status refresh, then readmodel/API packet refresh |
+| Refresh order | `refresh_strategygroup_runtime_product_state_artifacts.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, goal-status refresh, then readmodel/API artifact refresh |
 | Source-readiness impact | `owner-console-source-readiness.json` can consume the same-tick `strategygroup-runtime-goal-status.json` instead of reading the previous watcher tick |
-| Test coverage | `test_refresh_packets_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status -> owner-console-source-readiness API` |
+| Test coverage | `test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status -> owner-console-source-readiness API` |
 | Boundary | Local report/readmodel refresh only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Same-Tick Goal Status Visibility Fix
@@ -200,8 +207,8 @@ tick later.
 | Item | Evidence |
 | --- | --- |
 | Systemd hook | `80-product-state-refresh.conf` now passes `--refresh-goal-status`, `--goal-status-output-json`, and `--release-manifest` |
-| Refresh order | `refresh_strategygroup_runtime_product_state_packets.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, then goal-status refresh when all optional flags are enabled |
-| Test coverage | `test_refresh_packets_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status` |
+| Refresh order | `refresh_strategygroup_runtime_product_state_artifacts.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, then goal-status refresh when all optional flags are enabled |
+| Test coverage | `test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status` |
 | Owner impact | When the first live closure evidence is complete, goal-status can observe it in the same watcher post-step instead of waiting for another tick |
 | Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order` |
 | Deploy dry-run | `output/tokyo-git-deploy-dry-run-58f0fc29.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
@@ -231,15 +238,15 @@ waiting-for-market with no blockers or product gaps.
 The first bounded live-order closure refresher is now wired into the watcher
 product-state post-step. After a future real fresh-signal execution run writes
 official reports, the same post-step that refreshes product state can also
-generate live closure evidence and verification before the goal-status packet
+generate live closure evidence and verification before the goal-status artifact
 is rebuilt.
 
 | Item | Evidence |
 | --- | --- |
-| Product-state integration | `refresh_strategygroup_runtime_product_state_packets.py` accepts `--refresh-live-closure-evidence` |
+| Product-state integration | `refresh_strategygroup_runtime_product_state_artifacts.py` accepts `--refresh-live-closure-evidence` |
 | Watcher hook | `80-product-state-refresh.conf` enables `--refresh-live-closure-evidence` and writes `runtime-live-closure-evidence*.json` under the watcher report directory |
 | Refresh ordering | Live closure evidence refresh runs before `strategygroup-runtime-goal-status.json` refresh, so goal status can observe first-live completion in the same watcher post-step |
-| Refresh summary | `product-state-refresh-packet.json` includes `live_closure_evidence_refresh` with verification status, completion booleans, and reject reasons |
+| Refresh summary | `product-state-refresh-artifact.json` includes `live_closure_evidence_refresh` with verification status, completion booleans, and reject reasons; the old product-state packet filename remains compatibility provenance |
 | Healthy no-signal behavior | `live_closure_refresh_not_started` is not a blocker and remains Owner state `等待机会` |
 | Rejected evidence behavior | `live_closure_refresh_rejected` becomes a refresh blocker instead of silently completing the goal |
 | Boundary | This remains report projection only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
@@ -248,13 +255,13 @@ is rebuilt.
 ### 2026-06-18 Live Closure Evidence Refresh
 
 The first bounded live-order closure path now has a local refresher that scans
-a report directory and writes the canonical evidence packet plus verification
-packet consumed by the low-noise monitor and goal-progress audit. This removes
-the manual packet-assembly gap after a future real fresh-signal execution run.
+a report directory and writes the canonical evidence artifact plus verification
+artifact consumed by the low-noise monitor and goal-progress audit. This removes
+the manual artifact-assembly gap after a future real fresh-signal execution run.
 
 | Item | Evidence |
 | --- | --- |
-| Refresh command | `scripts/refresh_runtime_live_closure_evidence_packets.py --report-dir <reports-dir>` |
+| Refresh command | `scripts/refresh_runtime_live_closure_evidence_artifacts.py --report-dir <reports-dir>` |
 | Generated evidence | Writes `runtime-live-closure-evidence.json` |
 | Generated verification | Writes `runtime-live-closure-evidence-verification.json` |
 | Generated refresh report | Writes `runtime-live-closure-evidence-refresh.json` |
@@ -263,14 +270,14 @@ the manual packet-assembly gap after a future real fresh-signal execution run.
 | Complete-evidence behavior | Emits `live_closure_refresh_complete` only when all 13 first-live closure evidence keys pass verifier checks |
 | Anti-false-positive guard | Skips non-live dry-run/mock/sample/controlled inputs by default and rejects any exchange-result shape that lacks positive live-exchange and real-order markers |
 | Boundary | This is report projection only; it does not create evidence and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
-| Verification | `test_refresh_runtime_live_closure_evidence_packets.py` covers complete, in-progress, no-live-evidence, and no-live-marker rejection paths |
+| Verification | `test_refresh_runtime_live_closure_evidence_artifacts.py` covers complete, in-progress, no-live-evidence, and no-live-marker rejection paths |
 
 ### 2026-06-18 Live Closure Evidence Snapshot Projection
 
 The low-noise Tokyo snapshot and daily-check path now consumes first-live
 closure evidence without adding another remote interaction. The same L1
-read-only snapshot reads the closure packet files when present, verifies an
-evidence packet locally when a verification packet is absent, and projects the
+read-only snapshot reads the closure evidence files when present, verifies an
+evidence artifact locally when a verification artifact is absent, and projects the
 result into daily-check fields that goal-progress already understands.
 
 | Item | Evidence |
@@ -282,26 +289,26 @@ result into daily-check fields that goal-progress already understands.
 | Interaction budget | This reuses the existing L1 read-only snapshot and does not add a second Tokyo interaction |
 | Safety | Read/projection/test work only; no server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
-### 2026-06-18 Live Closure Evidence Packet Builder
+### 2026-06-18 Live Closure Evidence Artifact Builder
 
-The first bounded live-order closure path now has a local packet builder that
+The first bounded live-order closure path now has a local artifact builder that
 collects official report evidence ids into the same 13-key contract consumed by
 the live closure verifier. This is the handoff layer between a future real
 fresh-signal execution run and the goal-progress completion boundary.
 
 | Item | Evidence |
 | --- | --- |
-| Packet builder | `scripts/runtime_live_closure_evidence_packet.py` |
-| Contract mapping | Maps official source reports into `live_watcher_signal_packet_id` through `submit_outcome_review_id` |
-| Goal-progress integration | `run_strategygroup_runtime_goal_progress_audit.py` can auto-verify `runtime-live-closure-evidence.json` when a separate verification packet is absent |
+| Artifact builder | `scripts/runtime_live_closure_evidence_artifact.py` |
+| Contract mapping | Maps official source reports into `live_watcher_signal_evidence_id` through `submit_outcome_review_id` |
+| Goal-progress integration | `run_strategygroup_runtime_goal_progress_audit.py` can auto-verify `runtime-live-closure-evidence.json` when a separate verification artifact is absent |
 | Anti-false-positive guard | Controlled, dry-run, rehearsal, no-live-exchange, or no-real-order evidence is emitted with reject reasons and cannot complete the first-live goal |
-| Boundary | The builder only reads existing JSON reports and writes a local packet; it does not create execution evidence and does not call FinalGate or Operation Layer |
-| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Boundary | The builder only reads existing JSON reports and writes a local artifact; it does not create execution evidence and does not call FinalGate or Operation Layer |
+| Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Live Closure Evidence Verifier
 
 The P0 first bounded live-order goal now has a local evidence verifier for the
-future real closure packet. It verifies a supplied live evidence packet against
+future real closure artifact. It verifies a supplied live evidence artifact against
 the first-live-closure contract and can distinguish complete, in-progress, and
 rejected closure evidence without calling any live execution path.
 
@@ -309,17 +316,17 @@ rejected closure evidence without calling any live execution path.
 | --- | --- |
 | Verifier | `scripts/runtime_live_closure_evidence_verifier.py` |
 | Complete status | `live_closure_complete` only when all 13 contract evidence keys are present in order |
-| Official source guard | Complete evidence must also carry an official live closure source marker; shape-only mock/rehearsal packets are rejected |
+| Official source guard | Complete evidence must also carry an official live closure source marker; shape-only mock/rehearsal artifacts are rejected |
 | In-progress status | Missing exchange-native hard stop blocks later finalize/reconciliation stages with `blocked_by_previous_stage` |
 | Rejected status | Replay, synthetic signal, or disabled-smoke evidence becomes `blocked_live_closure_rejected` |
 | Goal-progress integration | `run_strategygroup_runtime_goal_progress_audit.py` accepts `--live-closure-evidence-verification-json` and only marks the goal complete when verifier completion is true |
 | Boundary | Verifier is local evidence classification only; it does not create evidence, does not call FinalGate, and does not call Operation Layer |
-| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Chain Closure Live-Proof Contract Alignment
 
 The runtime chain-closure status now consumes the same first-live-closure
-contract used by the P0 cutover-readiness packet. This prevents the monitor
+contract used by the P0 cutover-readiness artifact. This prevents the monitor
 surface from reporting an older, shorter live-proof list while the cutover
 contract requires the full first-order closure evidence sequence.
 
@@ -328,13 +335,13 @@ contract requires the full first-order closure evidence sequence.
 | Chain-closure source | `scripts/runtime_execution_chain_closure_status.py` imports `runtime_live_cutover_readiness.build_live_closure_cutover_contract()` |
 | Real execution status | Remains `waiting_for_live_action_time_proof`; `real_order_allowed=false` after local dry-run success |
 | Live stage count | `live_closure_stage_count=9` |
-| Missing live evidence count | `missing_live_proofs` now contains 13 contract evidence keys from `live_watcher_signal_packet_id` through `submit_outcome_review_id` |
+| Missing live evidence count | `missing_live_proofs` now contains 13 contract evidence keys from `live_watcher_signal_evidence_id` through `submit_outcome_review_id` |
 | Boundary | Local dry-run proof still cannot replace live same-run FinalGate, official Operation Layer, exchange acceptance, exchange-native protection, and post-submit settlement evidence |
-| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 First Live Closure Cutover Contract
 
-The P0 cutover readiness packet now includes a machine-readable first bounded
+The P0 cutover readiness artifact now includes a machine-readable first bounded
 live-order closure contract. This contract defines the exact evidence sequence
 that must be present after a real fresh selected StrategyGroup signal before the
 first live closure can be treated as complete.
@@ -343,31 +350,31 @@ first live closure can be treated as complete.
 | --- | --- |
 | Contract source | `scripts/runtime_live_cutover_readiness.py` emits `live_closure_cutover_contract` |
 | Ordered stages | live fresh signal, RequiredFacts ready, candidate/auth bound, action-time FinalGate, official Operation Layer ready, real exchange acceptance, exchange-native protection, post-submit finalize, reconciliation/settlement/review |
-| Required evidence keys | `live_watcher_signal_packet_id`, `required_facts_readiness_packet_id`, `candidate_id`, `runtime_grant_id`, `fresh_submit_authorization_id`, `action_time_finalgate_packet_id`, `operation_layer_submit_authorization_id`, `exchange_submit_execution_result_id`, `exchange_native_hard_stop_order_id`, `runtime_post_submit_finalize_packet_id`, `post_submit_reconciliation_evidence_id`, `post_submit_budget_settlement_id`, `submit_outcome_review_id` |
-| Regression guard | Goal-progress marks stale old cutover packets without this contract as `blocked` with `live_closure_cutover_contract:missing_or_not_ready` |
+| Required evidence keys | `live_watcher_signal_evidence_id`, `required_facts_readiness_artifact_id`, `candidate_id`, `runtime_grant_id`, `fresh_submit_authorization_id`, `action_time_finalgate_evidence_id`, `operation_layer_submit_authorization_id`, `exchange_submit_execution_result_id`, `exchange_native_hard_stop_order_id`, `runtime_post_submit_finalize_payload_id`, `post_submit_reconciliation_evidence_id`, `post_submit_budget_settlement_id`, `submit_outcome_review_id` |
+| Regression guard | Goal-progress marks stale old cutover artifacts without this contract as `blocked` with `live_closure_cutover_contract:missing_or_not_ready` |
 | Boundary | The contract is not submit authority and does not authorize mock/replay/disabled-smoke evidence as live closure proof |
-| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
-### 2026-06-18 P0 Live Cutover Readiness Packet
+### 2026-06-18 P0 Live Cutover Readiness Artifact
 
-The P0 first bounded live-order goal now has a local cutover-readiness packet
+The P0 first bounded live-order goal now has a local cutover-readiness artifact
 that compresses the existing dry-run audit into one Owner-readable question:
 are non-market blockers cleared for the next fresh selected StrategyGroup
 signal?
 
 | Item | Evidence |
 | --- | --- |
-| Cutover packet | `scripts/runtime_live_cutover_readiness.py` builds `runtime-live-cutover-readiness.json` and Owner-readable Markdown |
+| Cutover artifact | `scripts/runtime_live_cutover_readiness.py` builds `runtime-live-cutover-readiness.json` and Owner-readable Markdown |
 | Current cutover state | `status=live_cutover_waiting_for_fresh_signal`, `owner_state=等待机会`, `next_fresh_signal_cutover_ready=true`, `current_real_submit_allowed=false` |
-| Non-market blockers | `non_market_blockers=[]`; strategy scope, entry fast chain, Operation Layer relay, hard blocker policy, exit/protection recovery, post-submit close loop, and dry-run safety sections are all `ready` |
-| Legacy confirmation regression guard | Cutover packet checks `disabled_smoke_not_real_execution_proof`, `legacy_local_registration_probe_tolerated_without_blocking_cutover`, `post_submit_outcomes_do_not_require_owner_chat_confirmation`, and `standing_reduce_only_recovery_does_not_require_owner_chat_confirmation` |
-| Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads or locally auto-generates the packet and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
+| Non-market blockers | `non_market_blockers=[]`; strategy scope, entry fast chain, Operation Layer relay, hard blocker policy, exit/protection recovery, post-submit close loop, and dry-run safety check groups are all `ready` |
+| Legacy confirmation regression guard | Cutover artifact checks `disabled_smoke_not_real_execution_proof`, `legacy_local_registration_probe_tolerated_without_blocking_cutover`, `post_submit_outcomes_do_not_require_owner_chat_confirmation`, and `standing_reduce_only_recovery_does_not_require_owner_chat_confirmation` |
+| Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads or locally auto-generates the artifact and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
 | Boundary | This is cutover readiness, not real submit authority. Current real submit remains blocked by absence of a live fresh selected StrategyGroup signal |
-| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Replay Corpus and Post-Submit Simulator Expansion
 
-The P0.5 rehearsal loop now covers a broader local corpus instead of a single
+The Signal Observation grade rehearsal loop now covers a broader local corpus instead of a single
 sample. This checkpoint remains local-only and does not deploy to Tokyo.
 
 | Item | Evidence |
@@ -381,14 +388,14 @@ sample. This checkpoint remains local-only and does not deploy to Tokyo.
 
 ### 2026-06-18 Runtime Replay Lab Checkpoint
 
-The P0.5 Runtime Replay Lab now has a local MPG-001 contract, a tracked
+The Signal Observation grade Runtime Replay Lab now has a local MPG-001 contract, a tracked
 historical-style replay sample, a tracked synthetic signal fixture set, and a
 unified dry-run audit integration. This checkpoint is local-only and does not
 deploy to Tokyo.
 
 | Item | Evidence |
 | --- | --- |
-| Replay contract | `src/domain/strategygroup_runtime_replay.py` defines replay events, report packets, review recommendations, safety invariants, and external sidecar policy |
+| Replay contract | `src/domain/strategygroup_runtime_replay.py` defines replay events, report artifacts, review recommendations, safety invariants, and external sidecar policy |
 | MPG-001 sample | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-sample.json` |
 | Synthetic fixtures | `docs/current/strategy-group-handoffs/MPG-001/replay/synthetic-signal-fixtures.json` covers no-signal, fresh-pass, stale, missing-fact, conflict, protection-missing, and profile-boundary branches |
 | Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` emits a replay report and Owner-readable local progress note |
@@ -448,24 +455,24 @@ Owner-allocated subaccount/profile boundary.
 
 ### 2026-06-18 Standing Recovery Proof Isolation Guard
 
-The legacy compatibility isolation packet now explicitly checks the current
+The legacy compatibility isolation artifact now explicitly checks the current
 standing reduce-only recovery proof artifacts for old per-order Owner
-close-confirmation terms. This prevents bridge proof fixtures from silently
+close-confirmation terms. This prevents readiness proof fixtures from silently
 regressing from the standing recovery route back to the retired
 `owner_authorize_reduce_only_close` semantics.
 
 | Item | Evidence |
 | --- | --- |
-| Isolation packet | `runtime_legacy_compatibility_isolation_packet.py` now reports `standing_recovery_proof_artifacts_present=true` and `standing_recovery_proofs_have_no_legacy_owner_close_terms=true` |
+| Isolation evidence | `runtime_legacy_compatibility_isolation_evidence.py` now reports `standing_recovery_proof_artifacts_present=true` and `standing_recovery_proofs_have_no_legacy_owner_close_terms=true` |
 | Blocked regression | Unit coverage injects `monitor_position_or_owner_authorize_reduce_only_close` and requires `standing_recovery_proof_uses_legacy_owner_close_terms` |
-| Local packet run | `/tmp/runtime-legacy-isolation.json`: `status=legacy_compatibility_isolated_from_runtime_mainline`, `blockers=[]` |
-| Verification | `14 passed` for legacy isolation plus controlled tiny-live bridge proof tests; `py_compile` passed for the isolation packet scripts |
-| Safety | This is local packet/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+| Local artifact run | `/tmp/runtime-legacy-isolation.json`: `status=legacy_compatibility_isolated_from_runtime_mainline`, `blockers=[]` |
+| Verification | `14 passed` for legacy isolation plus controlled tiny-live readiness proof tests; `py_compile` passed for the isolation artifact scripts |
+| Safety | This is local artifact/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-18 Real-Order Readiness Matrix Summary
 
 Tokyo snapshot and daily check now surface the real-order readiness matrix as a
-compact count instead of hiding it inside the raw goal-status packet. This keeps
+compact count instead of hiding it inside the raw goal-status artifact. This keeps
 healthy waiting low-noise while still showing whether the first real-order path
 is waiting on market conditions or blocked by execution readiness.
 
@@ -506,7 +513,7 @@ Layer before any real exchange action.
 
 | Item | Evidence |
 | --- | --- |
-| Domain readiness | `RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION` carries `operation_layer_required=true`, `finalgate_required=true`, and no owner approval value |
+| Domain readiness | `RuntimeReduceOnlyCloseOwnerEvidenceStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION` carries `operation_layer_required=true`, `finalgate_required=true`, and no owner approval value |
 | Post-close followup | `ready_for_standing_reduce_only_recovery` requires `prepare_official_operation_layer_reduce_only_recovery`, `run_action_time_finalgate_for_reduce_only_recovery`, and `execute_reduce_only_recovery_through_operation_layer` |
 | Continuation selector | Active-position continuation selects `monitor_position_or_prepare_official_reduce_only_recovery` instead of the old owner-authorize close action |
 | Dry-run audit | `runtime-dry-run-audit-chain-current.json`: `status=passed`, `scenario_count=14`, `reduce_only_recovery_standing_authorization_checked=true`, `exchange_write_called=false`, `order_created=false` |
@@ -529,9 +536,9 @@ check, and keeps healthy market-waiting low-noise.
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `bb2b2bf0b1dfcb72a5616dadfa8e32f0d884d950` |
 | Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
-### 2026-06-18 Bridge Proof Standing-Recovery Fixture Checkpoint
+### 2026-06-18 Standing-Recovery Proof Fixture Checkpoint
 
-The controlled tiny-live bridge proof fixtures now use the same standing
+The controlled tiny-live readiness proof fixtures now use the same standing
 reduce-only recovery selector state as the runtime continuation chain. This
 keeps local proof artifacts from reintroducing the old
 `owner_authorize_reduce_only_close` selected action while the official route
@@ -539,10 +546,10 @@ continues to require fresh prepare, FinalGate, and controlled submit preflight.
 
 | Item | Evidence |
 | --- | --- |
-| Waiting selector fixture | `runtime_controlled_tiny_live_bridge_to_preflight_proof.py` now uses `continuation_refresh_monitor_position_or_standing_recovery` and `monitor_position_or_prepare_official_reduce_only_recovery` |
-| Legacy owner action scan | Targeted `rg` found no `monitor_position_or_owner_authorize_reduce_only_close` or owner-close refresh status in the bridge proof and bridge proof tests |
+| Waiting selector fixture | `runtime_controlled_tiny_live_readiness_to_preflight_proof.py` now emits readiness-projection vocabulary while using `continuation_refresh_monitor_position_or_standing_recovery` and `monitor_position_or_prepare_official_reduce_only_recovery` |
+| Legacy owner action scan | Targeted `rg` found no `monitor_position_or_owner_authorize_reduce_only_close` or owner-close refresh status in the readiness proof and readiness proof tests |
 | Test isolation | CLI tests now monkeypatch official proof builders instead of touching login-protected runtime proof paths |
-| Verification | `64 passed` for controlled bridge, continuation, dry-run closure, and daily-check tests; `py_compile` passed for the bridge proof scripts |
+| Verification | `64 passed` for controlled readiness projection, continuation, dry-run closure, and daily-check tests; `py_compile` passed for the readiness proof scripts |
 | Safety | This is local proof/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-18 Runtime Exit-Hardening Deploy Checkpoint
@@ -581,7 +588,7 @@ authorization evidence.
 | Deploy apply | `output/tokyo-git-deploy-apply-ea34594b.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-ea34594b.json`: `status=waiting_for_market`, `interaction.level=L1_daily_check_from_snapshot`, `remote_interaction_count=1`, `mutates_remote_files=false`, `calls_finalgate=false`, `calls_operation_layer=false`, `calls_exchange_write=false`, `places_order=false` |
 | Quiet monitor | `output/runtime-monitor/latest-daily-check.json`: `decision=DONT_NOTIFY`, `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]` |
-| Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `P0=waiting_for_market`, `P0.5=ready`, `remote_interaction_count=0` |
+| Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `P0=waiting_for_market`, `Signal Observation grade=ready`, `remote_interaction_count=0` |
 | Monitor baseline | At that checkpoint, `docs/current/RUNTIME_MONITOR_BASELINE.json` expected `ea34594badc066bc0c714d02c385341106665e07` |
 | Verification | `84 passed` for readiness pack, daily check, goal progress, goal status, and dry-run audit tests; `py_compile` passed for watcher readiness / daily check / goal status scripts |
 | Safety | Fix and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
@@ -601,16 +608,16 @@ and the remaining blockers are market-dependent.
 | Current state | `waiting_for_market`; next fresh signal cutover ready; current real submit not allowed without a real fresh signal |
 | Dispatcher audit | `runtime_signal_watcher_resume_dispatcher.py` keeps the path as fresh signal -> candidate/auth -> action-time FinalGate -> Operation Layer evidence -> official Operation Layer submit -> post-submit finalize |
 | Legacy confirmation posture | Non-executing prepare, fresh authorization binding, real submit, and reduce-only recovery use standing authorization inside the selected boundary; no per-order chat confirmation is reintroduced |
-| Local cutover readiness | `runtime_live_cutover_readiness.py`: `status=live_cutover_waiting_for_fresh_signal`; all cutover sections ready |
-| Replay lab | `run_strategygroup_runtime_replay_lab.py`: `P0.5 replay_ready`, 8 replay samples, 7 post-submit simulator cases, and synthetic fixtures for no signal, stale signal, missing facts, active position, open order, protection missing, boundary mismatch, and fresh-signal pass |
+| Local cutover readiness | `runtime_live_cutover_readiness.py`: `status=live_cutover_waiting_for_fresh_signal`; all cutover check groups ready |
+| Replay lab | `run_strategygroup_runtime_replay_lab.py`: `Signal Observation grade replay_ready`, 8 replay samples, 7 post-submit simulator cases, and synthetic fixtures for no signal, stale signal, missing facts, active position, open order, protection missing, boundary mismatch, and fresh-signal pass |
 | Low-noise monitor | `run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress`: `DONT_NOTIFY`, `healthy_waiting_for_market`, `L0_local_cache_read`, `remote_interaction_count=0`, `10 pass / 4 waiting / 0 blocked` |
-| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `not_complete_waiting_for_market`, P0.5 ready, non-market blockers none |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `not_complete_waiting_for_market`, Signal Observation grade ready, non-market blockers none |
 | Verification | `94 passed` for dispatcher, systemd unit, live closure evidence, execution-chain closure, and StrategyGroup goal-status tests |
 | Safety | This checkpoint did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-19 BTPC L2 Replay-to-Review Expansion
 
-The P0.5 replay lane now covers `BTPC-001` as an L2 shadow-candidate
+The Signal Observation grade replay lane now covers `BTPC-001` as an L2 shadow-candidate
 observation StrategyGroup. This expands no-action / would-enter diagnostics
 without changing the P0 L4 real-order lane.
 
@@ -626,7 +633,7 @@ without changing the P0 L4 real-order lane.
 
 ### 2026-06-19 VCB L1 Observe Replay-to-Review Expansion
 
-The P0.5 replay lane now covers `VCB-001` as an L1 observe-only StrategyGroup.
+The Signal Observation grade replay lane now covers `VCB-001` as an L1 observe-only StrategyGroup.
 This expands volatility-compression breakout visibility without promoting VCB
 to L2 shadow-candidate or L4 real-order scope.
 
@@ -641,7 +648,7 @@ to L2 shadow-candidate or L4 real-order scope.
 
 ### 2026-06-19 LSR L1 Observe Replay-to-Review Expansion
 
-The P0.5 replay lane now covers `LSR-001` as an L1 observe-only StrategyGroup.
+The Signal Observation grade replay lane now covers `LSR-001` as an L1 observe-only StrategyGroup.
 This keeps liquidity-sweep observations and the short-revival rewrite gap
 visible without promoting LSR to L2 shadow-candidate or L4 real-order scope.
 
@@ -656,7 +663,7 @@ visible without promoting LSR to L2 shadow-candidate or L4 real-order scope.
 
 ### 2026-06-19 BRF L1 Observe Replay-to-Review Expansion
 
-The P0.5 replay lane now covers `BRF-001` as an L1 observe-only StrategyGroup.
+The Signal Observation grade replay lane now covers `BRF-001` as an L1 observe-only StrategyGroup.
 This expands bear-rally-failure short visibility and short-squeeze-risk review
 without promoting BRF to L2 shadow-candidate or L4 real-order scope.
 
@@ -671,7 +678,7 @@ without promoting BRF to L2 shadow-candidate or L4 real-order scope.
 
 ### 2026-06-19 Replay-to-Review Owner Summary Checkpoint
 
-The P0.5 replay Owner progress report now includes a StrategyGroup-level review
+The Signal Observation grade replay Owner progress report now includes a StrategyGroup-level review
 table. This makes broader market observation legible while P0 waits for a real
 fresh selected StrategyGroup signal.
 
@@ -684,7 +691,7 @@ fresh selected StrategyGroup signal.
 
 ### 2026-06-19 Signal Coverage Owner Opportunity Table Checkpoint
 
-The P0.5 signal coverage expansion review now makes broader observe-only
+The Signal Observation grade signal coverage expansion review now makes broader observe-only
 would-enter rows directly reviewable. Each Owner progress table row includes
 the StrategyGroup tier, suggested next tier, suggested action, confidence, and
 execution boundary.
@@ -699,7 +706,7 @@ execution boundary.
 
 ### 2026-06-19 L2 Opportunity Triage Explanation Checkpoint
 
-The P0.5 L2 readiness and intake dry-run Owner reports now explain why broader
+The Signal Observation grade L2 readiness and intake dry-run Owner reports now explain why broader
 would-enter observations do or do not become new L2 intake candidates. This
 keeps market-opportunity review moving while P0 waits for a real fresh selected
 StrategyGroup signal.
@@ -713,42 +720,44 @@ StrategyGroup signal.
 | Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_l2_intake_dry_run.py` assert the richer Owner rows, source states, and no-candidate reason |
 | Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
-### 2026-06-19 Opportunity Decision Loop Checkpoint
+### 2026-06-19 Opportunity Review Work Loop Checkpoint
 
-The P0.5 path now has a repeatable local decision loop instead of another
-report-only layer. The loop joins observed would-enter rows, replay coverage,
-blocking gaps, and L2 tier state into per-StrategyGroup decisions.
+The Signal Observation grade path now has a repeatable local review work loop
+instead of another report-only layer. The loop joins observed would-enter rows,
+replay coverage, blocking gaps, and L2 tier state into per-StrategyGroup
+decisions.
 
 | Item | Evidence |
 | --- | --- |
-| Decision loop script | `scripts/build_strategygroup_opportunity_decision_loop.py` consumes signal coverage expansion, L2 readiness, L2 intake, and replay lab artifacts |
-| Machine output | `latest-opportunity-decision-loop.json` emits per-StrategyGroup `observed_signal`, `replay_verification`, `blocking_gaps_before_l2`, `gap_work_items`, `decision_action`, and `next_checkpoint` |
+| Review work loop script | `scripts/build_strategygroup_opportunity_review_work_loop.py` consumes signal coverage expansion, L2 readiness, L2 intake, and replay lab artifacts |
+| Machine output | `latest-opportunity-review-work-loop.json` emits per-StrategyGroup `observed_signal`, `replay_verification`, `blocking_gaps_before_l2`, `gap_work_items`, `review_work_action`, and `next_checkpoint` |
 | Current decisions | Current local run maps `BTPC-001` to `continue_l2_shadow_quality_review`, `LSR-001` and `VCB-001` to `repair_blocking_gaps_with_replay_or_facts`, and `RBR-001` to `park_or_vocabulary_only` |
 | L4 boundary | The loop keeps `real_order_authorized_count=0`, `l4_scope_change_recommended_count=0`, `places_order=false`, `calls_finalgate=false`, `calls_operation_layer=false`, and `calls_exchange_write=false` |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` covers L2-enabled continuation, L1 replay-plus-gap repair, missing-replay-before-L2, forbidden source effects, and CLI output |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` covers L2-enabled continuation, L1 replay-plus-gap repair, missing-replay-before-L2, forbidden source effects, and CLI output |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 Opportunity Work Queue Checkpoint
 
-The local decision loop now emits an actionable P0.5 work queue so broader
-would-enter observations do not stop at markdown/report review. The queue turns
-each blocking gap into work type, priority, scheduled status, validation command,
+The local review work loop now emits a high-priority Signal Observation grade work
+queue so broader would-enter observations do not stop at markdown/report review.
+The queue turns each blocking gap into work type, priority, scheduled status, validation command,
 and completion signal.
 
 | Item | Evidence |
 | --- | --- |
-| Work queue output | `latest-opportunity-decision-loop.json` now includes `work_queue.status`, `next_local_checkpoint`, `by_work_type`, `by_owner_priority`, and per-item `queue_id`, `actionable_task`, `validation_command`, and `completion_signal` |
+| Work queue output | `latest-opportunity-review-work-loop.json` now includes `work_queue.status`, `next_local_checkpoint`, `by_work_type`, `by_owner_priority`, and per-item `queue_id`, `actionable_task`, `validation_command`, and `completion_signal` |
 | Current queue | Current local run reports `work_queue_item_count=19`, `scheduled_work_queue_item_count=15`, and next checkpoint `repair_classifier_or_disable_state_gaps_for_lsr_vcb` |
 | Current grouping | Current work types are classifier/rule work, economic replay work, required fact or market-data work, strategy quality review, and strategy review work |
-| Scheduling rule | `LSR-001` and `VCB-001` classifier/economic gaps are scheduled for P0.5 repair; `BTPC-001` continues L2 shadow-quality/fact review; `RBR-001` stays unscheduled/parked unless new evidence appears |
+| Scheduling rule | `LSR-001` and `VCB-001` classifier/economic gaps are scheduled for Signal Observation grade repair; `BTPC-001` continues L2 shadow-quality/fact review; `RBR-001` stays unscheduled/parked unless new evidence appears |
 | L4 boundary | The queue keeps `real_order_authorized=0`, `l4_scope_change_recommended=0`, `places_order=false`, `calls_finalgate=false`, `calls_operation_layer=false`, and `calls_exchange_write=false` |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts work-queue counts, priority/type grouping, parked-item scheduling behavior, missing-replay queue behavior, CLI output, and safety invariants |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` asserts work-queue counts, priority/type grouping, parked-item scheduling behavior, missing-replay queue behavior, CLI output, and safety invariants |
 | Safety | Local work-queue generation only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 LSR/VCB Classifier Repair Spec Checkpoint
 
-The highest-priority P0.5 work queue items for `LSR-001` and `VCB-001` now have
-machine-readable classifier repair specs tied to replay acceptance cases. This
+The highest-priority Signal Observation grade work queue items for `LSR-001`
+and `VCB-001` now have machine-readable classifier repair specs tied to replay
+acceptance cases. This
 turns the classifier/disable-state gaps into a local closure contract instead
 of another report-only note.
 
@@ -757,15 +766,15 @@ of another report-only note.
 | Policy input | `main-control-signal-coverage-expansion-policy.json` defines `classifier_repair_spec` for `LSR-001` and `VCB-001` |
 | LSR target | `LSR-001` repair target is `side_specific_short_revival_classifier`, covering the lookahead rewrite and missing disable-state gaps |
 | VCB target | `VCB-001` repair target is `true_breakout_pre_entry_classifier`, covering the pre-entry classifier and false-breakout disable-state gaps |
-| Replay coverage | `latest-opportunity-decision-loop.json` reports `replay_case_coverage.covered=true` for all four LSR/VCB classifier work-queue items |
+| Replay coverage | `latest-opportunity-review-work-loop.json` reports `replay_case_coverage.covered=true` for all four LSR/VCB classifier work-queue items |
 | L2 boundary | The specs keep both groups at L1 observe-only; they are not L2 promotion authority, L4 scope expansion, FinalGate input, Operation Layer input, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert repair specs, replay-case coverage, no real-order authority, and no L4 scope change |
+| Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_opportunity_review_work_loop.py` assert repair specs, replay-case coverage, no real-order authority, and no L4 scope change |
 | Safety | Local policy/specification and replay-coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 LSR/VCB Economic Replay Spec Checkpoint
 
-The P0.5 work queue now also carries economic replay specs for `LSR-001` and
-`VCB-001`. The replay contract exposes cost, slippage, funding, min-qty/step,
+The Signal Observation grade work queue now also carries economic replay specs
+for `LSR-001` and `VCB-001`. The replay contract exposes cost, slippage, funding, min-qty/step,
 fill-slot, leverage-survival, net-edge, and no-submit-authority fields without
 reducing Owner-selected leverage or creating execution authority.
 
@@ -774,88 +783,88 @@ reducing Owner-selected leverage or creating execution authority.
 | Replay cost contract | `StrategyGroupReplayCostReview` now includes `fill_slot_assumption`, `leverage_survival_note`, and `does_not_lower_owner_selected_leverage` |
 | Policy input | `main-control-signal-coverage-expansion-policy.json` defines `economic_replay_spec` for `LSR-001` and `VCB-001` |
 | Static corpus | LSR/VCB tracked replay corpus samples used by the economic specs carry fill-slot and leverage-survival fields |
-| Work queue coverage | Current `latest-opportunity-decision-loop.json` reports `economic_case_coverage.covered=true`, `missing_cases=[]`, and `uncovered_cases=[]` for all three LSR/VCB economic replay queue items |
+| Work queue coverage | Current `latest-opportunity-review-work-loop.json` reports `economic_case_coverage.covered=true`, `missing_cases=[]`, and `uncovered_cases=[]` for all three LSR/VCB economic replay queue items |
 | L2 boundary | The specs are local replay review only; they are not L2 promotion authority, L4 scope expansion, FinalGate input, Operation Layer input, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert replay cost fields, economic specs, economic-case coverage, no real-order authority, and no L4 scope change |
+| Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_review_work_loop.py` assert replay cost fields, economic specs, economic-case coverage, no real-order authority, and no L4 scope change |
 | Safety | Local replay/specification and coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 Opportunity Work Queue Coverage State Checkpoint
 
-The P0.5 opportunity work queue now distinguishes items whose local replay/spec
-coverage is ready from items still waiting on fact sources, strategy review,
-strategy-quality decisions, or parked evidence. This keeps the local loop from
+The Signal Observation grade opportunity work queue now distinguishes items
+whose local replay/spec coverage is ready from items still waiting on fact sources, strategy review,
+strategy-asset recommendations, or parked evidence. This keeps the local loop from
 turning into more report text while also preventing covered LSR/VCB replay work
 from being misread as L2 promotion, L4 scope expansion, or real-order authority.
 
 | Item | Evidence |
 | --- | --- |
-| Queue fields | `latest-opportunity-decision-loop.json` work items now include `coverage_status`, `coverage_ready`, and `next_stage_decision` |
-| Current local run | `observed_opportunity_count=4`, `replay_covered_count=3`, `work_queue_item_count=19`, `scheduled_work_queue_item_count=15`, `coverage_ready_item_count=7`, `coverage_pending_item_count=4`, and `strategy_decision_pending_count=1` |
-| Coverage grouping | `by_coverage_status` reports `local_replay_coverage_ready=7`, `fact_source_pending=4`, `strategy_decision_pending=1`, `strategy_review_pending=3`, and `parked=4` |
+| Queue fields | `latest-opportunity-review-work-loop.json` work items now include `coverage_status`, `coverage_ready`, and `next_stage_recommendation` |
+| Current local run | `observed_opportunity_count=4`, `replay_covered_count=3`, `work_queue_item_count=19`, `scheduled_work_queue_item_count=15`, `coverage_ready_item_count=7`, `coverage_pending_item_count=4`, and `strategy_asset_recommendation_pending_count=1` |
+| Coverage grouping | `by_coverage_status` reports `local_replay_coverage_ready=7`, `fact_source_pending=4`, `strategy_asset_recommendation_pending=1`, `strategy_review_pending=3`, and `parked=4` |
 | Next stage | Covered LSR/VCB classifier/economic items emit `strategy_quality_review_before_l2_no_promotion`; BTPC missing fact items emit `attach_fact_source_before_l2_review`; RBR remains `parked` |
 | L4 boundary | Coverage-ready is not candidate authority, FinalGate authority, Operation Layer authority, L2 promotion authority, L4 scope expansion, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts LSR/VCB coverage-ready states, BTPC fact-source pending state, RBR parked state, no real-order authority, and no L4 scope change |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` asserts LSR/VCB coverage-ready states, BTPC fact-source pending state, RBR parked state, no real-order authority, and no L4 scope change |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 Strategy Quality Decision Rollup Checkpoint
 
-The P0.5 decision loop now rolls coverage-ready queue items into a
-StrategyGroup-level quality decision. This moves the local loop from "coverage
+The Signal Observation grade review work loop now rolls coverage-ready queue items
+into a StrategyGroup-level quality decision. This moves the local loop from "coverage
 exists" to "what should the project do with the covered evidence" without
 promoting any group, widening L4 scope, or creating real-order authority.
 
 | Item | Evidence |
 | --- | --- |
-| Quality rollup | `latest-opportunity-decision-loop.json` now includes `strategy_quality_decisions.status=ready`, `rows`, `by_decision`, and safety invariants |
+| Quality rollup | `latest-opportunity-review-work-loop.json` now includes `strategy_asset_recommendations.status=ready`, `rows`, `by_strategy_asset_recommendation`, and safety invariants |
 | Current local decisions | Current local run reports `revise_before_l2=2`, `keep_observing=1`, `park=1`, `needs_replay=0`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
 | LSR/VCB outcome | `LSR-001` and `VCB-001` roll up to `revise_before_l2` with next stage `record_revise_decision_and_keep_l1_until_review_passes` |
 | BTPC/RBR outcome | `BTPC-001` remains `keep_observing_l2_shadow_with_fact_review`; `RBR-001` remains `park_until_new_edge` |
-| Next checkpoint | `decision.default_next_step=record_lsr001_vcb001_strategy_quality_revise_before_l2`; `work_queue.next_local_checkpoint=record_strategy_quality_decisions_for_coverage_ready_items` |
+| Next checkpoint | `review_outcome_state.default_next_step=record_lsr001_vcb001_strategy_asset_recommendation_revise_before_l2`; `work_queue.next_local_checkpoint=record_strategy_asset_recommendations_for_coverage_ready_items` |
 | Boundary | Strategy-quality decisions are not L2 promotion authority, L4 scope change, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts the rollup counts, LSR/VCB revise decisions, BTPC keep-observing-with-fact-review, RBR parked state, Owner progress table, and no live-authority expansion |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` asserts the rollup counts, LSR/VCB revise decisions, BTPC keep-observing-with-fact-review, RBR parked state, Owner progress table, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 Strategy Quality Revision Task Checkpoint
 
-The P0.5 decision loop now turns `revise_before_l2` into concrete revision
-tasks. This prevents the LSR/VCB quality decision from becoming another
+The Signal Observation grade review work loop now turns `revise_before_l2` into
+concrete revision tasks. This prevents the LSR/VCB quality decision from becoming another
 summary-only state and gives the next local checkpoint a classifier/economic
 repair surface to execute and verify.
 
 | Item | Evidence |
 | --- | --- |
-| Revision task output | `strategy_quality_decisions.rows[].revision_tasks` now carries queue id, work type, gap, actionable task, validation command, completion signal, revision stage, and no-authority flags |
+| Revision task output | `strategy_asset_recommendations.rows[].revision_tasks` now carries queue id, work type, gap, actionable task, validation command, completion signal, revision stage, and no-authority flags |
 | Current local run | `revision_task=7`, `classifier_revision_task=4`, `economic_revision_task=3`, `revise_before_l2=2`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
 | LSR tasks | `LSR-001` emits classifier revisions for `lookahead_failed_proxy_requires_rewrite` and `lsr_disable_classifier_state_missing_from_runtime`, plus economic survival review for `cost_fill_slot_m2m_and_leverage_boundary_missing` |
 | VCB tasks | `VCB-001` emits classifier revisions for `false_breakout_disable_state_missing_from_runtime` and `pre_entry_classifier_does_not_reproduce_post_entry_edge`, plus economic survival review for `slot_m2m_equity_and_leverage_ruin_state_missing` and `volume_compression_cost_m2m_full_sequence_negative` |
-| Owner progress | The local Owner markdown `Strategy Quality Decisions` table includes `Revision Tasks` so the revise decision exposes work count without reading raw packets |
+| Owner progress | The local Owner markdown `Strategy Asset Recommendations` table includes `Revision Tasks` so the revise decision exposes work count without reading raw artifacts |
 | Boundary | Revision tasks are not strategy-parameter changes, tier-policy changes, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision-task counts, task stages, validation commands, completion signals, Owner progress table, and no live-authority expansion |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` asserts revision-task counts, task stages, validation commands, completion signals, Owner progress table, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 Strategy Quality Revision Completion State Checkpoint
 
-The P0.5 decision loop now distinguishes revision tasks that merely exist from
-revision tasks that are locally ready to execute and verify. This moves the
+The Signal Observation grade review work loop now distinguishes revision tasks
+that merely exist from revision tasks that are locally ready to execute and verify. This moves the
 loop from "write down the LSR/VCB repair work" to "prove the repair work has
 the replay/spec/cost acceptance surface needed for the next local revision
 checkpoint."
 
 | Item | Evidence |
 | --- | --- |
-| Revision readiness fields | `strategy_quality_decisions.rows[].revision_tasks[]` now emits `revision_status`, `revision_ready`, `acceptance_case_coverage_ready`, required entry/disable/cost-field counts, and `completion_blocker` |
-| Completion rollup | `strategy_quality_decisions.revision_completion.status=local_revision_completion_ready` when all revision tasks have coverage, required states/fields, and no-authority boundaries |
+| Revision readiness fields | `strategy_asset_recommendations.rows[].revision_tasks[]` now emits `revision_status`, `revision_ready`, `acceptance_case_coverage_ready`, required entry/disable/cost-field counts, and `completion_blocker` |
+| Completion rollup | `strategy_asset_recommendations.revision_completion.status=local_revision_completion_ready` when all revision tasks have coverage, required states/fields, and no-authority boundaries |
 | Current local run | `revision_task=7`, `revision_ready=7`, `classifier_revision_ready=4`, `economic_revision_ready=3`, `remaining_revision_blocker=0`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
-| Next checkpoint | `decision.default_next_step=execute_lsr001_vcb001_local_revision_tasks_before_l2` |
-| Owner progress | The local Owner markdown adds `Revision Ready` beside `Revision Tasks` so readiness is visible without reading raw packets |
+| Next checkpoint | `review_outcome_state.default_next_step=execute_lsr001_vcb001_local_revision_tasks_before_l2` |
+| Owner progress | The local Owner markdown adds `Revision Ready` beside `Revision Tasks` so readiness is visible without reading raw artifacts |
 | Boundary | Revision-ready is not strategy-parameter mutation, tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision readiness counts, status rollups, acceptance-case coverage, entry/disable/cost-field counts, completion blockers, Owner markdown, and no live-authority expansion |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` asserts revision readiness counts, status rollups, acceptance-case coverage, entry/disable/cost-field counts, completion blockers, Owner markdown, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 LSR/VCB Local Revision Execution Checkpoint
 
-The P0.5 loop now executes the ready LSR/VCB local revision tasks in the local
-classifier and replay-review surfaces. This is still pre-L2 review work: it
+The Signal Observation grade loop now executes the ready LSR/VCB local revision
+tasks in the local classifier and replay-review surfaces. This is still pre-L2 review work: it
 does not promote either StrategyGroup, expand L4 scope, or create real-order
 authority.
 
@@ -865,16 +874,16 @@ authority.
 | VCB classifier execution | `VCB001PriceActionEvaluator` now uses `vcb-001-price-action-v1`, requires compression breakout plus volume expansion, disables wick-only false breakout, and exposes entry/disable-state evidence |
 | Policy execution evidence | `main-control-signal-coverage-expansion-policy.json` records `revision_execution.status=local_classifier_revision_executed` and `replay_execution.status=local_economic_replay_executed` for LSR/VCB |
 | Readiness rollup | `latest-l2-readiness-review.json` reports `classifier_revision_executed_count=2`, `economic_replay_executed_count=2`, `tier_policy_change_recommended=false`, `l4_scope_change_recommended=false`, and `shadow_candidate_creation_recommended_now=false` |
-| Decision-loop rollup | `latest-opportunity-decision-loop.json` reports `revision_executed=7`, `classifier_revision_executed=4`, `economic_revision_executed=3`, `remaining_revision_execution=0`, and `revision_execution.status=local_revision_execution_complete` |
-| Next checkpoint | `decision.default_next_step=run_lsr001_vcb001_post_revision_replay_review_before_l2` |
+| Review-work-loop rollup | `latest-opportunity-review-work-loop.json` reports `revision_executed=7`, `classifier_revision_executed=4`, `economic_revision_executed=3`, `remaining_revision_execution=0`, and `revision_execution.status=local_revision_execution_complete` |
+| Next checkpoint | `review_outcome_state.default_next_step=run_lsr001_vcb001_post_revision_replay_review_before_l2` |
 | Boundary | Revision execution is not strategy-tier mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_reference_price_action_evaluators.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert classifier execution behavior, execution rollups, Owner markdown, and no live-authority expansion |
+| Verification | `tests/unit/test_reference_price_action_evaluators.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_review_work_loop.py` assert classifier execution behavior, execution rollups, Owner markdown, and no live-authority expansion |
 | Safety | Local domain/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 LSR/VCB Post-Revision Replay Review Checkpoint
 
-The P0.5 loop now verifies the revised LSR/VCB classifiers with deterministic
-post-revision replay cases before any L2 promotion review. This closes the
+The Signal Observation grade loop now verifies the revised LSR/VCB classifiers
+with deterministic post-revision replay cases before any L2 promotion review. This closes the
 local loop from "revision executed" to "revision behavior replay-checked" while
 keeping the real P0 live path waiting for a real selected StrategyGroup fresh
 signal.
@@ -884,16 +893,16 @@ signal.
 | Review artifact | `latest-post-revision-replay-review.json` reports `status=passed`, `review_case_count=5`, `passed_case_count=5`, `failed_case_count=0`, `would_enter_case_count=2`, and `disable_or_no_action_case_count=3` |
 | LSR coverage | `short_revival_short_would_enter` returns `would_enter/short`; `old_long_preview_disabled` returns `no_action/none` |
 | VCB coverage | `true_breakout_with_volume_would_enter` returns `would_enter/long`; `false_breakout_reversal_disabled` and `volume_expansion_missing_disabled` return `no_action/none` |
-| Decision-loop handoff | When LSR/VCB revision rows are active, the decision loop can consume the passed review and advance to `record_lsr001_vcb001_post_revision_quality_before_l2`; the latest local queue has shifted to `continue_btpc_l2_shadow_fact_quality_review` because the current observed set is BTPC/RBR |
+| Review-work-loop handoff | When LSR/VCB revision rows are active, the review work loop can consume the passed review and advance to `record_lsr001_vcb001_post_revision_quality_before_l2`; the latest local queue has shifted to `continue_btpc_l2_shadow_fact_quality_review` because the current observed set is BTPC/RBR |
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now includes `post_revision_replay_review` after L2 tier-policy review and keeps passed review cases non-blocking |
 | Boundary | Post-revision replay review is not L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_post_revision_replay_review.py`, `tests/unit/test_strategygroup_opportunity_decision_loop.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert review cases, next-step handoff, local monitor integration, and no live-authority expansion |
+| Verification | `tests/unit/test_strategygroup_post_revision_replay_review.py`, `tests/unit/test_strategygroup_opportunity_review_work_loop.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert review cases, next-step handoff, local monitor integration, and no live-authority expansion |
 | Safety | Local replay/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 BTPC L2 Shadow Fact Quality Review Checkpoint
 
-The P0.5 loop now classifies the active BTPC-001 L2 shadow observation fact
-gaps instead of leaving them as a flat pending list. This keeps the opportunity
+The Signal Observation grade loop now classifies the active BTPC-001 L2 shadow
+observation fact gaps instead of leaving them as a flat pending list. This keeps the opportunity
 discovery lane useful during no-signal periods while preserving the real-order
 boundary: BTPC remains L2 shadow observation only and does not become L4 or
 real-order eligible.
@@ -904,16 +913,16 @@ real-order eligible.
 | L2 observation | `btpc_state.l2_shadow_observation_enabled=true`, `btpc_state.replay_covered=true`, and `decision.l2_shadow_observation_can_continue=true` |
 | Replay support | BTPC replay summary carries five fixtures, including `missing_derivatives_context`, with `would_enter_replay_count=2` |
 | Fact classification | Historical OI, global long/short ratio, and top-trader ratio gaps block promotion beyond L2 review; the exchange margin/liquidation model blocks any BTPC real-order eligibility; short-squeeze review remains strategy-review pending and not a runtime submit blocker |
-| Next checkpoint | `decision.default_next_step=attach_btpc_derivatives_fact_sources_and_margin_model_for_l2_quality_review` |
-| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `opportunity_decision_loop` and `btpc_l2_shadow_fact_quality_review` after post-revision replay review |
+| Next checkpoint | `review_outcome_state.default_next_step=attach_btpc_derivatives_fact_sources_and_margin_model_for_l2_quality_review` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `opportunity_review_work_loop` and `btpc_l2_shadow_fact_quality_review` after post-revision replay review |
 | Boundary | BTPC fact-quality review is not tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
 | Verification | `tests/unit/test_strategygroup_btpc_l2_shadow_fact_quality_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert fact-gap classification, next-step handoff, monitor integration, and no live-authority expansion |
 | Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-19 BTPC Local Fact Proxy Review Checkpoint
 
-The P0.5 loop now attaches review-only local proxy coverage for the BTPC-001
-derivatives and margin/liquidation gaps. This gives replay and L2 shadow quality
+The Signal Observation grade loop now attaches review-only local proxy coverage
+for the BTPC-001 derivatives and margin/liquidation gaps. This gives replay and L2 shadow quality
 review a usable local model while keeping the live-order boundary explicit:
 proxy facts do not satisfy live RequiredFacts and cannot feed FinalGate,
 Operation Layer, exchange write, or real order.
@@ -921,7 +930,7 @@ Operation Layer, exchange write, or real order.
 | Item | Evidence |
 | --- | --- |
 | Review artifact | `latest-btpc-local-fact-proxy-review.json` reports `status=btpc_local_fact_proxy_review_ready`, `expected_proxy_fact_count=5`, `proxy_attached_count=5`, `l2_quality_proxy_ready_count=5`, and `live_required_fact_satisfied_count=0` |
-| Proxy coverage | Historical OI, global long/short ratio, top-trader ratio, margin/liquidation shape, and short-squeeze review rule are attached as local P0.5 review proxies only |
+| Proxy coverage | Historical OI, global long/short ratio, top-trader ratio, margin/liquidation shape, and short-squeeze review rule are attached as local Signal Observation grade review proxies only |
 | Margin model | The review model carries research leverage cases from the BTPC handoff and marks `not_exchange_truth=true`, `live_exchange_maintenance_margin_required=true`, and `does_not_lower_owner_selected_leverage=true` |
 | Replay support | The review consumes the BTPC L2 replay corpus, requires non-executing replay boundaries, and keeps `local_proxy_can_feed_replay_review=true` while `local_proxy_satisfies_live_required_facts=false` |
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_local_fact_proxy_review` after `btpc_l2_shadow_fact_quality_review` |
@@ -931,8 +940,8 @@ Operation Layer, exchange write, or real order.
 
 ### 2026-06-19 BTPC Proxy Replay Quality Review Checkpoint
 
-The P0.5 loop now consumes the BTPC local fact-proxy review and the BTPC L2
-replay corpus together. The output is a case-level quality review, so BTPC no
+The Signal Observation grade loop now consumes the BTPC local fact-proxy review
+and the BTPC L2 replay corpus together. The output is a case-level quality review, so BTPC no
 longer stops at "proxy facts attached"; it can classify each replay case as
 keep-observing, no-action baseline, missing-derivatives proxy-reviewable,
 conflict revision, or freshness revision.
@@ -949,8 +958,8 @@ conflict revision, or freshness revision.
 
 ### 2026-06-19 BTPC Proxy Replay Quality Decision Loop Rollup
 
-The P0.5 loop now feeds the BTPC proxy replay quality review back into the main
-opportunity decision loop. This closes the local chain:
+The Signal Observation grade loop now feeds the BTPC proxy replay quality
+review back into the main opportunity review work loop. This closes the local chain:
 
 ```text
 observation
@@ -962,35 +971,35 @@ observation
 
 | Item | Evidence |
 | --- | --- |
-| Decision-loop input | `scripts/build_strategygroup_opportunity_decision_loop.py` accepts `--btpc-proxy-replay-quality-json` |
+| Review-work-loop input | `scripts/build_strategygroup_opportunity_review_work_loop.py` accepts `--btpc-proxy-replay-quality-json` |
 | Decision rollup | `BTPC-001` can emit `keep_l2_shadow_and_revise_fact_classifier_inputs` instead of stopping at a standalone proxy replay report |
 | Action items | The rollup carries `attach_live_derivatives_fact_sources_before_btpc_live_eligibility`, `review_btpc_strong_uptrend_conflict_disable_rule`, `review_btpc_freshness_or_classifier_stale_signal_rule`, and `continue_btpc_l2_shadow_observation_with_proxy_context` |
-| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs a final `opportunity_decision_loop_final` after `btpc_proxy_replay_quality_review`, overwriting `latest-opportunity-decision-loop.json` with the enriched local decision artifact |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs a final `opportunity_review_work_loop_final` after `btpc_proxy_replay_quality_review`, overwriting `latest-opportunity-review-work-loop.json` with the enriched local review artifact |
 | Boundary | The rollup is not live RequiredFacts, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert the rollup, monitor ordering, zero remote interaction, and no live-authority expansion |
+| Verification | `tests/unit/test_strategygroup_opportunity_review_work_loop.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert the rollup, monitor ordering, zero remote interaction, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
-### 2026-06-19 BTPC L2 Keep / Revise / Fact Source Decision Checkpoint
+### 2026-06-19 BTPC L2 Keep / Revise / Fact Source Review Checkpoint
 
-The P0.5 loop now turns the BTPC proxy replay quality rollup into a stable local
-decision packet. This prevents the BTPC branch from stopping at an explanatory
+The Signal Observation grade loop now turns the BTPC proxy replay quality
+rollup into a stable local review artifact. This prevents the BTPC branch from stopping at an explanatory
 report: it records the next local work as keep L2 shadow observation, attach
 live derivatives fact sources before live eligibility, review the strong-uptrend
 conflict disable rule, and review stale-signal freshness/classifier handling.
 
 | Item | Evidence |
 | --- | --- |
-| Decision artifact | `latest-btpc-l2-keep-revise-fact-source-decision.json` reports `status=btpc_l2_keep_revise_fact_source_decision_ready` |
-| Action rows | The packet emits four action rows: live derivatives fact-source mapping, strong-uptrend conflict rule review, freshness/classifier stale-signal review, and continued L2 shadow observation |
-| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs `btpc_l2_keep_revise_fact_source_decision` after `opportunity_decision_loop_final` |
-| Boundary | The decision packet is not live RequiredFacts, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
-| Verification | `tests/unit/test_strategygroup_btpc_l2_keep_revise_fact_source_decision.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert action rows, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
-| Safety | Local decision-packet work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+| Review artifact | `latest-btpc-l2-keep-revise-fact-source-review.json` reports `status=btpc_l2_keep_revise_fact_source_review_ready` |
+| Action rows | The artifact emits four action rows: live derivatives fact-source mapping, strong-uptrend conflict rule review, freshness/classifier stale-signal review, and continued L2 shadow observation |
+| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs `btpc_l2_keep_revise_fact_source_review` after `opportunity_review_work_loop_final` |
+| Boundary | The review artifact is not live RequiredFacts, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_btpc_l2_keep_revise_fact_source_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert action rows, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
+| Safety | Local review-artifact work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
 ### 2026-06-19 BTPC Live Derivatives Fact Source Mapping Checkpoint
 
-The P0.5 loop now turns the BTPC live fact-source action into a concrete local
-mapping artifact. This closes the next step after the keep/revise decision:
+The Signal Observation grade loop now turns the BTPC live fact-source action
+into a concrete local mapping artifact. This closes the next step after the keep/revise decision:
 BTPC can keep L2 shadow observation while the project knows exactly which live
 derivatives and margin/liquidation sources must be attached before any future
 live eligibility review. The mapping is not live RequiredFacts and does not
@@ -1000,16 +1009,16 @@ write, or real-order authority.
 | Item | Evidence |
 | --- | --- |
 | Mapping artifact | `latest-btpc-live-derivatives-fact-source-mapping.json` reports `status=btpc_live_derivatives_fact_source_mapping_ready_without_live_authority` |
-| Source rows | The packet maps `funding_72h`, `perp_spot_premium`, `open_interest_or_crowding_proxy`, `historical_open_interest_window`, `historical_global_long_short_ratio_window`, `top_trader_position_ratio_window`, `short_squeeze_risk`, and `real_exchange_margin_liquidation_model` |
-| Live authority split | `mapping_ready=true` while `live_required_fact_satisfied=false`, `can_feed_finalgate=false`, `can_feed_operation_layer=false`, and `real_order_authority=false` for every row |
-| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_live_derivatives_fact_source_mapping` after `btpc_l2_keep_revise_fact_source_decision` |
+| Source rows | The artifact maps `funding_72h`, `perp_spot_premium`, `open_interest_or_crowding_proxy`, `historical_open_interest_window`, `historical_global_long_short_ratio_window`, `top_trader_position_ratio_window`, `short_squeeze_risk`, and `real_exchange_margin_liquidation_model` |
+| Live authority split | `mapping_ready=true` while `live_required_fact_satisfied=false`, `can_feed_finalgate=false`, `can_feed_operation_layer=false`, and no row carries live order authority |
+| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_live_derivatives_fact_source_mapping` after `btpc_l2_keep_revise_fact_source_review` |
 | Verification | `tests/unit/test_strategygroup_btpc_live_derivatives_fact_source_mapping.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert live-source mapping, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
 | Safety | Local source-map work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
 ### 2026-06-19 BTPC Classifier Rule Review Checkpoint
 
-The P0.5 loop now turns the BTPC strong-uptrend conflict and stale-signal
-action rows into a local classifier-rule review artifact, and the reference
+The Signal Observation grade loop now turns the BTPC strong-uptrend conflict
+and stale-signal action rows into a local classifier-rule review artifact, and the reference
 price-action evaluator now records those disable states in `btpc-001-price-action-v1`.
 This moves BTPC from explanatory replay rows toward a repeatable
 observe/replay/revise loop while keeping the StrategyGroup at L2 shadow
@@ -1042,7 +1051,7 @@ of making healthy waiting look like another Tokyo probe.
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime head `1e97edf52eba8b2fc6a6cec588c3ad6d0490d8c6` |
 | Cache-read fix | `81745bfb fix(runtime): report cache heartbeat as local read` keeps `interaction.level=L0_local_cache_read`, `remote_interaction_count=0`, and stores the prior collection in `cached_report_interaction` |
 | Low-noise monitor | `run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat`: `DONT_NOTIFY`, `waiting_for_market`, `interaction.level=L0_local_cache_read`, `remote_interaction_count=0` |
-| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `P0=waiting_for_market`, `Signal Observation grade=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
 | Completion audit | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5` |
 | Verification | `89 passed` for daily check, goal progress, P0 completion audit, live cutover readiness, quiet monitor, and monitor frequency tests |
 | Safety | Deploy apply mutated server files only for the bounded runtime release. Postdeploy and cache checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
@@ -1075,7 +1084,7 @@ cutover contract.
 | Item | Evidence |
 | --- | --- |
 | Owner progress clarity | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reports `Live Closure Evidence Boundary` with `Completed stages: 0/9`, `Expected stages: 9`, and `First incomplete stage: fresh_signal` |
-| P0 state | `status=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
+| P0 state | `status=waiting_for_market`, `Signal Observation grade=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
 | Contract source | Expected closure stages and waiting keys come from the current live cutover readiness contract, not from synthetic live evidence |
 | Verification | `25 passed` for `tests/unit/test_strategygroup_runtime_goal_progress_audit.py`; `py_compile` passed for `run_strategygroup_runtime_goal_progress_audit.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
@@ -1100,7 +1109,7 @@ keys, and no reject reasons.
 
 The P0 completion audit now checks that `goal_progress` is not older than the
 `daily_check` input when both inputs expose generated timestamps. This prevents
-a stale goal-progress packet from being used as completion evidence after a
+a stale goal-progress artifact from being used as completion evidence after a
 newer daily check has refreshed runtime state.
 
 | Item | Evidence |
@@ -1113,7 +1122,7 @@ newer daily check has refreshed runtime state.
 
 ### 2026-06-18 Live Closure Evidence Duplicate-ID Guard Checkpoint
 
-The live-closure evidence verifier now rejects a completion packet when two or
+The live-closure evidence verifier now rejects a completion artifact when two or
 more required closure evidence fields reuse the same non-empty evidence id.
 This keeps the first bounded live-order closure proof stage-specific instead of
 allowing one artifact id to satisfy multiple required closure stages.
@@ -1121,7 +1130,7 @@ allowing one artifact id to satisfy multiple required closure stages.
 | Item | Evidence |
 | --- | --- |
 | Duplicate-id guard | `runtime_live_closure_evidence_verifier.py` adds `duplicate_evidence_id` as a global reject reason when required closure evidence ids repeat |
-| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_duplicate_required_evidence_id` rejects a packet where `required_facts_readiness_packet_id` reuses `live_watcher_signal_packet_id` |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_duplicate_required_evidence_id` rejects an artifact where `required_facts_readiness_artifact_id` reuses `live_watcher_signal_evidence_id` |
 | Complete proof compatibility | `test_live_closure_evidence_verifier_marks_complete_when_all_contract_keys_present` still passes with distinct official live evidence ids and live submit proof |
 | Verification | `8 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `py_compile` passed for `runtime_live_closure_evidence_verifier.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
@@ -1132,13 +1141,13 @@ The live-closure evidence verifier now requires required closure evidence
 values to resolve to evidence-id strings. Non-empty arbitrary objects, lists,
 or booleans can no longer satisfy required first-live-closure evidence keys
 just because they are truthy. Structured values remain compatible when they
-carry an id-like field such as `id`, `evidence_id`, `packet_id`, `ref_id`, or
+carry an id-like field such as `id`, `evidence_id`, `evidence_id`, `ref_id`, or
 `reference_id`.
 
 | Item | Evidence |
 | --- | --- |
 | Evidence-id shape guard | `runtime_live_closure_evidence_verifier.py` adds `malformed_evidence_id` as a global reject reason when a required evidence key is present but cannot resolve to an evidence id |
-| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_malformed_required_evidence_id` rejects a packet where `candidate_id` is an arbitrary dict and `runtime_grant_id` is `true` |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_malformed_required_evidence_id` rejects an artifact where `candidate_id` is an arbitrary dict and `runtime_grant_id` is `true` |
 | Structured evidence compatibility | `test_live_closure_evidence_verifier_accepts_structured_evidence_id_values` still accepts structured evidence values that carry an `id` field |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `10 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `111 passed` for the P0 runtime-monitor/live-closure regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
@@ -1148,7 +1157,7 @@ carry an id-like field such as `id`, `evidence_id`, `packet_id`, `ref_id`, or
 
 The first-live-closure contract now requires live submit proof to bind back to
 the same `exchange_submit_execution_result_id` used as real exchange acceptance
-evidence. A packet with `live_exchange_called=true` and `real_order_placed=true`
+evidence. An artifact with `live_exchange_called=true` and `real_order_placed=true`
 is no longer enough if the proof omits or mismatches the accepted exchange
 submit execution result id.
 
@@ -1156,67 +1165,67 @@ submit execution result id.
 | --- | --- |
 | Contract binding | `runtime_live_cutover_readiness.py` adds `live_submit_proof_result_id_mismatch` to the `real_exchange_acceptance` reject reasons |
 | Verifier binding | `runtime_live_closure_evidence_verifier.py` rejects live closure evidence when `live_submit_proof.exchange_submit_execution_result_id` does not match the required `exchange_submit_execution_result_id` |
-| Packet builder binding | `runtime_live_closure_evidence_packet.py` copies the accepted `exchange_submit_execution_result_id` into `live_submit_proof` when building official live closure evidence |
-| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mismatch` rejects a packet where live submit proof points to a different exchange result |
+| Artifact builder binding | `runtime_live_closure_evidence_artifact.py` copies the accepted `exchange_submit_execution_result_id` into `live_submit_proof` when building official live closure evidence |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mismatch` rejects an artifact where live submit proof points to a different exchange result |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `19 passed` for the live-closure verifier/packet/cutover tests; `123 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Verification | `19 passed` for the live-closure verifier/artifact/cutover tests; `123 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Live Submit Proof Source-Consistency Checkpoint
 
-The live-closure evidence packet builder now derives `live_exchange_called` and
-`real_order_placed` only from source packets that carry the same accepted
+The live-closure evidence artifact builder now derives `live_exchange_called` and
+`real_order_placed` only from source artifacts that carry the same accepted
 `exchange_submit_execution_result_id`. It no longer allows an unrelated source
-packet with true submit markers to complete the live submit proof for a
+artifact with true submit markers to complete the live submit proof for a
 different exchange result.
 
 | Item | Evidence |
 | --- | --- |
 | Contract source guard | `runtime_live_cutover_readiness.py` adds `live_submit_proof_result_source_missing` to the `real_exchange_acceptance` reject reasons |
 | Verifier source guard | `runtime_live_closure_evidence_verifier.py` requires `live_submit_proof.result_source_matched=true` before real exchange acceptance can complete |
-| Packet builder source binding | `runtime_live_closure_evidence_packet.py` reads live submit markers only from packets matching the accepted `exchange_submit_execution_result_id` |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers` rejects a packet where submit markers exist only in an unrelated source |
+| Artifact builder source binding | `runtime_live_closure_evidence_artifact.py` reads live submit markers only from source artifacts matching the accepted `exchange_submit_execution_result_id` |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_cross_source_live_submit_markers` rejects an artifact where submit markers exist only in an unrelated source |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `21 passed` for the live-closure verifier/packet/cutover tests; `125 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Verification | `21 passed` for the live-closure verifier/artifact/cutover tests; `125 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Post-Submit Close-Loop Result Binding Checkpoint
 
-The live-closure evidence packet builder now requires post-submit close-loop
+The live-closure evidence artifact builder now requires post-submit close-loop
 evidence to be source-bound to the same accepted
-`exchange_submit_execution_result_id`. `runtime_post_submit_finalize_packet_id`,
+`exchange_submit_execution_result_id`. `runtime_post_submit_finalize_payload_id`,
 `post_submit_reconciliation_evidence_id`, `post_submit_budget_settlement_id`,
 and `submit_outcome_review_id` can no longer complete first-live-order closure
-when they come from a source packet that does not reference the same exchange
+when they come from a source artifact that does not reference the same exchange
 submit execution result.
 
 | Item | Evidence |
 | --- | --- |
 | Contract close-loop binding | `runtime_live_cutover_readiness.py` adds `post_submit_close_loop_proof_missing`, `post_submit_finalize_result_source_missing`, and `post_submit_close_loop_result_source_missing` to post-submit closure reject reasons |
-| Packet builder close-loop proof | `runtime_live_closure_evidence_packet.py` emits `post_submit_close_loop_proof` with present, matched, and missing source-match evidence keys |
+| Artifact builder close-loop proof | `runtime_live_closure_evidence_artifact.py` emits `post_submit_close_loop_proof` with present, matched, and missing source-match evidence keys |
 | Verifier close-loop guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when post-submit evidence is present but `post_submit_close_loop_proof` is missing or does not bind to the accepted exchange result |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_post_submit_close_loop` and verifier tests reject unbound post-submit closure evidence |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_unbound_post_submit_close_loop` and verifier tests reject unbound post-submit closure evidence |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `24 passed` for the live-closure verifier/packet/cutover tests; `128 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Verification | `24 passed` for the live-closure verifier/artifact/cutover tests; `128 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Exchange-Native Protection Result Binding Checkpoint
 
-The live-closure evidence packet builder now requires exchange-native
+The live-closure evidence artifact builder now requires exchange-native
 protection evidence to be source-bound to the same accepted
 `exchange_submit_execution_result_id`. A standalone
 `exchange_native_hard_stop_order_id` can no longer complete the
-first-live-order closure unless its source packet also references the same
+first-live-order closure unless its source artifact also references the same
 exchange submit execution result.
 
 | Item | Evidence |
 | --- | --- |
 | Contract protection binding | `runtime_live_cutover_readiness.py` adds `exchange_native_protection_proof_missing`, `exchange_native_protection_result_id_mismatch`, and `exchange_native_protection_result_source_missing` to the `exchange_native_protection` reject reasons |
-| Packet builder protection proof | `runtime_live_closure_evidence_packet.py` emits `exchange_native_protection_proof` with the hard-stop id, accepted exchange result id, source match status, and source count |
+| Artifact builder protection proof | `runtime_live_closure_evidence_artifact.py` emits `exchange_native_protection_proof` with the hard-stop id, accepted exchange result id, source match status, and source count |
 | Verifier protection guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when exchange-native protection evidence is present but the protection proof is missing, mismatched, or not source-bound to the accepted exchange result |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_exchange_native_protection`, `test_live_closure_evidence_verifier_rejects_missing_exchange_native_protection_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protection` reject isolated or unbound protection evidence |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_unbound_exchange_native_protection`, `test_live_closure_evidence_verifier_rejects_missing_exchange_native_protection_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protection` reject isolated or unbound protection evidence |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `27 passed` for the live-closure verifier/packet/cutover tests; `131 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `27 passed` for the live-closure verifier/artifact/cutover tests; `131 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Post-Submit Close-Loop Truth Checkpoint
@@ -1224,16 +1233,16 @@ exchange submit execution result.
 The first bounded live-order closure proof now requires post-submit evidence to
 prove the four close-loop outcomes, not only carry evidence ids bound to the
 accepted exchange submit result. A live closure cannot complete unless the
-source packets prove finalize completion, reconciliation match, budget
+source artifacts prove finalize completion, reconciliation match, budget
 settlement, and submit-outcome review recording.
 
 | Item | Evidence |
 | --- | --- |
 | Contract close-loop truth | `runtime_live_cutover_readiness.py` adds `post_submit_finalize_not_complete`, `post_submit_reconciliation_not_matched`, `post_submit_budget_not_settled`, and `submit_outcome_review_not_recorded` to the post-submit closure reject contract |
-| Official producer truth fields | `runtime_official_post_submit_finalize_proof.py` emits `post_submit_finalize_complete`, `post_submit_reconciliation_matched`, `post_submit_budget_settled`, and `submit_outcome_review_recorded` from the official post-submit proof packet |
-| Packet builder close-loop truth | `runtime_live_closure_evidence_packet.py` emits `finalize_complete`, `reconciliation_matched`, `budget_settled`, and `review_recorded` inside `post_submit_close_loop_proof` |
+| Official producer truth fields | `runtime_official_post_submit_finalize_proof.py` emits `post_submit_finalize_complete`, `post_submit_reconciliation_matched`, `post_submit_budget_settled`, and `submit_outcome_review_recorded` from the official post-submit proof artifact |
+| Artifact builder close-loop truth | `runtime_live_closure_evidence_artifact.py` emits `finalize_complete`, `reconciliation_matched`, `budget_settled`, and `review_recorded` inside `post_submit_close_loop_proof` |
 | Verifier close-loop truth guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when bound post-submit evidence is present but any close-loop truth field is not true |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_incomplete_post_submit_truth` and `test_live_closure_evidence_verifier_rejects_incomplete_post_submit_truth` reject ids-only post-submit closure evidence |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_incomplete_post_submit_truth` and `test_live_closure_evidence_verifier_rejects_incomplete_post_submit_truth` reject ids-only post-submit closure evidence |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `85 passed` for the targeted live-closure/cutover/snapshot tests; `148 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
@@ -1255,7 +1264,7 @@ overwriting the proof credentials that the local official proof chain expects.
 
 ### 2026-06-18 Pre-Submit Authorization Chain Binding Checkpoint
 
-The live-closure evidence packet builder now requires the candidate,
+The live-closure evidence artifact builder now requires the candidate,
 runtime-grant, action-time FinalGate, and official Operation Layer authorization
 evidence to bind to the same `fresh_submit_authorization_id`. This prevents a
 future real signal from being marked ready by stitching together stale
@@ -1264,59 +1273,59 @@ FinalGate or Operation Layer arm evidence from another authorization chain.
 | Item | Evidence |
 | --- | --- |
 | Contract pre-submit binding | `runtime_live_cutover_readiness.py` adds `pre_submit_authorization_chain_proof_missing`, `pre_submit_authorization_chain_id_mismatch`, `candidate_authorization_chain_source_missing`, `finalgate_authorization_chain_source_missing`, and `operation_layer_authorization_chain_source_missing` to the relevant pre-submit stage reject reasons |
-| Packet builder chain proof | `runtime_live_closure_evidence_packet.py` emits `pre_submit_authorization_chain_proof` anchored by `fresh_submit_authorization_id` with present, matched, and missing source-match evidence keys |
+| Artifact builder chain proof | `runtime_live_closure_evidence_artifact.py` emits `pre_submit_authorization_chain_proof` anchored by `fresh_submit_authorization_id` with present, matched, and missing source-match evidence keys |
 | Verifier chain guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when candidate/auth, FinalGate, or Operation Layer evidence is present but not bound to the same fresh submit authorization chain |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_pre_submit_authorization_chain`, `test_live_closure_evidence_verifier_rejects_missing_pre_submit_authorization_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_pre_submit_authorization_chain` reject missing or stale-chain pre-submit evidence |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_unbound_pre_submit_authorization_chain`, `test_live_closure_evidence_verifier_rejects_missing_pre_submit_authorization_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_pre_submit_authorization_chain` reject missing or stale-chain pre-submit evidence |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `30 passed` for the live-closure verifier/packet/cutover tests; `134 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `30 passed` for the live-closure verifier/artifact/cutover tests; `134 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Live Signal Chain Binding Checkpoint
 
-The live-closure evidence packet builder now requires RequiredFacts readiness
-and candidate evidence to bind to the same `live_watcher_signal_packet_id`.
+The live-closure evidence artifact builder now requires RequiredFacts readiness
+and candidate evidence to bind to the same `live_watcher_signal_evidence_id`.
 This prevents a future real signal from being marked ready by stitching
 together stale facts or stale candidates from another signal window.
 
 | Item | Evidence |
 | --- | --- |
 | Contract signal binding | `runtime_live_cutover_readiness.py` adds `live_signal_chain_proof_missing`, `live_signal_chain_id_mismatch`, `required_facts_signal_source_missing`, and `candidate_signal_source_missing` to the relevant signal/facts/candidate stage reject reasons |
-| Packet builder signal proof | `runtime_live_closure_evidence_packet.py` emits `live_signal_chain_proof` anchored by `live_watcher_signal_packet_id` with present, matched, and missing source-match evidence keys |
+| Artifact builder signal proof | `runtime_live_closure_evidence_artifact.py` emits `live_signal_chain_proof` anchored by `live_watcher_signal_evidence_id` with present, matched, and missing source-match evidence keys |
 | Verifier signal guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when RequiredFacts or candidate evidence is present but not bound to the same live signal |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_live_signal_chain`, `test_live_closure_evidence_verifier_rejects_missing_live_signal_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_live_signal_chain` reject missing or stale-signal facts/candidate evidence |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_unbound_live_signal_chain`, `test_live_closure_evidence_verifier_rejects_missing_live_signal_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_live_signal_chain` reject missing or stale-signal facts/candidate evidence |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `33 passed` for the live-closure verifier/packet/cutover tests; `137 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `33 passed` for the live-closure verifier/artifact/cutover tests; `137 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Runtime Boundary Binding Checkpoint
 
-The live-closure evidence packet builder now emits `runtime_boundary_proof`
-for the first bounded live-order closure chain. A complete live-closure packet
+The live-closure evidence artifact builder now emits `runtime_boundary_proof`
+for the first bounded live-order closure chain. A complete live-closure artifact
 must not only show live signal, RequiredFacts, candidate/auth, FinalGate,
 Operation Layer, exchange acceptance, exchange-native protection, finalize,
 reconciliation, settlement, and review evidence. It must also prove that those
-source packets remain inside the same selected StrategyGroup, runtime profile,
+source artifacts remain inside the same selected StrategyGroup, runtime profile,
 allocated subaccount, symbol, side, notional, and leverage boundary. Once the
 chain reaches candidate/auth evidence, missing boundary fields are rejected as
-hard live-closure proof gaps; signal/facts-only in-progress packets can still
+hard live-closure proof gaps; signal/facts-only in-progress artifacts can still
 remain in progress without being mislabeled as failed closure.
 
 | Item | Evidence |
 | --- | --- |
-| Boundary proof | `runtime_live_closure_evidence_packet.py` emits `runtime_boundary_proof` with observed, missing, conflicting, and normalized boundary values from source packets that carry the required live-closure evidence ids |
+| Boundary proof | `runtime_live_closure_evidence_artifact.py` emits `runtime_boundary_proof` with observed, missing, conflicting, and normalized boundary values from source artifacts that carry the required live-closure evidence ids |
 | Contract guard | `runtime_live_cutover_readiness.py` adds `live_closure_contract_requires_runtime_boundary_binding=true` and rejects missing proof, missing boundary fields, or mismatches from `candidate_authorization_bound` through close-loop completion |
 | Verifier guard | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when `runtime_boundary_proof` is missing, required boundary fields are missing after candidate/auth starts, or conflicts are reported for StrategyGroup, runtime profile, subaccount, symbol, side, notional, or leverage |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_runtime_boundary_missing_after_candidate`, `test_live_closure_evidence_packet_rejects_runtime_boundary_mismatch`, `test_live_closure_evidence_verifier_rejects_missing_runtime_boundary_proof`, `test_live_closure_evidence_verifier_rejects_runtime_boundary_missing_fields`, and `test_live_closure_evidence_verifier_rejects_runtime_boundary_mismatch` reject stitched or unbounded completion shapes |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_runtime_boundary_missing_after_candidate`, `test_live_closure_evidence_artifact_rejects_runtime_boundary_mismatch`, `test_live_closure_evidence_verifier_rejects_missing_runtime_boundary_proof`, `test_live_closure_evidence_verifier_rejects_runtime_boundary_missing_fields`, and `test_live_closure_evidence_verifier_rejects_runtime_boundary_mismatch` reject stitched or unbounded completion shapes |
 | Product-state compatibility | Goal-progress and Tokyo snapshot auto-verification fixtures now include the same runtime boundary proof, so the Owner progress layer remains `waiting_for_market` with no product gaps when no real live closure has started |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `43 passed` for the live-closure verifier/packet/cutover/refresh tests; `142 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `43 passed` for the live-closure verifier/artifact/cutover/refresh tests; `142 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Exchange Acceptance Proof Checkpoint
 
 The `real_exchange_acceptance` stage now requires more than an exchange submit
 execution result id plus generic live-submit markers. A first-live-order
-closure packet must prove that the matched result source says the entry submit
+closure artifact must prove that the matched result source says the entry submit
 was accepted by the exchange and carries an entry exchange order id. This keeps
 `exchange_submit_execution_result_id` from being treated as enough proof when
 the submit attempt was only called, locally shaped, rejected before acceptance,
@@ -1326,12 +1335,12 @@ reconciliation.
 | Item | Evidence |
 | --- | --- |
 | Contract acceptance guard | `runtime_live_cutover_readiness.py` adds `exchange_submit_not_accepted` and `exchange_order_id_missing` to `real_exchange_acceptance` reject reasons and to the live-submit truth contract check |
-| Packet builder acceptance proof | `runtime_live_closure_evidence_packet.py` derives `live_submit_proof.exchange_accepted` and `live_submit_proof.exchange_order_id_present` only from source packets bound to the same `exchange_submit_execution_result_id` |
+| Artifact builder acceptance proof | `runtime_live_closure_evidence_artifact.py` derives `live_submit_proof.exchange_accepted` and `live_submit_proof.exchange_order_id_present` only from source artifacts bound to the same `exchange_submit_execution_result_id` |
 | Verifier acceptance guard | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when matched live-submit proof does not show exchange acceptance or an entry exchange order id |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_exchange_result_without_acceptance` and `test_live_closure_evidence_verifier_rejects_unaccepted_live_submit_proof` reject called-but-not-accepted live submit shapes |
-| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange acceptance proof, so complete official packets still verify while weak packets are rejected |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_exchange_result_without_acceptance` and `test_live_closure_evidence_verifier_rejects_unaccepted_live_submit_proof` reject called-but-not-accepted live submit shapes |
+| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange acceptance proof, so complete official artifacts still verify while weak artifacts are rejected |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `81 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `144 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `81 passed` for the live-closure verifier/artifact/cutover/refresh/goal-progress/snapshot tests; `144 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Exchange-Native Protection Truth Checkpoint
@@ -1346,12 +1355,12 @@ treated as sufficient first-live-order closure protection.
 | Item | Evidence |
 | --- | --- |
 | Contract protection truth guard | `runtime_live_cutover_readiness.py` adds `hard_stop_not_accepted` and `hard_stop_not_reduce_only` beside `local_only_stop` in the `exchange_native_protection` reject reasons and contract check |
-| Packet builder protection truth | `runtime_live_closure_evidence_packet.py` derives `exchange_native_protection_proof.exchange_native`, `hard_stop_accepted`, and `reduce_only` only from source packets carrying the bound hard-stop evidence |
+| Artifact builder protection truth | `runtime_live_closure_evidence_artifact.py` derives `exchange_native_protection_proof.exchange_native`, `hard_stop_accepted`, and `reduce_only` only from source artifacts carrying the bound hard-stop evidence |
 | Verifier protection truth | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when protection proof is missing exchange-native, accepted, or reduce-only truth |
-| Weak proof rejection | `test_live_closure_evidence_packet_rejects_local_unaccepted_non_reduce_only_stop` and `test_live_closure_evidence_verifier_rejects_local_unaccepted_non_reduce_only_stop` reject local/unaccepted/non-reduce-only hard-stop shapes |
-| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange-native protection truth proof, so complete official packets still verify while weak packets are rejected |
+| Weak proof rejection | `test_live_closure_evidence_artifact_rejects_local_unaccepted_non_reduce_only_stop` and `test_live_closure_evidence_verifier_rejects_local_unaccepted_non_reduce_only_stop` reject local/unaccepted/non-reduce-only hard-stop shapes |
+| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange-native protection truth proof, so complete official artifacts still verify while weak artifacts are rejected |
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
-| Verification | `83 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `146 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Verification | `83 passed` for the live-closure verifier/artifact/cutover/refresh/goal-progress/snapshot tests; `146 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Completion Audit Full Contract Guard Checkpoint
@@ -1364,14 +1373,14 @@ healthy waiting state can be reported.
 
 This checkpoint also fixes the local monitor sequence so it refreshes
 `latest-live-cutover-readiness.json` before goal-progress and completion-audit.
-That prevents a stale live-cutover packet from creating false non-market gaps
+That prevents a stale live-cutover artifact from creating false non-market gaps
 or hiding a real contract regression during the no-signal waiting window.
 
 | Item | Evidence |
 | --- | --- |
 | Completion audit contract guard | `runtime_first_bounded_live_order_completion_audit.py` now checks `LIVE_CLOSURE_REQUIRED_EVIDENCE_KEYS` and `LIVE_CLOSURE_REQUIRED_CONTRACT_CHECKS` |
 | Local sequence order | `run_strategygroup_runtime_local_monitor_sequence.py` runs `daily_check -> live_cutover_readiness -> goal_progress -> completion_audit` |
-| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover packets under `tmp_path`, not `output/runtime-monitor/latest-live-cutover-readiness.json` |
+| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover artifacts under `tmp_path`, not `output/runtime-monitor/latest-live-cutover-readiness.json` |
 | Automation prompt | `tokyo-runtime-quiet-monitor` now names live-cutover readiness refresh inside the local zero-remote sequence |
 | Current audit output | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, `blockers=[]`, `non_market_gaps=[]`, `remote_interaction_count=0` |
 | Verification | `46 passed` for completion-audit, local-monitor-sequence, monitor-frequency, and goal-progress tests; `py_compile` passed for the touched runtime monitor/audit scripts |
@@ -1391,8 +1400,8 @@ official Operation Layer readiness.
 | Execute guard | `runtime_first_real_submit_api_flow.py` still requires `--execute-real-submit`; when `--standing-authorized-first-real-submit` is present, it no longer requires the legacy env confirmation string |
 | Evidence guard | Real submit still requires prearmed evidence ids for trusted submit facts, idempotency, attempt outcome, protection failure, local registration, Owner real-submit authorization, OrderLifecycle submit enablement, exchange adapter enablement, exchange action authorization, deployment readiness, and exchange adapter result |
 | Followup wording | `runtime_active_observation_followup.py` now points from disabled smoke to fresh-signal standing-authorized official Operation Layer chain instead of waiting for explicit per-order authorization |
-| Action packet wording | `build_runtime_first_real_submit_action_authorization_packet.py` can mark the authorization guard satisfied by standing authorization while still waiting for prearmed exchange-submit evidence |
-| Verification | `py_compile` passed; targeted tests `57 passed` across first-real-submit API flow, action authorization packet, and active-observation followup |
+| Action authorization evidence wording | `build_runtime_first_real_submit_action_authorization_evidence.py` can mark the authorization guard satisfied by standing authorization while still waiting for prearmed exchange-submit evidence |
+| Verification | `py_compile` passed; targeted tests `57 passed` across first-real-submit API flow, action authorization evidence, and active-observation followup |
 | Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch, fresh-signal unblock, or explicit Owner request |
 | Safety | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
@@ -1400,8 +1409,8 @@ official Operation Layer readiness.
 
 The Runtime Signal Watcher resume dispatcher now carries the same standing
 authorization semantics into the official Operation Layer command and submit
-packets. The API-compatible `owner_confirmed_for_first_real_submit_action=true`
-query parameter remains the official real-submit switch, but the packet now
+payloads. The API-compatible `owner_confirmed_for_first_real_submit_action=true`
+query parameter remains the official real-submit switch, but the payload now
 states that it is satisfied by the selected bounded standing authorization, not
 by a new per-order chat confirmation or legacy env confirmation.
 
@@ -1409,7 +1418,7 @@ by a new per-order chat confirmation or legacy env confirmation.
 | --- | --- |
 | Command plan semantics | `runtime_signal_watcher_resume_dispatcher.py` now emits `standing_authorized_first_real_submit=true`, `owner_chat_confirmation_required_for_real_submit=false`, and `legacy_owner_confirmation_env_required=false` for the official Operation Layer command plan |
 | Submit precondition guard | The dispatcher blocks before official Operation Layer submit if standing authorization semantics regress back to missing standing authorization, chat confirmation required, or legacy env required |
-| Submit result semantics | Real submit packets mark `standing_authorization_consumed_for_real_submit=true`; disabled smoke packets keep it `false` so disabled smoke cannot be treated as real execution proof |
+| Submit result semantics | Real submit payloads mark `standing_authorization_consumed_for_real_submit=true`; disabled smoke payloads keep it `false` so disabled smoke cannot be treated as real execution proof |
 | Regression test | `test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress` fixes the first-live cutover rule that old Owner confirmation semantics must not become an in-boundary real-submit blocker |
 | Local validation | `py_compile` passed for the dispatcher; `test_runtime_signal_watcher_resume_dispatcher.py`: `40 passed` |
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
@@ -1429,25 +1438,25 @@ per-order chat confirmation or legacy env confirmation semantics.
 | Required check | `operation_layer_standing_authorization_relay_checked` is now emitted in `checks`, `required_checks`, and `summary` |
 | Monitor integration | `run_strategygroup_runtime_daily_check.py` and `run_strategygroup_runtime_goal_progress_audit.py` include the new check in the entry fast-chain readiness boundary |
 | Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
-| Generated packet | `runtime_dry_run_audit_chain.py --output-json output/runtime-monitor/latest-runtime-dry-run-audit-chain.json`: `status=passed`, `scenario_count=14`, `operation_layer_standing_authorization_relay_checked=true` |
+| Generated artifact | `runtime_dry_run_audit_chain.py --output-json output/runtime-monitor/latest-runtime-dry-run-audit-chain.json`: `status=passed`, `scenario_count=14`, `operation_layer_standing_authorization_relay_checked=true` |
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-19 Observation Decision Loop Gap Closure Checkpoint
 
-The local monitor sequence now treats `opportunity_decision_loop=decision_loop_ready`
+The local monitor sequence now treats `opportunity_review_work_loop=review_work_loop_ready`
 as a valid closure for broader observe-only would-enter opportunities when no
-conditional L2 dry-run or tier-policy update is pending. This keeps the P0.5
-loop aligned with the current project direction: once an observation has been
+conditional L2 dry-run or tier-policy update is pending. This keeps the Signal
+Observation grade loop aligned with the current project direction: once an observation has been
 converted into replay/gap/decision rows, it should not keep appearing as an
 unreviewed observation-scope gap.
 
 | Item | Evidence |
 | --- | --- |
-| Gap classification | `run_strategygroup_runtime_local_monitor_sequence.py` clears `observation_scope_expansion_review_needed` after the opportunity decision loop is ready |
+| Gap classification | `run_strategygroup_runtime_local_monitor_sequence.py` clears `observation_scope_expansion_review_needed` after the opportunity review work loop is ready |
 | Preserved blockers | Conditional L2 dry-run pass, tier-policy recommendation, failed dry-run, forbidden effect, and blocked L2 review still surface as non-market repair items |
-| Regression test | `test_local_monitor_sequence_clears_expansion_gap_when_decision_loop_ready` covers broader would-enter plus L2 all-blocked/no-candidate state |
+| Regression test | `test_local_monitor_sequence_clears_expansion_gap_when_review_work_loop_ready` covers broader would-enter plus L2 all-blocked/no-candidate state |
 | Local validation | `test_strategygroup_runtime_local_monitor_sequence.py`: `6 passed` |
 | Local monitor sequence | `status=needs_refresh`, blockers empty, non-market gaps empty, remote interactions `0`; remaining refresh is monitor-cache freshness only |
 | Deployment | Not deployed; this is local monitor/reporting logic only |
@@ -1457,8 +1466,9 @@ unreviewed observation-scope gap.
 
 The signal coverage expansion review now joins broader would-enter rows with
 the current signal-coverage policy priority before deciding whether the row
-should create a P0.5 review push. This prevents low-priority parked observations
-from competing with P0/P0.5 work while still preserving the observation record.
+should create a Signal Observation grade review push. This prevents
+low-priority parked observations from competing with P0 / Signal Observation
+grade work while still preserving the observation record.
 
 | Item | Evidence |
 | --- | --- |
@@ -1498,7 +1508,7 @@ no-action rows as execution authority.
 | Item | Evidence |
 | --- | --- |
 | No-action policy join | Broader no-action rows now carry `coverage_review_priority`, `policy_l2_readiness`, and `policy_recommended_action` |
-| High-priority list | `broader_observation.high_priority_no_action_signals` contains P0.5/P1 no-action rows for review |
+| High-priority list | `broader_observation.high_priority_no_action_signals` contains Signal Observation grade / P1 no-action rows for review |
 | Current artifact | Latest diagnostic reports four high-priority no-action rows: `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` |
 | Non-execution boundary | High-priority no-action rows retain `not_order=true`, `not_execution_intent=true`, `no_execution_permission=true`, and `no_runtime_start=true` |
 | Local validation | Signal coverage diagnostic, expansion review, and local monitor sequence tests: `19 passed`; `py_compile` passed |

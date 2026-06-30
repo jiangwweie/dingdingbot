@@ -2,7 +2,7 @@
 """Build a non-executing Owner packet for the first real runtime submit gate.
 
 This packet aggregates the existing pre-live runtime submit rehearsal into a
-compact decision surface. It does not authorize, submit, place, register, or
+compact review surface. It does not authorize, submit, place, register, or
 cancel orders; it does not call OrderLifecycle or exchange APIs; and it does
 not mutate Tokyo, runtime state, budgets, attempts, or credentials.
 
@@ -25,11 +25,11 @@ REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
 
-from scripts.verify_runtime_submit_rehearsal_pre_live_packet import (
+from scripts.verify_runtime_submit_rehearsal_pre_live_evidence import (
     DEFAULT_DEPLOYED_HEAD,
     OWNER_AUTHORIZATION_FLAG,
     OWNER_LIVE_RUNTIME_ENABLEMENT_FLAG,
-    build_pre_live_packet,
+    build_pre_live_evidence,
 )
 
 
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _build_packet_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    pre_live_packet = await build_pre_live_packet(
+    pre_live_evidence = await build_pre_live_evidence(
         deployed_head=args.deployed_head,
         owner_real_submit_authorized=args.owner_real_submit_authorized,
         owner_live_runtime_enablement_authorized=(
@@ -66,18 +66,23 @@ async def _build_packet_from_args(args: argparse.Namespace) -> dict[str, Any]:
             args.exercise_in_memory_exchange_execution_simulation
         ),
     )
-    return build_first_real_submit_owner_packet(pre_live_packet=pre_live_packet)
+    return build_first_real_submit_owner_packet(pre_live_evidence=pre_live_evidence)
 
 
 def build_first_real_submit_owner_packet(
     *,
-    pre_live_packet: dict[str, Any],
+    pre_live_evidence: dict[str, Any] | None = None,
+    pre_live_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Summarize first-real-submit readiness without granting authority."""
 
+    pre_live_payload = pre_live_evidence if pre_live_evidence is not None else pre_live_packet
+    if pre_live_payload is None:
+        raise ValueError("pre_live_evidence.checks must be present")
+    pre_live_packet = pre_live_payload
     checks = pre_live_packet.get("checks")
     if not isinstance(checks, dict):
-        raise ValueError("pre_live_packet.checks must be present")
+        raise ValueError("pre_live_evidence.checks must be present")
     owner_gate = (
         pre_live_packet.get("owner_gate")
         if isinstance(pre_live_packet.get("owner_gate"), dict)
@@ -191,7 +196,7 @@ def build_first_real_submit_owner_packet(
 
     packet = {
         "status": status,
-        "scope": "runtime_first_real_submit_owner_decision_packet",
+        "scope": "runtime_first_real_submit_owner_review_artifact",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "local_git": pre_live_packet.get("local_git", {}),
         "deployment_gate": deployment_gate,
@@ -372,7 +377,7 @@ def build_first_real_submit_owner_packet(
             "available_evidence_ids": dict(
                 evidence_preparation.get("available_evidence_ids") or {}
             ),
-            "packet_status": (
+            "prepared_evidence_status": (
                 evidence_preparation.get("packet", {}).get("status")
                 if isinstance(evidence_preparation.get("packet"), dict)
                 else None
@@ -384,7 +389,7 @@ def build_first_real_submit_owner_packet(
             "ready_for_first_real_submit": ready_for_first_real_submit,
             "blockers": blockers,
         },
-        "source_pre_live_packet": {
+        "source_pre_live_evidence": {
             "status": pre_live_packet.get("status"),
             "scope": pre_live_packet.get("scope"),
             "safety_invariants": pre_live_packet.get("safety_invariants", {}),
@@ -494,7 +499,7 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a non-executing first-real-submit Owner decision packet."
+        description="Build a non-executing first-real-submit Owner review artifact."
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
     parser.add_argument(

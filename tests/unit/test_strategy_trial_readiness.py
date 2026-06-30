@@ -19,7 +19,7 @@ def test_bnb_strategy_trial_readiness_links_observation_without_execution_author
     assert readiness.strategy_profile.execution_mode == "owner_confirm_each_entry"
     assert readiness.observation_case["latest_signal"] == "would_enter"
     assert readiness.risk_cap_profile.profile_status == "present"
-    assert readiness.readiness_verdict == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert readiness.readiness_status == "testnet_rehearsal_blocked_with_explicit_reasons"
     assert readiness.live_ready is False
     assert readiness.auto_execution_ready is False
     assert readiness.non_permissions["no_execution_intent"] is True
@@ -57,9 +57,9 @@ def test_preflight_can_reach_testnet_ready_when_safety_facts_clear():
 
     assert preflight.status == "ready"
     assert "owner_testnet_authorization_missing" not in preflight.warnings
-    assert readiness.readiness_verdict == "testnet_rehearsal_ready"
+    assert readiness.readiness_status == "testnet_rehearsal_ready"
     assert readiness.rehearsal_readiness_state["testnet_rehearsal_status"] == "ready"
-    assert readiness.owner_decision_state["owner_authorization_required"] is False
+    assert readiness.owner_policy_state["owner_authorization_required"] is False
     assert readiness.live_ready is False
 
 
@@ -155,7 +155,7 @@ async def test_fact_collector_unknown_sources_become_concrete_preflight_blockers
         fact_checks=snapshot.to_response_dict(),
     )
 
-    assert readiness.readiness_verdict == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert readiness.readiness_status == "testnet_rehearsal_blocked_with_explicit_reasons"
     assert "active_position_check_required_before_rehearsal" in readiness.blockers
     assert "open_order_check_required_before_rehearsal" in readiness.blockers
     assert "gks_status_required_before_rehearsal" in readiness.blockers
@@ -244,7 +244,7 @@ async def test_fact_collector_clear_facts_reaches_testnet_ready():
 
     assert snapshot.blockers == []
     assert readiness.preflight_result.status == "ready"
-    assert readiness.readiness_verdict == "testnet_rehearsal_ready"
+    assert readiness.readiness_status == "testnet_rehearsal_ready"
     assert "owner_testnet_authorization_missing" not in readiness.warnings
     assert readiness.non_permissions["no_execution_permission"] is True
 
@@ -292,7 +292,7 @@ async def test_fact_collector_stale_account_facts_block_rehearsal():
     account_fact = snapshot.fact_map()["account_facts"]
     assert account_fact.status == "stale"
     assert "account_facts_stale" in readiness.blockers
-    assert readiness.readiness_verdict == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert readiness.readiness_status == "testnet_rehearsal_blocked_with_explicit_reasons"
 
 
 async def test_fact_collector_surfaces_missing_equity_and_margin():
@@ -376,7 +376,7 @@ async def test_fact_collector_conflicting_position_and_order_block_rehearsal():
 
     assert "conflicting_position_exists" in readiness.blockers
     assert "conflicting_open_order_exists" in readiness.blockers
-    assert readiness.readiness_verdict == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert readiness.readiness_status == "testnet_rehearsal_blocked_with_explicit_reasons"
 
 
 def _bnb_case() -> ObservationCaseQueueItem:

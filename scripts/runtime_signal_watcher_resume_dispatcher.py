@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Dispatch the Runtime Signal Watcher resume packet to the next safe step.
+"""Dispatch the Runtime Signal Watcher resume artifact to the next safe step.
 
 The default mode consumes post-signal-resume-pack.json and writes an
-Owner/agent-readable dispatch packet without calling the API. With
+Owner/agent-readable dispatch artifact without calling the API. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
 GET endpoint, or the official fresh-submit-authorization binding endpoint when
 the resume pack is parked at that non-executing checkpoint. With
@@ -30,6 +30,11 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.application.readmodels.owner_projection import (
+    owner_non_authority_checkpoint,
+    owner_state_without_legacy_input_recovery_action,
+)
+
 
 DEFAULT_RESUME_PACK = Path(
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
@@ -37,7 +42,7 @@ DEFAULT_RESUME_PACK = Path(
 )
 DEFAULT_OUTPUT_JSON = Path(
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "resume-dispatch-packet.json"
+    "resume-dispatch-artifact.json"
 )
 DEFAULT_OPERATION_LAYER_EVIDENCE_JSON = Path(
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
@@ -469,10 +474,10 @@ def _preflight_passed(body: Any) -> bool:
     status = str(
         payload.get("status") or payload.get("controlled_submit_plan_status") or ""
     ).lower()
-    verdict = str(payload.get("final_gate_verdict") or "").lower()
+    final_gate_status = str(payload.get("final_gate_verdict") or "").lower()
     return (
         status == "ready_for_controlled_submit_adapter"
-        and verdict == "pass"
+        and final_gate_status == "pass"
         and not payload.get("blockers")
     )
 
@@ -484,9 +489,9 @@ def _preflight_blockers(body: Any) -> list[str]:
     normalized_status = str(raw_status or "").lower()
     if raw_status is not None and normalized_status != "ready_for_controlled_submit_adapter":
         blockers.append(f"preflight_status:{raw_status}")
-    verdict = payload.get("final_gate_verdict")
-    if verdict is not None and str(verdict).lower() != "pass":
-        blockers.append(f"final_gate_verdict:{verdict}")
+    final_gate_status = payload.get("final_gate_verdict")
+    if final_gate_status is not None and str(final_gate_status).lower() != "pass":
+        blockers.append(f"final_gate_verdict:{final_gate_status}")
     return sorted(set(blockers))
 
 
@@ -502,13 +507,11 @@ def _allowed_auto_actions(
     ]
     if actions:
         return actions
-    fallback_sources = (
-        action_time_resume.get("next_step"),
-        action_time_resume.get("automatic_recovery_action"),
-        resume_pack.get("automatic_recovery_action"),
-        _dict(resume_pack.get("operator_command_plan")).get("next_step"),
-    )
-    return [str(item) for item in fallback_sources if str(item or "").strip()]
+    return [
+        str(item)
+        for item in _list(resume_pack.get("allowed_auto_actions"))
+        if str(item).strip()
+    ]
 
 
 def _first_text(*values: Any) -> str | None:
@@ -519,59 +522,63 @@ def _first_text(*values: Any) -> str | None:
     return None
 
 
-def _fresh_authorization_handoff_json_path(
+def _fresh_authorization_handoff_artifact_path(
     *,
     resume_pack: dict[str, Any],
     action_time_resume: dict[str, Any],
 ) -> str | None:
     artifact_paths = _dict(resume_pack.get("artifact_paths"))
     action_artifact_paths = _dict(action_time_resume.get("artifact_paths"))
-    readiness_bridge = _dict(resume_pack.get("readiness_bridge"))
-    bridge_artifact_paths = _dict(readiness_bridge.get("artifact_paths"))
+    readiness_projection = _dict(resume_pack.get("readiness_projection"))
+    projection_artifact_paths = _dict(readiness_projection.get("artifact_paths"))
     return _first_text(
+        action_time_resume.get("handoff_artifact_json"),
+        action_time_resume.get("fresh_submit_handoff_artifact_json"),
         action_time_resume.get("handoff_json"),
         action_time_resume.get("fresh_submit_handoff_json"),
-        action_time_resume.get("readiness_handoff_bridge_json"),
-        action_artifact_paths.get("readiness_handoff_bridge"),
+        action_time_resume.get("readiness_handoff_evidence_json"),
+        action_artifact_paths.get("readiness_handoff_evidence"),
         action_artifact_paths.get("official_submit_handoff_flow"),
+        resume_pack.get("handoff_artifact_json"),
+        resume_pack.get("fresh_submit_handoff_artifact_json"),
         resume_pack.get("handoff_json"),
         resume_pack.get("fresh_submit_handoff_json"),
-        resume_pack.get("readiness_handoff_bridge_json"),
-        artifact_paths.get("readiness_handoff_bridge"),
+        resume_pack.get("readiness_handoff_evidence_json"),
+        artifact_paths.get("readiness_handoff_evidence"),
         artifact_paths.get("official_submit_handoff_flow"),
         artifact_paths.get("cycle_executable_submit_handoff"),
-        bridge_artifact_paths.get("readiness_handoff_bridge"),
-        bridge_artifact_paths.get("official_submit_handoff_flow"),
+        projection_artifact_paths.get("readiness_handoff_evidence"),
+        projection_artifact_paths.get("official_submit_handoff_flow"),
     )
 
 
-def _unwrap_handoff_packet(payload: dict[str, Any]) -> dict[str, Any]:
+def _unwrap_handoff_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("handoff_id"):
         return payload
-    for key in ("api_payload", "packet"):
+    for key in ("api_payload", "artifact", "handoff_artifact"):
         nested = payload.get(key)
         if isinstance(nested, dict):
-            return _unwrap_handoff_packet(nested)
+            return _unwrap_handoff_payload(nested)
     for key in (
         "official_submit_handoff_flow",
-        "readiness_handoff_bridge",
+        "readiness_handoff_evidence",
         "cycle_executable_submit_handoff",
     ):
         nested = payload.get(key)
         if isinstance(nested, dict):
-            return _unwrap_handoff_packet(nested)
+            return _unwrap_handoff_payload(nested)
     return {}
 
 
-def _load_handoff_packet(path_value: str) -> tuple[dict[str, Any], str | None]:
+def _load_handoff_payload(path_value: str) -> tuple[dict[str, Any], str | None]:
     path = Path(path_value).expanduser()
     try:
         payload = _read_json(path)
     except Exception as exc:
-        return {}, f"handoff_json_unreadable:{type(exc).__name__}"
-    handoff = _unwrap_handoff_packet(payload)
+        return {}, f"handoff_artifact_unreadable:{type(exc).__name__}"
+    handoff = _unwrap_handoff_payload(payload)
     if not handoff:
-        return {}, "handoff_packet_missing_from_json"
+        return {}, "handoff_payload_missing_from_json"
     return handoff, None
 
 
@@ -579,7 +586,7 @@ def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
     return {
         "kind": "official_operation_layer_submit_next_checkpoint",
         "status": "pending_required_submit_evidence",
-        "next_action": OPERATION_LAYER_ACTION,
+        "official_operation_layer_action": OPERATION_LAYER_ACTION,
         "authorization_id": authorization_id,
         "official_endpoint_method": "POST",
         "official_endpoint_path": (
@@ -602,7 +609,7 @@ def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
         "places_order": False,
         "exchange_write_called": False,
         "order_lifecycle_called": False,
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
         ),
     }
@@ -631,13 +638,13 @@ def _operation_layer_submit_url(
     )
 
 
-def _operation_layer_submit_precondition_blockers(packet: dict[str, Any]) -> list[str]:
-    readiness = _dict(packet.get("operation_layer_readiness"))
-    command_plan = _dict(packet.get("operation_layer_command_plan"))
-    finalgate_result = _dict(packet.get("finalgate_preflight_result"))
+def _operation_layer_submit_precondition_blockers(artifact: dict[str, Any]) -> list[str]:
+    readiness = _dict(artifact.get("operation_layer_readiness"))
+    command_plan = _dict(artifact.get("operation_layer_command_plan"))
+    finalgate_result = _dict(artifact.get("finalgate_preflight_result"))
     blockers: list[str] = []
-    if packet.get("status") != "operation_layer_ready":
-        blockers.append(f"operation_layer_not_ready:{packet.get('status')}")
+    if artifact.get("status") != "operation_layer_ready":
+        blockers.append(f"operation_layer_not_ready:{artifact.get('status')}")
     if readiness.get("ready_for_official_operation_layer_submit") is not True:
         blockers.append("operation_layer_readiness_not_ready")
     if command_plan.get("official_endpoint_method") != "POST":
@@ -871,7 +878,7 @@ def _operation_layer_blocker_review_policy(
             "status": "ready",
             "project_progress_allowed": True,
             "continue_observation_allowed": True,
-            "review_packet_recommended": False,
+            "review_artifact_recommended": False,
             "real_submit_allowed": True,
             "owner_console_state": "processing",
             "owner_sentence": "系统自动处理中",
@@ -892,10 +899,10 @@ def _operation_layer_blocker_review_policy(
     }
     return {
         "scope": "operation_layer_blocker_review_policy",
-        "status": "submit_blocked_review_packet_ready",
+        "status": "submit_blocked_review_artifact_ready",
         "project_progress_allowed": True,
         "continue_observation_allowed": True,
-        "review_packet_recommended": True,
+        "review_artifact_recommended": True,
         "real_submit_allowed": False,
         "owner_console_state": owner_console_state,
         "owner_sentence": owner_sentence_by_class.get(
@@ -913,7 +920,7 @@ def _owner_state_for_operation_layer_ready() -> dict[str, Any]:
         "blocked_at": "none",
         "blocked_reason": "none",
         "next_recover_condition": "official_operation_layer_submit_action_time_recheck",
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "rerun_action_time_finalgate_then_use_official_operation_layer"
         ),
         "downgrade_mode": "none",
@@ -937,7 +944,7 @@ def _owner_state_for_operation_layer_blocked(
         "blocked_at": "OperationLayerEvidence",
         "blocked_reason": reason,
         "next_recover_condition": "required_submit_evidence_ready_and_fresh",
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "refresh_operation_layer_evidence_and_rerun_finalgate"
         ),
         "downgrade_mode": "continue_watcher_observation_no_submit",
@@ -948,7 +955,7 @@ def _fresh_authorization_binding_command_plan(
     *,
     api_base: str,
     runtime_instance_id: str,
-    handoff_json: str,
+    handoff_artifact_json: str,
     requested_fresh_submit_authorization_id: str | None,
 ) -> dict[str, Any]:
     endpoint = (
@@ -960,7 +967,7 @@ def _fresh_authorization_binding_command_plan(
         "method": "POST",
         "api_base": api_base.rstrip("/"),
         "path": endpoint,
-        "handoff_json": handoff_json,
+        "handoff_artifact_json": handoff_artifact_json,
         "requested_fresh_submit_authorization_id": (
             requested_fresh_submit_authorization_id
         ),
@@ -992,8 +999,8 @@ def _non_executing_prepare_command_plan(
             action_time_resume=action_time_resume,
         ),
         "requires_runtime_instance_id": True,
-        "requires_readiness_handoff_bridge": True,
-        "readiness_handoff_bridge": _fresh_authorization_handoff_json_path(
+        "requires_readiness_handoff_evidence": True,
+        "readiness_handoff_evidence": _fresh_authorization_handoff_artifact_path(
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
         ),
@@ -1075,9 +1082,9 @@ def _run_non_executing_prepare(
 
 
 def _non_executing_prepare_forbidden_effects(
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> list[str]:
-    safety = _dict(prepare_packet.get("safety_invariants"))
+    safety = _dict(prepare_artifact.get("safety_invariants"))
     checks = {
         "local_registration_armed": False,
         "exchange_submit_armed": False,
@@ -1098,20 +1105,15 @@ def _non_executing_prepare_forbidden_effects(
 
 
 def _non_executing_prepare_authorization_id(
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> str | None:
-    return _first_text(
-        _dict(prepare_packet.get("ids")).get("authorization_id"),
-        _dict(prepare_packet.get("operator_command_plan")).get(
-            "prepared_authorization_id"
-        ),
-    )
+    return _first_text(_dict(prepare_artifact.get("ids")).get("authorization_id"))
 
 
 def _non_executing_prepare_candidate_id(
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> str | None:
-    ids = _dict(prepare_packet.get("ids"))
+    ids = _dict(prepare_artifact.get("ids"))
     return _first_text(
         ids.get("order_candidate_id"),
         ids.get("shadow_candidate_id"),
@@ -1120,18 +1122,18 @@ def _non_executing_prepare_candidate_id(
 
 
 def _non_executing_prepare_ready(
-    prepare_packet: dict[str, Any],
+    prepare_artifact: dict[str, Any],
 ) -> bool:
     return (
-        prepare_packet.get("status") == "ready_for_final_gate_preflight"
-        and bool(_non_executing_prepare_authorization_id(prepare_packet))
-        and not _list(prepare_packet.get("blockers"))
+        prepare_artifact.get("status") == "ready_for_final_gate_preflight"
+        and bool(_non_executing_prepare_authorization_id(prepare_artifact))
+        and not _list(prepare_artifact.get("blockers"))
     )
 
 
-def _packet_from_non_executing_prepare(
+def _dispatch_artifact_from_non_executing_prepare(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     status: str,
     blocker_class: str,
     dispatch_status: str,
@@ -1152,7 +1154,7 @@ def _packet_from_non_executing_prepare(
         )
     )
     return {
-        **packet,
+        **artifact,
         "status": status,
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
@@ -1173,16 +1175,16 @@ def _packet_from_non_executing_prepare(
                 "next_recover_condition": (
                     "fresh_candidate_authorization_evidence_ready"
                 ),
-                "automatic_recovery_action": NON_EXECUTING_PREPARE_ACTION,
+                "non_authority_checkpoint": NON_EXECUTING_PREPARE_ACTION,
                 "downgrade_mode": "continue_watcher_observation_no_submit",
             }
         ),
-        "command_plan": next_command_plan or packet.get("command_plan"),
-        "non_executing_prepare_command_plan": packet.get("command_plan"),
+        "command_plan": next_command_plan or artifact.get("command_plan"),
+        "non_executing_prepare_command_plan": artifact.get("command_plan"),
         "non_executing_prepare_result": prepare_result,
         "blockers": blockers,
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "official_non_executing_prepare_called": prepare_result is not None,
             "allowed_prepare_evidence_created": status == READY_STATUS,
@@ -1202,7 +1204,7 @@ def _packet_from_non_executing_prepare(
 
 def _execute_non_executing_prepare(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     timeout_seconds: int,
     prepare_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     operation_layer_evidence_report: dict[str, Any] | None = None,
@@ -1214,7 +1216,7 @@ def _execute_non_executing_prepare(
     operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
-    command_plan = _dict(packet.get("command_plan"))
+    command_plan = _dict(artifact.get("command_plan"))
     runtime_instance_id = _first_text(command_plan.get("runtime_instance_id"))
     signal_input_json = _first_text(command_plan.get("signal_input_json"))
     missing: list[str] = []
@@ -1223,8 +1225,8 @@ def _execute_non_executing_prepare(
     if not signal_input_json and not command_plan.get("order_candidate_id"):
         missing.append("signal_input_json")
     if missing:
-        return _packet_from_non_executing_prepare(
-            packet=packet,
+        return _dispatch_artifact_from_non_executing_prepare(
+            artifact=artifact,
             status="blocked",
             blocker_class="missing_fact",
             dispatch_status="blocked_by_missing_non_executing_prepare_inputs",
@@ -1236,8 +1238,8 @@ def _execute_non_executing_prepare(
     prepare_result = runner(command_plan)
     forbidden_effects = _non_executing_prepare_forbidden_effects(prepare_result)
     if forbidden_effects:
-        return _packet_from_non_executing_prepare(
-            packet=packet,
+        return _dispatch_artifact_from_non_executing_prepare(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_non_executing_prepare_forbidden_effect",
@@ -1251,8 +1253,8 @@ def _execute_non_executing_prepare(
             blockers.append(
                 f"non_executing_prepare_status:{prepare_result.get('status')}"
             )
-        return _packet_from_non_executing_prepare(
-            packet=packet,
+        return _dispatch_artifact_from_non_executing_prepare(
+            artifact=artifact,
             status="blocked",
             blocker_class="missing_fact",
             dispatch_status="blocked_by_non_executing_prepare",
@@ -1267,8 +1269,8 @@ def _execute_non_executing_prepare(
         signal_input_json=signal_input_json,
         shadow_candidate_id=_non_executing_prepare_candidate_id(prepare_result),
     )
-    ready_packet = _packet_from_non_executing_prepare(
-        packet=packet,
+    ready_artifact = _dispatch_artifact_from_non_executing_prepare(
+        artifact=artifact,
         status=READY_STATUS,
         blocker_class="none",
         dispatch_status="non_executing_prepare_ready_for_finalgate",
@@ -1277,7 +1279,7 @@ def _execute_non_executing_prepare(
         next_command_plan=next_command_plan,
     )
     return _execute_finalgate_preflight(
-        packet=ready_packet,
+        artifact=ready_artifact,
         timeout_seconds=timeout_seconds,
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
@@ -1289,7 +1291,7 @@ def _execute_non_executing_prepare(
     )
 
 
-def build_dispatch_packet(
+def build_dispatch_artifact(
     *,
     resume_pack: dict[str, Any],
     source_path: Path,
@@ -1329,7 +1331,7 @@ def build_dispatch_packet(
     ]
 
     if unsafe_flags:
-        return _packet(
+        return _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1344,7 +1346,7 @@ def build_dispatch_packet(
         )
 
     if status == WAITING_STATUS:
-        return _packet(
+        return _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1361,7 +1363,7 @@ def build_dispatch_packet(
 
     if status == NON_EXECUTING_PREPARE_STATUS:
         if NON_EXECUTING_PREPARE_ACTION not in allowed_auto_actions:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1383,7 +1385,7 @@ def build_dispatch_packet(
             action_time_resume=action_time_resume,
         )
         if selected_scope_blockers:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1393,7 +1395,7 @@ def build_dispatch_packet(
                     "blocker_class": "hard_safety_stop",
                     "blocked_at": "selected_strategygroup_scope",
                     "blocked_reason": ",".join(selected_scope_blockers),
-                    "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                    "non_authority_checkpoint": "review_selected_strategygroup_scope",
                     "downgrade_mode": "continue_watcher_observation_no_submit",
                 },
                 status="blocked",
@@ -1404,7 +1406,7 @@ def build_dispatch_packet(
                 command_plan=None,
                 selected_strategy_group_id=selected_strategy_group_id,
             )
-        packet = _packet(
+        artifact = _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1419,7 +1421,7 @@ def build_dispatch_packet(
                 "next_recover_condition": (
                     "fresh_candidate_runtime_grant_authorization_evidence_exists"
                 ),
-                "automatic_recovery_action": NON_EXECUTING_PREPARE_ACTION,
+                "non_authority_checkpoint": NON_EXECUTING_PREPARE_ACTION,
                 "downgrade_mode": (
                     "no_real_submit_until_candidate_authorization_finalgate"
                 ),
@@ -1437,9 +1439,9 @@ def build_dispatch_packet(
             selected_strategy_group_id=selected_strategy_group_id,
         )
         if not execute_preflight:
-            return packet
+            return artifact
         return _execute_non_executing_prepare(
-            packet=packet,
+            artifact=artifact,
             timeout_seconds=preflight_timeout_seconds,
             prepare_runner=non_executing_preparer,
             operation_layer_evidence_report=operation_layer_evidence_report,
@@ -1461,7 +1463,7 @@ def build_dispatch_packet(
         )
     )
     if selected_scope_blockers:
-        return _packet(
+        return _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1471,7 +1473,7 @@ def build_dispatch_packet(
                 "blocker_class": "hard_safety_stop",
                 "blocked_at": "selected_strategygroup_scope",
                 "blocked_reason": ",".join(selected_scope_blockers),
-                "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                "non_authority_checkpoint": "review_selected_strategygroup_scope",
                 "downgrade_mode": "continue_watcher_observation_no_submit",
             },
             status="blocked",
@@ -1488,7 +1490,7 @@ def build_dispatch_packet(
             action in allowed_auto_actions
             for action in FRESH_AUTHORIZATION_ALLOWED_ACTIONS
         ):
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1504,12 +1506,12 @@ def build_dispatch_packet(
                 command_plan=None,
                 selected_strategy_group_id=selected_strategy_group_id,
             )
-        handoff_json = _fresh_authorization_handoff_json_path(
+        handoff_artifact_json = _fresh_authorization_handoff_artifact_path(
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
         )
-        if not handoff_json:
-            return _packet(
+        if not handoff_artifact_json:
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1517,20 +1519,20 @@ def build_dispatch_packet(
                 owner_state=_owner_state_for_fresh_authorization(
                     status="blocked",
                     blocker_class="missing_fact",
-                    dispatch_status="blocked_by_missing_handoff_json",
-                    blockers=["missing_fact:handoff_json"],
+                    dispatch_status="blocked_by_missing_handoff_artifact",
+                    blockers=["missing_fact:handoff_artifact_json"],
                 ),
                 status="blocked",
                 blocker_class="missing_fact",
                 dispatch_action=None,
-                dispatch_status="blocked_by_missing_handoff_json",
-                blockers=base_blockers + ["missing_fact:handoff_json"],
+                dispatch_status="blocked_by_missing_handoff_artifact",
+                blockers=base_blockers + ["missing_fact:handoff_artifact_json"],
                 command_plan=None,
                 selected_strategy_group_id=selected_strategy_group_id,
             )
-        handoff_packet, handoff_error = _load_handoff_packet(handoff_json)
+        handoff_payload, handoff_error = _load_handoff_payload(handoff_artifact_json)
         if handoff_error:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1538,13 +1540,13 @@ def build_dispatch_packet(
                 owner_state=_owner_state_for_fresh_authorization(
                     status="blocked",
                     blocker_class="missing_fact",
-                    dispatch_status="blocked_by_invalid_handoff_json",
+                    dispatch_status="blocked_by_invalid_handoff_artifact",
                     blockers=[handoff_error],
                 ),
                 status="blocked",
                 blocker_class="missing_fact",
                 dispatch_action=None,
-                dispatch_status="blocked_by_invalid_handoff_json",
+                dispatch_status="blocked_by_invalid_handoff_artifact",
                 blockers=base_blockers + [handoff_error],
                 command_plan=None,
                 selected_strategy_group_id=selected_strategy_group_id,
@@ -1554,8 +1556,8 @@ def build_dispatch_packet(
             action_time_resume=action_time_resume,
         )
         for value in (
-            handoff_packet.get("strategy_group_id"),
-            handoff_packet.get("strategy_family_id"),
+            handoff_payload.get("strategy_group_id"),
+            handoff_payload.get("strategy_family_id"),
         ):
             text = str(value or "").strip()
             if text and text not in handoff_groups:
@@ -1565,7 +1567,7 @@ def build_dispatch_packet(
             action_groups=handoff_groups,
         )
         if selected_scope_blockers:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1575,7 +1577,7 @@ def build_dispatch_packet(
                     "blocker_class": "hard_safety_stop",
                     "blocked_at": "selected_strategygroup_scope",
                     "blocked_reason": ",".join(selected_scope_blockers),
-                    "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                    "non_authority_checkpoint": "review_selected_strategygroup_scope",
                     "downgrade_mode": "continue_watcher_observation_no_submit",
                 },
                 status="blocked",
@@ -1587,12 +1589,12 @@ def build_dispatch_packet(
                 selected_strategy_group_id=selected_strategy_group_id,
             )
         runtime_instance_id = _first_text(
-            handoff_packet.get("runtime_instance_id"),
+            handoff_payload.get("runtime_instance_id"),
             resume_pack.get("runtime_instance_id"),
             *list(resume_pack.get("selected_runtime_instance_ids") or []),
         )
         if not runtime_instance_id:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1615,7 +1617,7 @@ def build_dispatch_packet(
             action_time_resume.get("requested_fresh_submit_authorization_id"),
             resume_pack.get("requested_fresh_submit_authorization_id"),
         )
-        packet = _packet(
+        artifact = _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1634,16 +1636,16 @@ def build_dispatch_packet(
             command_plan=_fresh_authorization_binding_command_plan(
                 api_base=api_base,
                 runtime_instance_id=runtime_instance_id,
-                handoff_json=handoff_json,
+                handoff_artifact_json=handoff_artifact_json,
                 requested_fresh_submit_authorization_id=requested_authorization_id,
             ),
             selected_strategy_group_id=selected_strategy_group_id,
         )
         if not execute_preflight:
-            return packet
+            return artifact
         return _execute_fresh_authorization_binding(
-            packet=packet,
-            handoff_packet=handoff_packet,
+            artifact=artifact,
+            handoff_payload=handoff_payload,
             timeout_seconds=preflight_timeout_seconds,
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
@@ -1666,7 +1668,7 @@ def build_dispatch_packet(
                 _dict(resume_pack.get("command_plan")).get("authorization_id"),
             )
             if not authorization_id:
-                return _packet(
+                return _dispatch_artifact(
                     label=label,
                     source_path=source_path,
                     resume_pack=resume_pack,
@@ -1693,7 +1695,7 @@ def build_dispatch_packet(
             operation_layer_command_plan = _operation_layer_command_plan(
                 authorization_id=authorization_id,
             )
-        packet = _packet(
+        artifact = _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1716,13 +1718,13 @@ def build_dispatch_packet(
             operation_layer_command_plan=operation_layer_command_plan,
             selected_strategy_group_id=selected_strategy_group_id,
         )
-        packet = _packet_with_operation_layer_readiness(
-            packet=packet,
+        artifact = _dispatch_artifact_with_operation_layer_readiness(
+            artifact=artifact,
             evidence_report=operation_layer_evidence_report,
             evidence_report_path=operation_layer_evidence_report_path,
         )
         return _maybe_execute_operation_layer_submit(
-            packet=packet,
+            artifact=artifact,
             execute_operation_layer_submit=execute_operation_layer_submit,
             operation_layer_submit_mode=operation_layer_submit_mode,
             execute_post_submit_finalize=execute_post_submit_finalize,
@@ -1731,7 +1733,7 @@ def build_dispatch_packet(
 
     if status == READY_STATUS:
         if FINALGATE_ACTION not in allowed_auto_actions:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1749,7 +1751,7 @@ def build_dispatch_packet(
             )
         missing = _missing_ready_fields(resume_pack, action_time_resume)
         if missing:
-            return _packet(
+            return _dispatch_artifact(
                 label=label,
                 source_path=source_path,
                 resume_pack=resume_pack,
@@ -1776,7 +1778,7 @@ def build_dispatch_packet(
             action_time_resume.get("shadow_candidate_id")
             or resume_pack.get("shadow_candidate_id")
         )
-        packet = _packet(
+        artifact = _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1796,9 +1798,9 @@ def build_dispatch_packet(
             selected_strategy_group_id=selected_strategy_group_id,
         )
         if not execute_preflight:
-            return packet
+            return artifact
         return _execute_finalgate_preflight(
-            packet=packet,
+            artifact=artifact,
             timeout_seconds=preflight_timeout_seconds,
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
@@ -1809,7 +1811,7 @@ def build_dispatch_packet(
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
-    return _packet(
+    return _dispatch_artifact(
         label=label,
         source_path=source_path,
         resume_pack=resume_pack,
@@ -1825,7 +1827,7 @@ def build_dispatch_packet(
     )
 
 
-def _packet(
+def _dispatch_artifact(
     *,
     label: str,
     source_path: Path,
@@ -1842,6 +1844,7 @@ def _packet(
     operation_layer_command_plan: dict[str, Any] | None = None,
     selected_strategy_group_id: str | None = None,
 ) -> dict[str, Any]:
+    owner_state_projection = _owner_state_projection(owner_state)
     return {
         "scope": "runtime_signal_watcher_resume_dispatcher",
         "label": label,
@@ -1856,7 +1859,7 @@ def _packet(
             if str(selected_strategy_group_id or "").strip()
             else None
         ),
-        "owner_state": owner_state,
+        "owner_state": owner_state_projection,
         "selected_runtime_instance_ids": list(
             resume_pack.get("selected_runtime_instance_ids") or []
         ),
@@ -1878,6 +1881,19 @@ def _packet(
             "official_operation_layer_submit_called": False,
         },
     }
+
+
+def _owner_state_projection(owner_state: dict[str, Any]) -> dict[str, Any]:
+    checkpoint = owner_non_authority_checkpoint(
+        owner_state,
+        default="review_current_state",
+    )
+    projection = {
+        **owner_state_without_legacy_input_recovery_action(owner_state),
+        "non_authority_checkpoint": checkpoint,
+        "checkpoint_source": "owner_state",
+    }
+    return projection
 
 
 def _operation_layer_evidence_needs_preparation(
@@ -1962,19 +1978,19 @@ def _operation_layer_needs_runtime_live_enablement(
 
 def _runtime_instance_id_for_live_enablement(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence_report: dict[str, Any] | None,
 ) -> str | None:
     ids = _operation_layer_ids(evidence_report or {})
     selected_runtime_ids = [
         str(item)
-        for item in _list(packet.get("selected_runtime_instance_ids"))
+        for item in _list(artifact.get("selected_runtime_instance_ids"))
         if str(item or "").strip()
     ]
     return _first_text(
         ids.get("runtime_instance_id"),
         selected_runtime_ids[0] if len(selected_runtime_ids) == 1 else None,
-        _dict(packet.get("action_time_resume")).get("runtime_instance_id"),
+        _dict(artifact.get("action_time_resume")).get("runtime_instance_id"),
     )
 
 
@@ -2241,7 +2257,7 @@ def _run_runtime_live_enablement(
 
 def _maybe_apply_runtime_live_enablement(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     command_plan: dict[str, Any],
     evidence_report: dict[str, Any] | None,
     execute_operation_layer_submit: bool,
@@ -2257,7 +2273,7 @@ def _maybe_apply_runtime_live_enablement(
         return None
     authorization_id = str(command_plan.get("authorization_id") or "").strip()
     runtime_instance_id = _runtime_instance_id_for_live_enablement(
-        packet=packet,
+        artifact=artifact,
         evidence_report=evidence_report,
     )
     if not authorization_id or not runtime_instance_id:
@@ -2313,7 +2329,7 @@ def _run_operation_layer_evidence_prep(
 
 def _execute_finalgate_preflight(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     timeout_seconds: int,
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
@@ -2324,10 +2340,10 @@ def _execute_finalgate_preflight(
     operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
-    command_plan = _dict(packet.get("command_plan"))
+    command_plan = _dict(artifact.get("command_plan"))
     if command_plan.get("method") != "GET" or not command_plan.get("curl"):
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_invalid_preflight_command_plan",
@@ -2338,8 +2354,8 @@ def _execute_finalgate_preflight(
 
     cookie, cookie_error = _session_cookie()
     if not cookie:
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_unavailable",
@@ -2376,8 +2392,8 @@ def _execute_finalgate_preflight(
 
     http_status = response.get("http_status")
     if http_status in {401, 403}:
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_http_error",
@@ -2387,8 +2403,8 @@ def _execute_finalgate_preflight(
         )
     if response.get("error"):
         blocker_class = "missing_fact" if http_status == 404 else "deployment_issue"
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class=blocker_class,
             dispatch_status="blocked_by_finalgate_preflight_http_error",
@@ -2399,8 +2415,8 @@ def _execute_finalgate_preflight(
 
     forbidden_effects = _preflight_forbidden_effects(response.get("body"))
     if forbidden_effects:
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_finalgate_preflight_forbidden_effect",
@@ -2411,8 +2427,8 @@ def _execute_finalgate_preflight(
 
     if not _preflight_passed(response.get("body")):
         blockers = _preflight_blockers(response.get("body"))
-        return _packet_from_preflight(
-            packet=packet,
+        return _dispatch_artifact_from_preflight(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_action_time_finalgate",
@@ -2422,10 +2438,10 @@ def _execute_finalgate_preflight(
         )
 
     operation_layer_command_plan = _operation_layer_command_plan(
-        authorization_id=packet["command_plan"]["prepared_authorization_id"],
+        authorization_id=artifact["command_plan"]["prepared_authorization_id"],
     )
     operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
-        authorization_id=packet["command_plan"]["prepared_authorization_id"],
+        authorization_id=artifact["command_plan"]["prepared_authorization_id"],
         command_plan=operation_layer_command_plan,
         current_report=operation_layer_evidence_report,
         current_report_path=operation_layer_evidence_report_path,
@@ -2433,7 +2449,7 @@ def _execute_finalgate_preflight(
         evidence_preparer=operation_layer_evidence_preparer,
     )
     runtime_live_enablement_result = _maybe_apply_runtime_live_enablement(
-        packet=packet,
+        artifact=artifact,
         command_plan=operation_layer_command_plan,
         evidence_report=operation_layer_evidence_report,
         execute_operation_layer_submit=execute_operation_layer_submit,
@@ -2442,15 +2458,15 @@ def _execute_finalgate_preflight(
     )
     if _dict(runtime_live_enablement_result).get("mutation_applied") is True:
         operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
-            authorization_id=packet["command_plan"]["prepared_authorization_id"],
+            authorization_id=artifact["command_plan"]["prepared_authorization_id"],
             command_plan=operation_layer_command_plan,
             current_report=operation_layer_evidence_report,
             current_report_path=operation_layer_evidence_report_path,
             execute_operation_layer_submit=execute_operation_layer_submit,
             evidence_preparer=operation_layer_evidence_preparer,
         )
-    result_packet = _packet_from_preflight(
-        packet=packet,
+    result_artifact = _dispatch_artifact_from_preflight(
+        artifact=artifact,
         status="finalgate_ready",
         blocker_class="none",
         dispatch_status="official_finalgate_preflight_passed",
@@ -2459,17 +2475,17 @@ def _execute_finalgate_preflight(
         operation_layer_command_plan=operation_layer_command_plan,
     )
     if runtime_live_enablement_result is not None:
-        result_packet = _packet_with_runtime_live_enablement_result(
-            packet=result_packet,
+        result_artifact = _dispatch_artifact_with_runtime_live_enablement_result(
+            artifact=result_artifact,
             runtime_live_enablement_result=runtime_live_enablement_result,
         )
-    result_packet = _packet_with_operation_layer_readiness(
-        packet=result_packet,
+    result_artifact = _dispatch_artifact_with_operation_layer_readiness(
+        artifact=result_artifact,
         evidence_report=operation_layer_evidence_report,
         evidence_report_path=operation_layer_evidence_report_path,
     )
     return _maybe_execute_operation_layer_submit(
-        packet=result_packet,
+        artifact=result_artifact,
         execute_operation_layer_submit=execute_operation_layer_submit,
         operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
@@ -2479,8 +2495,8 @@ def _execute_finalgate_preflight(
 
 def _execute_fresh_authorization_binding(
     *,
-    packet: dict[str, Any],
-    handoff_packet: dict[str, Any],
+    artifact: dict[str, Any],
+    handoff_payload: dict[str, Any],
     timeout_seconds: int,
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
@@ -2491,10 +2507,10 @@ def _execute_fresh_authorization_binding(
     operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
-    command_plan = _dict(packet.get("command_plan"))
+    command_plan = _dict(artifact.get("command_plan"))
     if command_plan.get("method") != "POST":
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_invalid_fresh_authorization_binding_plan",
@@ -2504,8 +2520,8 @@ def _execute_fresh_authorization_binding(
 
     cookie, cookie_error = _session_cookie()
     if not cookie:
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_unavailable",
@@ -2525,7 +2541,7 @@ def _execute_fresh_authorization_binding(
         cookie=cookie,
         timeout_seconds=timeout_seconds,
         body={
-            "handoff_packet": handoff_packet,
+            "handoff_artifact": handoff_payload,
             "requested_fresh_submit_authorization_id": (
                 command_plan.get("requested_fresh_submit_authorization_id")
             ),
@@ -2533,7 +2549,7 @@ def _execute_fresh_authorization_binding(
             "allow_create_intent_from_latest_draft": True,
             "metadata": {
                 "runtime_signal_watcher_resume_dispatcher": True,
-                "automatic_recovery_action": FRESH_AUTHORIZATION_BINDING_ACTION,
+                "non_authority_checkpoint": FRESH_AUTHORIZATION_BINDING_ACTION,
             },
             "no_exchange_side_effects": True,
         },
@@ -2554,8 +2570,8 @@ def _execute_fresh_authorization_binding(
     }
     http_status = response.get("http_status")
     if http_status in {401, 403}:
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_http_error",
@@ -2563,8 +2579,8 @@ def _execute_fresh_authorization_binding(
             binding_result=binding_result,
         )
     if response.get("error"):
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_fresh_authorization_binding_http_error",
@@ -2577,8 +2593,8 @@ def _execute_fresh_authorization_binding(
     body = _dict(response.get("body"))
     forbidden_effects = _fresh_authorization_binding_forbidden_effects(body)
     if forbidden_effects:
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_fresh_authorization_binding_forbidden_effect",
@@ -2595,8 +2611,8 @@ def _execute_fresh_authorization_binding(
             "created_intent_and_authorization",
         }:
             blockers.append(f"fresh_authorization_binding_status:{body.get('status')}")
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="missing_fact",
             dispatch_status="blocked_by_fresh_authorization_binding",
@@ -2605,11 +2621,11 @@ def _execute_fresh_authorization_binding(
         )
 
     next_command_plan = _bound_fresh_authorization_preflight_plan(
-        packet=packet,
+        artifact=artifact,
         binding_body=body,
     )
-    bound_packet = _packet_from_fresh_authorization_binding(
-        packet=packet,
+    bound_artifact = _dispatch_artifact_from_fresh_authorization_binding(
+        artifact=artifact,
         status="fresh_authorization_bound",
         blocker_class="none",
         dispatch_status="official_fresh_authorization_binding_ready",
@@ -2618,8 +2634,8 @@ def _execute_fresh_authorization_binding(
         next_command_plan=next_command_plan,
     )
     if next_command_plan is None:
-        return _packet_from_fresh_authorization_binding(
-            packet=packet,
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
             status="blocked",
             blocker_class="missing_fact",
             dispatch_status="blocked_by_missing_bound_fresh_authorization_id",
@@ -2627,7 +2643,7 @@ def _execute_fresh_authorization_binding(
             binding_result=binding_result,
         )
     return _execute_finalgate_preflight(
-        packet=bound_packet,
+        artifact=bound_artifact,
         timeout_seconds=timeout_seconds,
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
@@ -2674,7 +2690,7 @@ def _fresh_authorization_binding_ready(body: dict[str, Any]) -> bool:
 
 def _bound_fresh_authorization_preflight_plan(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     binding_body: dict[str, Any],
 ) -> dict[str, Any] | None:
     fresh_authorization_id = _first_text(
@@ -2682,28 +2698,28 @@ def _bound_fresh_authorization_preflight_plan(
     )
     if not fresh_authorization_id:
         return None
-    command_plan = _dict(packet.get("command_plan"))
-    action_time_resume = _dict(packet.get("action_time_resume"))
+    command_plan = _dict(artifact.get("command_plan"))
+    action_time_resume = _dict(artifact.get("action_time_resume"))
     authorization_snapshot = _dict(binding_body.get("authorization_snapshot"))
     return _preflight_command_plan(
         api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
         authorization_id=fresh_authorization_id,
         signal_input_json=_first_text(
             action_time_resume.get("signal_input_json"),
-            packet.get("signal_input_json"),
+            artifact.get("signal_input_json"),
         ),
         shadow_candidate_id=_first_text(
             action_time_resume.get("shadow_candidate_id"),
-            packet.get("shadow_candidate_id"),
+            artifact.get("shadow_candidate_id"),
             binding_body.get("order_candidate_id"),
             authorization_snapshot.get("order_candidate_id"),
         ),
     )
 
 
-def _packet_from_fresh_authorization_binding(
+def _dispatch_artifact_from_fresh_authorization_binding(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     status: str,
     blocker_class: str,
     dispatch_status: str,
@@ -2722,25 +2738,25 @@ def _packet_from_fresh_authorization_binding(
         blockers=blockers,
     )
     return {
-        **packet,
+        **artifact,
         "status": status,
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": (
             FINALGATE_ACTION if status == "fresh_authorization_bound" else None
         ),
-        "owner_state": owner_state,
+        "owner_state": _owner_state_projection(owner_state),
         "command_plan": (
             next_command_plan
             if status == "fresh_authorization_bound" and next_command_plan
-            else packet.get("command_plan")
+            else artifact.get("command_plan")
         ),
-        "fresh_authorization_binding_command_plan": packet.get("command_plan"),
+        "fresh_authorization_binding_command_plan": artifact.get("command_plan"),
         "fresh_authorization_binding_result": binding_result,
         "fresh_submit_authorization_id": body.get("fresh_submit_authorization_id"),
         "blockers": blockers,
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "official_fresh_authorization_binding_called": binding_result is not None
             and bool(binding_result.get("called")),
@@ -2762,9 +2778,9 @@ def _packet_from_fresh_authorization_binding(
     }
 
 
-def _packet_from_preflight(
+def _dispatch_artifact_from_preflight(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     status: str,
     blocker_class: str,
     dispatch_status: str,
@@ -2779,19 +2795,19 @@ def _packet_from_preflight(
         blockers=blockers,
     )
     return {
-        **packet,
+        **artifact,
         "status": status,
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": (
             OPERATION_LAYER_ACTION if status == "finalgate_ready" else None
         ),
-        "owner_state": owner_state,
+        "owner_state": _owner_state_projection(owner_state),
         "finalgate_preflight_result": preflight_result,
         "operation_layer_command_plan": operation_layer_command_plan,
         "blockers": blockers,
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "official_finalgate_preflight_called": preflight_result is not None
             and bool(preflight_result.get("called")),
@@ -2799,10 +2815,10 @@ def _packet_from_preflight(
             "calls_order_lifecycle": False,
             "exchange_write_called": False,
             "mutates_pg": bool(
-                _dict(packet.get("safety_invariants")).get("mutates_pg")
+                _dict(artifact.get("safety_invariants")).get("mutates_pg")
             ),
             "pg_prepare_evidence_mutated": bool(
-                _dict(packet.get("safety_invariants")).get(
+                _dict(artifact.get("safety_invariants")).get(
                     "pg_prepare_evidence_mutated"
                 )
             ),
@@ -2813,15 +2829,15 @@ def _packet_from_preflight(
     }
 
 
-def _packet_with_runtime_live_enablement_result(
+def _dispatch_artifact_with_runtime_live_enablement_result(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     runtime_live_enablement_result: dict[str, Any],
 ) -> dict[str, Any]:
     result = _dict(runtime_live_enablement_result)
     blockers = _dedupe_text(
         [
-            *list(packet.get("blockers") or []),
+            *list(artifact.get("blockers") or []),
             *[
                 f"runtime_live_enablement:{item}"
                 for item in list(result.get("blockers") or [])
@@ -2831,23 +2847,23 @@ def _packet_with_runtime_live_enablement_result(
     mutation_applied = result.get("mutation_applied") is True
     runtime_state_mutated = result.get("runtime_state_mutated") is True
     return {
-        **packet,
+        **artifact,
         "runtime_live_enablement_result": result,
         "dispatch_status": (
             "runtime_live_enablement_applied_after_finalgate"
             if mutation_applied
-            else packet.get("dispatch_status")
+            else artifact.get("dispatch_status")
         ),
         "blockers": blockers,
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "runtime_live_enablement_called": bool(result.get("called")),
             "runtime_live_enablement_mutation_applied": mutation_applied,
             "runtime_state_mutated": runtime_state_mutated,
             "mutates_pg": bool(
                 runtime_state_mutated
-                or _dict(packet.get("safety_invariants")).get("mutates_pg")
+                or _dict(artifact.get("safety_invariants")).get("mutates_pg")
             ),
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -2860,20 +2876,20 @@ def _packet_with_runtime_live_enablement_result(
     }
 
 
-def _packet_with_operation_layer_readiness(
+def _dispatch_artifact_with_operation_layer_readiness(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence_report: dict[str, Any] | None,
     evidence_report_path: str | None,
 ) -> dict[str, Any]:
-    command_plan = _dict(packet.get("operation_layer_command_plan"))
+    command_plan = _dict(artifact.get("operation_layer_command_plan"))
     readiness = _operation_layer_readiness(
         evidence_report=evidence_report,
         evidence_report_path=evidence_report_path,
         command_plan=command_plan,
     )
     if readiness is None:
-        return packet
+        return artifact
 
     ready = readiness.get("status") == "ready"
     evidence_safety = _dict((evidence_report or {}).get("safety"))
@@ -2895,7 +2911,7 @@ def _packet_with_operation_layer_readiness(
         ]
     )
     return {
-        **packet,
+        **artifact,
         "status": "operation_layer_ready" if ready else "operation_layer_blocked",
         "blocker_class": "none" if ready else blocker_class,
         "dispatch_status": (
@@ -2904,7 +2920,7 @@ def _packet_with_operation_layer_readiness(
             else "blocked_by_operation_layer_evidence"
         ),
         "dispatch_action": OPERATION_LAYER_ACTION if ready else None,
-        "owner_state": owner_state,
+        "owner_state": _owner_state_projection(owner_state),
         "operation_layer_readiness": readiness,
         "operation_layer_blocker_review": _dict(
             readiness.get("blocker_review_policy")
@@ -2912,12 +2928,12 @@ def _packet_with_operation_layer_readiness(
         "blockers": [] if ready else blockers,
         "warnings": _dedupe_text(
             [
-                *list(packet.get("warnings") or []),
+                *list(artifact.get("warnings") or []),
                 *list(readiness.get("warnings") or []),
             ]
         ),
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "official_operation_layer_submit_called": False,
             "operation_layer_evidence_report_read": True,
             "operation_layer_evidence_attempt_counter_mutated": (
@@ -2938,17 +2954,17 @@ def _packet_with_operation_layer_readiness(
 
 def _maybe_execute_operation_layer_submit(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     execute_operation_layer_submit: bool,
     operation_layer_submit_mode: str,
     execute_post_submit_finalize: bool,
     timeout_seconds: int,
 ) -> dict[str, Any]:
     if not execute_operation_layer_submit:
-        return packet
+        return artifact
     if operation_layer_submit_mode not in OPERATION_LAYER_SUBMIT_MODES:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
@@ -2962,10 +2978,10 @@ def _maybe_execute_operation_layer_submit(
                 "error": "invalid_operation_layer_submit_mode",
             },
         )
-    blockers = _operation_layer_submit_precondition_blockers(packet)
+    blockers = _operation_layer_submit_precondition_blockers(artifact)
     if blockers:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class=_operation_layer_blocker_class(blockers, []),
             dispatch_status="blocked_before_official_operation_layer_submit",
@@ -2978,7 +2994,7 @@ def _maybe_execute_operation_layer_submit(
             },
         )
     return _execute_operation_layer_submit(
-        packet=packet,
+        artifact=artifact,
         timeout_seconds=timeout_seconds,
         operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
@@ -2987,15 +3003,15 @@ def _maybe_execute_operation_layer_submit(
 
 def _execute_operation_layer_submit(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     timeout_seconds: int,
     operation_layer_submit_mode: str,
     execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     cookie, cookie_error = _session_cookie()
     if not cookie:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_unavailable",
@@ -3008,8 +3024,8 @@ def _execute_operation_layer_submit(
             },
         )
 
-    command_plan = _dict(packet.get("operation_layer_command_plan"))
-    readiness = _dict(packet.get("operation_layer_readiness"))
+    command_plan = _dict(artifact.get("operation_layer_command_plan"))
+    readiness = _dict(artifact.get("operation_layer_readiness"))
     url = _operation_layer_submit_url(
         command_plan=command_plan,
         readiness=readiness,
@@ -3056,8 +3072,8 @@ def _execute_operation_layer_submit(
 
     http_status = response.get("http_status")
     if http_status in {401, 403}:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_http_error",
@@ -3065,8 +3081,8 @@ def _execute_operation_layer_submit(
             submit_result=submit_result,
         )
     if response.get("error"):
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operation_layer_submit_http_error",
@@ -3078,8 +3094,8 @@ def _execute_operation_layer_submit(
 
     forbidden_effects = _operation_layer_submit_forbidden_effects(body)
     if forbidden_effects:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_operation_layer_submit_forbidden_effect",
@@ -3091,8 +3107,8 @@ def _execute_operation_layer_submit(
     body_blockers = _dedupe_text(body.get("blockers") or [])
     if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
         if body_status != "exchange_submit_execution_disabled":
-            return _packet_from_operation_layer_submit(
-                packet=packet,
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
                 status="operation_layer_submit_blocked",
                 blocker_class="hard_safety_stop",
                 dispatch_status="blocked_by_disabled_smoke_submit_result",
@@ -3107,16 +3123,16 @@ def _execute_operation_layer_submit(
             or body.get("exchange_order_submitted") is True
             or body.get("order_lifecycle_submit_called") is True
         ):
-            return _packet_from_operation_layer_submit(
-                packet=packet,
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
                 status="operation_layer_submit_blocked",
                 blocker_class="hard_safety_stop",
                 dispatch_status="blocked_by_disabled_smoke_forbidden_effect",
                 blockers=["disabled_smoke_reported_submit_side_effect"],
                 submit_result=submit_result,
             )
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_disabled_smoke_passed",
             blocker_class="none",
             dispatch_status="official_operation_layer_disabled_smoke_passed",
@@ -3124,8 +3140,8 @@ def _execute_operation_layer_submit(
             submit_result=submit_result,
         )
     if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
@@ -3136,12 +3152,12 @@ def _execute_operation_layer_submit(
         )
     if body_status == "exchange_submit_orders_submitted":
         identity_blockers = _operation_layer_submit_result_identity_blockers(
-            packet=packet,
+            artifact=artifact,
             body=body,
         )
         if identity_blockers:
-            return _packet_from_operation_layer_submit(
-                packet=packet,
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
                 status="operation_layer_submit_failed",
                 blocker_class=_operation_layer_blocker_class(identity_blockers, []),
                 dispatch_status=(
@@ -3150,8 +3166,8 @@ def _execute_operation_layer_submit(
                 blockers=identity_blockers,
                 submit_result=submit_result,
             )
-        submit_packet = _packet_from_operation_layer_submit(
-            packet=packet,
+        submit_artifact = _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="submitted",
             blocker_class="none",
             dispatch_status="official_operation_layer_submit_completed",
@@ -3159,15 +3175,15 @@ def _execute_operation_layer_submit(
             submit_result=submit_result,
         )
         if not execute_post_submit_finalize:
-            return submit_packet
+            return submit_artifact
         return _execute_post_submit_finalize(
-            packet=submit_packet,
+            artifact=submit_artifact,
             cookie=cookie,
             timeout_seconds=timeout_seconds,
         )
     if body_status in {"entry_submit_failed", "protection_submit_failed"}:
-        return _packet_from_operation_layer_submit(
-            packet=packet,
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
             status="operation_layer_submit_failed",
             blocker_class=(
                 "active_position_resolution"
@@ -3179,8 +3195,8 @@ def _execute_operation_layer_submit(
             submit_result=submit_result,
         )
 
-    return _packet_from_operation_layer_submit(
-        packet=packet,
+    return _dispatch_artifact_from_operation_layer_submit(
+        artifact=artifact,
         status="operation_layer_submit_blocked",
         blocker_class=_operation_layer_blocker_class(body_blockers, []),
         dispatch_status="blocked_by_operation_layer_submit_result",
@@ -3211,15 +3227,15 @@ def _operation_layer_submit_forbidden_effects(body: dict[str, Any]) -> list[str]
 
 def _operation_layer_submit_result_identity_blockers(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     body: dict[str, Any],
 ) -> list[str]:
-    command_plan = _dict(packet.get("operation_layer_command_plan"))
-    readiness = _dict(packet.get("operation_layer_readiness"))
+    command_plan = _dict(artifact.get("operation_layer_command_plan"))
+    readiness = _dict(artifact.get("operation_layer_readiness"))
     ids = _dict(readiness.get("available_evidence_ids"))
     selected_runtime_ids = [
         str(item)
-        for item in _list(packet.get("selected_runtime_instance_ids"))
+        for item in _list(artifact.get("selected_runtime_instance_ids"))
         if str(item or "").strip()
     ]
     expected_authorization_id = _first_text(
@@ -3269,9 +3285,9 @@ def _operation_layer_submit_result_identity_blockers(
     return _dedupe_text(blockers)
 
 
-def _packet_from_operation_layer_submit(
+def _dispatch_artifact_from_operation_layer_submit(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     status: str,
     blocker_class: str,
     dispatch_status: str,
@@ -3291,7 +3307,7 @@ def _packet_from_operation_layer_submit(
     exchange_order_submitted = bool(body.get("exchange_order_submitted"))
     order_lifecycle_submit_called = bool(body.get("order_lifecycle_submit_called"))
     return {
-        **packet,
+        **artifact,
         "status": status,
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
@@ -3304,11 +3320,11 @@ def _packet_from_operation_layer_submit(
                 else None
             )
         ),
-        "owner_state": owner_state,
+        "owner_state": _owner_state_projection(owner_state),
         "operation_layer_submit_result": submit_result,
         "blockers": blockers,
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "official_operation_layer_submit_called": called,
             "official_operation_layer_submit_endpoint": called,
@@ -3328,7 +3344,7 @@ def _packet_from_operation_layer_submit(
                 submit_result.get("standing_authorization_consumed_for_real_submit")
             ),
             "mutates_pg": bool(
-                called or _dict(packet.get("safety_invariants")).get("mutates_pg")
+                called or _dict(artifact.get("safety_invariants")).get("mutates_pg")
             ),
             "pg_submit_evidence_mutated": called,
             "places_order": exchange_order_submitted,
@@ -3346,15 +3362,15 @@ def _packet_from_operation_layer_submit(
 
 def _execute_post_submit_finalize(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     cookie: str,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    context = _post_submit_finalize_context(packet)
+    context = _post_submit_finalize_context(artifact)
     blockers = list(context.get("blockers") or [])
     if blockers:
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalize_blocked",
             blocker_class=_post_submit_finalize_blocker_class(blockers),
             dispatch_status="blocked_before_post_submit_finalize",
@@ -3368,7 +3384,7 @@ def _execute_post_submit_finalize(
         )
 
     api_base = str(
-        _dict(packet.get("operation_layer_command_plan")).get("api_base")
+        _dict(artifact.get("operation_layer_command_plan")).get("api_base")
         or DEFAULT_API_BASE
     ).rstrip("/")
     runtime_instance_id = str(context["runtime_instance_id"])
@@ -3377,7 +3393,7 @@ def _execute_post_submit_finalize(
     path = (
         "/api/trading-console/strategy-runtimes/"
         f"{urllib.parse.quote(runtime_instance_id, safe='')}"
-        "/post-submit-finalize-packets"
+        "/post-submit-finalize-payloads"
     )
     body: dict[str, Any] = {
         "authorization_id": authorization_id,
@@ -3385,8 +3401,8 @@ def _execute_post_submit_finalize(
         "protection_blockers": [],
         "metadata": {
             "runtime_signal_watcher_resume_dispatcher": True,
-            "automatic_recovery_action": POST_SUBMIT_FINALIZE_ACTION,
-            "operation_layer_submit_dispatch_status": packet.get("dispatch_status"),
+            "non_authority_checkpoint": POST_SUBMIT_FINALIZE_ACTION,
+            "operation_layer_submit_dispatch_status": artifact.get("dispatch_status"),
         },
         "non_executing": True,
     }
@@ -3420,8 +3436,8 @@ def _execute_post_submit_finalize(
     }
     http_status = response.get("http_status")
     if http_status in {401, 403}:
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalize_blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_operator_session_http_error",
@@ -3429,8 +3445,8 @@ def _execute_post_submit_finalize(
             finalize_result=finalize_result,
         )
     if response.get("error"):
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalize_blocked",
             blocker_class="deployment_issue",
             dispatch_status="blocked_by_post_submit_finalize_http_error",
@@ -3443,8 +3459,8 @@ def _execute_post_submit_finalize(
     finalize_body = _dict(response.get("body"))
     forbidden_effects = _post_submit_finalize_forbidden_effects(finalize_body)
     if forbidden_effects:
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalize_blocked",
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_post_submit_finalize_forbidden_effect",
@@ -3464,8 +3480,8 @@ def _execute_post_submit_finalize(
         body=finalize_body,
     )
     if identity_blockers:
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalize_blocked",
             blocker_class=_post_submit_finalize_blocker_class(identity_blockers),
             dispatch_status="post_submit_finalize_result_identity_mismatch",
@@ -3477,8 +3493,8 @@ def _execute_post_submit_finalize(
             finalize_body
         )
         if closed_loop_blockers:
-            return _packet_from_post_submit_finalize(
-                packet=packet,
+            return _dispatch_artifact_from_post_submit_finalize(
+                artifact=artifact,
                 status="post_submit_finalize_blocked",
                 blocker_class=_post_submit_finalize_blocker_class(
                     closed_loop_blockers
@@ -3489,8 +3505,8 @@ def _execute_post_submit_finalize(
                 blockers=closed_loop_blockers,
                 finalize_result=finalize_result,
             )
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="settled",
             blocker_class="none",
             dispatch_status="post_submit_finalize_completed_next_attempt_ready",
@@ -3498,16 +3514,16 @@ def _execute_post_submit_finalize(
             finalize_result=finalize_result,
         )
     if body_status == "finalized_next_attempt_blocked":
-        return _packet_from_post_submit_finalize(
-            packet=packet,
+        return _dispatch_artifact_from_post_submit_finalize(
+            artifact=artifact,
             status="post_submit_finalized_next_attempt_blocked",
             blocker_class=_post_submit_finalize_blocker_class(blockers),
             dispatch_status="post_submit_finalize_completed_next_attempt_blocked",
             blockers=blockers or ["next_attempt_gate_blocked"],
             finalize_result=finalize_result,
         )
-    return _packet_from_post_submit_finalize(
-        packet=packet,
+    return _dispatch_artifact_from_post_submit_finalize(
+        artifact=artifact,
         status="post_submit_finalize_blocked",
         blocker_class=_post_submit_finalize_blocker_class(blockers),
         dispatch_status="blocked_by_post_submit_finalize_result",
@@ -3600,14 +3616,14 @@ def _post_submit_finalize_result_identity_blockers(
     return _dedupe_text(blockers)
 
 
-def _post_submit_finalize_context(packet: dict[str, Any]) -> dict[str, Any]:
-    body = _dict(_dict(packet.get("operation_layer_submit_result")).get("body"))
-    command_plan = _dict(packet.get("operation_layer_command_plan"))
-    readiness = _dict(packet.get("operation_layer_readiness"))
+def _post_submit_finalize_context(artifact: dict[str, Any]) -> dict[str, Any]:
+    body = _dict(_dict(artifact.get("operation_layer_submit_result")).get("body"))
+    command_plan = _dict(artifact.get("operation_layer_command_plan"))
+    readiness = _dict(artifact.get("operation_layer_readiness"))
     ids = _dict(readiness.get("available_evidence_ids"))
     selected_runtime_ids = [
         str(item)
-        for item in _list(packet.get("selected_runtime_instance_ids"))
+        for item in _list(artifact.get("selected_runtime_instance_ids"))
         if str(item or "").strip()
     ]
     authorization_id = _first_text(
@@ -3679,9 +3695,9 @@ def _post_submit_finalize_blocker_class(blockers: list[str]) -> str:
     return "missing_fact"
 
 
-def _packet_from_post_submit_finalize(
+def _dispatch_artifact_from_post_submit_finalize(
     *,
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     status: str,
     blocker_class: str,
     dispatch_status: str,
@@ -3699,22 +3715,22 @@ def _packet_from_post_submit_finalize(
     finalize_called = bool(finalize_result.get("called"))
     settlement_called = bool(body.get("post_submit_budget_settlement_id"))
     return {
-        **packet,
+        **artifact,
         "status": status,
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": CONTINUE_ACTION if status == "settled" else None,
-        "owner_state": owner_state,
+        "owner_state": _owner_state_projection(owner_state),
         "post_submit_finalize_result": finalize_result,
         "blockers": blockers,
         "warnings": _dedupe_text(
             [
-                *list(packet.get("warnings") or []),
+                *list(artifact.get("warnings") or []),
                 *list(body.get("warnings") or []),
             ]
         ),
         "safety_invariants": {
-            **_dict(packet.get("safety_invariants")),
+            **_dict(artifact.get("safety_invariants")),
             "dispatcher_only": False,
             "official_post_submit_finalize_called": finalize_called,
             "official_post_submit_finalize_endpoint": finalize_called,
@@ -3722,20 +3738,20 @@ def _packet_from_post_submit_finalize(
             "runtime_budget_mutated": settlement_called,
             "mutates_pg": bool(
                 finalize_called
-                or _dict(packet.get("safety_invariants")).get("mutates_pg")
+                or _dict(artifact.get("safety_invariants")).get("mutates_pg")
             ),
             "places_order": bool(
-                _dict(packet.get("safety_invariants")).get("places_order")
+                _dict(artifact.get("safety_invariants")).get("places_order")
             ),
             "calls_order_lifecycle": bool(
-                _dict(packet.get("safety_invariants")).get("calls_order_lifecycle")
+                _dict(artifact.get("safety_invariants")).get("calls_order_lifecycle")
             ),
             "exchange_write_called": bool(
-                _dict(packet.get("safety_invariants")).get("exchange_write_called")
+                _dict(artifact.get("safety_invariants")).get("exchange_write_called")
             ),
             "withdrawal_or_transfer_created": bool(
                 body.get("withdrawal_or_transfer_created")
-                or _dict(packet.get("safety_invariants")).get(
+                or _dict(artifact.get("safety_invariants")).get(
                     "withdrawal_or_transfer_created"
                 )
             ),
@@ -3758,7 +3774,7 @@ def _owner_state_for_operation_layer_submit(
             "blocked_at": "none",
             "blocked_reason": "none",
             "next_recover_condition": "post_submit_finalize_reconciliation_budget_settlement",
-            "automatic_recovery_action": POST_SUBMIT_FINALIZE_ACTION,
+            "non_authority_checkpoint": POST_SUBMIT_FINALIZE_ACTION,
             "downgrade_mode": "none",
             "exchange_submit_execution_status": body.get("status"),
         }
@@ -3769,7 +3785,7 @@ def _owner_state_for_operation_layer_submit(
             "blocked_at": "none",
             "blocked_reason": "none",
             "next_recover_condition": "fresh_strategy_signal_or_real_gateway_action",
-            "automatic_recovery_action": CONTINUE_ACTION,
+            "non_authority_checkpoint": CONTINUE_ACTION,
             "downgrade_mode": "none",
             "exchange_submit_execution_status": body.get("status"),
         }
@@ -3782,7 +3798,7 @@ def _owner_state_for_operation_layer_submit(
             "next_recover_condition": (
                 "reconcile_exchange_and_local_order_state_then_apply_recovery_policy"
             ),
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "run_post_submit_reconciliation_and_protection_failure_policy"
             ),
             "downgrade_mode": "halt_new_entries_until_reconciled",
@@ -3794,7 +3810,7 @@ def _owner_state_for_operation_layer_submit(
         "blocked_at": "OperationLayerSubmit",
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "operation_layer_submit_blocker_resolved",
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "refresh_operation_layer_evidence_and_rerun_action_time_finalgate"
         ),
         "downgrade_mode": "continue_watcher_observation_no_submit",
@@ -3817,7 +3833,7 @@ def _owner_state_for_post_submit_finalize(
             "blocked_at": "none",
             "blocked_reason": "none",
             "next_recover_condition": "fresh_strategy_signal_for_next_attempt",
-            "automatic_recovery_action": CONTINUE_ACTION,
+            "non_authority_checkpoint": CONTINUE_ACTION,
             "downgrade_mode": "none",
             "post_submit_finalize_status": body.get("status"),
             "next_attempt_gate_status": _dict(body.get("next_attempt_gate")).get(
@@ -3831,7 +3847,7 @@ def _owner_state_for_post_submit_finalize(
             "blocked_at": "NextAttemptGate",
             "blocked_reason": blockers[0] if blockers else dispatch_status,
             "next_recover_condition": "next_attempt_gate_blocker_resolved",
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "resolve_next_attempt_gate_blocker_before_new_signal"
             ),
             "downgrade_mode": "halt_new_entries_until_next_gate_ready",
@@ -3843,7 +3859,7 @@ def _owner_state_for_post_submit_finalize(
         "blocked_at": "PostSubmitFinalize",
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "post_submit_finalize_blocker_resolved",
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "retry_official_post_submit_finalize_after_repair"
         ),
         "downgrade_mode": "halt_new_entries_until_post_submit_settled",
@@ -3865,7 +3881,7 @@ def _owner_state_for_preflight(
             "blocked_at": "none",
             "blocked_reason": "none",
             "next_recover_condition": "official_operation_layer_submit_evidence_is_prepared",
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
             ),
             "downgrade_mode": "none",
@@ -3880,7 +3896,7 @@ def _owner_state_for_preflight(
             "blocked_at": "operator_session",
             "blocked_reason": dispatch_status,
             "next_recover_condition": "operator_session_available_for_local_official_preflight",
-            "automatic_recovery_action": "restore_operator_session_or_local_session_signing",
+            "non_authority_checkpoint": "restore_operator_session_or_local_session_signing",
             "downgrade_mode": "continue_watcher_observation_no_submit",
         }
     if dispatch_status == "blocked_by_action_time_finalgate":
@@ -3890,7 +3906,7 @@ def _owner_state_for_preflight(
             "blocked_at": "FinalGate",
             "blocked_reason": blockers[0] if blockers else "action_time_finalgate_blocked",
             "next_recover_condition": "fresh_action_time_facts_pass_finalgate",
-            "automatic_recovery_action": "refresh_action_time_facts_or_downgrade_to_observation",
+            "non_authority_checkpoint": "refresh_action_time_facts_or_downgrade_to_observation",
             "downgrade_mode": "observe_only_no_submit",
         }
     return {
@@ -3899,7 +3915,7 @@ def _owner_state_for_preflight(
         "blocked_at": "FinalGate",
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "preflight_blocker_resolved",
-        "automatic_recovery_action": "retry_official_action_time_finalgate_preflight_after_repair",
+        "non_authority_checkpoint": "retry_official_action_time_finalgate_preflight_after_repair",
         "downgrade_mode": "continue_watcher_observation_no_submit",
     }
 
@@ -3920,8 +3936,8 @@ def _owner_state_for_fresh_authorization(
             "next_recover_condition": (
                 "readiness_handoff_rebuilt_with_fresh_submit_authorization_id"
             ),
-            "automatic_recovery_action": (
-                "rerun_readiness_bridge_or_dispatcher_for_action_time_finalgate"
+            "non_authority_checkpoint": (
+                "rerun_readiness_evidence_or_dispatcher_for_action_time_finalgate"
             ),
             "downgrade_mode": "none",
         }
@@ -3934,7 +3950,7 @@ def _owner_state_for_fresh_authorization(
             "next_recover_condition": (
                 "fresh_submit_authorization_binding_api_returns_ready"
             ),
-            "automatic_recovery_action": (
+            "non_authority_checkpoint": (
                 FRESH_AUTHORIZATION_BINDING_ACTION
             ),
             "downgrade_mode": "armed_observation_no_submit",
@@ -3949,7 +3965,7 @@ def _owner_state_for_fresh_authorization(
             "blocked_at": "operator_session",
             "blocked_reason": dispatch_status,
             "next_recover_condition": "operator_session_available_for_local_binding_api",
-            "automatic_recovery_action": "restore_operator_session_or_local_session_signing",
+            "non_authority_checkpoint": "restore_operator_session_or_local_session_signing",
             "downgrade_mode": "continue_watcher_observation_no_submit",
         }
     return {
@@ -3958,7 +3974,7 @@ def _owner_state_for_fresh_authorization(
         "blocked_at": "fresh_submit_authorization",
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "fresh_authorization_binding_blocker_resolved",
-        "automatic_recovery_action": (
+        "non_authority_checkpoint": (
             "retry_official_fresh_submit_authorization_binding_after_repair"
         ),
         "downgrade_mode": "continue_watcher_observation_no_submit",
@@ -3968,7 +3984,7 @@ def _owner_state_for_fresh_authorization(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a Runtime Signal Watcher resume dispatch packet, optionally "
+            "Build a Runtime Signal Watcher resume dispatch artifact, optionally "
             "calling the official action-time FinalGate preflight GET."
         ),
     )
@@ -3992,7 +4008,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Optional selected StrategyGroup scope. When set, actionable "
             "fresh-authorization, FinalGate, or Operation Layer dispatch is "
-            "blocked unless the resume packet proves the action belongs to "
+            "blocked unless the resume artifact proves the action belongs to "
             "that StrategyGroup."
         ),
     )
@@ -4051,7 +4067,7 @@ def main(argv: list[str] | None = None) -> int:
     operation_layer_evidence_report, operation_layer_evidence_report_path = (
         _read_optional_json(args.operation_layer_evidence_json)
     )
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_read_json(source_path),
         source_path=source_path,
         api_base=args.api_base,
@@ -4065,9 +4081,9 @@ def main(argv: list[str] | None = None) -> int:
         execute_post_submit_finalize=args.execute_post_submit_finalize,
         selected_strategy_group_id=args.selected_strategy_group_id,
     )
-    _write_json(Path(args.output_json).expanduser(), packet)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+    _write_json(Path(args.output_json).expanduser(), artifact)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         WAITING_STATUS,
         READY_STATUS,
         *FRESH_AUTHORIZATION_STATUSES,

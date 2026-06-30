@@ -1108,4 +1108,4 @@ def _metadata_has_owner_review(metadata: dict[str, Any]) -> bool:
         return True
     if bool(metadata.get("owner_review_verified")):
         return True
-    return bool(metadata.get("owner_review_decision_id"))
+    return bool(metadata.get("owner_review_outcome_id"))

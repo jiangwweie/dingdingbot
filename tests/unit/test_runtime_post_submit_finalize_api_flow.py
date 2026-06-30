@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 from scripts import runtime_post_submit_finalize_api_flow
 from src.interfaces import api_trading_console
 from src.domain.runtime_post_submit_finalize import (
@@ -15,14 +17,14 @@ from tests.unit.test_runtime_execution_submit_outcome_review import (
     _submitted_result,
 )
 from src.domain.runtime_post_submit_finalize import (
-    build_runtime_post_submit_finalize_packet,
+    build_runtime_post_submit_finalize_payload,
 )
 
 
 class _Client:
     def __init__(self, *, http_status: int = 200, body: dict | None = None) -> None:
         self.http_status = http_status
-        self.body = body or build_runtime_post_submit_finalize_packet(
+        self.body = body or build_runtime_post_submit_finalize_payload(
             authorization_id="auth-1",
             runtime=_runtime(boundary={"budget_reserved": 0}),
             exchange_submit_execution_result=_submitted_result(),
@@ -64,22 +66,25 @@ def _args(**overrides):
 def test_post_submit_finalize_api_flow_posts_runtime_finalize_request():
     client = _Client()
 
-    packet = runtime_post_submit_finalize_api_flow._build_packet(
+    artifact = runtime_post_submit_finalize_api_flow._build_artifact(
         _args(),
         client=client,
     )
 
-    assert packet["status"] == (
+    assert artifact["status"] == (
         RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT.value
     )
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["pre_submit_rehearsal_called"] is False
+    assert artifact["post_submit_finalize_payload"]["authorization_id"] == "auth-1"
+    assert "post_submit_finalize_packet" not in artifact
+    assert not hasattr(runtime_post_submit_finalize_api_flow, "_build_packet")
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["pre_submit_rehearsal_called"] is False
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["method"] == "POST"
     assert call["path"] == (
         "/api/trading-console/strategy-runtimes/runtime-1/"
-        "post-submit-finalize-packets"
+        "post-submit-finalize-payloads"
     )
     assert call["body"]["authorization_id"] == "auth-1"
     assert call["body"]["reservation_id"] == "runtime-attempt-reservation-auth-1"
@@ -91,37 +96,37 @@ def test_post_submit_finalize_api_flow_posts_runtime_finalize_request():
 def test_post_submit_finalize_api_flow_can_omit_authorization_for_latest_result():
     client = _Client()
 
-    packet = runtime_post_submit_finalize_api_flow._build_packet(
+    artifact = runtime_post_submit_finalize_api_flow._build_artifact(
         _args(authorization_id=None, reservation_id=None),
         client=client,
     )
 
-    assert packet["authorization_id"] == "auth-1"
+    assert artifact["authorization_id"] == "auth-1"
     assert "authorization_id" not in client.calls[0]["body"]
     assert "reservation_id" not in client.calls[0]["body"]
 
 
 def test_post_submit_finalize_api_flow_keeps_blocked_http_errors():
-    packet = runtime_post_submit_finalize_api_flow._build_packet(
+    artifact = runtime_post_submit_finalize_api_flow._build_artifact(
         _args(),
         client=_Client(http_status=503, body={"detail": "unavailable"}),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "post_submit_finalize_api"
-    assert "post_submit_finalize_api_http_503" in packet["blockers"]
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "post_submit_finalize_api"
+    assert "post_submit_finalize_api_http_503" in artifact["blockers"]
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
 def test_post_submit_finalize_api_flow_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy finalize flow")
         return {"status": "blocked", "ok": True}
 
     monkeypatch.setattr(
         runtime_post_submit_finalize_api_flow,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,
@@ -142,10 +147,29 @@ def test_post_submit_finalize_api_flow_cli_stdout_is_json_only(monkeypatch, caps
     assert "inner noisy finalize flow" in captured.err
 
 
+def test_post_submit_finalize_api_flow_cli_help_uses_payload_wording(
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["runtime_post_submit_finalize_api_flow.py", "--help"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        runtime_post_submit_finalize_api_flow.main()
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "post-submit finalize payload API" in captured.out
+    assert "post-submit finalize packet API" not in captured.out
+
+
 async def test_trading_console_endpoint_finalizes_latest_submit_without_manual_auth(
     monkeypatch,
 ):
-    packet = build_runtime_post_submit_finalize_packet(
+    packet = build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=_runtime(boundary={"budget_reserved": 0}),
         exchange_submit_execution_result=_submitted_result(),
@@ -188,7 +212,7 @@ async def test_trading_console_endpoint_finalizes_latest_submit_without_manual_a
     )
 
     response = await (
-        api_trading_console.runtime_post_submit_finalize_packet_for_runtime(
+        api_trading_console.runtime_post_submit_finalize_payload_for_runtime(
             "runtime-1",
             api_trading_console.RuntimePostSubmitFinalizeRequest(),
         )
@@ -207,7 +231,7 @@ async def test_trading_console_endpoint_finalizes_latest_submit_without_manual_a
 
 class _FinalizeService:
     def __init__(self, packet) -> None:
-        self.packet = packet
+        self.enablement_evidence = packet
         self.latest_calls = []
         self.authorization_calls = []
 
@@ -227,8 +251,8 @@ class _FinalizeService:
                 "active_positions_count": active_positions_count,
             }
         )
-        return self.packet
+        return self.enablement_evidence
 
     async def finalize_authorization(self, *args, **kwargs):
         self.authorization_calls.append({"args": args, "kwargs": kwargs})
-        return self.packet
+        return self.enablement_evidence

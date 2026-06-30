@@ -46,7 +46,7 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
+async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
 
     from src.application.reconciliation import ReconciliationService
@@ -136,7 +136,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-exchange",
         action="store_true",
-        help="Use only local PG facts; packet may warn on missing exchange facts.",
+        help="Use only local PG facts; artifact may warn on missing exchange facts.",
     )
     parser.add_argument(
         "--skip-reconciliation",
@@ -144,8 +144,8 @@ def main() -> int:
         help="Skip live reconciliation read-model build.",
     )
     args = parser.parse_args()
-    payload = asyncio.run(_build_packet(args))
-    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    artifact = asyncio.run(_build_artifact(args))
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, default=str))
     return 0
 
 

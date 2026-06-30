@@ -1,0 +1,16 @@
+{
+  "checks": {
+    "ready_for_real_order_action": false,
+    "runtime_dry_run_audit_passed": true
+  },
+  "owner_state": {
+    "non_authority_checkpoint": "continue_watcher_observation",
+    "status": "waiting_for_opportunity"
+  },
+  "ready_for_real_order_action": false,
+  "real_order_boundary": {
+    "ready_for_real_order_action": false
+  },
+  "scope": "strategygroup_runtime_goal_status",
+  "status": "waiting_for_market"
+}

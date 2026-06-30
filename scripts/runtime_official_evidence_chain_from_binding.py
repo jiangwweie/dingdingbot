@@ -44,7 +44,7 @@ def _read_json(path: str) -> dict[str, Any]:
 
 
 def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    for key in ("api_payload", "packet", "body"):
+    for key in ("api_payload", "body"):
         nested = payload.get(key)
         if isinstance(nested, dict):
             return nested

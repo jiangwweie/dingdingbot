@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from src.application.runtime_next_attempt_strategy_planning_service import (
     RuntimeNextAttemptStrategyPlanningService,
     RuntimeNextAttemptStrategyPlanningStatus,
@@ -16,13 +19,13 @@ from src.application.runtime_strategy_signal_planning_service import (
 )
 from src.domain.runtime_next_attempt_release import (
     RuntimeNextAttemptReleaseStatus,
-    build_runtime_next_attempt_release_packet,
+    build_runtime_next_attempt_release_evidence,
 )
 from src.domain.runtime_execution_post_submit_budget_settlement import (
     RuntimeExecutionPostSubmitBudgetSettlementStatus,
 )
 from src.domain.runtime_post_submit_finalize import (
-    build_runtime_post_submit_finalize_packet,
+    build_runtime_post_submit_finalize_payload,
 )
 from src.domain.signal_evaluation import OrderCandidate
 from src.domain.strategy_family_signal import (
@@ -104,8 +107,8 @@ def _signal_input(*, evaluation_id: str = "eval-fresh") -> StrategyFamilySignalI
     )
 
 
-def _ready_post_submit_packet():
-    return build_runtime_post_submit_finalize_packet(
+def _ready_post_submit_payload():
+    return build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
         exchange_submit_execution_result=_submitted_result(),
@@ -128,8 +131,8 @@ def _ready_post_submit_packet():
     )
 
 
-def _blocked_post_submit_packet():
-    return build_runtime_post_submit_finalize_packet(
+def _blocked_post_submit_payload():
+    return build_runtime_post_submit_finalize_payload(
         authorization_id="auth-1",
         runtime=_runtime(),
         exchange_submit_execution_result=_submitted_result(),
@@ -141,22 +144,22 @@ def _blocked_post_submit_packet():
     )
 
 
-def _ready_release_packet():
-    return build_runtime_next_attempt_release_packet(
+def _ready_release_evidence():
+    return build_runtime_next_attempt_release_evidence(
         active_position_resolution=_resolution(
             RuntimeActivePositionResolutionStatus.READY_FOR_NEXT_ATTEMPT_GATE,
         ),
-        next_attempt_gate_packet=_clear_gate(),
+        next_attempt_gate_evidence=_clear_gate(),
         now_ms=NOW_MS,
     )
 
 
-def _blocked_release_packet():
-    return build_runtime_next_attempt_release_packet(
+def _blocked_release_evidence():
+    return build_runtime_next_attempt_release_evidence(
         active_position_resolution=_resolution(
             RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP,
         ),
-        next_attempt_gate_packet=None,
+        next_attempt_gate_evidence=None,
         now_ms=NOW_MS,
     )
 
@@ -269,26 +272,33 @@ async def test_next_attempt_strategy_planning_calls_shadow_planner_only_after_re
         strategy_signal_planner=planner,
     )
 
-    packet = await service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=_ready_post_submit_packet(),
+    artifact = await service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=_ready_post_submit_payload(),
         signal_input=signal_input,
         runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
         context_id="context-1",
     )
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT
     )
     assert planner.calls == 1
-    assert packet.order_candidate_id == "order-candidate-eval-fresh"
-    assert packet.operator_command_plan["creates_shadow_candidate"] is True
-    assert packet.operator_command_plan["creates_executable_execution_intent"] is False
-    assert packet.operator_command_plan["requires_official_final_gate"] is True
+    assert artifact.order_candidate_id == "order-candidate-eval-fresh"
+    assert artifact.strategy_planning_plan["creates_shadow_candidate"] is True
+    assert artifact.strategy_planning_plan["creates_executable_execution_intent"] is False
+    assert artifact.strategy_planning_plan["requires_official_final_gate"] is True
+    assert planner.last_metadata["source_post_submit_finalize_payload_id"] == (
+        artifact.source_post_submit_finalize_payload_id
+    )
+    assert "source_post_submit_finalize_packet_id" not in planner.last_metadata
     assert planner.last_metadata["consumed_authorization_replay_only"] is True
     assert planner.last_metadata["requires_fresh_authorization_before_submit"] is True
-    assert packet.exchange_called is False
-    assert packet.order_lifecycle_called is False
-    assert packet.exchange_order_submitted is False
+    payload = artifact.model_dump(mode="json")
+    assert "source_post_submit_finalize_payload_id" in payload
+    assert "post_submit_finalize_packet_id" not in payload
+    assert artifact.exchange_called is False
+    assert artifact.order_lifecycle_called is False
+    assert artifact.exchange_order_submitted is False
 
 
 async def test_next_attempt_strategy_planning_does_not_call_planner_when_gate_blocked():
@@ -302,20 +312,20 @@ async def test_next_attempt_strategy_planning_does_not_call_planner_when_gate_bl
         strategy_signal_planner=planner,
     )
 
-    packet = await service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=_blocked_post_submit_packet(),
+    artifact = await service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=_blocked_post_submit_payload(),
         signal_input=signal_input,
         runtime=_runtime(),
     )
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeNextAttemptStrategyPlanningStatus.BLOCKED_BY_POST_SUBMIT_GATE
     )
     assert planner.calls == 0
-    assert "post_submit_finalize_not_ready_for_next_attempt" in packet.blockers
-    assert "runtime_active_position_slot_in_use" in packet.blockers
-    assert packet.operator_command_plan["creates_shadow_candidate"] is False
-    assert packet.exchange_order_submitted is False
+    assert "post_submit_finalize_not_ready_for_next_attempt" in artifact.blockers
+    assert "runtime_active_position_slot_in_use" in artifact.blockers
+    assert artifact.strategy_planning_plan["creates_shadow_candidate"] is False
+    assert artifact.exchange_order_submitted is False
 
 
 async def test_next_attempt_strategy_planning_waits_when_fresh_signal_is_observe_only():
@@ -327,20 +337,20 @@ async def test_next_attempt_strategy_planning_waits_when_fresh_signal_is_observe
         strategy_signal_planner=planner,
     )
 
-    packet = await service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=_ready_post_submit_packet(),
+    artifact = await service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=_ready_post_submit_payload(),
         signal_input=signal_input,
         runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
     )
 
-    assert packet.status == RuntimeNextAttemptStrategyPlanningStatus.WAITING_FOR_SIGNAL
+    assert artifact.status == RuntimeNextAttemptStrategyPlanningStatus.WAITING_FOR_SIGNAL
     assert planner.calls == 1
-    assert packet.order_candidate_id is None
-    assert packet.operator_command_plan["next_step"] == (
+    assert artifact.order_candidate_id is None
+    assert artifact.strategy_planning_plan["next_step"] == (
         "observe_only_or_wait_for_next_closed_bar"
     )
-    assert packet.operator_command_plan["creates_shadow_candidate"] is False
-    assert packet.execution_intent_created is False
+    assert artifact.strategy_planning_plan["creates_shadow_candidate"] is False
+    assert artifact.execution_intent_created is False
 
 
 async def test_next_attempt_strategy_planning_blocks_runtime_mismatch_before_planner():
@@ -354,17 +364,17 @@ async def test_next_attempt_strategy_planning_blocks_runtime_mismatch_before_pla
         strategy_signal_planner=planner,
     )
 
-    packet = await service.plan_from_post_submit_gate(
-        post_submit_finalize_packet=_ready_post_submit_packet(),
+    artifact = await service.plan_from_post_submit_gate(
+        post_submit_finalize_payload=_ready_post_submit_payload(),
         signal_input=signal_input,
         runtime=_runtime(runtime_instance_id="runtime-other"),
     )
 
-    assert packet.status == (
+    assert artifact.status == (
         RuntimeNextAttemptStrategyPlanningStatus.BLOCKED_BY_POST_SUBMIT_GATE
     )
     assert planner.calls == 0
-    assert "post_submit_runtime_mismatch" in packet.blockers
+    assert "post_submit_runtime_mismatch" in artifact.blockers
 
 
 async def test_next_attempt_strategy_planning_calls_shadow_planner_after_release_ready():
@@ -377,12 +387,12 @@ async def test_next_attempt_strategy_planning_calls_shadow_planner_after_release
     service = RuntimeNextAttemptStrategyPlanningService(
         strategy_signal_planner=planner,
     )
-    release_packet = _ready_release_packet()
+    release_evidence = _ready_release_evidence()
 
-    assert release_packet.status == RuntimeNextAttemptReleaseStatus.READY_FOR_STRATEGY_SIGNAL
+    assert release_evidence.status == RuntimeNextAttemptReleaseStatus.READY_FOR_STRATEGY_SIGNAL
 
     packet = await service.plan_from_release_gate(
-        next_attempt_release_packet=release_packet,
+        next_attempt_release_evidence=release_evidence,
         signal_input=signal_input,
         runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
         context_id="release-context-1",
@@ -392,15 +402,25 @@ async def test_next_attempt_strategy_planning_calls_shadow_planner_after_release
         RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT
     )
     assert planner.calls == 1
-    assert packet.source_release_packet_id == release_packet.packet_id
-    assert packet.order_candidate_id == "order-candidate-eval-fresh"
-    assert packet.operator_command_plan["creates_shadow_candidate"] is True
-    assert packet.operator_command_plan["creates_executable_execution_intent"] is False
-    assert packet.operator_command_plan["live_submit_allowed"] is False
-    assert packet.operator_command_plan["requires_official_final_gate"] is True
-    assert planner.last_metadata["source_next_attempt_release_packet_id"] == (
-        release_packet.packet_id
+    assert (
+        packet.source_release_evidence_id
+        == release_evidence.release_evidence_id
     )
+    payload = packet.model_dump(mode="json")
+    assert (
+        payload["source_release_evidence_id"]
+        == release_evidence.release_evidence_id
+    )
+    assert "source_release_packet_id" not in payload
+    assert packet.order_candidate_id == "order-candidate-eval-fresh"
+    assert packet.strategy_planning_plan["creates_shadow_candidate"] is True
+    assert packet.strategy_planning_plan["creates_executable_execution_intent"] is False
+    assert packet.strategy_planning_plan["live_submit_allowed"] is False
+    assert packet.strategy_planning_plan["requires_official_final_gate"] is True
+    assert planner.last_metadata["source_next_attempt_release_evidence_id"] == (
+        release_evidence.release_evidence_id
+    )
+    assert "source_next_attempt_release_packet_id" not in planner.last_metadata
     assert planner.last_metadata["release_ready_for_strategy_signal"] is True
     assert planner.last_metadata["requires_fresh_authorization_before_submit"] is True
     assert packet.exchange_order_submitted is False
@@ -417,10 +437,10 @@ async def test_next_attempt_strategy_planning_does_not_call_planner_when_release
     service = RuntimeNextAttemptStrategyPlanningService(
         strategy_signal_planner=planner,
     )
-    release_packet = _blocked_release_packet()
+    release_evidence = _blocked_release_evidence()
 
     packet = await service.plan_from_release_gate(
-        next_attempt_release_packet=release_packet,
+        next_attempt_release_evidence=release_evidence,
         signal_input=signal_input,
         runtime=_runtime(),
     )
@@ -432,7 +452,7 @@ async def test_next_attempt_strategy_planning_does_not_call_planner_when_release
     assert "next_attempt_release_not_ready_for_strategy_signal" in packet.blockers
     assert "strategy_signal_observation_not_allowed_by_release" in packet.blockers
     assert "shadow_candidate_planning_not_allowed_by_release" in packet.blockers
-    assert packet.operator_command_plan["creates_shadow_candidate"] is False
+    assert packet.strategy_planning_plan["creates_shadow_candidate"] is False
     assert packet.exchange_order_submitted is False
 
 
@@ -442,12 +462,12 @@ async def test_trading_console_next_attempt_strategy_plan_endpoint_uses_injected
     from src.interfaces import api as api_module
     from src.interfaces.api_trading_console import (
         RuntimeNextAttemptStrategyPlanningRequest,
-        runtime_next_attempt_strategy_plan_from_post_submit_packet,
+        runtime_next_attempt_strategy_plan_from_post_submit_payload,
     )
 
     runtime = _runtime(boundary={"budget_reserved": Decimal("0")})
     signal_input = _signal_input()
-    post_submit_packet = _ready_post_submit_packet()
+    post_submit_payload = _ready_post_submit_payload()
     planner = _Planner(
         planning_status=(
             RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
@@ -475,10 +495,10 @@ async def test_trading_console_next_attempt_strategy_plan_endpoint_uses_injected
         raising=False,
     )
 
-    response = await runtime_next_attempt_strategy_plan_from_post_submit_packet(
+    response = await runtime_next_attempt_strategy_plan_from_post_submit_payload(
         runtime.runtime_instance_id,
         RuntimeNextAttemptStrategyPlanningRequest(
-            post_submit_finalize_packet=post_submit_packet,
+            post_submit_finalize_payload=post_submit_payload,
             signal_input=signal_input,
             metadata={"unit_endpoint": True},
         ),
@@ -491,3 +511,15 @@ async def test_trading_console_next_attempt_strategy_plan_endpoint_uses_injected
     assert response.order_candidate_id == "order-candidate-eval-fresh"
     assert response.metadata["unit_endpoint"] is True
     assert response.exchange_order_submitted is False
+
+
+def test_trading_console_next_attempt_strategy_plan_rejects_legacy_packet_field():
+    from src.interfaces.api_trading_console import (
+        RuntimeNextAttemptStrategyPlanningRequest,
+    )
+
+    with pytest.raises(ValidationError):
+        RuntimeNextAttemptStrategyPlanningRequest(
+            post_submit_finalize_packet=_ready_post_submit_payload(),
+            signal_input=_signal_input(),
+        )

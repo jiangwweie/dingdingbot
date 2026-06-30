@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from scripts.runtime_active_observation_status import build_status_packet
+from scripts.runtime_active_observation_status import build_status_artifact
 
 
 def _write_json(path, payload):
@@ -13,7 +13,7 @@ def _write_json(path, payload):
 def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "supervisor-packet.json",
+        root / "supervisor-artifact.json",
         {
             "status": "supervisor_running",
             "safety_invariants": {
@@ -23,7 +23,7 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
         },
     )
     _write_json(
-        root / "loop-packet.json",
+        root / "loop-artifact.json",
         {
             "status": "waiting_for_signal",
             "iterations_requested": 5,
@@ -52,11 +52,11 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
                         },
                     }
                 ],
-                "operator_command_plan": {
+                "observation_plan": {
                     "next_step": "continue_waiting_for_strategy_signal"
                 },
             },
-            "operator_command_plan": {
+            "observation_loop_plan": {
                 "next_step": "continue_waiting_for_strategy_signal"
             },
             "safety_invariants": {
@@ -70,66 +70,90 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["iterations_requested"] == 5
-    assert packet["iterations_completed"] == 2
-    assert packet["iterations_remaining"] == 3
-    assert packet["latest_iteration"] == 2
-    assert packet["observation_running"] is True
-    assert packet["observation_window_complete"] is False
-    assert packet["operator_command_plan"]["observation_next_step"] == (
+    assert artifact["status"] == "waiting_for_signal"
+    assert artifact["iterations_requested"] == 5
+    assert artifact["iterations_completed"] == 2
+    assert artifact["iterations_remaining"] == 3
+    assert artifact["latest_iteration"] == 2
+    assert artifact["observation_running"] is True
+    assert artifact["observation_window_complete"] is False
+    assert "operator_command_plan" not in artifact
+    assert artifact["observation_plan"]["not_execution_authority"] is True
+    assert artifact["observation_plan"]["observation_next_step"] == (
         "continue_active_observation_loop"
     )
-    assert packet["active_runtime_count"] == 1
-    assert packet["monitored_runtime_count"] == 1
-    assert packet["selected_runtime_instance_ids"] == ["runtime-1"]
-    assert packet["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
-    assert packet["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
-    assert packet["safety_invariants"]["read_packets_only"] is True
-    assert packet["safety_invariants"]["connects_to_api"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["active_runtime_count"] == 1
+    assert artifact["monitored_runtime_count"] == 1
+    assert artifact["selected_runtime_instance_ids"] == ["runtime-1"]
+    assert artifact["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
+    assert artifact["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
+    assert "legacy_artifact_sources" not in artifact
+    assert artifact["safety_invariants"]["read_artifacts_only"] is True
+    assert artifact["safety_invariants"]["connects_to_api"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_status_blocks_on_stale_packets(tmp_path):
+def test_status_blocks_on_stale_artifacts(tmp_path):
     root = tmp_path / "obs"
-    _write_json(root / "loop-packet.json", {"status": "waiting_for_signal"})
+    _write_json(root / "loop-artifact.json", {"status": "waiting_for_signal"})
 
-    packet = build_status_packet(root, stale_after_seconds=0, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=0, now_ms=10**15)
 
-    assert packet["status"] == "stale"
-    assert packet["packet_stale"] is True
-    assert "active_observation_packets_stale_or_missing" in packet["blockers"]
+    assert artifact["status"] == "stale"
+    assert artifact["artifact_stale"] is True
+    assert "active_observation_artifacts_stale_or_missing" in artifact["blockers"]
+
+
+def test_status_ignores_legacy_packet_sources(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(root / "loop-packet.json", {"status": "blocked"})
+
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert artifact["status"] == "stale"
+    assert artifact["latest_status"] is None
+    assert "legacy_artifact_sources" not in artifact
+    loop_source = next(
+        source for source in artifact["artifact_sources"] if source["role"] == "loop"
+    )
+    assert loop_source == {
+        "role": "loop",
+        "artifact_name": "loop-artifact.json",
+        "source_path": str(root / "loop-artifact.json"),
+        "loaded": False,
+    }
 
 
 def test_status_blocks_on_forbidden_effects(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "followup-packet.json",
+        root / "followup-artifact.json",
         {
             "status": "disabled_smoke_blocked",
             "safety_invariants": {"exchange_order_submitted": True},
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "blocked_forbidden_effect"
-    assert "active_observation_forbidden_effects_detected" in packet["blockers"]
-    assert packet["forbidden_effects"] == [
-        "followup-packet.json:exchange_order_submitted"
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert "active_observation_forbidden_effects_detected" in artifact["blockers"]
+    assert artifact["forbidden_effects"] == [
+        "followup-artifact.json:exchange_order_submitted"
     ]
+    assert "legacy_artifact_sources" not in artifact
 
 
 def test_status_allows_standing_operation_layer_evidence_prep_effects(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "followup-packet.json",
+        root / "followup-artifact.json",
         {
             "status": "disabled_smoke_blocked",
-            "operator_command_plan": {
-                "mutating_attempt_consumption_allowed_by_this_packet": True
+            "followup_plan": {
+                "mutating_attempt_consumption_allowed_by_this_artifact": True
             },
             "safety_invariants": {
                 "standing_authorized_operation_layer_evidence_prep_called": True,
@@ -145,31 +169,31 @@ def test_status_allows_standing_operation_layer_evidence_prep_effects(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "blocked"
-    assert packet["forbidden_effects"] == []
-    assert "active_observation_forbidden_effects_detected" not in packet["blockers"]
-    assert packet["allowed_operation_layer_evidence_prep_effects"] == [
-        "followup-packet.json:attempt_counter_mutated",
-        "followup-packet.json:runtime_budget_mutated",
+    assert artifact["status"] == "blocked"
+    assert artifact["forbidden_effects"] == []
+    assert "active_observation_forbidden_effects_detected" not in artifact["blockers"]
+    assert artifact["allowed_operation_layer_evidence_prep_effects"] == [
+        "followup-artifact.json:attempt_counter_mutated",
+        "followup-artifact.json:runtime_budget_mutated",
     ]
-    assert packet["safety_invariants"][
+    assert artifact["safety_invariants"][
         "allowed_operation_layer_evidence_prep_effects"
     ] == [
-        "followup-packet.json:attempt_counter_mutated",
-        "followup-packet.json:runtime_budget_mutated",
+        "followup-artifact.json:attempt_counter_mutated",
+        "followup-artifact.json:runtime_budget_mutated",
     ]
 
 
 def test_status_blocks_evidence_prep_when_dangerous_effect_appears(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "followup-packet.json",
+        root / "followup-artifact.json",
         {
             "status": "disabled_smoke_blocked",
-            "operator_command_plan": {
-                "mutating_attempt_consumption_allowed_by_this_packet": True
+            "followup_plan": {
+                "mutating_attempt_consumption_allowed_by_this_artifact": True
             },
             "safety_invariants": {
                 "standing_authorized_operation_layer_evidence_prep_called": True,
@@ -180,23 +204,23 @@ def test_status_blocks_evidence_prep_when_dangerous_effect_appears(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "blocked_forbidden_effect"
-    assert packet["forbidden_effects"] == [
-        "followup-packet.json:exchange_order_submitted",
-        "followup-packet.json:attempt_counter_mutated",
-        "followup-packet.json:runtime_budget_mutated",
+    assert artifact["status"] == "blocked_forbidden_effect"
+    assert artifact["forbidden_effects"] == [
+        "followup-artifact.json:exchange_order_submitted",
+        "followup-artifact.json:attempt_counter_mutated",
+        "followup-artifact.json:runtime_budget_mutated",
     ]
 
 
 def test_status_marks_prepare_followup_as_attention(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "followup-packet.json",
+        root / "followup-artifact.json",
         {
             "status": "ready_for_prepare_records",
-            "operator_command_plan": {
+            "followup_plan": {
                 "next_step": "review_ready_signal_then_continue_prepare_record_path"
             },
             "safety_invariants": {
@@ -206,19 +230,44 @@ def test_status_marks_prepare_followup_as_attention(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "attention"
-    assert packet["latest_status"] == "ready_for_prepare_records"
-    assert packet["operator_command_plan"]["followup_next_step"] == (
+    assert artifact["status"] == "attention"
+    assert artifact["latest_status"] == "ready_for_prepare_records"
+    assert artifact["observation_plan"]["followup_next_step"] == (
         "review_ready_signal_then_continue_prepare_record_path"
+    )
+
+
+def test_status_ignores_legacy_operator_command_plan_next_step(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "followup-artifact.json",
+        {
+            "status": "ready_for_prepare_records",
+            "operator_command_plan": {
+                "next_step": "legacy_operator_step_must_not_drive_status"
+            },
+            "safety_invariants": {
+                "exchange_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert artifact["status"] == "attention"
+    assert artifact["observation_plan"]["followup_next_step"] is None
+    assert artifact["observation_plan"]["observation_next_step"] == (
+        "review_non_executing_prepare_or_preview_artifact"
     )
 
 
 def test_status_exposes_observed_prepare_record_evidence(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "loop-packet.json",
+        root / "loop-artifact.json",
         {
             "status": "ready_for_final_gate_preflight",
             "latest_summary": {
@@ -260,19 +309,19 @@ def test_status_exposes_observed_prepare_record_evidence(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "attention"
-    assert packet["latest_status"] == "ready_for_final_gate_preflight"
-    assert packet["signal_input_json"] == "/tmp/signal-input-ready.json"
-    assert packet["prepared_authorization_id"] == "auth-ready-1"
-    assert packet["runtime_signal_summaries"][0]["signal_input_json"] == (
+    assert artifact["status"] == "attention"
+    assert artifact["latest_status"] == "ready_for_final_gate_preflight"
+    assert artifact["signal_input_json"] == "/tmp/signal-input-ready.json"
+    assert artifact["prepared_authorization_id"] == "auth-ready-1"
+    assert artifact["runtime_signal_summaries"][0]["signal_input_json"] == (
         "/tmp/signal-input-ready.json"
     )
-    assert packet["runtime_signal_summaries"][0]["prepared_authorization_id"] == (
+    assert artifact["runtime_signal_summaries"][0]["prepared_authorization_id"] == (
         "auth-ready-1"
     )
-    assert packet["allowed_prepare_record_effects"] == [
+    assert artifact["allowed_prepare_record_effects"] == [
         "prepare_records_created",
         "shadow_candidate_created",
         "runtime_execution_intent_draft_created",
@@ -280,8 +329,8 @@ def test_status_exposes_observed_prepare_record_evidence(tmp_path):
         "submit_authorization_created",
         "protection_plan_created",
     ]
-    safety = packet["safety_invariants"]
-    assert safety["read_packets_only"] is True
+    safety = artifact["safety_invariants"]
+    assert safety["read_artifacts_only"] is True
     assert safety["creates_prepare_records"] is False
     assert safety["observed_prepare_records_created"] is True
     assert safety["observed_shadow_candidate_created"] is True
@@ -295,7 +344,7 @@ def test_status_exposes_observed_prepare_record_evidence(tmp_path):
 def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
     root = tmp_path / "obs"
     _write_json(
-        root / "loop-packet.json",
+        root / "loop-artifact.json",
         {
             "status": "waiting_for_signal",
             "iterations_requested": 3,
@@ -307,7 +356,7 @@ def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
                 "monitored_runtime_count": 0,
                 "runtime_signal_summaries": [],
             },
-            "operator_command_plan": {
+            "observation_loop_plan": {
                 "next_step": "continue_waiting_for_strategy_signal"
             },
             "safety_invariants": {
@@ -321,16 +370,16 @@ def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
         },
     )
 
-    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+    artifact = build_status_artifact(root, stale_after_seconds=10**15, now_ms=10**15)
 
-    assert packet["status"] == "observation_window_complete_no_signal"
-    assert packet["latest_status"] == "waiting_for_signal"
-    assert packet["iterations_requested"] == 3
-    assert packet["iterations_completed"] == 3
-    assert packet["iterations_remaining"] == 0
-    assert packet["observation_running"] is False
-    assert packet["observation_window_complete"] is True
-    assert packet["operator_command_plan"]["observation_next_step"] == (
+    assert artifact["status"] == "observation_window_complete_no_signal"
+    assert artifact["latest_status"] == "waiting_for_signal"
+    assert artifact["iterations_requested"] == 3
+    assert artifact["iterations_completed"] == 3
+    assert artifact["iterations_remaining"] == 0
+    assert artifact["observation_running"] is False
+    assert artifact["observation_window_complete"] is True
+    assert artifact["observation_plan"]["observation_next_step"] == (
         "review_no_signal_window_or_start_new_observation"
     )
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["places_order"] is False

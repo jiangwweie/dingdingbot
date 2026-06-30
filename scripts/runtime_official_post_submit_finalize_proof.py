@@ -32,12 +32,12 @@ from scripts.runtime_official_controlled_gateway_action_proof import (  # noqa: 
     _ExchangeSubmitExecutionResultRepo,
     _ExecutionRecoveryRepo,
     _PositionProjection,
-    _controlled_gateway_action_packet,
+    _controlled_gateway_action_artifact,
 )
 from scripts.runtime_official_exchange_submit_boundary_proof import (  # noqa: E402
     _ExchangeSubmitAdapterResultRepo,
     _exchange_evidence_ids,
-    _exchange_submit_boundary_packet,
+    _exchange_submit_boundary_artifact,
     _prepare_candidate,
     _run_local_registration_stage,
 )
@@ -164,12 +164,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             reservation_id = _body(local_stage["attempt_reservation"]).get(
                 "reservation_id"
             )
-            exchange_packet_preview = _request(
+            exchange_submit_preview = _request(
                 api_client,
                 "GET",
                 (
                     "/api/trading-console/"
-                    "runtime-execution-exchange-submit-packet-previews/"
+                    "runtime-execution-exchange-submit-previews/"
                     f"authorizations/{authorization_id}"
                 ),
             )
@@ -229,11 +229,11 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                     "exchange_submit_adapter_enabled": True,
                 },
             )
-            exchange_boundary_packet = _exchange_submit_boundary_packet(
+            exchange_boundary_artifact = _exchange_submit_boundary_artifact(
                 shadow_report=shadow_report,
                 prepare_report=prepare_report,
                 local_stage=local_stage,
-                exchange_packet_preview=exchange_packet_preview,
+                exchange_submit_preview=exchange_submit_preview,
                 exchange_action_authorization=exchange_action_authorization,
                 exchange_submit_enablement=exchange_submit_enablement,
                 exchange_adapter_result=exchange_adapter_result,
@@ -261,7 +261,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 "POST",
                 (
                     "/api/trading-console/strategy-runtimes/"
-                    "runtime-rtf075-cpm-long/post-submit-finalize-packets"
+                    "runtime-rtf075-cpm-long/post-submit-finalize-payloads"
                 ),
                 body={
                     "authorization_id": authorization_id,
@@ -275,9 +275,9 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 },
             )
 
-    controlled_gateway_action_packet = _controlled_gateway_action_packet(
+    controlled_gateway_action_artifact = _controlled_gateway_action_artifact(
         prepare_report=prepare_report,
-        exchange_boundary_packet=exchange_boundary_packet,
+        exchange_boundary_artifact=exchange_boundary_artifact,
         exchange_execution_result=exchange_execution_result,
         lifecycle=lifecycle,
         gateway=gateway,
@@ -285,10 +285,10 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         recovery_repo=recovery_repo,
         position_projection=position_projection,
     )
-    packet = _post_submit_finalize_proof_packet(
+    proof_artifact = _post_submit_finalize_proof_artifact(
         prepare_report=prepare_report,
         local_stage=local_stage,
-        controlled_gateway_action_packet=controlled_gateway_action_packet,
+        controlled_gateway_action_artifact=controlled_gateway_action_artifact,
         post_submit_finalize=post_submit_finalize,
         review_repo=review_repo,
         settlement_repo=settlement_repo,
@@ -300,9 +300,9 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "prepare-report.json": prepare_report,
         "local-registration-adapter-result.json": local_stage["adapter_result"],
         "exchange-submit-execution-result.json": exchange_execution_result,
-        "controlled-gateway-action-packet.json": controlled_gateway_action_packet,
+        "controlled-gateway-action-artifact.json": controlled_gateway_action_artifact,
         "post-submit-finalize.json": post_submit_finalize,
-        "post-submit-finalize-proof-packet.json": packet,
+        "post-submit-finalize-proof-artifact.json": proof_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -311,43 +311,47 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "scope": "runtime_official_post_submit_finalize_proof",
         "status": (
             "official_post_submit_finalize_passed"
-            if _contract_passed(packet["checks"])
+            if _contract_passed(proof_artifact["checks"])
             else "blocked"
         ),
         "runtime_instance_id": "runtime-rtf075-cpm-long",
         "order_candidate_id": "order-candidate-rtf075-contract",
-        "authorization_id": (packet["ids"] or {}).get("authorization_id"),
-        "execution_intent_id": (packet["ids"] or {}).get("execution_intent_id"),
-        "exchange_submit_execution_result_id": (packet["ids"] or {}).get(
+        "authorization_id": (proof_artifact["ids"] or {}).get("authorization_id"),
+        "execution_intent_id": (proof_artifact["ids"] or {}).get(
+            "execution_intent_id"
+        ),
+        "exchange_submit_execution_result_id": (proof_artifact["ids"] or {}).get(
             "exchange_submit_execution_result_id"
         ),
-        "submit_outcome_review_id": (packet["ids"] or {}).get(
+        "submit_outcome_review_id": (proof_artifact["ids"] or {}).get(
             "submit_outcome_review_id"
         ),
-        "post_submit_reconciliation_evidence_id": (packet["ids"] or {}).get(
+        "post_submit_reconciliation_evidence_id": (proof_artifact["ids"] or {}).get(
             "post_submit_reconciliation_evidence_id"
         ),
-        "post_submit_budget_settlement_id": (packet["ids"] or {}).get(
+        "post_submit_budget_settlement_id": (proof_artifact["ids"] or {}).get(
             "post_submit_budget_settlement_id"
         ),
-        "post_submit_finalize_complete": packet.get(
+        "post_submit_finalize_complete": proof_artifact.get(
             "post_submit_finalize_complete"
         ),
-        "post_submit_reconciliation_matched": packet.get(
+        "post_submit_reconciliation_matched": proof_artifact.get(
             "post_submit_reconciliation_matched"
         ),
-        "post_submit_budget_settled": packet.get("post_submit_budget_settled"),
-        "submit_outcome_review_recorded": packet.get(
+        "post_submit_budget_settled": proof_artifact.get(
+            "post_submit_budget_settled"
+        ),
+        "submit_outcome_review_recorded": proof_artifact.get(
             "submit_outcome_review_recorded"
         ),
-        "post_submit_finalize_packet": post_submit_finalize,
-        "post_submit_finalize_proof_packet": packet,
-        "checks": packet["checks"],
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "post_submit_finalize_payload": post_submit_finalize,
+        "post_submit_finalize_proof_artifact": proof_artifact,
+        "checks": proof_artifact["checks"],
+        "safety_invariants": proof_artifact["safety_invariants"],
+        "post_submit_finalize_plan": {
             "next_step": (
                 "build_strategy_driven_next_attempt_after_flat_or_close_review"
-                if _contract_passed(packet["checks"])
+                if _contract_passed(proof_artifact["checks"])
                 else "resolve_post_submit_finalize_blockers"
             ),
             "uses_official_fastapi_routes": True,
@@ -537,11 +541,11 @@ class _temporary_post_submit_injections:
                 delattr(api_module, key)
 
 
-def _post_submit_finalize_proof_packet(
+def _post_submit_finalize_proof_artifact(
     *,
     prepare_report: dict[str, Any],
     local_stage: dict[str, Any],
-    controlled_gateway_action_packet: dict[str, Any],
+    controlled_gateway_action_artifact: dict[str, Any],
     post_submit_finalize: dict[str, Any],
     review_repo: _SubmitOutcomeReviewRepo,
     settlement_repo: _PostSubmitBudgetSettlementRepo,
@@ -550,10 +554,11 @@ def _post_submit_finalize_proof_packet(
     state: Any,
 ) -> dict[str, Any]:
     finalize_body = _body(post_submit_finalize)
+    finalize_payload_id = _post_submit_finalize_payload_id(finalize_body)
     review = review_repo.created[-1] if review_repo.created else None
     settlement = settlement_repo.created[-1] if settlement_repo.created else None
     checks = _checks(
-        controlled_gateway_action_packet=controlled_gateway_action_packet,
+        controlled_gateway_action_artifact=controlled_gateway_action_artifact,
         post_submit_finalize=post_submit_finalize,
         review=review,
         settlement=settlement,
@@ -562,7 +567,7 @@ def _post_submit_finalize_proof_packet(
         state=state,
     )
     return {
-        "scope": "runtime_official_post_submit_finalize_proof_packet",
+        "scope": "runtime_official_post_submit_finalize_proof_artifact",
         "status": (
             "post_submit_finalize_completed_next_attempt_blocked"
             if _contract_passed(checks)
@@ -570,7 +575,7 @@ def _post_submit_finalize_proof_packet(
         ),
         "ids": {
             **dict(prepare_report.get("ids") or {}),
-            **dict(controlled_gateway_action_packet.get("ids") or {}),
+            **dict(controlled_gateway_action_artifact.get("ids") or {}),
             "attempt_reservation_id": _body(
                 local_stage["attempt_reservation"]
             ).get("reservation_id"),
@@ -583,10 +588,10 @@ def _post_submit_finalize_proof_packet(
             "post_submit_budget_settlement_id": finalize_body.get(
                 "post_submit_budget_settlement_id"
             ),
-            "post_submit_finalize_packet_id": finalize_body.get("packet_id"),
+            "post_submit_finalize_payload_id": finalize_payload_id,
         },
         "statuses": {
-            **dict(controlled_gateway_action_packet.get("statuses") or {}),
+            **dict(controlled_gateway_action_artifact.get("statuses") or {}),
             "post_submit_finalize": finalize_body.get("status"),
             "next_attempt_gate": (
                 finalize_body.get("next_attempt_gate") or {}
@@ -612,7 +617,7 @@ def _post_submit_finalize_proof_packet(
         ),
         "post_submit_finalize": {
             "http_status": post_submit_finalize.get("http_status"),
-            "packet_id": finalize_body.get("packet_id"),
+            "payload_id": finalize_payload_id,
             "status": finalize_body.get("status"),
             "blockers": list(finalize_body.get("blockers") or []),
             "warnings": list(finalize_body.get("warnings") or []),
@@ -677,9 +682,15 @@ def _post_submit_finalize_proof_packet(
     }
 
 
+def _post_submit_finalize_payload_id(finalize_body: dict[str, Any]) -> Any:
+    return finalize_body.get("post_submit_finalize_payload_id") or finalize_body.get(
+        "payload_id"
+    )
+
+
 def _checks(
     *,
-    controlled_gateway_action_packet: dict[str, Any],
+    controlled_gateway_action_artifact: dict[str, Any],
     post_submit_finalize: dict[str, Any],
     review: Any,
     settlement: Any,
@@ -695,7 +706,7 @@ def _checks(
     )
     return {
         "controlled_gateway_action_passed": (
-            controlled_gateway_action_packet.get("status")
+            controlled_gateway_action_artifact.get("status")
             == "controlled_gateway_action_submitted"
         ),
         "post_submit_finalize_http_ok": (

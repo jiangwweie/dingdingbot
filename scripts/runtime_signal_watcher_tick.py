@@ -2,7 +2,7 @@
 """Run one read-only runtime signal watcher tick with optional Feishu wake-up.
 
 The watcher is intentionally one-shot so it can be driven by a systemd timer.
-It reuses the active observation supervisor, writes auditable JSON packets, and
+It reuses the active observation supervisor, writes auditable JSON artifacts, and
 only sends a notification when owner attention is required. It never submits,
 places orders, calls OrderLifecycle, mutates runtime budget, or transfers funds.
 """
@@ -28,22 +28,27 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_active_observation_supervisor as supervisor  # noqa: E402
-from scripts.build_runtime_observation_operator_packet import (  # noqa: E402
-    build_operator_packet_from_path,
+from scripts.build_runtime_observation_operator_evidence import (  # noqa: E402
+    build_operator_evidence_from_path,
 )
-from scripts.build_runtime_observation_wakeup_packet import (  # noqa: E402
-    build_wakeup_packet,
+from scripts.build_runtime_observation_wakeup_evidence import (  # noqa: E402
+    build_wakeup_evidence,
 )
-from scripts.runtime_active_observation_status import build_status_packet  # noqa: E402
+from scripts.runtime_active_observation_status import build_status_artifact  # noqa: E402
 
 
 OWNER_ATTENTION_STATUSES = {
     "blocked_forbidden_effect",
     "runtime_signal_ready_for_non_executing_prepare",
     "prepared_shadow_evidence_ready_for_owner_review",
-    "operator_packet_needs_review",
+    "operator_evidence_needs_review",
 }
-STATUS_PACKET_ATTENTION_STATUSES = {"attention", "blocked", "blocked_forbidden_effect", "stale"}
+STATUS_ARTIFACT_ATTENTION_STATUSES = {
+    "attention",
+    "blocked",
+    "blocked_forbidden_effect",
+    "stale",
+}
 
 
 Notifier = Callable[[str, str | None, dict[str, Any], float], dict[str, Any]]
@@ -193,15 +198,15 @@ def send_feishu_text(
 
 def _event_key(
     *,
-    status_packet: dict[str, Any],
-    operator_packet: dict[str, Any],
-    wakeup_packet: dict[str, Any],
+    status_artifact: dict[str, Any],
+    operator_evidence: dict[str, Any],
+    wakeup_evidence: dict[str, Any],
 ) -> str:
-    summary = wakeup_packet.get("summary") if isinstance(wakeup_packet.get("summary"), dict) else {}
+    summary = wakeup_evidence.get("summary") if isinstance(wakeup_evidence.get("summary"), dict) else {}
     parts = [
-        str(wakeup_packet.get("status") or ""),
-        str(operator_packet.get("status") or ""),
-        str(status_packet.get("latest_status") or ""),
+        str(wakeup_evidence.get("status") or ""),
+        str(operator_evidence.get("status") or ""),
+        str(status_artifact.get("latest_status") or ""),
         str(summary.get("prepared_authorization_id") or ""),
         str(summary.get("shadow_candidate_id") or ""),
     ]
@@ -211,15 +216,15 @@ def _event_key(
 def _notification_required(
     *,
     args: argparse.Namespace,
-    status_packet: dict[str, Any],
-    wakeup_packet: dict[str, Any],
+    status_artifact: dict[str, Any],
+    wakeup_evidence: dict[str, Any],
     auto_resume: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
     auto_resume_status = str((auto_resume or {}).get("status") or "")
     if auto_resume_status == "waiting_for_market":
         return False, "waiting_for_market_no_owner_attention_needed"
-    wakeup_status = str(wakeup_packet.get("status") or "")
-    status_status = str(status_packet.get("status") or "")
+    wakeup_status = str(wakeup_evidence.get("status") or "")
+    status_status = str(status_artifact.get("status") or "")
     if args.notify_no_signal and wakeup_status in {
         "owner_sleep_safe_observation_running",
         "observation_window_complete_no_signal",
@@ -227,20 +232,20 @@ def _notification_required(
         return True, "notify_no_signal_enabled"
     if wakeup_status in OWNER_ATTENTION_STATUSES:
         return True, f"wakeup_status:{wakeup_status}"
-    if status_status in STATUS_PACKET_ATTENTION_STATUSES:
-        return True, f"status_packet:{status_status}"
+    if status_status in STATUS_ARTIFACT_ATTENTION_STATUSES:
+        return True, f"status_artifact:{status_status}"
     return False, "no_owner_attention_needed"
 
 
 def _notification_text(
     *,
     args: argparse.Namespace,
-    status_packet: dict[str, Any],
-    operator_packet: dict[str, Any],
-    wakeup_packet: dict[str, Any],
+    status_artifact: dict[str, Any],
+    operator_evidence: dict[str, Any],
+    wakeup_evidence: dict[str, Any],
     paths: dict[str, str],
 ) -> str:
-    summary = wakeup_packet.get("summary") if isinstance(wakeup_packet.get("summary"), dict) else {}
+    summary = wakeup_evidence.get("summary") if isinstance(wakeup_evidence.get("summary"), dict) else {}
     monitored_count = summary.get("monitored_runtime_count")
     active_count = summary.get("active_runtime_count")
     if monitored_count is None:
@@ -249,18 +254,19 @@ def _notification_text(
         runtime_count_line = f"monitored runtimes: {monitored_count} (active total: {active_count})"
     else:
         runtime_count_line = f"monitored runtimes: {monitored_count}"
+    operator_plan = operator_evidence.get("operator_review_plan") or {}
     lines = [
-        f"BRC runtime signal watcher: {wakeup_packet.get('status')}",
+        f"BRC runtime signal watcher: {wakeup_evidence.get('status')}",
         f"env: {args.label}",
-        f"operator: {operator_packet.get('status')}",
+        f"operator: {operator_evidence.get('status')}",
         runtime_count_line,
         f"ready runtime signals: {summary.get('runtime_ready_signal_count')}",
         f"prepared authorization: {summary.get('prepared_authorization_id') or '-'}",
         f"shadow candidate: {summary.get('shadow_candidate_id') or '-'}",
-        f"next: {summary.get('next_step') or (operator_packet.get('operator_command_plan') or {}).get('next_step') or '-'}",
-        f"evidence: {paths.get('wakeup_packet_json')}",
+        f"next: {summary.get('next_step') or operator_plan.get('next_step') or '-'}",
+        f"evidence: {paths.get('wakeup_evidence_json')}",
     ]
-    blockers = status_packet.get("blockers") or operator_packet.get("blockers") or []
+    blockers = status_artifact.get("blockers") or operator_evidence.get("blockers") or []
     if blockers:
         lines.append("blockers: " + ", ".join(str(item) for item in blockers[:6]))
     return "\n".join(lines)
@@ -273,19 +279,19 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _post_signal_auto_resume_plan(
     *,
     args: argparse.Namespace,
-    status_packet: dict[str, Any],
-    operator_packet: dict[str, Any],
-    wakeup_packet: dict[str, Any],
+    status_artifact: dict[str, Any],
+    operator_evidence: dict[str, Any],
+    wakeup_evidence: dict[str, Any],
 ) -> dict[str, Any]:
-    latest_status = str(status_packet.get("latest_status") or "")
-    status_status = str(status_packet.get("status") or "")
-    wakeup_status = str(wakeup_packet.get("status") or "")
-    operator_status = str(operator_packet.get("status") or "")
-    forbidden_effects = list(status_packet.get("forbidden_effects") or [])
-    blockers = [str(item) for item in status_packet.get("blockers") or []]
-    prepared_authorization_id = status_packet.get("prepared_authorization_id")
-    shadow_candidate_id = status_packet.get("shadow_candidate_id")
-    summary = _as_dict(wakeup_packet.get("summary"))
+    latest_status = str(status_artifact.get("latest_status") or "")
+    status_status = str(status_artifact.get("status") or "")
+    wakeup_status = str(wakeup_evidence.get("status") or "")
+    operator_status = str(operator_evidence.get("status") or "")
+    forbidden_effects = list(status_artifact.get("forbidden_effects") or [])
+    blockers = [str(item) for item in status_artifact.get("blockers") or []]
+    prepared_authorization_id = status_artifact.get("prepared_authorization_id")
+    shadow_candidate_id = status_artifact.get("shadow_candidate_id")
+    summary = _as_dict(wakeup_evidence.get("summary"))
     prepared_authorization_id = (
         prepared_authorization_id or summary.get("prepared_authorization_id")
     )
@@ -294,7 +300,7 @@ def _post_signal_auto_resume_plan(
     base = {
         "source": "runtime_signal_watcher_tick",
         "latest_status": latest_status,
-        "status_packet_status": status_status,
+        "watcher_status_evidence_status": status_status,
         "wakeup_status": wakeup_status,
         "operator_status": operator_status,
         "prepared_authorization_id": prepared_authorization_id,
@@ -314,7 +320,8 @@ def _post_signal_auto_resume_plan(
             "blocked_at": "watcher_forbidden_effects",
             "blocked_reason": ",".join(forbidden_effects) or wakeup_status,
             "next_recover_condition": "forbidden_effect_flags_are_absent",
-            "automatic_recovery_action": "stop_and_investigate_watcher_evidence",
+            "non_authority_checkpoint": "stop_and_investigate_watcher_evidence",
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "manual_review_only",
             "can_continue_without_owner_chat": False,
             "creates_shadow_candidate": False,
@@ -327,8 +334,9 @@ def _post_signal_auto_resume_plan(
             "status": "blocked_observation_evidence",
             "blocked_at": "active_observation_status",
             "blocked_reason": status_status,
-            "next_recover_condition": "fresh_non_forbidden_observation_packets_exist",
-            "automatic_recovery_action": "refresh_or_restart_active_observation_status",
+            "next_recover_condition": "fresh_non_forbidden_observation_artifacts_exist",
+            "non_authority_checkpoint": "refresh_or_restart_active_observation_status",
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "observe_only_no_candidate_prepare",
             "can_continue_without_owner_chat": False,
             "creates_shadow_candidate": False,
@@ -348,7 +356,8 @@ def _post_signal_auto_resume_plan(
             "next_recover_condition": (
                 "official_final_gate_preflight_passes_with_current_facts"
             ),
-            "automatic_recovery_action": "run_official_action_time_final_gate_preflight",
+            "non_authority_checkpoint": "run_official_action_time_final_gate_preflight",
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "no_real_submit_until_final_gate_pass",
             "can_continue_without_owner_chat": True,
             "creates_shadow_candidate": bool(
@@ -364,7 +373,7 @@ def _post_signal_auto_resume_plan(
         "prepared_shadow_evidence_ready_for_owner_review",
     }
     if latest_status in ready_prepare_statuses or wakeup_status in ready_prepare_statuses:
-        automatic_recovery_action = (
+        non_authority_checkpoint = (
             "wait_for_prepare_records_then_rebuild_final_gate_status"
             if args.allow_prepare_records
             else "rerun_watcher_tick_with_allow_prepare_records"
@@ -377,7 +386,8 @@ def _post_signal_auto_resume_plan(
             "next_recover_condition": (
                 "shadow_candidate_runtime_grant_authorization_evidence_exists"
             ),
-            "automatic_recovery_action": automatic_recovery_action,
+            "non_authority_checkpoint": non_authority_checkpoint,
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "armed_observation_no_real_submit",
             "can_continue_without_owner_chat": True,
             "creates_shadow_candidate": bool(args.allow_prepare_records),
@@ -390,7 +400,7 @@ def _post_signal_auto_resume_plan(
         in {"waiting_for_signal", "observation_window_complete_no_signal", "ok"}
         or wakeup_status
         in {
-            "operator_packet_needs_review",
+            "operator_evidence_needs_review",
             "owner_sleep_safe_observation_running",
             "observation_window_complete_no_signal",
         }
@@ -404,7 +414,8 @@ def _post_signal_auto_resume_plan(
             "next_recover_condition": (
                 "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
             ),
-            "automatic_recovery_action": "continue_watcher_observation",
+            "non_authority_checkpoint": "continue_watcher_observation",
+            "checkpoint_source": "runtime_signal_watcher_tick",
             "downgrade_mode": "observe_only",
             "can_continue_without_owner_chat": True,
             "creates_shadow_candidate": False,
@@ -414,10 +425,11 @@ def _post_signal_auto_resume_plan(
     return {
         **base,
         "status": "blocked_operator_review",
-        "blocked_at": "operator_packet",
+        "blocked_at": "operator_evidence",
         "blocked_reason": wakeup_status or operator_status or "unknown",
-        "next_recover_condition": "operator_packet_maps_to_waiting_or_ready_signal",
-        "automatic_recovery_action": "rebuild_operator_and_wakeup_packets",
+        "next_recover_condition": "operator_evidence_maps_to_waiting_or_ready_signal",
+        "non_authority_checkpoint": "rebuild_operator_and_wakeup_evidence",
+        "checkpoint_source": "runtime_signal_watcher_tick",
         "downgrade_mode": "observe_only_no_candidate_prepare",
         "can_continue_without_owner_chat": False,
         "creates_shadow_candidate": False,
@@ -428,10 +440,10 @@ def _post_signal_auto_resume_plan(
 def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
     return argparse.Namespace(
         output_dir=str(output_dir),
-        supervisor_output_json=str(output_dir / "supervisor-packet.json"),
-        loop_output_json=str(output_dir / "loop-packet.json"),
-        followup_output_json=str(output_dir / "followup-packet.json"),
-        status_output_json=str(output_dir / "status-packet.json"),
+        supervisor_output_json=str(output_dir / "supervisor-artifact.json"),
+        loop_output_json=str(output_dir / "loop-artifact.json"),
+        followup_output_json=str(output_dir / "followup-artifact.json"),
+        status_output_json=str(output_dir / "status-artifact.json"),
         env_file=args.env_file,
         api_base=args.api_base,
         source=args.source,
@@ -450,14 +462,14 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         allow_standing_operation_layer_evidence_prep=(
             getattr(args, "allow_standing_operation_layer_evidence_prep", False)
         ),
-        include_packets=args.include_packets,
+        include_artifacts=args.include_artifacts,
         skip_disabled_smoke_prerequisite_probe=(
             args.skip_disabled_smoke_prerequisite_probe
         ),
     )
 
 
-def build_watcher_tick_packet(
+def build_watcher_tick_artifact(
     args: argparse.Namespace,
     *,
     supervisor_builder: SupervisorBuilder | None = None,
@@ -468,32 +480,32 @@ def build_watcher_tick_packet(
     state_file = _state_path(output_dir, args.state_json)
     previous_state = _read_json(state_file)
 
-    supervisor_builder = supervisor_builder or supervisor.build_supervisor_packet
-    supervisor_packet = supervisor_builder(_supervisor_args(args, output_dir))
-    _write_json(output_dir / "supervisor-packet.json", supervisor_packet)
+    supervisor_builder = supervisor_builder or supervisor.build_supervisor_artifact
+    supervisor_artifact = supervisor_builder(_supervisor_args(args, output_dir))
+    _write_json(output_dir / "supervisor-artifact.json", supervisor_artifact)
 
-    status_packet = build_status_packet(
+    status_artifact = build_status_artifact(
         output_dir,
         stale_after_seconds=args.status_stale_after_seconds,
     )
-    _write_json(output_dir / "status-packet.json", status_packet)
-    _write_json(output_dir / "latest-status.json", status_packet)
+    _write_json(output_dir / "status-artifact.json", status_artifact)
+    _write_json(output_dir / "latest-status.json", status_artifact)
 
-    operator_packet = build_operator_packet_from_path(
-        status_packet_json=output_dir / "status-packet.json",
+    operator_evidence = build_operator_evidence_from_path(
+        status_artifact_json=output_dir / "status-artifact.json",
         strategy_source=args.strategy_source,
     )
-    _write_json(output_dir / "operator-packet.json", operator_packet)
+    _write_json(output_dir / "operator-evidence.json", operator_evidence)
 
-    wakeup_packet = build_wakeup_packet(operator_packet)
-    _write_json(output_dir / "wakeup-packet.json", wakeup_packet)
+    wakeup_evidence = build_wakeup_evidence(operator_evidence)
+    _write_json(output_dir / "wakeup-evidence.json", wakeup_evidence)
     auto_resume = _post_signal_auto_resume_plan(
         args=args,
-        status_packet=status_packet,
-        operator_packet=operator_packet,
-        wakeup_packet=wakeup_packet,
+        status_artifact=status_artifact,
+        operator_evidence=operator_evidence,
+        wakeup_evidence=wakeup_evidence,
     )
-    status_safety = status_packet.get("safety_invariants")
+    status_safety = status_artifact.get("safety_invariants")
     if not isinstance(status_safety, dict):
         status_safety = {}
     observed_prepare_records_created = bool(
@@ -516,23 +528,23 @@ def build_watcher_tick_packet(
     )
 
     event_key = _event_key(
-        status_packet=status_packet,
-        operator_packet=operator_packet,
-        wakeup_packet=wakeup_packet,
+        status_artifact=status_artifact,
+        operator_evidence=operator_evidence,
+        wakeup_evidence=wakeup_evidence,
     )
     required, reason = _notification_required(
         args=args,
-        status_packet=status_packet,
-        wakeup_packet=wakeup_packet,
+        status_artifact=status_artifact,
+        wakeup_evidence=wakeup_evidence,
         auto_resume=auto_resume,
     )
     duplicate = previous_state.get("last_notified_event_key") == event_key
     webhook_url = _webhook_url(args)
     webhook_secret = _webhook_secret(args)
     paths = {
-        "status_packet_json": str(output_dir / "status-packet.json"),
-        "operator_packet_json": str(output_dir / "operator-packet.json"),
-        "wakeup_packet_json": str(output_dir / "wakeup-packet.json"),
+        "status_artifact_json": str(output_dir / "status-artifact.json"),
+        "operator_evidence_json": str(output_dir / "operator-evidence.json"),
+        "wakeup_evidence_json": str(output_dir / "wakeup-evidence.json"),
         "watcher_tick_json": str(output_dir / "watcher-tick.json"),
     }
     notification = {
@@ -555,9 +567,9 @@ def build_watcher_tick_packet(
     else:
         message = _notification_text(
             args=args,
-            status_packet=status_packet,
-            operator_packet=operator_packet,
-            wakeup_packet=wakeup_packet,
+            status_artifact=status_artifact,
+            operator_evidence=operator_evidence,
+            wakeup_evidence=wakeup_evidence,
             paths=paths,
         )
         if args.notification_dry_run:
@@ -581,9 +593,9 @@ def build_watcher_tick_packet(
 
     state = {
         "last_event_key": event_key,
-        "last_wakeup_status": wakeup_packet.get("status"),
-        "last_operator_status": operator_packet.get("status"),
-        "last_status_packet_status": status_packet.get("status"),
+        "last_wakeup_status": wakeup_evidence.get("status"),
+        "last_operator_status": operator_evidence.get("status"),
+        "last_watcher_status_evidence_status": status_artifact.get("status"),
         "last_observed_at_ms": int(time.time() * 1000),
         "last_notified_event_key": (
             event_key if notification.get("sent") else previous_state.get("last_notified_event_key")
@@ -591,24 +603,26 @@ def build_watcher_tick_packet(
     }
     _write_json(state_file, state)
 
-    packet = {
+    artifact = {
         "scope": "runtime_signal_watcher_tick",
-        "status": _tick_status(notification, wakeup_packet, status_packet),
+        "status": _tick_status(notification, wakeup_evidence, status_artifact),
         "output_dir": str(output_dir),
         "paths": paths,
         "event_key": event_key,
-        "supervisor_status": supervisor_packet.get("status"),
-        "status_packet_status": status_packet.get("status"),
-        "operator_status": operator_packet.get("status"),
-        "wakeup_status": wakeup_packet.get("status"),
+        "supervisor_status": supervisor_artifact.get("status"),
+        "watcher_status_evidence_status": status_artifact.get("status"),
+        "operator_status": operator_evidence.get("status"),
+        "wakeup_status": wakeup_evidence.get("status"),
         "post_signal_auto_resume": auto_resume,
         "notification": notification,
-        "blockers": list(status_packet.get("blockers") or []),
-        "warnings": list(status_packet.get("warnings") or []),
-        "operator_command_plan": {
+        "blockers": list(status_artifact.get("blockers") or []),
+        "warnings": list(status_artifact.get("warnings") or []),
+        "watcher_tick_plan": {
             "not_executed": True,
-            "next_step": auto_resume["automatic_recovery_action"],
-            "wakeup_next_step": (wakeup_packet.get("summary") or {}).get("next_step"),
+            "non_authority_checkpoint": auto_resume["non_authority_checkpoint"],
+            "checkpoint_source": "post_signal_auto_resume",
+            "not_execution_authority": True,
+            "wakeup_next_step": (wakeup_evidence.get("summary") or {}).get("next_step"),
             "records_observation_only": True,
             "sends_owner_wakeup_only": bool(notification.get("sent")),
             "can_continue_without_owner_chat": bool(
@@ -645,7 +659,7 @@ def build_watcher_tick_packet(
             "submit_authorization_created": observed_submit_authorization_created,
             "protection_plan_created": observed_protection_plan_created,
             "allowed_prepare_record_effects": list(
-                status_packet.get("allowed_prepare_record_effects") or []
+                status_artifact.get("allowed_prepare_record_effects") or []
             ),
             "real_submit_requested": False,
             "exchange_order_requested": False,
@@ -656,21 +670,21 @@ def build_watcher_tick_packet(
             "attempt_counter_mutated": False,
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
-            "forbidden_effects": list(status_packet.get("forbidden_effects") or []),
+            "forbidden_effects": list(status_artifact.get("forbidden_effects") or []),
         },
     }
-    _write_json(output_dir / "watcher-tick.json", packet)
-    return packet
+    _write_json(output_dir / "watcher-tick.json", artifact)
+    return artifact
 
 
 def _tick_status(
     notification: dict[str, Any],
-    wakeup_packet: dict[str, Any],
-    status_packet: dict[str, Any],
+    wakeup_evidence: dict[str, Any],
+    status_artifact: dict[str, Any],
 ) -> str:
-    if wakeup_packet.get("status") == "blocked_forbidden_effect":
+    if wakeup_evidence.get("status") == "blocked_forbidden_effect":
         return "blocked_forbidden_effect"
-    if status_packet.get("status") in {"blocked", "blocked_forbidden_effect", "stale"}:
+    if status_artifact.get("status") in {"blocked", "blocked_forbidden_effect", "stale"}:
         return "watcher_attention"
     if notification.get("required") and notification.get("sent"):
         return "owner_notified"
@@ -690,7 +704,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument(
         "--strategy-source",
-        choices=["sample", "local_sqlite_fallback", "live_market"],
+        choices=["sample", "local_sqlite_read_only", "live_market"],
         default="live_market",
     )
     parser.add_argument("--runtime-instance-id", action="append", default=[])
@@ -719,7 +733,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_false",
         dest="skip_disabled_smoke_prerequisite_probe",
     )
-    parser.add_argument("--include-packets", action="store_true")
+    parser.add_argument("--include-artifacts", action="store_true")
     parser.add_argument("--notify-no-signal", action="store_true")
     parser.add_argument("--notification-dry-run", action="store_true")
     parser.add_argument("--notification-timeout-seconds", type=float, default=10.0)
@@ -731,9 +745,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_watcher_tick_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] not in {"blocked_forbidden_effect"} else 2
+    artifact = build_watcher_tick_artifact(args)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] not in {"blocked_forbidden_effect"} else 2
 
 
 if __name__ == "__main__":

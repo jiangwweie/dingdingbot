@@ -67,15 +67,15 @@ def _args(tmp_path, **overrides):
 def test_official_submit_handoff_api_flow_posts_handoff_request(tmp_path):
     client = _Client()
 
-    packet = runtime_official_submit_handoff_api_flow._build_packet(
+    artifact = runtime_official_submit_handoff_api_flow._build_artifact(
         _args(tmp_path),
         client=client,
     )
 
-    assert packet["status"] == "ready_for_official_submit_call"
-    assert packet["operator_action_preview"]["ready_for_call"] is True
-    assert packet["safety_invariants"]["calls_official_submit_endpoint"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["status"] == "ready_for_official_submit_call"
+    assert artifact["operator_action_preview"]["ready_for_call"] is True
+    assert artifact["safety_invariants"]["calls_official_submit_endpoint"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert len(client.calls) == 1
     call = client.calls[0]
     assert call["method"] == "POST"
@@ -83,36 +83,36 @@ def test_official_submit_handoff_api_flow_posts_handoff_request(tmp_path):
         "/api/trading-console/strategy-runtimes/runtime-1/"
         "official-submit-handoff-previews"
     )
-    assert call["body"]["readiness_packet"]["packet_id"] == "readiness-1"
+    assert call["body"]["readiness_artifact"]["artifact_id"] == "readiness-1"
     assert call["body"]["fresh_submit_authorization_id"] == "fresh-auth-1"
     assert call["body"]["metadata"]["runtime_official_submit_handoff_api_flow"] is True
     assert call["body"]["non_executing"] is True
 
 
 def test_official_submit_handoff_api_flow_keeps_http_errors(tmp_path):
-    packet = runtime_official_submit_handoff_api_flow._build_packet(
+    artifact = runtime_official_submit_handoff_api_flow._build_artifact(
         _args(tmp_path),
         client=_Client(http_status=400, body={"detail": "bad"}),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocked_stage"] == "official_submit_handoff_api"
-    assert "official_submit_handoff_api_http_400" in packet["blockers"]
-    assert packet["safety_invariants"]["execution_intent_created"] is False
+    assert artifact["status"] == "blocked"
+    assert artifact["blocked_stage"] == "official_submit_handoff_api"
+    assert "official_submit_handoff_api_http_400" in artifact["blockers"]
+    assert artifact["safety_invariants"]["execution_intent_created"] is False
 
 
 def test_official_submit_handoff_api_flow_cli_stdout_is_json_only(
     monkeypatch,
     capsys,
 ):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy handoff api flow")
         return {"status": "blocked", "ok": True}
 
     monkeypatch.setattr(
         runtime_official_submit_handoff_api_flow,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,

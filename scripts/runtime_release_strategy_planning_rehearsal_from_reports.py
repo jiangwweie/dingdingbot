@@ -39,7 +39,7 @@ from src.application.runtime_strategy_signal_planning_service import (  # noqa: 
     RuntimeStrategySignalCandidatePlanningStatus,
 )
 from src.domain.runtime_next_attempt_release import (  # noqa: E402
-    RuntimeNextAttemptReleasePacket,
+    RuntimeNextAttemptReleaseEvidence,
 )
 from src.domain.signal_evaluation import OrderCandidate  # noqa: E402
 from src.domain.strategy_family_signal import (  # noqa: E402
@@ -64,10 +64,11 @@ def _load_report(path: str) -> dict[str, Any]:
     return value
 
 
-def _payload(report: dict[str, Any], key: str) -> dict[str, Any]:
-    value = report.get(key)
-    if isinstance(value, dict):
-        return value
+def _payload(report: dict[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = report.get(key)
+        if isinstance(value, dict):
+            return value
     return report
 
 
@@ -90,7 +91,7 @@ def _int_from_snapshot(
 
 
 def _runtime_from_release_and_signal(
-    release: RuntimeNextAttemptReleasePacket,
+    release: RuntimeNextAttemptReleaseEvidence,
     signal_input: StrategyFamilySignalInput,
 ) -> StrategyRuntimeInstance:
     constraints = dict(signal_input.trial_constraints_snapshot or {})
@@ -234,11 +235,11 @@ def _candidate(
     )
 
 
-async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
+async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     release_report = _load_report(args.next_attempt_release_json)
     signal_report = _load_report(args.signal_input_json)
-    release = RuntimeNextAttemptReleasePacket.model_validate(
-        _payload(release_report, "packet"),
+    release = RuntimeNextAttemptReleaseEvidence.model_validate(
+        _payload(release_report, "release_evidence"),
     )
     signal_input = StrategyFamilySignalInput.model_validate(
         _payload(signal_report, "signal_input"),
@@ -254,8 +255,8 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
         strategy_signal_planner=planner,
     )
     runtime = _runtime_from_release_and_signal(release, signal_input)
-    packet = await service.plan_from_release_gate(
-        next_attempt_release_packet=release,
+    planning_artifact = await service.plan_from_release_gate(
+        next_attempt_release_evidence=release,
         signal_input=signal_input,
         runtime=runtime,
         context_id=args.context_id,
@@ -267,8 +268,8 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     )
     return {
         "scope": "runtime_release_strategy_planning_rehearsal_from_reports",
-        "status": packet.status.value,
-        "packet": packet.model_dump(mode="json"),
+        "status": planning_artifact.status.value,
+        "planning_artifact": planning_artifact.model_dump(mode="json"),
         "planner_called": planner.calls > 0,
         "planner_call_count": planner.calls,
         "planner_metadata": planner.last_metadata or {},
@@ -277,7 +278,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             "signal_input_json": args.signal_input_json,
         },
         "safety_invariants": {
-            "packet_only": True,
+            "release_strategy_planning_rehearsal_evidence_only": True,
             "uses_rehearsal_planner": True,
             "pg_read_called": False,
             "pg_write_called": False,
@@ -314,8 +315,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = asyncio.run(_build_packet(args))
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+    artifact = asyncio.run(_build_artifact(args))
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 

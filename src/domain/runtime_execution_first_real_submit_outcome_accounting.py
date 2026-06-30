@@ -1,6 +1,6 @@
-"""Post-submit accounting packet for the first real runtime submit.
+"""Post-submit accounting evidence for the first real runtime submit.
 
-This packet links a recorded exchange-submit outcome review to the
+This payload links a recorded exchange-submit outcome review to the
 attempt-outcome policy derived from it. It is accounting evidence only: it does
 not mutate runtime state, release budget, create/cancel orders, or call an
 exchange.

@@ -6,7 +6,10 @@ import sqlite3
 from decimal import Decimal
 from pathlib import Path
 
-from src.application.strategy_group_live_readonly_observation import RecentCandle
+from src.application.strategy_group_live_readonly_observation import (
+    LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE,
+    RecentCandle,
+)
 
 
 _SAMPLE_FALLBACK_SYMBOLS = {
@@ -21,6 +24,10 @@ _SAMPLE_FALLBACK_SYMBOLS = {
 }
 
 
+class _LocalSqliteObservationDataUnavailable(RuntimeError):
+    """Local read-only observation data is absent or insufficient."""
+
+
 class LocalSqliteObservationMarketSource:
     """Read closed candles from the local research SQLite database.
 
@@ -29,7 +36,7 @@ class LocalSqliteObservationMarketSource:
     """
 
     source_id = "local_sqlite_v3_dev_closed_klines_read_only"
-    source_type = "local_sqlite_fallback"
+    source_type = LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
 
     def __init__(self, db_path: str | Path = "data/v3_dev.db") -> None:
         self._db_path = Path(db_path)
@@ -42,7 +49,7 @@ class LocalSqliteObservationMarketSource:
             if timeframe == "4h":
                 return self._latest_4h_from_1h(symbol=symbol, limit=limit)
             return self._latest_from_db(symbol=symbol, timeframe=timeframe, limit=limit)
-        except Exception:
+        except (FileNotFoundError, _LocalSqliteObservationDataUnavailable):
             fallback = self._sample_fallback(symbol=symbol, timeframe=timeframe, limit=limit)
             if fallback:
                 self.fallback_used = True
@@ -76,7 +83,9 @@ class LocalSqliteObservationMarketSource:
             for row in reversed(rows)
         ]
         if len(candles) < limit:
-            raise ValueError(f"insufficient closed candles for {symbol} {timeframe}: {len(candles)} < {limit}")
+            raise _LocalSqliteObservationDataUnavailable(
+                f"insufficient closed candles for {symbol} {timeframe}: {len(candles)} < {limit}"
+            )
         return candles
 
     def _latest_4h_from_1h(self, *, symbol: str, limit: int) -> list[RecentCandle]:

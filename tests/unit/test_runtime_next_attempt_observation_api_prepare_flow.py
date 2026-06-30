@@ -72,8 +72,8 @@ def _waiting_payload():
         "blocked_stage": "strategy_signal",
         "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
         "warnings": [],
-        "operator_command_plan": {"next_step": "observe_only_or_wait_for_next_closed_bar"},
-        "signal_packet": {
+        "observation_cycle_plan": {"next_step": "observe_only_or_wait_for_next_closed_bar"},
+        "signal_artifact": {
             "signal_input": {
                 "evaluation_id": "eval-1",
                 "strategy_family_id": "BTPC-001",
@@ -87,8 +87,8 @@ def _ready_payload():
         "status": "ready_for_prepare",
         "blockers": [],
         "warnings": [],
-        "operator_command_plan": {"next_step": "run_official_runtime_next_attempt_prepare_api_flow"},
-        "signal_packet": {
+        "observation_cycle_plan": {"next_step": "run_official_runtime_next_attempt_prepare_api_flow"},
+        "signal_artifact": {
             "signal_input": {
                 "evaluation_id": "eval-ready",
                 "strategy_family_id": "BTPC-001",
@@ -118,14 +118,14 @@ def test_observation_api_prepare_waits_without_prepare(monkeypatch, tmp_path):
         "_run_prepare_flow",
         fail_prepare,
     )
-    payload = runtime_next_attempt_observation_api_prepare_flow._build_packet(
+    payload = runtime_next_attempt_observation_api_prepare_flow._build_artifact(
         _args(signal_output_json=str(tmp_path / "signal.json")),
         client=_Client(_waiting_payload()),
     )
 
     assert payload["status"] == "waiting_for_signal"
     assert payload["signal_input_json"].endswith("signal.json")
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
+    assert payload["api_prepare_plan"]["creates_shadow_candidate"] is False
     assert payload["safety_invariants"]["prepare_records_created"] is False
     assert payload["safety_invariants"]["order_created"] is False
 
@@ -140,7 +140,7 @@ def test_observation_api_prepare_ready_writes_signal_without_records(monkeypatch
         fail_prepare,
     )
     signal_path = tmp_path / "ready-signal.json"
-    payload = runtime_next_attempt_observation_api_prepare_flow._build_packet(
+    payload = runtime_next_attempt_observation_api_prepare_flow._build_artifact(
         _args(signal_output_json=str(signal_path)),
         client=_Client(_ready_payload()),
     )
@@ -148,12 +148,12 @@ def test_observation_api_prepare_ready_writes_signal_without_records(monkeypatch
     assert payload["status"] == "ready_for_prepare"
     assert payload["signal_input_json"] == str(signal_path)
     assert signal_path.exists()
-    assert payload["operator_command_plan"]["next_step"] == (
+    assert payload["api_prepare_plan"]["next_step"] == (
         "rerun_with_allow_prepare_records_under_standing_authorization"
     )
-    assert payload["operator_command_plan"]["creates_execution_intent"] is False
-    assert payload["operator_command_plan"]["uses_standing_runtime_authorization"] is True
-    assert payload["operator_command_plan"]["requires_official_operation_layer"] is True
+    assert payload["api_prepare_plan"]["creates_execution_intent"] is False
+    assert payload["api_prepare_plan"]["uses_standing_runtime_authorization"] is True
+    assert payload["api_prepare_plan"]["requires_official_operation_layer"] is True
     assert payload["safety_invariants"]["prepare_records_created"] is False
 
 
@@ -166,8 +166,8 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
             "status": "ready_for_final_gate_preflight",
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {
-                "prepared_authorization_id": "auth-1",
+            "ids": {
+                "authorization_id": "auth-1",
             },
             "created_records": {
                 "shadow_candidate_created": True,
@@ -183,7 +183,7 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
         "_run_prepare_flow",
         fake_prepare,
     )
-    payload = runtime_next_attempt_observation_api_prepare_flow._build_packet(
+    payload = runtime_next_attempt_observation_api_prepare_flow._build_artifact(
         _args(
             allow_prepare_records=True,
             signal_output_json=str(signal_path),
@@ -192,8 +192,8 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
     )
 
     assert payload["status"] == "ready_for_final_gate_preflight"
-    assert payload["operator_command_plan"]["prepared_authorization_id"] == "auth-1"
-    assert payload["operator_command_plan"]["live_submit_allowed"] is False
+    assert payload["api_prepare_plan"]["prepared_authorization_id"] == "auth-1"
+    assert payload["api_prepare_plan"]["live_submit_allowed"] is False
     assert payload["safety_invariants"]["prepare_records_created"] is True
     assert payload["safety_invariants"]["shadow_candidate_created"] is True
     assert payload["safety_invariants"]["recorded_execution_intent_created"] is True
@@ -203,14 +203,14 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
 
 
 def test_observation_api_prepare_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy observation")
         return {"status": "ready_for_prepare", "ok": True}
 
     monkeypatch.setattr(
         runtime_next_attempt_observation_api_prepare_flow,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,

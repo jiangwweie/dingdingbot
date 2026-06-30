@@ -144,10 +144,10 @@ def _safety(
     post_submit: dict[str, Any] | None = None,
     observation: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
-    def flag(packet: dict[str, Any] | None, name: str) -> bool:
-        if not isinstance(packet, dict):
+    def flag(artifact: dict[str, Any] | None, name: str) -> bool:
+        if not isinstance(artifact, dict):
             return False
-        safety = packet.get("safety_invariants")
+        safety = artifact.get("safety_invariants")
         return bool(safety.get(name)) if isinstance(safety, dict) else False
 
     return {
@@ -205,15 +205,15 @@ def _operator_next_step(status: str) -> str:
     return "resolve_post_submit_or_prepare_loop_blocker"
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     finalize_builder: FinalizeBuilder | None = None,
     observation_builder: ObservationBuilder | None = None,
 ) -> dict[str, Any]:
     paths = _output_paths(args)
-    finalize_builder = finalize_builder or finalize_flow._build_packet
-    observation_builder = observation_builder or observation_flow._build_packet
+    finalize_builder = finalize_builder or finalize_flow._build_artifact
+    observation_builder = observation_builder or observation_flow._build_artifact
 
     post_submit = finalize_builder(_finalize_args(args))
     _write_json(paths["post_submit_finalize"], post_submit)
@@ -233,7 +233,7 @@ def _build_packet(
             "artifact_paths": {key: str(value) for key, value in paths.items()},
             "blockers": blockers,
             "warnings": list(post_submit.get("warnings") or []),
-            "operator_command_plan": {
+            "fresh_signal_prepare_plan": {
                 "next_step": "resolve_post_submit_finalize_blocker",
                 "creates_shadow_candidate": False,
                 "creates_execution_intent": False,
@@ -258,15 +258,20 @@ def _build_packet(
     blockers = list(observation.get("blockers") or [])
     if status == "blocked" and not blockers:
         blockers.append("observation_prepare_not_ready")
-    observation_plan = observation.get("operator_command_plan")
+    observation_plan = observation.get("api_prepare_plan")
+    if not isinstance(observation_plan, dict):
+        observation_plan = observation.get("observation_cycle_plan")
     if not isinstance(observation_plan, dict):
         observation_plan = {}
-    prepare_packet = observation.get("prepare_packet")
-    if not isinstance(prepare_packet, dict):
-        prepare_packet = {}
-    prepare_plan = prepare_packet.get("operator_command_plan")
+    prepare_artifact = observation.get("prepare_artifact")
+    if not isinstance(prepare_artifact, dict):
+        prepare_artifact = {}
+    prepare_plan = prepare_artifact.get("prepare_artifact_plan")
     if not isinstance(prepare_plan, dict):
         prepare_plan = {}
+    prepare_ids = prepare_artifact.get("ids")
+    if not isinstance(prepare_ids, dict):
+        prepare_ids = {}
 
     return {
         "scope": "runtime_fresh_signal_prepare_loop",
@@ -280,11 +285,12 @@ def _build_packet(
         "prepared_authorization_id": (
             observation_plan.get("prepared_authorization_id")
             or prepare_plan.get("prepared_authorization_id")
+            or prepare_ids.get("authorization_id")
         ),
         "blockers": blockers,
         "warnings": list(post_submit.get("warnings") or [])
         + list(observation.get("warnings") or []),
-        "operator_command_plan": {
+        "fresh_signal_prepare_plan": {
             "next_step": _operator_next_step(status),
             "creates_shadow_candidate": bool(
                 observation_plan.get("creates_shadow_candidate")
@@ -369,9 +375,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {
+        artifact = _build_artifact(args)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if artifact["status"] in {
         WAITING_FOR_SIGNAL,
         READY_FOR_PREPARE,
         READY_FOR_FINAL_GATE_PREFLIGHT,

@@ -257,7 +257,7 @@ def test_promotion_confirmation_api_records_gate_snapshot_without_action(monkeyp
                 "strategy_family_version_id": "CPM-RO-001-v0",
                 "semantic_confirmations": _semantic_confirmed(),
                 "runtime_confirmations": _runtime_confirmed(),
-                "reason": "Owner confirms bounded 30U experimental capital semantics.",
+                "reason": "Owner confirms controlled-subaccount experimental capital semantics.",
                 "evidence_refs": ["owner-note://promotion-confirmation-api-1"],
                 "created_at_ms": NOW_MS,
                 "metadata": {"source": "api-unit-test"},
@@ -325,7 +325,7 @@ def test_promotion_confirmation_api_records_profile_proposal_snapshot(monkeypatc
                 "runtime_profile_proposal_snapshot": profile_proposal.model_dump(
                     mode="json"
                 ),
-                "reason": "Owner confirms BRF conservative 30U proposal snapshot.",
+                "reason": "Owner confirms BRF controlled-subaccount proposal snapshot.",
                 "evidence_refs": ["runtime-profile-proposal://BRF-001-v0"],
                 "created_at_ms": NOW_MS,
             },

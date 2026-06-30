@@ -6,7 +6,7 @@ Last updated: 2026-06-15
 ## Goal
 
 Consume the first StrategyGroup handoff batch as Strategy Picker, watcher
-scope, RequiredFacts readiness, and runtime bridge inputs.
+scope, RequiredFacts readiness, and runtime input evidence.
 
 ## Done When
 

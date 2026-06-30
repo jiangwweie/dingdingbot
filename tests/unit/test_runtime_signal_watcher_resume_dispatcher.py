@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
-from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_packet, main
+from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_artifact, main
 
 
 def _resume_pack(status: str = "waiting_for_market") -> dict:
@@ -102,12 +102,12 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
         encoding="utf-8",
     )
     return {
-        "scope": "runtime_fresh_attempt_readiness_packet",
+        "scope": "runtime_fresh_attempt_readiness_projection",
         "status": "ready_for_fresh_submit_authorization",
         "runtime_instance_id": "runtime-mpg-1",
         "selected_runtime_instance_ids": ["runtime-mpg-1"],
         "artifact_paths": {
-            "readiness_handoff_bridge": str(handoff_path),
+            "readiness_handoff_evidence": str(handoff_path),
         },
         "action_time_resume": {
             "status": "ready_for_fresh_submit_authorization",
@@ -138,7 +138,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
     }
 
 
-def _finalgate_ready_dispatch_packet() -> dict:
+def _finalgate_ready_dispatch_artifact() -> dict:
     return {
         **_resume_pack("ready_for_action_time_final_gate"),
         "status": "finalgate_ready",
@@ -232,7 +232,7 @@ def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
             "name": "prepare_machine_evidence",
             "id_summary": {"authorization_id": "auth-ready-1"},
             "blockers": [
-                "first_real_submit_packet_unavailable:"
+                "first_real_submit_evidence_unavailable:"
                 "runtimeexecutionorderlifecycleadapterresult_not_found"
             ],
             "warnings": [],
@@ -251,24 +251,27 @@ def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
 
 
 def test_dispatcher_waiting_for_market_is_no_action():
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack(),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "waiting_for_market"
-    assert packet["blocker_class"] == "waiting_for_market"
-    assert packet["dispatch_action"] == "continue_watcher_observation"
-    assert packet["dispatch_status"] == "no_action_continue_observation"
-    assert packet["command_plan"] is None
-    assert packet["selected_strategy_group_id"] == "MPG-001"
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["status"] == "waiting_for_market"
+    assert artifact["blocker_class"] == "waiting_for_market"
+    assert artifact["dispatch_action"] == "continue_watcher_observation"
+    assert artifact["dispatch_status"] == "no_action_continue_observation"
+    assert artifact["command_plan"] is None
+    assert artifact["selected_strategy_group_id"] == "MPG-001"
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
     resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
     resume["signal_input_json"] = "/reports/runtime-mpg-1/signal-input.json"
+    resume["artifact_paths"] = {
+        "readiness_handoff_evidence": "/reports/runtime-mpg-1/readiness-handoff-evidence.json",
+    }
     resume["action_time_resume"].update(
         {
             "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
@@ -284,32 +287,37 @@ def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
         "blocker_class": "none",
     }
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "ready_for_non_executing_prepare"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == (
+    assert artifact["status"] == "ready_for_non_executing_prepare"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_action"] == (
         "prepare_fresh_candidate_authorization_evidence"
     )
-    assert packet["dispatch_status"] == "non_executing_prepare_dispatch_ready"
-    assert packet["owner_state"]["automatic_recovery_action"] == (
+    assert artifact["dispatch_status"] == "non_executing_prepare_dispatch_ready"
+    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "prepare_fresh_candidate_authorization_evidence"
     )
-    command = packet["command_plan"]
+    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
+    command = artifact["command_plan"]
     assert command["kind"] == "fresh_candidate_authorization_evidence_preparation"
     assert command["requires_runtime_instance_id"] is True
-    assert command["requires_readiness_handoff_bridge"] is True
+    assert command["requires_readiness_handoff_evidence"] is True
+    assert command["readiness_handoff_evidence"] == (
+        "/reports/runtime-mpg-1/readiness-handoff-evidence.json"
+    )
     assert command["signal_input_json"] == "/reports/runtime-mpg-1/signal-input.json"
     assert command["calls_official_submit_endpoint"] is False
     assert command["places_order"] is False
     assert command["exchange_write_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
@@ -318,17 +326,44 @@ def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
         "continue_watcher_observation"
     ]
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
-        selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_resume_allowed_actions"
-    assert "allowed_auto_actions_missing_non_executing_prepare" in packet["blockers"]
-    assert packet["command_plan"] is None
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_resume_allowed_actions"
+    assert "allowed_auto_actions_missing_non_executing_prepare" in artifact["blockers"]
+    assert artifact["command_plan"] is None
+
+
+def test_dispatcher_non_executing_prepare_rejects_legacy_action_fallback():
+    resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
+    resume["action_time_resume"].pop("allowed_auto_actions", None)
+    resume["action_time_resume"]["next_step"] = (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    resume["action_time_resume"]["automatic_recovery_action"] = (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    resume["automatic_recovery_action"] = (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    resume["operator_command_plan"] = {
+        "next_step": "prepare_fresh_candidate_authorization_evidence"
+    }
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_resume_allowed_actions"
+    assert "allowed_auto_actions_missing_non_executing_prepare" in artifact["blockers"]
+    assert artifact["command_plan"] is None
 
 
 def _non_executing_prepare_resume(
@@ -361,13 +396,13 @@ def _non_executing_prepare_resume(
     return resume
 
 
-def _non_executing_prepare_ready_packet(
+def _non_executing_prepare_ready_artifact(
     *,
     authorization_id: str = "auth-prepared-1",
     candidate_id: str = "candidate-1",
 ) -> dict:
     return {
-        "scope": "runtime_next_attempt_prepare_packet",
+        "scope": "runtime_next_attempt_prepare_artifact",
         "status": "ready_for_final_gate_preflight",
         "ids": {
             "authorization_id": authorization_id,
@@ -438,11 +473,11 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
 
     def _prepare_runner(command_plan):
         prepare_calls.append(command_plan)
-        return _non_executing_prepare_ready_packet()
+        return _non_executing_prepare_ready_artifact()
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_non_executing_prepare_resume(),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
@@ -451,26 +486,26 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "finalgate_ready"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert packet["non_executing_prepare_result"]["status"] == (
+    assert artifact["status"] == "finalgate_ready"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert artifact["non_executing_prepare_result"]["status"] == (
         "ready_for_final_gate_preflight"
     )
     assert prepare_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
     assert prepare_calls[0]["signal_input_json"] == (
         "/reports/runtime-mpg-1/signal-input.json"
     )
-    assert packet["command_plan"]["prepared_authorization_id"] == "auth-prepared-1"
-    assert packet["command_plan"]["shadow_candidate_id"] == "candidate-1"
-    assert packet["finalgate_preflight_result"]["called"] is True
-    assert packet["finalgate_preflight_result"]["places_order"] is False
-    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is True
-    assert packet["safety_invariants"]["allowed_prepare_evidence_created"] is True
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["calls_order_lifecycle"] is False
+    assert artifact["command_plan"]["prepared_authorization_id"] == "auth-prepared-1"
+    assert artifact["command_plan"]["shadow_candidate_id"] == "candidate-1"
+    assert artifact["finalgate_preflight_result"]["called"] is True
+    assert artifact["finalgate_preflight_result"]["places_order"] is False
+    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is True
+    assert artifact["safety_invariants"]["allowed_prepare_evidence_created"] is True
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
     assert [item["method"] for item in calls] == ["GET"]
 
 
@@ -487,13 +522,13 @@ def test_dispatcher_execute_non_executing_prepare_blocks_forbidden_effect(
         raise AssertionError("FinalGate must not run after forbidden prepare effect")
 
     def _prepare_runner(_command_plan):
-        packet = _non_executing_prepare_ready_packet()
-        packet["safety_invariants"]["exchange_write_called"] = True
-        return packet
+        prepare_artifact = _non_executing_prepare_ready_artifact()
+        prepare_artifact["safety_invariants"]["exchange_write_called"] = True
+        return prepare_artifact
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_non_executing_prepare_resume(),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
@@ -501,15 +536,15 @@ def test_dispatcher_execute_non_executing_prepare_blocks_forbidden_effect(
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
         "blocked_by_non_executing_prepare_forbidden_effect"
     )
-    assert "non_executing_prepare_effect:exchange_write_called" in packet["blockers"]
-    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is True
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert "non_executing_prepare_effect:exchange_write_called" in artifact["blockers"]
+    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is True
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_execute_non_executing_prepare_blocks_missing_signal_input():
@@ -518,24 +553,24 @@ def test_dispatcher_execute_non_executing_prepare_blocks_missing_signal_input():
     resume["action_time_resume"]["signal_input_json"] = None
     resume["runtime_signal_summaries"][0]["signal_input_json"] = None
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
         non_executing_preparer=(
-            lambda _command_plan: _non_executing_prepare_ready_packet()
+            lambda _command_plan: _non_executing_prepare_ready_artifact()
         ),
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "missing_fact"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == (
         "blocked_by_missing_non_executing_prepare_inputs"
     )
-    assert "missing_fact:signal_input_json" in packet["blockers"]
-    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is False
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
+    assert "missing_fact:signal_input_json" in artifact["blockers"]
+    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is False
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
 
 
 def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scope(
@@ -569,7 +604,7 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
 
     def _prepare_runner(command_plan):
         prepared_runtime_ids.append(command_plan["runtime_instance_id"])
-        return _non_executing_prepare_ready_packet(
+        return _non_executing_prepare_ready_artifact(
             authorization_id=f"auth-{command_plan['runtime_instance_id']}",
             candidate_id=f"candidate-{command_plan['runtime_instance_id']}",
         )
@@ -578,7 +613,7 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
         ("TEQ-001", "runtime-teq-1"),
         ("SOR-001", "runtime-sor-1"),
     ):
-        packet = build_dispatch_packet(
+        artifact = build_dispatch_artifact(
             resume_pack=_non_executing_prepare_resume(
                 strategy_group_id=strategy_group_id,
                 runtime_instance_id=runtime_instance_id,
@@ -589,19 +624,19 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
             selected_strategy_group_id=strategy_group_id,
         )
 
-        assert packet["status"] == "finalgate_ready"
-        assert packet["selected_strategy_group_id"] == strategy_group_id
-        assert packet["command_plan"]["prepared_authorization_id"] == (
+        assert artifact["status"] == "finalgate_ready"
+        assert artifact["selected_strategy_group_id"] == strategy_group_id
+        assert artifact["command_plan"]["prepared_authorization_id"] == (
             f"auth-{runtime_instance_id}"
         )
-        assert packet["safety_invariants"]["places_order"] is False
-        assert packet["safety_invariants"]["exchange_write_called"] is False
+        assert artifact["safety_invariants"]["places_order"] is False
+        assert artifact["safety_invariants"]["exchange_write_called"] is False
 
     assert prepared_runtime_ids == ["runtime-teq-1", "runtime-sor-1"]
 
 
 def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
@@ -610,12 +645,12 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "ready_for_action_time_final_gate"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == "run_official_action_time_final_gate_preflight"
-    assert packet["dispatch_status"] == "official_finalgate_preflight_dispatch_ready"
-    assert packet["blockers"] == []
-    command = packet["command_plan"]
+    assert artifact["status"] == "ready_for_action_time_final_gate"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_action"] == "run_official_action_time_final_gate_preflight"
+    assert artifact["dispatch_status"] == "official_finalgate_preflight_dispatch_ready"
+    assert artifact["blockers"] == []
+    command = artifact["command_plan"]
     assert command["method"] == "GET"
     assert command["prepared_authorization_id"] == "auth-ready-1"
     assert (
@@ -634,21 +669,25 @@ def test_dispatcher_blocks_actionable_resume_outside_selected_strategygroup_scop
         runtime_instance_id="runtime-sor-1",
     )
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         selected_strategy_group_id="MPG-001",
         execute_preflight=True,
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
-    assert packet["command_plan"] is None
-    assert packet["selected_strategy_group_id"] == "MPG-001"
-    assert packet["owner_state"]["blocked_at"] == "selected_strategygroup_scope"
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
-    assert packet["blockers"] == [
+    assert artifact["status"] == "blocked"
+    assert artifact["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert artifact["command_plan"] is None
+    assert artifact["selected_strategy_group_id"] == "MPG-001"
+    assert artifact["owner_state"]["blocked_at"] == "selected_strategygroup_scope"
+    assert "next_safe_checkpoint" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "review_selected_strategygroup_scope"
+    )
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
+    assert artifact["blockers"] == [
         "selected_strategy_group_mismatch:expected=MPG-001:actual=SOR-001"
     ]
 
@@ -658,36 +697,40 @@ def test_dispatcher_blocks_actionable_resume_when_selected_scope_cannot_be_prove
     resume["runtime_instance_id"] = None
     resume["selected_runtime_instance_ids"] = ["runtime-mpg-1", "runtime-sor-1"]
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
-    assert packet["blockers"] == ["missing_fact:selected_strategy_group_id_for_action"]
-    assert packet["command_plan"] is None
+    assert artifact["status"] == "blocked"
+    assert artifact["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert artifact["blockers"] == ["missing_fact:selected_strategy_group_id_for_action"]
+    assert artifact["command_plan"] is None
+    assert "next_safe_checkpoint" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "review_selected_strategygroup_scope"
+    )
 
 
 def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_fresh_authorization_resume_pack(tmp_path),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
 
-    assert packet["status"] == "ready_for_fresh_submit_authorization"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == (
+    assert artifact["status"] == "ready_for_fresh_submit_authorization"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_action"] == (
         "run_official_fresh_submit_authorization_binding"
     )
-    assert packet["dispatch_status"] == (
+    assert artifact["dispatch_status"] == (
         "official_fresh_authorization_binding_dispatch_ready"
     )
-    assert packet["owner_state"]["blocked_at"] == "fresh_submit_authorization"
-    command = packet["command_plan"]
+    assert artifact["owner_state"]["blocked_at"] == "fresh_submit_authorization"
+    command = artifact["command_plan"]
     assert command["method"] == "POST"
     assert command["path"] == (
         "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
@@ -698,26 +741,29 @@ def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
     assert command["exchange_write_called"] is False
 
 
-def test_dispatcher_accepts_fresh_attempt_readiness_alias_next_step(tmp_path):
+def test_dispatcher_accepts_fresh_attempt_readiness_alias_with_explicit_allowed_action(
+    tmp_path,
+):
     resume = _fresh_authorization_resume_pack(tmp_path)
     resume.pop("action_time_resume")
     resume["status"] = "waiting_for_fresh_authorization"
+    resume["allowed_auto_actions"] = ["bind_or_resolve_fresh_authorization"]
     resume["operator_command_plan"] = {
         "next_step": "bind_or_resolve_fresh_authorization",
     }
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/fresh-attempt-readiness.json"),
         api_base="http://127.0.0.1:18080",
     )
 
-    assert packet["status"] == "waiting_for_fresh_authorization"
-    assert packet["dispatch_action"] == (
+    assert artifact["status"] == "waiting_for_fresh_authorization"
+    assert artifact["dispatch_action"] == (
         "run_official_fresh_submit_authorization_binding"
     )
-    assert packet["command_plan"]["method"] == "POST"
-    assert packet["command_plan"]["places_order"] is False
+    assert artifact["command_plan"]["method"] == "POST"
+    assert artifact["command_plan"]["places_order"] is False
 
 
 def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkpoint(
@@ -776,36 +822,38 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_fresh_authorization_resume_pack(tmp_path),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
     )
 
-    assert packet["status"] == "finalgate_ready"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert packet["fresh_submit_authorization_id"] == "fresh-auth-1"
-    assert packet["fresh_authorization_binding_result"]["called"] is True
-    assert packet["owner_state"]["automatic_recovery_action"] == (
+    assert artifact["status"] == "finalgate_ready"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert artifact["fresh_submit_authorization_id"] == "fresh-auth-1"
+    assert artifact["fresh_authorization_binding_result"]["called"] is True
+    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
     )
-    assert packet["safety_invariants"]["official_fresh_authorization_binding_called"]
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert packet["safety_invariants"]["creates_submit_authorization"] is True
-    assert packet["safety_invariants"]["pg_prepare_evidence_mutated"] is True
-    assert packet["safety_invariants"]["mutates_pg"] is True
-    assert packet["safety_invariants"]["calls_official_submit_endpoint"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["operation_layer_command_plan"]["authorization_id"] == "fresh-auth-1"
+    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
+    assert artifact["safety_invariants"]["official_fresh_authorization_binding_called"]
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["safety_invariants"]["creates_submit_authorization"] is True
+    assert artifact["safety_invariants"]["pg_prepare_evidence_mutated"] is True
+    assert artifact["safety_invariants"]["mutates_pg"] is True
+    assert artifact["safety_invariants"]["calls_official_submit_endpoint"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["operation_layer_command_plan"]["authorization_id"] == "fresh-auth-1"
     assert len(calls) == 2
     bind_call = calls[0]
     assert bind_call["method"] == "POST"
     assert "runtime-execution-first-real-submit-actions" not in bind_call["url"]
     assert bind_call["body"]["no_exchange_side_effects"] is True
-    assert bind_call["body"]["handoff_packet"]["handoff_id"] == (
+    assert bind_call["body"]["handoff_artifact"]["handoff_id"] == (
         "handoff-runtime-mpg-1"
     )
     preflight_call = calls[1]
@@ -840,37 +888,37 @@ def test_dispatcher_execute_fresh_authorization_binding_blocks_forbidden_effect(
         },
     )
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_fresh_authorization_resume_pack(tmp_path),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
         "blocked_by_fresh_authorization_binding_forbidden_effect"
     )
     assert "fresh_authorization_binding_effect:exchange_write_called" in (
-        packet["blockers"]
+        artifact["blockers"]
     )
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_dispatcher_blocks_fresh_authorization_without_handoff_json(tmp_path):
+def test_dispatcher_blocks_fresh_authorization_without_handoff_artifact(tmp_path):
     resume = _fresh_authorization_resume_pack(tmp_path)
     resume["artifact_paths"] = {}
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "missing_fact"
-    assert packet["dispatch_status"] == "blocked_by_missing_handoff_json"
-    assert "missing_fact:handoff_json" in packet["blockers"]
-    assert packet["owner_state"]["blocked_at"] == "fresh_submit_authorization"
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == "blocked_by_missing_handoff_artifact"
+    assert "missing_fact:handoff_artifact_json" in artifact["blockers"]
+    assert artifact["owner_state"]["blocked_at"] == "fresh_submit_authorization"
 
 
 def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monkeypatch):
@@ -899,55 +947,89 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         },
     )
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
     )
 
-    assert packet["status"] == "finalgate_ready"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_status"] == "official_finalgate_preflight_passed"
-    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert packet["owner_state"]["status"] == "finalgate_ready"
-    assert packet["owner_state"]["automatic_recovery_action"] == (
+    assert artifact["status"] == "finalgate_ready"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "official_finalgate_preflight_passed"
+    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert artifact["owner_state"]["status"] == "finalgate_ready"
+    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
     )
-    assert packet["finalgate_preflight_result"]["called"] is True
-    assert packet["operation_layer_command_plan"]["places_order"] is False
-    assert packet["operation_layer_command_plan"]["official_endpoint_method"] == "POST"
-    assert packet["operation_layer_command_plan"]["official_endpoint_path"] == (
+    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
+    assert artifact["finalgate_preflight_result"]["called"] is True
+    assert artifact["operation_layer_command_plan"]["places_order"] is False
+    assert "next_action" not in artifact["operation_layer_command_plan"]
+    assert artifact["operation_layer_command_plan"][
+        "official_operation_layer_action"
+    ] == "prepare_official_operation_layer_submit"
+    assert artifact["operation_layer_command_plan"]["official_endpoint_method"] == "POST"
+    assert artifact["operation_layer_command_plan"]["official_endpoint_path"] == (
         "/api/trading-console/"
         "runtime-execution-first-real-submit-actions/authorizations/auth-ready-1"
     )
     assert (
-        packet["operation_layer_command_plan"][
+        artifact["operation_layer_command_plan"][
             "owner_confirmed_for_first_real_submit_action"
         ]
         is True
     )
     assert (
-        packet["operation_layer_command_plan"]["standing_authorized_first_real_submit"]
+        artifact["operation_layer_command_plan"]["standing_authorized_first_real_submit"]
         is True
     )
     assert (
-        packet["operation_layer_command_plan"][
+        artifact["operation_layer_command_plan"][
             "owner_chat_confirmation_required_for_real_submit"
         ]
         is False
     )
     assert (
-        packet["operation_layer_command_plan"]["legacy_owner_confirmation_env_required"]
+        artifact["operation_layer_command_plan"]["legacy_owner_confirmation_env_required"]
         is False
     )
     assert "exchange_submit_action_authorization_id" in (
-        packet["operation_layer_command_plan"]["requires_evidence_ids"]
+        artifact["operation_layer_command_plan"]["requires_evidence_ids"]
     )
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_finalgate_rejects_legacy_action_fallback_without_allowed_actions():
+    resume = _resume_pack("ready_for_action_time_final_gate")
+    resume["action_time_resume"].pop("allowed_auto_actions", None)
+    resume["action_time_resume"]["next_step"] = (
+        "run_official_action_time_final_gate_preflight"
+    )
+    resume["action_time_resume"]["automatic_recovery_action"] = (
+        "run_official_action_time_final_gate_preflight"
+    )
+    resume["automatic_recovery_action"] = (
+        "run_official_action_time_final_gate_preflight"
+    )
+    resume["operator_command_plan"] = {
+        "next_step": "run_official_action_time_final_gate_preflight"
+    }
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_resume_allowed_actions"
+    assert "allowed_auto_actions_missing_finalgate_preflight" in artifact["blockers"]
+    assert artifact["command_plan"] is None
 
 
 def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
@@ -1012,7 +1094,7 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
@@ -1032,15 +1114,15 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
             },
         )
     ]
-    assert packet["status"] == "submitted"
-    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert packet["operation_layer_submit_result"]["called"] is True
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert packet["safety_invariants"][
+    assert artifact["status"] == "submitted"
+    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert artifact["operation_layer_submit_result"]["called"] is True
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"][
         "operation_layer_evidence_attempt_counter_mutated"
     ] is True
-    assert packet["safety_invariants"][
+    assert artifact["safety_invariants"][
         "operation_layer_evidence_runtime_budget_mutated"
     ] is True
     assert len(calls) == 2
@@ -1130,7 +1212,7 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
@@ -1145,17 +1227,17 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
     assert len(live_enablement_calls) == 1
     assert live_enablement_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
     assert live_enablement_calls[0]["authorization_id"] == "auth-ready-1"
-    assert packet["status"] == "submitted"
-    assert packet["runtime_live_enablement_result"]["mutation_applied"] is True
-    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert packet["operation_layer_submit_result"]["called"] is True
-    assert packet["safety_invariants"]["runtime_live_enablement_called"] is True
-    assert packet["safety_invariants"]["runtime_live_enablement_mutation_applied"] is True
-    assert packet["safety_invariants"]["runtime_state_mutated"] is True
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert packet["safety_invariants"]["places_order"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is True
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["status"] == "submitted"
+    assert artifact["runtime_live_enablement_result"]["mutation_applied"] is True
+    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert artifact["operation_layer_submit_result"]["called"] is True
+    assert artifact["safety_invariants"]["runtime_live_enablement_called"] is True
+    assert artifact["safety_invariants"]["runtime_live_enablement_mutation_applied"] is True
+    assert artifact["safety_invariants"]["runtime_state_mutated"] is True
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
@@ -1228,59 +1310,59 @@ def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
 
 
 def test_dispatcher_translates_operation_layer_evidence_blocker():
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_blocked_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
         ),
     )
 
-    assert packet["status"] == "operation_layer_blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_operation_layer_evidence"
-    assert packet["dispatch_action"] is None
-    assert packet["owner_state"]["blocked_at"] == "OperationLayerEvidence"
-    assert packet["owner_state"]["downgrade_mode"] == (
+    assert artifact["status"] == "operation_layer_blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_operation_layer_evidence"
+    assert artifact["dispatch_action"] is None
+    assert artifact["owner_state"]["blocked_at"] == "OperationLayerEvidence"
+    assert artifact["owner_state"]["downgrade_mode"] == (
         "continue_watcher_observation_no_submit"
     )
-    readiness = packet["operation_layer_readiness"]
+    readiness = artifact["operation_layer_readiness"]
     assert readiness["status"] == "blocked"
     assert readiness["ready_for_official_operation_layer_submit"] is False
     assert "exchange_submit_action_authorization_id" in (
         readiness["missing_evidence_ids"]
     )
     assert "deployment_readiness_evidence_id" in readiness["missing_evidence_ids"]
-    assert "persistent_duplicate_submit_lock_required" in packet["blockers"]
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert "persistent_duplicate_submit_lock_required" in artifact["blockers"]
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_dispatcher_translates_operation_layer_evidence_ready():
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
         ),
     )
 
-    assert packet["status"] == "operation_layer_ready"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_status"] == "official_operation_layer_evidence_ready"
-    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert packet["blockers"] == []
-    assert packet["owner_state"]["status"] == "operation_layer_ready"
-    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert packet["operation_layer_readiness"][
+    assert artifact["status"] == "operation_layer_ready"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "official_operation_layer_evidence_ready"
+    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert artifact["blockers"] == []
+    assert artifact["owner_state"]["status"] == "operation_layer_ready"
+    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert artifact["operation_layer_readiness"][
         "ready_for_official_operation_layer_submit"
     ] is True
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress(
@@ -1292,16 +1374,16 @@ def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regre
         lambda: ("brc_operator_session=fake-session", None),
     )
 
-    resume_pack = _finalgate_ready_dispatch_packet()
+    resume_pack = _finalgate_ready_dispatch_artifact()
     operation_layer_command_plan = dict(resume_pack["operation_layer_command_plan"])
     operation_layer_command_plan["standing_authorized_first_real_submit"] = False
     operation_layer_command_plan["owner_chat_confirmation_required_for_real_submit"] = True
     operation_layer_command_plan["legacy_owner_confirmation_env_required"] = True
     resume_pack["operation_layer_command_plan"] = operation_layer_command_plan
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume_pack,
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1309,19 +1391,19 @@ def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regre
         execute_operation_layer_submit=True,
     )
 
-    assert packet["status"] == "operation_layer_submit_blocked"
-    assert packet["dispatch_status"] == "blocked_before_official_operation_layer_submit"
+    assert artifact["status"] == "operation_layer_submit_blocked"
+    assert artifact["dispatch_status"] == "blocked_before_official_operation_layer_submit"
     assert "standing_authorization_not_bound_for_first_real_submit" in (
-        packet["blockers"]
+        artifact["blockers"]
     )
     assert "owner_chat_confirmation_still_required_for_first_real_submit" in (
-        packet["blockers"]
+        artifact["blockers"]
     )
-    assert "legacy_owner_confirmation_env_still_required" in packet["blockers"]
-    assert packet["operation_layer_submit_result"]["called"] is False
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert "legacy_owner_confirmation_env_still_required" in artifact["blockers"]
+    assert artifact["operation_layer_submit_result"]["called"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
@@ -1359,9 +1441,9 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1369,57 +1451,57 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
         execute_operation_layer_submit=True,
     )
 
-    assert packet["status"] == "submitted"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_status"] == "official_operation_layer_submit_completed"
-    assert packet["dispatch_action"] == (
+    assert artifact["status"] == "submitted"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "official_operation_layer_submit_completed"
+    assert artifact["dispatch_action"] == (
         "post_submit_finalize_reconciliation_budget_settlement"
     )
-    assert packet["owner_state"]["status"] == "submitted"
-    assert packet["operation_layer_submit_result"]["called"] is True
+    assert artifact["owner_state"]["status"] == "submitted"
+    assert artifact["operation_layer_submit_result"]["called"] is True
     assert (
-        packet["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
+        artifact["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
         is True
     )
     assert (
-        packet["operation_layer_submit_result"][
+        artifact["operation_layer_submit_result"][
             "owner_chat_confirmation_required_for_real_submit"
         ]
         is False
     )
     assert (
-        packet["operation_layer_submit_result"]["legacy_owner_confirmation_env_required"]
+        artifact["operation_layer_submit_result"]["legacy_owner_confirmation_env_required"]
         is False
     )
     assert (
-        packet["operation_layer_submit_result"][
+        artifact["operation_layer_submit_result"][
             "standing_authorization_consumed_for_real_submit"
         ]
         is True
     )
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
     assert (
-        packet["safety_invariants"]["standing_authorized_first_real_submit"] is True
+        artifact["safety_invariants"]["standing_authorized_first_real_submit"] is True
     )
     assert (
-        packet["safety_invariants"][
+        artifact["safety_invariants"][
             "owner_chat_confirmation_required_for_real_submit"
         ]
         is False
     )
     assert (
-        packet["safety_invariants"]["legacy_owner_confirmation_env_required"] is False
+        artifact["safety_invariants"]["legacy_owner_confirmation_env_required"] is False
     )
     assert (
-        packet["safety_invariants"][
+        artifact["safety_invariants"][
             "standing_authorization_consumed_for_real_submit"
         ]
         is True
     )
-    assert packet["safety_invariants"]["places_order"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is True
-    assert packet["safety_invariants"]["calls_order_lifecycle"] is True
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert artifact["safety_invariants"]["calls_order_lifecycle"] is True
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
     assert len(calls) == 1
     call = calls[0]
     assert call["method"] == "POST"
@@ -1463,9 +1545,9 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1474,36 +1556,36 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
         operation_layer_submit_mode="disabled_smoke",
     )
 
-    assert packet["status"] == "operation_layer_disabled_smoke_passed"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_status"] == "official_operation_layer_disabled_smoke_passed"
-    assert packet["dispatch_action"] == "continue_watcher_observation"
-    assert packet["owner_state"]["status"] == "operation_layer_disabled_smoke_passed"
-    assert packet["operation_layer_submit_result"]["called"] is True
-    assert packet["operation_layer_submit_result"][
+    assert artifact["status"] == "operation_layer_disabled_smoke_passed"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "official_operation_layer_disabled_smoke_passed"
+    assert artifact["dispatch_action"] == "continue_watcher_observation"
+    assert artifact["owner_state"]["status"] == "operation_layer_disabled_smoke_passed"
+    assert artifact["operation_layer_submit_result"]["called"] is True
+    assert artifact["operation_layer_submit_result"][
         "owner_confirmed_for_first_real_submit_action"
     ] is False
     assert (
-        packet["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
+        artifact["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
         is True
     )
     assert (
-        packet["operation_layer_submit_result"][
+        artifact["operation_layer_submit_result"][
             "standing_authorization_consumed_for_real_submit"
         ]
         is False
     )
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
     assert (
-        packet["safety_invariants"][
+        artifact["safety_invariants"][
             "standing_authorization_consumed_for_real_submit"
         ]
         is False
     )
-    assert packet["safety_invariants"]["places_order"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert packet["safety_invariants"]["calls_order_lifecycle"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
     assert len(calls) == 1
     parsed = urlparse(calls[0]["url"])
     query = parse_qs(parsed.query)
@@ -1522,7 +1604,7 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
 
     def _request_json(**kwargs):
         calls.append(kwargs)
-        if "post-submit-finalize-packets" in kwargs["url"]:
+        if "post-submit-finalize-payloads" in kwargs["url"]:
             return {
                 "http_status": 200,
                 "error": False,
@@ -1580,9 +1662,9 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1591,38 +1673,40 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert packet["status"] == "settled"
-    assert packet["blocker_class"] == "none"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "settled"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == (
         "post_submit_finalize_completed_next_attempt_ready"
     )
-    assert packet["dispatch_action"] == "continue_watcher_observation"
-    assert packet["owner_state"]["status"] == "settled"
-    assert packet["owner_state"]["automatic_recovery_action"] == (
+    assert artifact["dispatch_action"] == "continue_watcher_observation"
+    assert artifact["owner_state"]["status"] == "settled"
+    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "continue_watcher_observation"
     )
-    assert packet["post_submit_finalize_result"]["called"] is True
-    assert packet["post_submit_finalize_result"]["authorization_id"] == "auth-ready-1"
-    assert packet["post_submit_finalize_result"]["runtime_instance_id"] == (
+    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
+    assert artifact["post_submit_finalize_result"]["called"] is True
+    assert artifact["post_submit_finalize_result"]["authorization_id"] == "auth-ready-1"
+    assert artifact["post_submit_finalize_result"]["runtime_instance_id"] == (
         "runtime-mpg-1"
     )
-    assert packet["post_submit_finalize_result"]["reservation_id"] == (
+    assert artifact["post_submit_finalize_result"]["reservation_id"] == (
         "runtime-attempt-reservation-auth-ready-1"
     )
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is True
-    assert packet["safety_invariants"]["post_submit_budget_settlement_called"] is True
-    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
-    assert packet["safety_invariants"]["places_order"] is True
-    assert packet["safety_invariants"]["exchange_write_called"] is True
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
+    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is True
+    assert artifact["safety_invariants"]["runtime_budget_mutated"] is True
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
     assert len(calls) == 2
     submit_call, finalize_call = calls
     assert submit_call["method"] == "POST"
     assert finalize_call["method"] == "POST"
     assert finalize_call["url"].endswith(
         "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
-        "post-submit-finalize-packets"
+        "post-submit-finalize-payloads"
     )
     assert finalize_call["body"]["authorization_id"] == "auth-ready-1"
     assert finalize_call["body"]["reservation_id"] == (
@@ -1641,7 +1725,7 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
 
     def _request_json(**kwargs):
         calls.append(kwargs)
-        if "post-submit-finalize-packets" in kwargs["url"]:
+        if "post-submit-finalize-payloads" in kwargs["url"]:
             return {
                 "http_status": 200,
                 "error": False,
@@ -1690,9 +1774,9 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1701,29 +1785,29 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert packet["status"] == "post_submit_finalize_blocked"
-    assert packet["blocker_class"] == "missing_fact"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "post_submit_finalize_blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == (
         "blocked_by_post_submit_finalize_incomplete_closed_loop"
     )
-    assert "post_submit_finalize_budget_settlement_id_missing" in packet["blockers"]
-    assert "post_submit_finalize_review_id_missing" in packet["blockers"]
+    assert "post_submit_finalize_budget_settlement_id_missing" in artifact["blockers"]
+    assert "post_submit_finalize_review_id_missing" in artifact["blockers"]
     assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
-        packet["blockers"]
+        artifact["blockers"]
     )
-    assert "post_submit_finalize_not_complete" in packet["blockers"]
-    assert "post_submit_reconciliation_not_matched" in packet["blockers"]
-    assert "post_submit_budget_not_settled" in packet["blockers"]
-    assert "submit_outcome_review_not_recorded" in packet["blockers"]
-    assert packet["dispatch_action"] is None
-    assert packet["owner_state"]["status"] == "post_submit_finalize_blocked"
-    assert packet["owner_state"]["downgrade_mode"] == (
+    assert "post_submit_finalize_not_complete" in artifact["blockers"]
+    assert "post_submit_reconciliation_not_matched" in artifact["blockers"]
+    assert "post_submit_budget_not_settled" in artifact["blockers"]
+    assert "submit_outcome_review_not_recorded" in artifact["blockers"]
+    assert artifact["dispatch_action"] is None
+    assert artifact["owner_state"]["status"] == "post_submit_finalize_blocked"
+    assert artifact["owner_state"]["downgrade_mode"] == (
         "halt_new_entries_until_post_submit_settled"
     )
-    assert packet["post_submit_finalize_result"]["called"] is True
-    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is True
-    assert packet["safety_invariants"]["post_submit_budget_settlement_called"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["post_submit_finalize_result"]["called"] is True
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
+    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
     assert len(calls) == 2
 
 
@@ -1762,9 +1846,9 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monke
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1773,23 +1857,23 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monke
         execute_post_submit_finalize=True,
     )
 
-    assert packet["status"] == "operation_layer_submit_failed"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == (
+    assert artifact["status"] == "operation_layer_submit_failed"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
         "official_operation_layer_submit_result_identity_mismatch"
     )
     assert (
         "operation_layer_submit_authorization_id_mismatch:"
         "expected=auth-ready-1:actual=other-auth"
-    ) in packet["blockers"]
-    assert packet["dispatch_action"] is None
-    assert packet["owner_state"]["downgrade_mode"] == (
+    ) in artifact["blockers"]
+    assert artifact["dispatch_action"] is None
+    assert artifact["owner_state"]["downgrade_mode"] == (
         "halt_new_entries_until_reconciled"
     )
-    assert "post_submit_finalize_result" not in packet
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert "post_submit_finalize_result" not in artifact
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
     assert len(calls) == 1
 
 
@@ -1801,7 +1885,7 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
     )
 
     def _request_json(**kwargs):
-        if "post-submit-finalize-packets" in kwargs["url"]:
+        if "post-submit-finalize-payloads" in kwargs["url"]:
             return {
                 "http_status": 200,
                 "error": False,
@@ -1848,9 +1932,9 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1859,15 +1943,15 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert packet["status"] == "post_submit_finalize_blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "post_submit_finalize_result_identity_mismatch"
+    assert artifact["status"] == "post_submit_finalize_blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "post_submit_finalize_result_identity_mismatch"
     assert any(
         blocker.startswith("post_submit_finalize_runtime_instance_id_mismatch:")
-        for blocker in packet["blockers"]
+        for blocker in artifact["blockers"]
     )
-    assert packet["post_submit_finalize_result"]["called"] is True
-    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is True
+    assert artifact["post_submit_finalize_result"]["called"] is True
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
 
 
 def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
@@ -1885,12 +1969,12 @@ def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
         return {}
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-    resume = _finalgate_ready_dispatch_packet()
+    resume = _finalgate_ready_dispatch_artifact()
     resume["finalgate_preflight_result"] = {"called": False}
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
@@ -1898,41 +1982,41 @@ def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
         execute_operation_layer_submit=True,
     )
 
-    assert packet["status"] == "operation_layer_submit_blocked"
-    assert packet["dispatch_status"] == "blocked_before_official_operation_layer_submit"
-    assert "action_time_finalgate_preflight_not_called" in packet["blockers"]
+    assert artifact["status"] == "operation_layer_submit_blocked"
+    assert artifact["dispatch_status"] == "blocked_before_official_operation_layer_submit"
+    assert "action_time_finalgate_preflight_not_called" in artifact["blockers"]
     assert called["request"] is False
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():
     report = _operation_layer_ready_report()
     report["ids"]["authorization_id"] = "old-auth-1"
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=report,
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
         ),
     )
 
-    assert packet["status"] == "operation_layer_blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_operation_layer_evidence"
+    assert artifact["status"] == "operation_layer_blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_operation_layer_evidence"
     assert any(
         blocker.startswith("operation_layer_authorization_id_mismatch:")
-        for blocker in packet["blockers"]
+        for blocker in artifact["blockers"]
     )
-    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
 
 
 def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists():
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=(
             _operation_layer_report_with_satisfied_legacy_probe_blocker()
         ),
@@ -1941,33 +2025,33 @@ def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists
         ),
     )
 
-    assert packet["status"] == "operation_layer_ready"
-    assert packet["blockers"] == []
-    assert packet["operation_layer_readiness"]["blockers"] == []
+    assert artifact["status"] == "operation_layer_ready"
+    assert artifact["blockers"] == []
+    assert artifact["operation_layer_readiness"]["blockers"] == []
     assert (
         "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
         "local_registration_adapter_result"
-    ) in packet["warnings"]
+    ) in artifact["warnings"]
 
 
 def test_dispatcher_keeps_legacy_local_registration_probe_without_result():
     report = _operation_layer_report_with_satisfied_legacy_probe_blocker()
     report["ids"].pop("local_registration_adapter_result_id")
 
-    packet = build_dispatch_packet(
-        resume_pack=_finalgate_ready_dispatch_packet(),
-        source_path=Path("/tmp/resume-dispatch-packet.json"),
+    artifact = build_dispatch_artifact(
+        resume_pack=_finalgate_ready_dispatch_artifact(),
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
         operation_layer_evidence_report=report,
         operation_layer_evidence_report_path=(
             "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
         ),
     )
 
-    assert packet["status"] == "operation_layer_blocked"
-    assert packet["blocker_class"] == "missing_fact"
+    assert artifact["status"] == "operation_layer_blocked"
+    assert artifact["blocker_class"] == "missing_fact"
     assert any(
         "runtimeexecutionorderlifecycleadapterresult_not_found" in blocker
-        for blocker in packet["blockers"]
+        for blocker in artifact["blockers"]
     )
 
 
@@ -1997,20 +2081,20 @@ def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
         },
     )
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_action_time_finalgate"
-    assert "active_position_conflict" in packet["blockers"]
-    assert packet["owner_state"]["blocked_at"] == "FinalGate"
-    assert packet["owner_state"]["downgrade_mode"] == "observe_only_no_submit"
-    assert packet["operation_layer_command_plan"] is None
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_action_time_finalgate"
+    assert "active_position_conflict" in artifact["blockers"]
+    assert artifact["owner_state"]["blocked_at"] == "FinalGate"
+    assert artifact["owner_state"]["downgrade_mode"] == "observe_only_no_submit"
+    assert artifact["operation_layer_command_plan"] is None
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_execute_preflight_blocks_operator_session_unavailable(monkeypatch):
@@ -2027,21 +2111,23 @@ def test_dispatcher_execute_preflight_blocks_operator_session_unavailable(monkey
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "deployment_issue"
-    assert packet["dispatch_status"] == "blocked_by_operator_session_unavailable"
-    assert packet["owner_state"]["blocked_at"] == "operator_session"
-    assert packet["owner_state"]["automatic_recovery_action"] == (
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "deployment_issue"
+    assert artifact["dispatch_status"] == "blocked_by_operator_session_unavailable"
+    assert artifact["owner_state"]["blocked_at"] == "operator_session"
+    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "restore_operator_session_or_local_session_signing"
     )
+    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
     assert called["request"] is False
-    assert packet["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_execute_preflight_blocks_forbidden_preflight_effect(monkeypatch):
@@ -2070,18 +2156,18 @@ def test_dispatcher_execute_preflight_blocks_forbidden_preflight_effect(monkeypa
         },
     )
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_finalgate_preflight_forbidden_effect"
-    assert "preflight_effect:exchange_called" in packet["blockers"]
-    assert packet["owner_state"]["blocked_at"] == "FinalGate"
-    assert packet["operation_layer_command_plan"] is None
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_finalgate_preflight_forbidden_effect"
+    assert "preflight_effect:exchange_called" in artifact["blockers"]
+    assert artifact["owner_state"]["blocked_at"] == "FinalGate"
+    assert artifact["operation_layer_command_plan"] is None
 
 
 def test_dispatcher_blocks_ready_without_fresh_evidence():
@@ -2089,16 +2175,16 @@ def test_dispatcher_blocks_ready_without_fresh_evidence():
     resume["action_time_resume"]["signal_input_json"] = None
     resume["signal_input_json"] = None
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "missing_fact"
-    assert packet["dispatch_status"] == "blocked_by_missing_preflight_evidence"
-    assert "missing_fact:signal_input_json" in packet["blockers"]
-    assert packet["command_plan"] is None
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == "blocked_by_missing_preflight_evidence"
+    assert "missing_fact:signal_input_json" in artifact["blockers"]
+    assert artifact["command_plan"] is None
 
 
 def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypatch):
@@ -2133,15 +2219,15 @@ def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypat
 
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         execute_preflight=True,
     )
 
-    assert packet["status"] == "finalgate_ready"
-    assert packet["command_plan"]["shadow_candidate_id"] is None
-    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["status"] == "finalgate_ready"
+    assert artifact["command_plan"]["shadow_candidate_id"] is None
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith(
         "/runtime-execution-controlled-submit-preflights/authorizations/auth-ready-1"
@@ -2152,21 +2238,21 @@ def test_dispatcher_blocks_unsafe_resume_flags():
     resume = _resume_pack("ready_for_action_time_final_gate")
     resume["action_time_resume"]["exchange_write_called"] = True
 
-    packet = build_dispatch_packet(
+    artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("/tmp/post-signal-resume-pack.json"),
     )
 
-    assert packet["status"] == "blocked"
-    assert packet["blocker_class"] == "hard_safety_stop"
-    assert packet["dispatch_status"] == "blocked_by_unsafe_resume_flags"
-    assert "unsafe_flag:exchange_write_called" in packet["blockers"]
-    assert packet["command_plan"] is None
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_unsafe_resume_flags"
+    assert "unsafe_flag:exchange_write_called" in artifact["blockers"]
+    assert artifact["command_plan"] is None
 
 
-def test_dispatcher_cli_writes_packet(tmp_path):
+def test_dispatcher_cli_writes_artifact(tmp_path):
     resume_path = tmp_path / "post-signal-resume-pack.json"
-    output_path = tmp_path / "resume-dispatch-packet.json"
+    output_path = tmp_path / "resume-dispatch-artifact.json"
     resume_path.write_text(json.dumps(_resume_pack()), encoding="utf-8")
 
     exit_code = main(
@@ -2179,9 +2265,9 @@ def test_dispatcher_cli_writes_packet(tmp_path):
     )
 
     assert exit_code == 0
-    packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert packet["status"] == "waiting_for_market"
-    assert packet["dispatch_action"] == "continue_watcher_observation"
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "waiting_for_market"
+    assert artifact["dispatch_action"] == "continue_watcher_observation"
 
 
 def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
@@ -2210,7 +2296,7 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
         },
     )
     resume_path = tmp_path / "post-signal-resume-pack.json"
-    output_path = tmp_path / "resume-dispatch-packet.json"
+    output_path = tmp_path / "resume-dispatch-artifact.json"
     resume_path.write_text(
         json.dumps(_resume_pack("ready_for_action_time_final_gate")),
         encoding="utf-8",
@@ -2227,5 +2313,5 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
     )
 
     assert exit_code == 0
-    packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert packet["status"] == "finalgate_ready"
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "finalgate_ready"

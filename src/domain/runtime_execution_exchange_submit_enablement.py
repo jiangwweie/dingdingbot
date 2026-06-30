@@ -1,7 +1,7 @@
 """Auditable enablement decision for runtime exchange submit.
 
 This is the explicit gate after local CREATED-order registration and exchange
-submit packet preview. It can prove whether a future adapter may proceed to an
+submit submit preview. It can prove whether a future adapter may proceed to an
 exchange-submit action, but it still does not call OrderLifecycle.submit_order,
 ExchangeGateway, OwnerBoundedExecution, withdrawals, or transfers.
 """
@@ -14,9 +14,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.brc_audit_ids import BrcSemanticIds
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreview,
-    RuntimeExecutionExchangeSubmitPacketPreviewStatus,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreview,
+    RuntimeExecutionExchangeSubmitPreviewStatus,
 )
 
 
@@ -33,7 +33,7 @@ class RuntimeExecutionExchangeSubmitGate(
     RuntimeExecutionExchangeSubmitEnablementModel
 ):
     gate_id: str = Field(min_length=1, max_length=460)
-    packet_preview_id: str = Field(min_length=1, max_length=460)
+    submit_preview_id: str = Field(min_length=1, max_length=460)
     binding_id: str = Field(min_length=1, max_length=460)
     adapter_result_id: str = Field(min_length=1, max_length=420)
     authorization_id: str = Field(min_length=1, max_length=220)
@@ -58,7 +58,7 @@ class RuntimeExecutionExchangeSubmitGate(
     warnings: list[str] = Field(default_factory=list)
     requires_persistent_duplicate_submit_lock: Literal[True] = True
     requires_local_created_orders: Literal[True] = True
-    requires_exchange_submit_packet_preview: Literal[True] = True
+    requires_exchange_submit_preview: Literal[True] = True
     not_exchange_submit_authority: Literal[True] = True
     order_lifecycle_submit_called: Literal[False] = False
     execution_intent_status_changed: Literal[False] = False
@@ -187,7 +187,7 @@ class RuntimeExecutionExchangeSubmitEnablementDecision(
 
 def build_runtime_execution_exchange_submit_gate(
     *,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     owner_real_submit_authorized: bool = False,
     trusted_submit_facts_ready: bool = False,
     submit_idempotency_policy_ready: bool = False,
@@ -200,17 +200,17 @@ def build_runtime_execution_exchange_submit_gate(
     deployment_readiness_evidence_ready: bool = False,
     now_ms: int,
 ) -> RuntimeExecutionExchangeSubmitGate:
-    blockers = list(packet_preview.blockers)
-    warnings = list(packet_preview.warnings)
+    blockers = list(submit_preview.blockers)
+    warnings = list(submit_preview.warnings)
     if (
-        packet_preview.status
-        != RuntimeExecutionExchangeSubmitPacketPreviewStatus
+        submit_preview.status
+        != RuntimeExecutionExchangeSubmitPreviewStatus
         .READY_FOR_EXCHANGE_SUBMIT_ADAPTER_DESIGN
     ):
-        blockers.append("exchange_submit_packet_preview_not_ready")
-    if not packet_preview.entry_submit_request_preview:
+        blockers.append("exchange_submit_preview_not_ready")
+    if not submit_preview.entry_submit_request_preview:
         blockers.append("entry_exchange_submit_request_preview_missing")
-    if not packet_preview.protection_submit_request_previews:
+    if not submit_preview.protection_submit_request_previews:
         blockers.append("protection_exchange_submit_request_previews_missing")
     if not owner_real_submit_authorized:
         blockers.append("owner_real_submit_authorization_missing")
@@ -239,18 +239,18 @@ def build_runtime_execution_exchange_submit_gate(
         else RuntimeExecutionExchangeSubmitGateStatus.READY_FOR_EXCHANGE_SUBMIT_ACTION
     )
     return RuntimeExecutionExchangeSubmitGate(
-        gate_id=f"runtime-exchange-submit-gate-{packet_preview.authorization_id}",
-        packet_preview_id=packet_preview.packet_preview_id,
-        binding_id=packet_preview.binding_id,
-        adapter_result_id=packet_preview.adapter_result_id,
-        authorization_id=packet_preview.authorization_id,
-        execution_intent_id=packet_preview.execution_intent_id,
-        runtime_instance_id=packet_preview.runtime_instance_id,
-        source_type=packet_preview.source_type,
-        source_id=packet_preview.source_id,
-        semantic_ids=packet_preview.semantic_ids,
+        gate_id=f"runtime-exchange-submit-gate-{submit_preview.authorization_id}",
+        submit_preview_id=submit_preview.submit_preview_id,
+        binding_id=submit_preview.binding_id,
+        adapter_result_id=submit_preview.adapter_result_id,
+        authorization_id=submit_preview.authorization_id,
+        execution_intent_id=submit_preview.execution_intent_id,
+        runtime_instance_id=submit_preview.runtime_instance_id,
+        source_type=submit_preview.source_type,
+        source_id=submit_preview.source_id,
+        semantic_ids=submit_preview.semantic_ids,
         status=status,
-        symbol=packet_preview.symbol,
+        symbol=submit_preview.symbol,
         owner_real_submit_authorized=owner_real_submit_authorized,
         trusted_submit_facts_ready=trusted_submit_facts_ready,
         submit_idempotency_policy_ready=submit_idempotency_policy_ready,
@@ -268,12 +268,12 @@ def build_runtime_execution_exchange_submit_gate(
             "scope": "runtime_execution_exchange_submit_gate",
             "first_real_submit_exchange_submit_gate": True,
             "requires_local_created_orders": True,
-            "local_order_ids": list(packet_preview.local_order_ids),
-            "entry_order_id": packet_preview.entry_order_id,
-            "protection_order_ids": list(packet_preview.protection_order_ids),
+            "local_order_ids": list(submit_preview.local_order_ids),
+            "entry_order_id": submit_preview.entry_order_id,
+            "protection_order_ids": list(submit_preview.protection_order_ids),
             "submit_request_previews": [
                 request.model_dump(mode="json")
-                for request in packet_preview.submit_request_previews
+                for request in submit_preview.submit_request_previews
             ],
             "does_not_call_order_lifecycle_submit": True,
             "does_not_change_execution_intent_status": True,
@@ -287,7 +287,7 @@ def build_runtime_execution_exchange_submit_gate(
 
 def build_runtime_execution_exchange_submit_enablement_decision(
     *,
-    packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+    submit_preview: RuntimeExecutionExchangeSubmitPreview,
     trusted_submit_fact_snapshot_id: str | None = None,
     submit_idempotency_policy_id: str | None = None,
     attempt_outcome_policy_id: str | None = None,
@@ -303,7 +303,7 @@ def build_runtime_execution_exchange_submit_enablement_decision(
     now_ms: int,
 ) -> RuntimeExecutionExchangeSubmitEnablementDecision:
     gate = build_runtime_execution_exchange_submit_gate(
-        packet_preview=packet_preview,
+        submit_preview=submit_preview,
         owner_real_submit_authorized=_present(owner_real_submit_authorization_id),
         trusted_submit_facts_ready=_present(trusted_submit_fact_snapshot_id),
         submit_idempotency_policy_ready=_present(submit_idempotency_policy_id),
@@ -364,14 +364,14 @@ def build_runtime_execution_exchange_submit_enablement_decision(
     return RuntimeExecutionExchangeSubmitEnablementDecision(
         decision_id=(
             "runtime-exchange-submit-enablement-"
-            f"{packet_preview.authorization_id}"
+            f"{submit_preview.authorization_id}"
         ),
-        authorization_id=packet_preview.authorization_id,
-        execution_intent_id=packet_preview.execution_intent_id,
-        runtime_instance_id=packet_preview.runtime_instance_id,
-        source_type=packet_preview.source_type,
-        source_id=packet_preview.source_id,
-        semantic_ids=packet_preview.semantic_ids,
+        authorization_id=submit_preview.authorization_id,
+        execution_intent_id=submit_preview.execution_intent_id,
+        runtime_instance_id=submit_preview.runtime_instance_id,
+        source_type=submit_preview.source_type,
+        source_id=submit_preview.source_id,
+        semantic_ids=submit_preview.semantic_ids,
         status=status,
         exchange_submit_gate=gate,
         trusted_submit_fact_snapshot_id=_optional_str(
@@ -406,13 +406,13 @@ def build_runtime_execution_exchange_submit_enablement_decision(
         metadata={
             "scope": "runtime_execution_exchange_submit_enablement",
             "first_real_submit_exchange_submit_decision": True,
-            "requires_exchange_submit_packet_preview": True,
-            "local_order_ids": list(packet_preview.local_order_ids),
-            "entry_order_id": packet_preview.entry_order_id,
-            "protection_order_ids": list(packet_preview.protection_order_ids),
+            "requires_exchange_submit_preview": True,
+            "local_order_ids": list(submit_preview.local_order_ids),
+            "entry_order_id": submit_preview.entry_order_id,
+            "protection_order_ids": list(submit_preview.protection_order_ids),
             "submit_request_previews": [
                 request.model_dump(mode="json")
-                for request in packet_preview.submit_request_previews
+                for request in submit_preview.submit_request_previews
             ],
             "does_not_call_order_lifecycle_submit": True,
             "does_not_change_execution_intent_status": True,

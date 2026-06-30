@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
+from scripts import build_runtime_reduce_only_close_owner_evidence as script
 from src.domain.runtime_position_exit_plan import (
     RuntimePositionExitPlan,
     RuntimePositionExitPlanStatus,
 )
 from src.domain.runtime_reduce_only_close_authorization import (
     OWNER_REDUCE_ONLY_CLOSE_APPROVAL_ENV,
-    RuntimeReduceOnlyCloseOwnerPacketStatus,
+    RuntimeReduceOnlyCloseOwnerEvidence,
+    RuntimeReduceOnlyCloseOwnerEvidenceStatus,
     STANDING_REDUCE_ONLY_RECOVERY_SCOPE,
-    build_runtime_reduce_only_close_owner_packet,
+    build_runtime_reduce_only_close_owner_evidence,
 )
 
 
@@ -41,7 +45,7 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
         "market_min_qty": Decimal("1.0"),
         "market_qty_step": Decimal("1.0"),
         "tp1_quantity_feasible": False,
-        "recommended_owner_decision": (
+        "recommended_recovery_action": (
             "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
         ),
         "warnings": ["tp1_partial_quantity_below_min_qty_or_step"],
@@ -51,33 +55,36 @@ def _exit_plan(**overrides) -> RuntimePositionExitPlan:
     return RuntimePositionExitPlan(**data)
 
 
-def test_reduce_only_close_owner_packet_ready_when_full_close_feasible():
-    packet = build_runtime_reduce_only_close_owner_packet(
+def test_reduce_only_close_owner_evidence_ready_when_full_close_feasible():
+    evidence = build_runtime_reduce_only_close_owner_evidence(
         exit_plan=_exit_plan(),
         now_ms=123,
     )
 
     assert (
-        packet.status
-        == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
+        evidence.status
+        == RuntimeReduceOnlyCloseOwnerEvidenceStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
     )
-    assert packet.owner_approval_env is None
-    assert packet.owner_approval_value is None
-    assert packet.owner_approval_required is False
-    assert packet.standing_authorization_scope == STANDING_REDUCE_ONLY_RECOVERY_SCOPE
-    assert packet.operation_layer_required is True
-    assert packet.finalgate_required is True
-    assert packet.close_quantity == Decimal("1.0")
-    assert packet.reduce_only_side == "buy"
-    assert packet.not_order is True
-    assert packet.not_execution_authority is True
-    assert packet.exchange_order_submitted is False
-    assert packet.position_closed is False
-    assert "tp1_partial_quantity_below_min_qty_or_step" in packet.warnings
+    assert evidence.owner_approval_env is None
+    assert evidence.owner_approval_value is None
+    assert evidence.owner_approval_required is False
+    assert evidence.standing_authorization_scope == STANDING_REDUCE_ONLY_RECOVERY_SCOPE
+    assert evidence.operation_layer_required is True
+    assert evidence.finalgate_required is True
+    assert evidence.close_quantity == Decimal("1.0")
+    assert evidence.reduce_only_side == "buy"
+    assert evidence.not_order is True
+    assert evidence.not_execution_authority is True
+    assert evidence.exchange_order_submitted is False
+    assert evidence.position_closed is False
+    assert "tp1_partial_quantity_below_min_qty_or_step" in evidence.warnings
+    payload = evidence.model_dump(mode="json")
+    assert payload["reduce_only_close_owner_evidence_only"] is True
+    assert "packet_only" not in payload
 
 
-def test_reduce_only_close_owner_packet_blocks_when_full_close_not_feasible():
-    packet = build_runtime_reduce_only_close_owner_packet(
+def test_reduce_only_close_owner_evidence_blocks_when_full_close_not_feasible():
+    evidence = build_runtime_reduce_only_close_owner_evidence(
         exit_plan=_exit_plan(
             full_reduce_only_close_feasible=False,
             full_reduce_only_close_quantity=Decimal("0"),
@@ -85,6 +92,33 @@ def test_reduce_only_close_owner_packet_blocks_when_full_close_not_feasible():
         now_ms=123,
     )
 
-    assert packet.status == RuntimeReduceOnlyCloseOwnerPacketStatus.BLOCKED
-    assert packet.owner_approval_value is None
-    assert "full_reduce_only_close_not_feasible" in packet.blockers
+    assert evidence.status == RuntimeReduceOnlyCloseOwnerEvidenceStatus.BLOCKED
+    assert evidence.owner_approval_value is None
+    assert "full_reduce_only_close_not_feasible" in evidence.blockers
+
+
+def test_reduce_only_close_owner_rejects_legacy_packet_only_input():
+    evidence = build_runtime_reduce_only_close_owner_evidence(
+        exit_plan=_exit_plan(),
+        now_ms=123,
+    )
+    legacy_payload = evidence.model_dump(mode="json")
+    legacy_payload["packet_only"] = legacy_payload.pop(
+        "reduce_only_close_owner_evidence_only",
+    )
+
+    with pytest.raises(ValueError):
+        RuntimeReduceOnlyCloseOwnerEvidence.model_validate(legacy_payload)
+
+
+def test_reduce_only_close_owner_script_safety_is_projection_only():
+    safety = script._reduce_only_close_owner_safety_invariants(
+        exchange_read_only=True,
+    )
+
+    assert safety["reduce_only_close_owner_projection_only"] is True
+    assert "packet_only" not in safety
+    assert safety["exchange_read_only"] is True
+    assert safety["exchange_write_called"] is False
+    assert safety["order_created"] is False
+    assert safety["position_closed"] is False

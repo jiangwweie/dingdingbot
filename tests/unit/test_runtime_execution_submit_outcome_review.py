@@ -757,9 +757,17 @@ async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
     assert settlement.budget_remaining_after == Decimal("30")
     assert settlement.runtime_budget_mutated is True
     assert settlement.attempt_counter_mutated is False
+    assert settlement.not_execution_authority is True
+    assert settlement.not_future_live_authorization is True
+    assert settlement.cannot_authorize_future_live_action is True
+    assert settlement.cannot_authorize_fresh_submit is True
+    assert settlement.runtime_authorization_created is False
     assert settlement.budget_released is True
     assert settlement.exchange_called is False
     assert settlement.order_lifecycle_called is False
+    assert settlement.metadata["does_not_authorize_future_live_action"] is True
+    assert settlement.metadata["does_not_authorize_fresh_submit"] is True
+    assert settlement.metadata["does_not_create_runtime_authorization"] is True
     assert runtime_service.runtime.boundary.attempts_used == 1
     assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
     assert len(runtime_service.applied) == 1
@@ -1262,7 +1270,7 @@ def _execution_result(
     return RuntimeExecutionExchangeSubmitExecutionResult(
         execution_result_id="exchange-submit-result-1",
         enablement_decision_id="exchange-submit-enable-1",
-        packet_preview_id="packet-preview-1",
+        submit_preview_id="submit-preview-1",
         binding_id="binding-1",
         authorization_id="auth-1",
         execution_intent_id="intent-1",

@@ -20,9 +20,10 @@ from src.domain.models import (
 from src.domain.runtime_live_position_monitor import (
     RuntimeLivePositionMonitorStatus,
     RuntimeLiveProtectionStatus,
-    build_runtime_live_position_monitor_packet,
+    build_runtime_live_position_monitor_artifact,
 )
 from src.domain.runtime_position_exit_plan import (
+    RuntimePositionExitPlan,
     RuntimePositionExitPlanStatus,
     build_runtime_position_exit_plan,
 )
@@ -167,7 +168,7 @@ def _reconciliation_warning() -> ReconciliationReadModelResult:
 
 
 def test_active_short_with_sl_only_is_holdable_warning_not_runaway_blocker():
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -193,7 +194,7 @@ def test_active_short_with_sl_only_is_holdable_warning_not_runaway_blocker():
 
 
 def test_exit_plan_proposes_tp1_runner_without_execution_authority():
-    monitor = build_runtime_live_position_monitor_packet(
+    monitor = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -233,7 +234,7 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
         "atr_trailing_review_only",
         "time_stop_review_only",
     ]
-    assert plan.runner_exit_automation == "review_packet_only_first_stage"
+    assert plan.runner_exit_automation == "review_evidence_only_first_stage"
     assert plan.runner_stop_update_authority == "none_in_first_stage"
     assert plan.runner_exit_review_required is True
     assert plan.metadata["runner_primary_exit_rule"] == (
@@ -243,9 +244,14 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
     assert plan.not_execution_intent is True
     assert plan.exchange_order_submitted is False
 
+    legacy_payload = plan.model_dump(mode="json")
+    legacy_payload["runner_exit_automation"] = "review_packet_only_first_stage"
+    with pytest.raises(ValueError):
+        RuntimePositionExitPlan.model_validate(legacy_payload)
+
 
 def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
-    monitor = build_runtime_live_position_monitor_packet(
+    monitor = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -273,7 +279,7 @@ def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
     assert plan.tp1_quantity_step_aligned == Decimal("0")
     assert plan.tp1_quantity_feasible is False
     assert plan.runner_quantity_reference == Decimal("1")
-    assert plan.recommended_owner_decision == (
+    assert plan.recommended_recovery_action == (
         "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
     )
     assert plan.full_reduce_only_close_quantity == Decimal("1")
@@ -284,7 +290,7 @@ def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
 
 
 def test_active_position_without_hard_stop_requires_owner_action():
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[],
@@ -302,7 +308,7 @@ def test_active_position_without_hard_stop_requires_owner_action():
 
 
 def test_active_position_with_local_sl_only_still_requires_exchange_native_stop():
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -329,7 +335,7 @@ def test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload():
     order.pop("reduceOnly")
     order["info"]["reduceOnly"] = True
 
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -349,7 +355,7 @@ def test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload():
 
 
 def test_flat_after_attempt_requires_review_before_next_attempt():
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[],
         local_open_orders=[],
@@ -366,7 +372,7 @@ def test_flat_after_attempt_requires_review_before_next_attempt():
     assert packet.blocks_new_entries_until_resolved is True
 
 
-def test_severe_reconciliation_blocks_monitor_packet():
+def test_severe_reconciliation_blocks_monitor_artifact():
     result = ReconciliationReadModelResult(
         symbol=SYMBOL,
         checked_at=NOW_MS,
@@ -380,7 +386,7 @@ def test_severe_reconciliation_blocks_monitor_packet():
         ],
     )
 
-    packet = build_runtime_live_position_monitor_packet(
+    packet = build_runtime_live_position_monitor_artifact(
         runtime=_runtime(),
         local_positions=[_position()],
         local_open_orders=[_order("ord-sl", OrderRole.SL)],
@@ -434,7 +440,7 @@ class _Reconciliation:
 
 
 @pytest.mark.asyncio
-async def test_service_builds_packet_from_runtime_local_exchange_and_reconciliation_facts():
+async def test_service_builds_artifact_from_runtime_local_exchange_and_reconciliation_facts():
     service = RuntimeLivePositionMonitorService(
         runtime_repository=_RuntimeRepo(_runtime()),
         position_repository=_PositionRepo(),
@@ -443,7 +449,7 @@ async def test_service_builds_packet_from_runtime_local_exchange_and_reconciliat
         reconciliation_service=_Reconciliation(),
     )
 
-    packet = await service.build_monitor_packet(
+    packet = await service.build_monitor_artifact(
         runtime_instance_id=RUNTIME_ID,
         now_ms=NOW_MS,
     )

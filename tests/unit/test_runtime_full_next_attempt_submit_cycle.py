@@ -56,12 +56,12 @@ def _args(tmp_path, **overrides):
         "runtime_instance_id": "runtime-1",
         "reservation_id": "reservation-1",
         "signal_input_json": str(_signal_path(tmp_path)),
-        "cycle_packet_json": None,
+        "cycle_artifact_json": None,
         "authorization_id": None,
         "closed_review_required": False,
         "protection_blocker": None,
         "evidence_json": str(_evidence_path(tmp_path)),
-        "first_real_submit_packet_json": None,
+        "first_real_submit_evidence_json": None,
         "fresh_submit_authorization_id": None,
         "mode": "disabled_smoke",
         "owner_confirmed_for_real_submit_action": False,
@@ -81,7 +81,7 @@ def _args(tmp_path, **overrides):
     return type("Args", (), values)()
 
 
-def _cycle_packet(status: str):
+def _cycle_artifact(status: str):
     return {
         "scope": "runtime_post_submit_next_attempt_cycle",
         "status": status,
@@ -90,7 +90,7 @@ def _cycle_packet(status: str):
         "next_attempt_strategy_plan_flow": {
             "status": status,
             "api_payload": {
-                "packet_id": "strategy-plan-1",
+                "artifact_id": "strategy-plan-1",
                 "runtime_instance_id": "runtime-1",
                 "status": status,
                 "order_candidate_id": (
@@ -105,14 +105,14 @@ def _cycle_packet(status: str):
     }
 
 
-def _handoff_packet(status: str):
+def _handoff_artifact(status: str):
     return {
         "scope": "runtime_cycle_executable_submit_handoff",
         "status": status,
         "blocked_stage": None,
         "blockers": [],
         "warnings": ["handoff"],
-        "operator_command_plan": {
+        "executable_handoff_plan": {
             "calls_official_submit_endpoint": False,
         },
     }
@@ -121,93 +121,127 @@ def _handoff_packet(status: str):
 def test_full_cycle_waits_without_running_readiness_when_signal_not_ready(tmp_path):
     handoff_calls = []
 
-    packet = runtime_full_next_attempt_submit_cycle._build_packet(
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
         _args(tmp_path),
-        cycle_builder=lambda args: _cycle_packet("waiting_for_signal"),
-        handoff_bridge_builder=lambda args: handoff_calls.append(args),
+        cycle_builder=lambda args: _cycle_artifact("waiting_for_signal"),
+        handoff_projection_builder=lambda args: handoff_calls.append(args),
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["blocked_stage"] == "strategy_signal"
+    assert artifact["status"] == "waiting_for_signal"
+    assert artifact["blocked_stage"] == "strategy_signal"
     assert handoff_calls == []
-    assert packet["operator_command_plan"]["runs_executable_readiness"] is False
-    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["full_submit_cycle_plan"]["runs_executable_readiness"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_full_cycle_stops_at_final_gate_preflight_when_evidence_missing(tmp_path):
-    packet = runtime_full_next_attempt_submit_cycle._build_packet(
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
         _args(tmp_path, evidence_json=None),
-        cycle_builder=lambda args: _cycle_packet("ready_for_final_gate_preflight"),
-        handoff_bridge_builder=lambda args: _handoff_packet("ready_for_official_submit_call"),
+        cycle_builder=lambda args: _cycle_artifact("ready_for_final_gate_preflight"),
+        handoff_projection_builder=lambda args: _handoff_artifact(
+            "ready_for_official_submit_call"
+        ),
     )
 
-    assert packet["status"] == "ready_for_final_gate_preflight"
-    assert "executable_readiness_evidence_json_missing" in packet["warnings"]
-    assert packet["operator_command_plan"]["runs_executable_readiness"] is False
+    assert artifact["status"] == "ready_for_final_gate_preflight"
+    assert "executable_readiness_evidence_json_missing" in artifact["warnings"]
+    assert artifact["full_submit_cycle_plan"]["runs_executable_readiness"] is False
 
 
-def test_full_cycle_runs_handoff_bridge_when_cycle_ready_and_evidence_present(tmp_path):
-    packet = runtime_full_next_attempt_submit_cycle._build_packet(
+def test_full_cycle_runs_handoff_projection_when_cycle_ready_and_evidence_present(tmp_path):
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
         _args(tmp_path, fresh_submit_authorization_id="fresh-auth-1"),
-        cycle_builder=lambda args: _cycle_packet("ready_for_final_gate_preflight"),
-        handoff_bridge_builder=lambda args: _handoff_packet("ready_for_official_submit_call"),
+        cycle_builder=lambda args: _cycle_artifact("ready_for_final_gate_preflight"),
+        handoff_projection_builder=lambda args: _handoff_artifact(
+            "ready_for_official_submit_call"
+        ),
     )
 
-    assert packet["status"] == "ready_for_official_submit_call"
-    assert packet["operator_command_plan"]["runs_executable_readiness"] is True
-    assert packet["operator_command_plan"]["calls_official_submit_endpoint"] is False
-    assert packet["operator_command_plan"]["requires_owner_chat_confirmation"] is False
-    assert packet["operator_command_plan"]["uses_standing_runtime_authorization"] is True
-    assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
-    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
-    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
-    assert packet["operator_command_plan"]["requires_action_time_confirmation"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["status"] == "ready_for_official_submit_call"
+    assert artifact["full_submit_cycle_plan"]["runs_executable_readiness"] is True
+    assert artifact["full_submit_cycle_plan"]["calls_official_submit_endpoint"] is False
+    assert (
+        artifact["full_submit_cycle_plan"]["requires_owner_chat_confirmation"] is False
+    )
+    assert artifact["full_submit_cycle_plan"]["uses_standing_runtime_authorization"] is True
+    assert artifact["full_submit_cycle_plan"]["requires_action_time_final_gate"] is True
+    assert artifact["full_submit_cycle_plan"]["requires_official_operation_layer"] is True
+    assert artifact["full_submit_cycle_plan"]["can_continue_without_owner_chat"] is True
+    assert (
+        artifact["full_submit_cycle_plan"]["requires_action_time_confirmation"] is False
+    )
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+
+
+def test_full_cycle_default_handoff_projection_builder_is_wired(monkeypatch, tmp_path):
+    calls = []
+
+    monkeypatch.setattr(
+        runtime_full_next_attempt_submit_cycle.next_attempt_cycle,
+        "_build_cycle_artifact",
+        lambda args: _cycle_artifact("ready_for_final_gate_preflight"),
+    )
+    monkeypatch.setattr(
+        runtime_full_next_attempt_submit_cycle.handoff_projection,
+        "_build_artifact",
+        lambda args: calls.append(args)
+        or _handoff_artifact("ready_for_official_submit_call"),
+    )
+
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
+        _args(tmp_path, fresh_submit_authorization_id="fresh-auth-1"),
+    )
+
+    assert calls
+    assert artifact["status"] == "ready_for_official_submit_call"
+    assert artifact["cycle_executable_submit_handoff"]["status"] == (
+        "ready_for_official_submit_call"
+    )
 
 
 def test_full_cycle_can_resume_from_existing_cycle_artifact(tmp_path):
     cycle_path = tmp_path / "existing-cycle.json"
     cycle_path.write_text(
-        json.dumps(_cycle_packet("waiting_for_signal")),
+        json.dumps(_cycle_artifact("waiting_for_signal")),
         encoding="utf-8",
     )
     calls = []
 
-    packet = runtime_full_next_attempt_submit_cycle._build_packet(
-        _args(tmp_path, cycle_packet_json=str(cycle_path)),
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
+        _args(tmp_path, cycle_artifact_json=str(cycle_path)),
         cycle_builder=lambda args: calls.append(args),
-        handoff_bridge_builder=lambda args: calls.append(args),
+        handoff_projection_builder=lambda args: calls.append(args),
     )
 
-    assert packet["status"] == "waiting_for_signal"
+    assert artifact["status"] == "waiting_for_signal"
     assert calls == []
-    assert packet["operator_command_plan"]["runs_executable_readiness"] is False
+    assert artifact["full_submit_cycle_plan"]["runs_executable_readiness"] is False
 
 
-def test_full_cycle_returns_ready_for_fresh_authorization_from_bridge(tmp_path):
-    packet = runtime_full_next_attempt_submit_cycle._build_packet(
+def test_full_cycle_returns_ready_for_fresh_authorization_from_handoff_projection(tmp_path):
+    artifact = runtime_full_next_attempt_submit_cycle._build_artifact(
         _args(tmp_path),
-        cycle_builder=lambda args: _cycle_packet("ready_for_final_gate_preflight"),
-        handoff_bridge_builder=lambda args: _handoff_packet(
+        cycle_builder=lambda args: _cycle_artifact("ready_for_final_gate_preflight"),
+        handoff_projection_builder=lambda args: _handoff_artifact(
             "ready_for_fresh_submit_authorization"
         ),
     )
 
-    assert packet["status"] == "ready_for_fresh_submit_authorization"
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "ready_for_fresh_submit_authorization"
+    assert artifact["full_submit_cycle_plan"]["next_step"] == (
         "bind_or_resolve_fresh_submit_authorization"
     )
 
 
 def test_full_cycle_cli_stdout_is_json_only(monkeypatch, capsys):
-    def fake_build_packet(args):
+    def fake_build_artifact(args):
         print("inner noisy full cycle")
         return {"status": "waiting_for_signal", "ok": True}
 
     monkeypatch.setattr(
         runtime_full_next_attempt_submit_cycle,
-        "_build_packet",
-        fake_build_packet,
+        "_build_artifact",
+        fake_build_artifact,
     )
     monkeypatch.setattr(
         sys,

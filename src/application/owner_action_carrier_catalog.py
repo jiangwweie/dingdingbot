@@ -48,7 +48,7 @@ def owner_action_carrier_id_for_symbol(carrier_id: str | None, symbol: str | Non
 
 def get_owner_action_carrier(carrier_id: str) -> StrategyTrialCarrierView | None:
     if carrier_id == BNB_OWNER_ACTION_CARRIER_ID:
-        return build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
+        return build_bnb_strategy_trial_architecture_governance().owner_review_artifact.carrier
     if carrier_id == TREND_OWNER_ACTION_CARRIER_ID:
         return _trend_carrier()
     if carrier_id == MR_OWNER_ACTION_CARRIER_ID:
@@ -68,7 +68,7 @@ def get_owner_action_carrier(carrier_id: str) -> StrategyTrialCarrierView | None
 
 def owner_action_risk_warnings(carrier_id: str) -> list[StrategyTrialRiskWarning]:
     if carrier_id == BNB_OWNER_ACTION_CARRIER_ID:
-        return list(build_bnb_strategy_trial_architecture_governance().owner_review_packet.strategy_warnings)
+        return list(build_bnb_strategy_trial_architecture_governance().owner_review_artifact.strategy_warnings)
     if carrier_id == TREND_OWNER_ACTION_CARRIER_ID:
         return _trend_warnings()
     if carrier_id in {MR_OWNER_ACTION_CARRIER_ID, MR_BTC_OWNER_ACTION_CARRIER_ID}:

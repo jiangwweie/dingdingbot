@@ -48,13 +48,16 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         post_submit_report,
     )
 
-    packet = _proof_packet(
+    proof_artifact = _proof_artifact(
         fresh_preflight_report=fresh_preflight_report,
         post_submit_report=post_submit_report,
     )
-    _write_json(output_dir / "fresh-candidate-runtime-cycle-packet.json", packet)
+    _write_json(
+        output_dir / "fresh-candidate-runtime-cycle-artifact.json",
+        proof_artifact,
+    )
 
-    checks = dict(packet["checks"])
+    checks = dict(proof_artifact["checks"])
     report = {
         "scope": "runtime_official_fresh_candidate_runtime_cycle_handoff_proof",
         "status": (
@@ -78,12 +81,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "post_submit_budget_settlement_id": post_submit_report.get(
             "post_submit_budget_settlement_id"
         ),
-        "fresh_candidate_runtime_cycle_packet": packet,
+        "fresh_candidate_runtime_cycle_artifact": proof_artifact,
         "rtf090_prerequisite": fresh_preflight_report,
         "rtf088_post_submit_finalize": post_submit_report,
         "checks": checks,
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "safety_invariants": proof_artifact["safety_invariants"],
+        "fresh_candidate_runtime_cycle_handoff_plan": {
             "next_step": (
                 "prove_repeatable_runtime_cycle_with_flat_next_attempt_gate"
                 if _contract_passed(checks)
@@ -110,23 +113,25 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def _proof_packet(
+def _proof_artifact(
     *,
     fresh_preflight_report: dict[str, Any],
     post_submit_report: dict[str, Any],
 ) -> dict[str, Any]:
-    fresh_packet = fresh_preflight_report.get(
-        "fresh_candidate_final_gate_preflight_packet"
+    fresh_preflight_artifact = fresh_preflight_report.get(
+        "fresh_candidate_final_gate_preflight_artifact"
     ) or {}
-    post_packet = post_submit_report.get("post_submit_finalize_proof_packet") or {}
+    post_submit_artifact = (
+        post_submit_report.get("post_submit_finalize_proof_artifact") or {}
+    )
     checks = _checks(
         fresh_preflight_report=fresh_preflight_report,
-        fresh_packet=fresh_packet,
+        fresh_preflight_artifact=fresh_preflight_artifact,
         post_submit_report=post_submit_report,
-        post_packet=post_packet,
+        post_submit_artifact=post_submit_artifact,
     )
     return {
-        "scope": "runtime_official_fresh_candidate_runtime_cycle_packet",
+        "scope": "runtime_official_fresh_candidate_runtime_cycle_artifact",
         "status": (
             "fresh_candidate_cycle_handoff_completed"
             if _contract_passed(checks)
@@ -143,15 +148,15 @@ def _proof_packet(
             ),
         },
         "pre_submit_side": {
-            "fresh_preflight_status": fresh_packet.get("status"),
-            "final_gate_verdict": (fresh_packet.get("final_gate") or {}).get(
-                "verdict"
-            ),
+            "fresh_preflight_status": fresh_preflight_artifact.get("status"),
+            "final_gate_verdict": (
+                fresh_preflight_artifact.get("final_gate") or {}
+            ).get("verdict"),
             "controlled_submit_preflight_status": (
-                fresh_packet.get("controlled_submit_preflight") or {}
+                fresh_preflight_artifact.get("controlled_submit_preflight") or {}
             ).get("status"),
             "fresh_authorization_required_before_submit": (
-                fresh_packet.get("authorization") or {}
+                fresh_preflight_artifact.get("authorization") or {}
             ).get("fresh_authorization_required_before_submit"),
         },
         "controlled_action_side": {
@@ -159,38 +164,41 @@ def _proof_packet(
                 "exchange_submit_execution_result_id"
             ),
             "exchange_submit_execution_result_status": (
-                (post_packet.get("statuses") or {}).get(
+                (post_submit_artifact.get("statuses") or {}).get(
                     "exchange_submit_execution_result"
                 )
             ),
             "controlled_gateway_action_status": (
-                post_packet.get("statuses") or {}
+                post_submit_artifact.get("statuses") or {}
             ).get("exchange_submit_adapter_result"),
             "execution_mode": "in_memory_simulation",
         },
         "post_submit_side": {
-            "finalize_status": (post_packet.get("post_submit_finalize") or {}).get(
-                "status"
-            ),
+            "finalize_status": (
+                post_submit_artifact.get("post_submit_finalize") or {}
+            ).get("status"),
             "next_attempt_gate_status": (
-                post_packet.get("next_attempt_gate") or {}
+                post_submit_artifact.get("next_attempt_gate") or {}
             ).get("status"),
             "next_attempt_gate_blockers": list(
-                (post_packet.get("next_attempt_gate") or {}).get("blockers") or []
+                (post_submit_artifact.get("next_attempt_gate") or {}).get(
+                    "blockers"
+                )
+                or []
             ),
             "old_authorization_submit_retry_allowed": (
-                post_packet.get("post_submit_finalize") or {}
+                post_submit_artifact.get("post_submit_finalize") or {}
             ).get("old_authorization_submit_retry_allowed"),
             "pre_submit_rehearsal_retry_allowed": (
-                post_packet.get("post_submit_finalize") or {}
+                post_submit_artifact.get("post_submit_finalize") or {}
             ).get("pre_submit_rehearsal_retry_allowed"),
         },
         "checks": checks,
         "safety_invariants": _safety_invariants(
             fresh_preflight_report=fresh_preflight_report,
-            fresh_packet=fresh_packet,
+            fresh_preflight_artifact=fresh_preflight_artifact,
             post_submit_report=post_submit_report,
-            post_packet=post_packet,
+            post_submit_artifact=post_submit_artifact,
         ),
     }
 
@@ -198,22 +206,22 @@ def _proof_packet(
 def _checks(
     *,
     fresh_preflight_report: dict[str, Any],
-    fresh_packet: dict[str, Any],
+    fresh_preflight_artifact: dict[str, Any],
     post_submit_report: dict[str, Any],
-    post_packet: dict[str, Any],
+    post_submit_artifact: dict[str, Any],
 ) -> dict[str, bool]:
     fresh_checks = fresh_preflight_report.get("checks") or {}
     post_checks = post_submit_report.get("checks") or {}
-    post_finalize = post_packet.get("post_submit_finalize") or {}
-    next_gate = post_packet.get("next_attempt_gate") or {}
-    statuses = post_packet.get("statuses") or {}
-    review = post_packet.get("review") or {}
-    settlement = post_packet.get("settlement") or {}
+    post_finalize = post_submit_artifact.get("post_submit_finalize") or {}
+    next_gate = post_submit_artifact.get("next_attempt_gate") or {}
+    statuses = post_submit_artifact.get("statuses") or {}
+    review = post_submit_artifact.get("review") or {}
+    settlement = post_submit_artifact.get("settlement") or {}
     safety = _safety_invariants(
         fresh_preflight_report=fresh_preflight_report,
-        fresh_packet=fresh_packet,
+        fresh_preflight_artifact=fresh_preflight_artifact,
         post_submit_report=post_submit_report,
-        post_packet=post_packet,
+        post_submit_artifact=post_submit_artifact,
     )
     return {
         "rtf090_prerequisite_passed": (
@@ -235,7 +243,7 @@ def _checks(
             == "runtime-rtf075-cpm-long"
         ),
         "fresh_preflight_ready": (
-            fresh_packet.get("status")
+            fresh_preflight_artifact.get("status")
             == "fresh_candidate_ready_for_controlled_submit_adapter"
         ),
         "final_gate_passed": bool(fresh_checks.get("final_gate_verdict_pass")),
@@ -334,9 +342,9 @@ def _contract_passed(checks: dict[str, bool]) -> bool:
 def _safety_invariants(
     *,
     fresh_preflight_report: dict[str, Any],
-    fresh_packet: dict[str, Any],
+    fresh_preflight_artifact: dict[str, Any],
     post_submit_report: dict[str, Any],
-    post_packet: dict[str, Any],
+    post_submit_artifact: dict[str, Any],
 ) -> dict[str, bool]:
     fresh_safety = fresh_preflight_report.get("safety_invariants") or {}
     post_safety = post_submit_report.get("safety_invariants") or {}
@@ -345,11 +353,11 @@ def _safety_invariants(
         "uses_official_fastapi_routes": True,
         "uses_fake_console_api": False,
         "fresh_candidate_preflight_ready": (
-            fresh_packet.get("status")
+            fresh_preflight_artifact.get("status")
             == "fresh_candidate_ready_for_controlled_submit_adapter"
         ),
         "controlled_in_memory_execution_result_recorded": (
-            (post_packet.get("statuses") or {}).get(
+            (post_submit_artifact.get("statuses") or {}).get(
                 "exchange_submit_execution_result"
             )
             == "exchange_submit_orders_submitted"

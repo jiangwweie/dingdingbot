@@ -19,6 +19,8 @@ def test_official_next_attempt_strategy_continuation_passes(tmp_path):
     assert report["signal_evaluation_id"] == "eval-rtf075-cpm-long"
     assert report["blocked_status"] == "blocked_by_post_submit_gate"
     assert report["ready_status"] == "ready_for_final_gate_preflight"
+    assert "operator_command_plan" not in report
+    assert report["next_attempt_strategy_continuation_plan"]["places_order"] is False
 
     checks = report["checks"]
     assert checks["rtf088_prerequisite_passed"] is True
@@ -48,7 +50,7 @@ def test_official_next_attempt_strategy_continuation_passes(tmp_path):
     assert checks["withdrawal_or_transfer_created"] is False
 
 
-def test_official_next_attempt_strategy_continuation_outputs_packet(tmp_path):
+def test_official_next_attempt_strategy_continuation_outputs_artifact(tmp_path):
     output_dir = tmp_path / "rtf089"
 
     report = script.build_proof_report(output_dir)
@@ -57,7 +59,7 @@ def test_official_next_attempt_strategy_continuation_outputs_packet(tmp_path):
         "contract-report.json",
         "blocked-next-attempt-strategy-plan.json",
         "ready-next-attempt-strategy-plan.json",
-        "next-attempt-strategy-continuation-packet.json",
+        "next-attempt-strategy-continuation-artifact.json",
     ]
     for name in expected_files:
         assert (output_dir / name).exists()
@@ -65,37 +67,44 @@ def test_official_next_attempt_strategy_continuation_outputs_packet(tmp_path):
     assert json.loads((output_dir / "contract-report.json").read_text())[
         "status"
     ] == report["status"]
-    packet = json.loads(
+    artifact = json.loads(
         (
             output_dir
-            / "next-attempt-strategy-continuation-packet.json"
+            / "next-attempt-strategy-continuation-artifact.json"
         ).read_text()
     )
-    assert packet["status"] == "next_attempt_strategy_continuation_ready_for_final_gate"
-    assert packet["blocked_path"]["status"] == "blocked_by_post_submit_gate"
-    assert "runtime_active_position_slot_in_use" in packet["blocked_path"]["blockers"]
-    assert packet["blocked_path"]["order_candidate_id"] is None
-    assert packet["ready_path"]["status"] == "ready_for_final_gate_preflight"
-    assert packet["ready_path"]["next_attempt_gate_status"] == (
+    assert artifact["status"] == "next_attempt_strategy_continuation_ready_for_final_gate"
+    assert artifact["blocked_path"]["status"] == "blocked_by_post_submit_gate"
+    assert "runtime_active_position_slot_in_use" in artifact["blocked_path"][
+        "blockers"
+    ]
+    assert artifact["blocked_path"]["order_candidate_id"] is None
+    assert artifact["ready_path"]["status"] == "ready_for_final_gate_preflight"
+    assert artifact["ready_path"]["next_attempt_gate_status"] == (
         "ready_for_fresh_signal"
     )
-    assert packet["ready_path"]["order_candidate_id"] == (
+    assert artifact["ready_path"]["order_candidate_id"] == (
         "order-candidate-rtf075-contract"
     )
-    assert packet["ready_path"]["operator_command_plan"][
+    assert "operator_command_plan" not in artifact["ready_path"]
+    assert artifact["ready_path"]["strategy_planning_plan"][
         "requires_official_final_gate"
     ] is True
-    assert packet["ready_post_submit_gate"][
+    assert artifact["ready_post_submit_gate"][
         "old_authorization_submit_retry_allowed"
     ] is False
-    assert packet["ready_post_submit_gate"][
+    assert "packet_id" not in artifact["ready_post_submit_gate"]
+    assert artifact["ready_post_submit_gate"]["payload_id"] == (
+        "post-submit-rtf075-contract"
+    )
+    assert artifact["ready_post_submit_gate"][
         "pre_submit_rehearsal_retry_allowed"
     ] is False
-    assert packet["safety_invariants"]["ready_path_shadow_candidate_created"] is True
-    assert packet["safety_invariants"]["execution_intent_created"] is False
-    assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["safety_invariants"]["exchange_called"] is False
-    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert artifact["safety_invariants"]["ready_path_shadow_candidate_created"] is True
+    assert artifact["safety_invariants"]["execution_intent_created"] is False
+    assert artifact["safety_invariants"]["order_lifecycle_called"] is False
+    assert artifact["safety_invariants"]["exchange_called"] is False
+    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_official_next_attempt_strategy_continuation_cli_stdout_is_json_only(

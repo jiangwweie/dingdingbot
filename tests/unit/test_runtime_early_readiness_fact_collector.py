@@ -38,6 +38,93 @@ def test_collector_extracts_partial_facts_without_claiming_ready(tmp_path):
     assert report["evidence"] is None
 
 
+def test_collector_records_legacy_packet_wrapper_without_collecting_facts(tmp_path):
+    report = script._build_report(
+        _args(
+            tmp_path,
+            runtime_grant_authorization_id="grant-rtf024",
+            final_gate_preview_json=str(
+                _write_json(
+                    tmp_path,
+                    "final-gate-legacy-wrapper.json",
+                    {
+                        "packet": {
+                            "final_gate_preview_id": "fg-legacy-wrapper",
+                            "verdict": "PASS",
+                            "candidate_snapshot": {
+                                "protection_reference_present": True,
+                            },
+                        },
+                    },
+                )
+            ),
+        )
+    )
+
+    assert "final_gate_preview_id_missing" in report["blockers"]
+    assert "final_gate_preview_json" not in report["collected_source_kinds"]
+    assert report["source_wrapper_provenance"] == [
+        {
+            "source_kind": "final_gate_preview_json",
+            "wrapper": "packet",
+            "legacy_wrapper": True,
+        }
+    ]
+    assert (
+        "legacy_source_wrapper_used:final_gate_preview_json:packet"
+        in report["warnings"]
+    )
+
+
+def test_collector_does_not_unwrap_legacy_decision_source_boundary(tmp_path):
+    report = script._build_report(
+        _args(
+            tmp_path,
+            runtime_grant_authorization_id="grant-rtf024",
+            final_gate_preview_json=str(
+                _write_json(
+                    tmp_path,
+                    "final-gate-decision-wrapper.json",
+                    {
+                        "decision": {
+                            "final_gate_preview_id": "fg-decision-wrapper",
+                            "verdict": "PASS",
+                        },
+                    },
+                )
+            ),
+        )
+    )
+
+    assert "final_gate_preview_id_missing" in report["blockers"]
+    assert report["source_wrapper_provenance"] == []
+
+
+def test_collector_does_not_use_legacy_packet_id_as_final_gate_preview_id(tmp_path):
+    report = script._build_report(
+        _args(
+            tmp_path,
+            runtime_grant_authorization_id="grant-rtf024",
+            final_gate_preview_json=str(
+                _write_json(
+                    tmp_path,
+                    "final-gate-packet-id-only.json",
+                    {
+                        "packet_id": "legacy-finalgate-packet-id",
+                        "verdict": "PASS",
+                        "candidate_snapshot": {
+                            "protection_reference_present": True,
+                        },
+                    },
+                )
+            ),
+        )
+    )
+
+    assert "final_gate_preview_id_missing" in report["blockers"]
+    assert report["evidence"] is None
+
+
 def test_collector_writes_readiness_evidence_when_reports_are_complete(tmp_path):
     report = script._build_report(
         _args(

@@ -539,7 +539,7 @@ class _Client:
 def _args(tmp_path, **overrides):
     signal_path = tmp_path / "signal.json"
     signal_path.write_text(
-        json.dumps({"signal_packet": {"signal_input": _signal_input().model_dump(mode="json")}}),
+        json.dumps({"signal_input": _signal_input().model_dump(mode="json")}),
         encoding="utf-8",
     )
     values = {
@@ -583,3 +583,29 @@ def test_intent_draft_source_api_flow_posts_ready_source_request(tmp_path):
     assert call["body"]["owner_reviewed"] is True
     assert call["body"]["owner_confirmed_for_intent"] is True
     assert call["body"]["active_positions_count"] == 0
+    assert call["body"]["metadata"]["signal_input_source_wrapper"] == {
+        "wrapper": "signal_input",
+    }
+
+
+def test_intent_draft_source_api_flow_rejects_legacy_signal_wrapper(tmp_path):
+    client = _Client()
+    signal_path = tmp_path / "legacy-signal.json"
+    signal_path.write_text(
+        json.dumps(
+            {
+                "signal_packet": {
+                    "signal_input": _signal_input().model_dump(mode="json"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="legacy signal wrapper"):
+        api_flow._build_report(
+            _args(tmp_path, signal_input_json=str(signal_path)),
+            client=client,
+        )
+
+    assert client.calls == []

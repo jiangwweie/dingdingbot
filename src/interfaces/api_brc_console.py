@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any, Literal, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -28,7 +28,10 @@ from src.application.strategy_group_reviewability import (
     StrategyGroupReviewabilityResponse,
     build_strategy_group_reviewability_snapshot,
 )
+from src.application.readmodels.json_projection import jsonable_mapping
+from src.interfaces.review_outcome_projection import review_outcome_storage_projection
 from src.application.strategy_group_live_readonly_observation import (
+    LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE,
     StrategyGroupLiveReadOnlyObservationResponse,
     build_strategy_group_live_readonly_observation_v1,
     run_strategy_group_live_readonly_observation_once,
@@ -59,7 +62,9 @@ from src.application.llm_advisory_plane import (
     LlmAdvisoryPlaneService,
     NotificationServiceAdvisoryPush,
 )
-from src.application.llm_context_packet_builder import build_llm_context_packet
+from src.application.llm_advisory_context_artifact_builder import (
+    build_llm_advisory_context_artifact,
+)
 from src.application.multi_carrier_budget_authorization import (
     MultiCarrierBudgetAuthorization,
     MultiCarrierBudgetAuthorizationCreateRequest,
@@ -68,10 +73,10 @@ from src.application.multi_carrier_budget_authorization import (
     MultiCarrierBudgetAuthorizationInfrastructureError,
     MultiCarrierBudgetAuthorizationService,
 )
-from src.application.bnb_live_execution_bridge import (
-    BnbLiveExecutionBridgeDryRunRequest,
-    BnbLiveExecutionBridgeDryRunResponse,
-    BnbLiveExecutionBridgeDryRunService,
+from src.application.bnb_live_execution_boundary import (
+    BnbLiveExecutionBoundaryDryRunRequest,
+    BnbLiveExecutionBoundaryDryRunResponse,
+    BnbLiveExecutionBoundaryDryRunService,
 )
 from src.application.binance_usdt_futures_account_facts import (
     BinanceUsdtFuturesAccountFactsSource,
@@ -134,7 +139,7 @@ from src.application.brc_admission_service import (
 from src.application.strategy_runtime_service import StrategyRuntimeError
 from src.domain.brc_admission import (
     AdmissionDecision,
-    AdmissionEvidencePacket,
+    AdmissionEvidence,
     AdmissionExecutionMode,
     AdmissionRequest as BrcAdmissionRequestModel,
     AdmissionTrialBinding,
@@ -213,6 +218,8 @@ advisory_router = APIRouter(
 
 
 class LlmAdvisoryEventCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     event_id: Optional[str] = Field(default=None, max_length=128)
     event_type: LlmConsumableEventType
     source_type: str = Field(default="owner_console", min_length=1, max_length=64)
@@ -223,7 +230,7 @@ class LlmAdvisoryEventCreateRequest(BaseModel):
     strategy_family_ids: list[str] = Field(default_factory=list)
     dedupe_key: Optional[str] = Field(default=None, max_length=256)
     occurred_at_ms: Optional[int] = Field(default=None, ge=0)
-    context_packet: dict[str, Any] = Field(default_factory=dict)
+    context_artifact: dict[str, Any] = Field(default_factory=dict)
     allowed_llm_actions: list[LlmAdvisoryAllowedAction] = Field(default_factory=list)
     delivery_policy: list[LlmAdvisoryDeliveryChannel] = Field(default_factory=list)
     push_to_feishu: bool = False
@@ -301,7 +308,7 @@ class BrcLiveLifecyclePendingOpenReviewRequest(BaseModel):
 
 
 class BrcLiveLifecycleClosedReviewedRequest(BrcLiveLifecyclePendingOpenReviewRequest):
-    review_decision: Literal["promote", "revise", "park"] = "park"
+    review_outcome: Literal["promote", "revise", "park"] = "park"
     strategy_outcome: str = Field(default="closed_reviewed", max_length=128)
     close_reason: Optional[str] = Field(default=None, max_length=256)
     cleanup_evidence_ref: Optional[str] = Field(default=None, max_length=512)
@@ -316,7 +323,7 @@ class BrcLiveLifecycleReviewResponse(BaseModel):
             "places_order": False,
             "mutates_exchange": False,
             "grants_trading_permission": False,
-            "frontend_action_enabled": False,
+            "owner_action_enabled": False,
         }
     )
 
@@ -330,7 +337,7 @@ class BrcLiveLifecycleReviewListResponse(BaseModel):
             "places_order": False,
             "mutates_exchange": False,
             "grants_trading_permission": False,
-            "frontend_action_enabled": False,
+            "owner_action_enabled": False,
         }
     )
 
@@ -567,7 +574,7 @@ class BrcActionReadiness(BaseModel):
     enabled: bool
     disabled_reason: Optional[str] = None
     route: Optional[str] = None
-    button_label: str
+    action_label: str
     what_happens: str
     what_will_not_happen: str = (
         "不会真实下单、提现、转账、自动调整仓位、启用实盘或执行策略池。"
@@ -595,7 +602,7 @@ RuntimeState = Literal[
 AccountFactsSource = Literal["local_pg", "exchange_testnet", "exchange_live", "mixed", "unavailable"]
 AccountFactsTruthLevel = Literal["summary", "exchange_read", "reconciled", "unavailable"]
 ReconciliationStatusValue = Literal["not_available", "clean", "mismatch", "unknown"]
-ActionCardType = Literal[
+ActionItemType = Literal[
     "read_status",
     "enter_monitor",
     "testnet_rehearsal",
@@ -605,14 +612,14 @@ ActionCardType = Literal[
 ]
 
 
-class BrcActionCard(BaseModel):
-    action_card_id: str
+class BrcActionItem(BaseModel):
+    action_item_id: str
     title: str
-    action_type: ActionCardType
+    action_type: ActionItemType
     enabled: bool
     disabled_reason: Optional[str] = None
     route: Optional[str] = None
-    button_label: str
+    action_label: str
     authority_source: Literal["application_preflight"] = "application_preflight"
     fact_snapshot_id: str
     preflight_result_id: str
@@ -651,8 +658,8 @@ class BrcReadinessResponse(BaseModel):
     risk_decision: RiskDecision = "ALLOW_READ"
     risk_account_summary: dict[str, Any] = Field(default_factory=dict)
     strategy_playbook_summary: dict[str, Any] = Field(default_factory=dict)
-    action_cards: list[BrcActionCard] = Field(default_factory=list)
-    global_cutoff_controls: list[BrcActionCard] = Field(default_factory=list)
+    action_items: list[BrcActionItem] = Field(default_factory=list)
+    global_cutoff_controls: list[BrcActionItem] = Field(default_factory=list)
     latest_audit: Optional[dict[str, Any]] = None
     runtime_summary: dict[str, Any] = Field(default_factory=dict)
     review_summary: dict[str, Any] = Field(default_factory=dict)
@@ -689,7 +696,7 @@ class StartupGuardReadinessArmResponse(BaseModel):
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     exchange_write_methods_called: Literal[False] = False
-    next_checklist_verdict: str
+    next_checklist_status: str
     notes: list[str] = Field(default_factory=list)
     live_ready: Literal[False] = False
 
@@ -753,7 +760,7 @@ class Mi001SolCheckView(BaseModel):
 
 
 class Mi001SolReadinessView(BaseModel):
-    verdict: str
+    status: str
     blockers: list[str] = Field(default_factory=list)
     checks: list[Mi001SolCheckView] = Field(default_factory=list)
 
@@ -857,7 +864,7 @@ class BrcAuditTrailResponse(BaseModel):
     operation_results: list[dict[str, Any]] = Field(default_factory=list)
     operator_actions: list[dict[str, Any]] = Field(default_factory=list)
     workflow_runs: list[dict[str, Any]] = Field(default_factory=list)
-    review_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    review_outcomes: list[dict[str, Any]] = Field(default_factory=list)
     developer_details: dict[str, Any] = Field(default_factory=dict)
     live_ready: Literal[False] = False
 
@@ -933,7 +940,7 @@ class BrcStrategyFamilyVersionCreateRequest(BaseModel):
     created_by: str = Field(default="owner", max_length=128)
 
 
-class BrcEvidencePacketCreateRequest(BaseModel):
+class BrcAdmissionEvidenceCreateRequest(BaseModel):
     strategy_family_version_id: str = Field(min_length=1, max_length=128)
     payload_json: dict[str, Any] = Field(default_factory=dict)
     mandatory_complete: bool = False
@@ -950,7 +957,7 @@ class BrcOwnerRegimeInputCreateRequest(BaseModel):
 
 class BrcAdmissionRequestCreateRequest(BaseModel):
     strategy_family_version_id: str = Field(min_length=1, max_length=128)
-    evidence_packet_id: str = Field(min_length=1, max_length=128)
+    admission_evidence_id: str = Field(min_length=1, max_length=128)
     owner_market_regime_input_id: str = Field(min_length=1, max_length=128)
     trial_env: TrialEnv
     trial_stage: TrialStage
@@ -1117,7 +1124,7 @@ async def _operation_audit_writable() -> bool:
     return not errors
 
 
-async def _operation_review_packet(input_params: dict[str, Any]) -> dict[str, Any]:
+async def _operation_review_artifact(input_params: dict[str, Any]) -> dict[str, Any]:
     api_module = _api_module()
     service = getattr(api_module, "_brc_campaign_service", None)
     campaign = await service.get_latest_campaign() if service is not None else None
@@ -1202,7 +1209,7 @@ async def _operation_admission_campaign_creator(input_params: dict[str, Any]) ->
         confirmed_by=str(input_params.get("confirmed_by") or "owner"),
     )
     return {
-        "campaign": _dump_jsonable(campaign),
+        "campaign": jsonable_mapping(campaign),
         "binding": updated_binding.model_dump(mode="json"),
         "admission_decision_id": decision.admission_decision_id,
         "campaign_created": True,
@@ -1296,7 +1303,7 @@ async def _operation_runtime_constraint_installer(input_params: dict[str, Any]) 
     )
     installed_campaign = installed["campaign"]
     return {
-        "campaign": _dump_jsonable(installed_campaign),
+        "campaign": jsonable_mapping(installed_campaign),
         "binding": updated_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1370,7 +1377,7 @@ async def _operation_runtime_carrier_preparer(input_params: dict[str, Any]) -> d
     )
     prepared_campaign = prepared["campaign"]
     return {
-        "campaign": _dump_jsonable(prepared_campaign),
+        "campaign": jsonable_mapping(prepared_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1445,7 +1452,7 @@ async def _operation_runtime_start_preparer(input_params: dict[str, Any]) -> dic
     )
     prepared_campaign = prepared["campaign"]
     return {
-        "campaign": _dump_jsonable(prepared_campaign),
+        "campaign": jsonable_mapping(prepared_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1534,7 +1541,7 @@ async def _operation_signal_trade_intent_recorder(input_params: dict[str, Any]) 
         ),
         execution_mode=str(recorded.get("execution_mode") or intent.get("execution_mode")),
         trial_trade_intent_id=recorded.get("intent_id") or intent.get("intent_id"),
-        trial_trade_intent_decision=str(recorded.get("decision") or intent.get("decision")),
+        trial_trade_intent_result=str(recorded["trial_trade_intent_result"]),
         not_executed_reason=str(recorded.get("not_executed_reason") or intent.get("not_executed_reason")),
         execution_permission_resolution=dict(recorded.get("execution_permission_resolution") or {}),
         operation_id=str(input_params["operation_id"]),
@@ -1542,7 +1549,7 @@ async def _operation_signal_trade_intent_recorder(input_params: dict[str, Any]) 
     )
     return {
         **recorded,
-        "campaign": _dump_jsonable(metadata_result.get("campaign")),
+        "campaign": jsonable_mapping(metadata_result.get("campaign")),
         "campaign_id": getattr(metadata_result.get("campaign"), "campaign_id", None)
         or recorded.get("campaign_id")
         or intent.get("campaign_id"),
@@ -1614,7 +1621,7 @@ async def _operation_runtime_handoff_preparer(input_params: dict[str, Any]) -> d
     )
     prepared_campaign = prepared["campaign"]
     return {
-        "campaign": _dump_jsonable(prepared_campaign),
+        "campaign": jsonable_mapping(prepared_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1693,7 +1700,7 @@ async def _operation_runtime_start_from_handoff_starter(input_params: dict[str, 
     )
     started_campaign = started["campaign"]
     return {
-        "campaign": _dump_jsonable(started_campaign),
+        "campaign": jsonable_mapping(started_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1768,7 +1775,7 @@ async def _operation_strategy_activation_preparer(input_params: dict[str, Any]) 
     )
     prepared_campaign = prepared["campaign"]
     return {
-        "campaign": _dump_jsonable(prepared_campaign),
+        "campaign": jsonable_mapping(prepared_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1848,7 +1855,7 @@ async def _operation_strategy_state_activator(input_params: dict[str, Any]) -> d
     )
     activated_campaign = activated["campaign"]
     return {
-        "campaign": _dump_jsonable(activated_campaign),
+        "campaign": jsonable_mapping(activated_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -1931,7 +1938,7 @@ async def _operation_signal_loop_preparer(input_params: dict[str, Any]) -> dict[
     )
     prepared_campaign = prepared["campaign"]
     return {
-        "campaign": _dump_jsonable(prepared_campaign),
+        "campaign": jsonable_mapping(prepared_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -2014,7 +2021,7 @@ async def _operation_signal_loop_starter(input_params: dict[str, Any]) -> dict[s
     )
     started_campaign = started["campaign"]
     return {
-        "campaign": _dump_jsonable(started_campaign),
+        "campaign": jsonable_mapping(started_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -2100,7 +2107,7 @@ async def _operation_signal_evaluator(input_params: dict[str, Any]) -> dict[str,
     )
     evaluated_campaign = evaluated["campaign"]
     return {
-        "campaign": _dump_jsonable(evaluated_campaign),
+        "campaign": jsonable_mapping(evaluated_campaign),
         "binding": audited_binding.model_dump(mode="json"),
         "campaign_id": binding.campaign_id,
         "binding_id": binding.binding_id,
@@ -2151,7 +2158,7 @@ async def _operation_runtime_transition(target_state: str, input_params: dict[st
             "live_ready": False,
         },
     )
-    return _dump_jsonable(snapshot)
+    return jsonable_mapping(snapshot)
 
 
 async def _operation_budget_authorization_summary() -> dict[str, Any]:
@@ -2207,7 +2214,7 @@ async def _operation_runtime_stop(input_params: dict[str, Any]) -> dict[str, Any
     from src.application.campaign_state_service import CampaignTransitionTrigger
 
     current = campaign_state.get_state()
-    current_payload = _dump_jsonable(current)
+    current_payload = jsonable_mapping(current)
     current_status = str(current_payload.get("status") or "").lower()
     stopped_states = {"stopped", "stopped_by_owner", "emergency_stop", "hard_locked", "closed"}
     if current_status in stopped_states:
@@ -2244,7 +2251,7 @@ async def _operation_runtime_stop(input_params: dict[str, Any]) -> dict[str, Any
             "live_ready": False,
         },
     )
-    payload = _dump_jsonable(snapshot)
+    payload = jsonable_mapping(snapshot)
     payload.update(
         {
             "runtime_state": payload.get("status"),
@@ -2318,7 +2325,7 @@ async def _get_operation_service(request: Optional[Request] = None) -> BrcOperat
             markets_orders_summary=_operation_markets_orders_summary,
             audit_writable=_operation_audit_writable,
             runtime_safety_readiness=_operation_runtime_safety_readiness,
-            review_packet_reader=_operation_review_packet,
+            review_artifact_reader=_operation_review_artifact,
             runtime_transition=_operation_runtime_transition,
             budget_authorization_summary=_operation_budget_authorization_summary,
             budget_revoke_executor=_operation_revoke_budget_authorization,
@@ -2481,32 +2488,9 @@ def _env_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _dump_jsonable(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
-    if hasattr(value, "dict"):
-        return value.dict()
-    if isinstance(value, dict):
-        return dict(value)
-    payload: dict[str, Any] = {}
-    for key in dir(value):
-        if key.startswith("_"):
-            continue
-        attr = getattr(value, key, None)
-        if callable(attr):
-            continue
-        if isinstance(attr, (str, int, float, bool, type(None), list, dict)):
-            payload[key] = attr
-        else:
-            payload[key] = str(attr)
-    return payload
-
-
 def _operation_audit_payload(operation: Any, result: Any = None) -> dict[str, Any]:
-    payload = _dump_jsonable(operation)
-    result_payload = _dump_jsonable(result) if result is not None else None
+    payload = jsonable_mapping(operation)
+    result_payload = jsonable_mapping(result) if result is not None else None
     payload["result"] = result_payload
     payload["audit_refs"] = (
         result_payload.get("audit_refs")
@@ -2599,8 +2583,8 @@ async def _markets_orders_summary(api_module: Any) -> tuple[dict[str, Any], list
             except Exception as exc:  # pragma: no cover
                 errors.append(f"{exchange_symbol} open order read failed: {exc}")
 
-        position_payloads = [_dump_jsonable(item) for item in positions]
-        order_payloads = [_dump_jsonable(item) for item in orders]
+        position_payloads = [jsonable_mapping(item) for item in positions]
+        order_payloads = [jsonable_mapping(item) for item in orders]
         all_positions.extend(position_payloads)
         all_open_orders.extend(order_payloads)
         symbols.append(
@@ -2974,11 +2958,11 @@ async def _exchange_testnet_facts(api_module: Any) -> dict[str, Any]:
     for symbol in [str(item["exchange_symbol"]) for item in _CONTROLLED_SYMBOLS]:
         try:
             fetched_positions = await gateway.fetch_positions(symbol=symbol)
-            positions.extend(_dump_jsonable(item) for item in fetched_positions if _position_nonzero(item))
+            positions.extend(jsonable_mapping(item) for item in fetched_positions if _position_nonzero(item))
         except TypeError:
             try:
                 fetched_positions = await gateway.fetch_positions(symbol)
-                positions.extend(_dump_jsonable(item) for item in fetched_positions if _position_nonzero(item))
+                positions.extend(jsonable_mapping(item) for item in fetched_positions if _position_nonzero(item))
             except Exception as exc:  # pragma: no cover - defensive read path
                 errors.append(f"{symbol} exchange positions read failed: {exc}")
         except Exception as exc:  # pragma: no cover - defensive read path
@@ -3012,7 +2996,7 @@ async def _safe_fetch_exchange_orders(gateway: Any, symbol: str, *, errors: list
     for params in (None, {"stop": True}):
         try:
             fetched = await _call_fetch_open_orders(gateway, symbol, params=params)
-            orders.extend(_dump_jsonable(item) for item in fetched)
+            orders.extend(jsonable_mapping(item) for item in fetched)
         except Exception as exc:  # pragma: no cover - defensive read path
             errors.append(f"{symbol} exchange open orders read failed: {exc}")
     return _dedupe_records(orders, key_fn=_order_key)
@@ -3031,9 +3015,9 @@ async def _safe_fetch_recent_orders(
         return []
     try:
         try:
-            return [_dump_jsonable(item) for item in await method(symbol=symbol, limit=20)]
+            return [jsonable_mapping(item) for item in await method(symbol=symbol, limit=20)]
         except TypeError:
-            return [_dump_jsonable(item) for item in await method(symbol, limit=20)]
+            return [jsonable_mapping(item) for item in await method(symbol, limit=20)]
     except Exception as exc:  # pragma: no cover - defensive read path
         errors.append(f"{symbol} exchange recent orders read failed: {exc}")
         return []
@@ -3052,9 +3036,9 @@ async def _safe_fetch_recent_fills(
         return []
     try:
         try:
-            return [_dump_jsonable(item) for item in await method(symbol=symbol, limit=20)]
+            return [jsonable_mapping(item) for item in await method(symbol=symbol, limit=20)]
         except TypeError:
-            return [_dump_jsonable(item) for item in await method(symbol, limit=20)]
+            return [jsonable_mapping(item) for item in await method(symbol, limit=20)]
     except Exception as exc:  # pragma: no cover - defensive read path
         errors.append(f"{symbol} exchange recent fills read failed: {exc}")
         return []
@@ -3175,7 +3159,7 @@ def _dedupe_records(records: list[dict[str, Any]], *, key_fn: Any) -> list[dict[
 
 
 def _position_nonzero(item: Any) -> bool:
-    payload = _dump_jsonable(item)
+    payload = jsonable_mapping(item)
     for key in ("size", "contracts", "positionAmt", "quantity", "current_qty"):
         if key in payload and _decimal_value(payload.get(key)) != Decimal("0"):
             return True
@@ -3238,14 +3222,14 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
             "operation_results": operation_payloads,
             "operator_actions": [],
             "workflow_runs": [],
-            "review_decisions": [],
+            "review_outcomes": [],
             "latest_event": operation_timeline[0] if operation_timeline else None,
         }, errors + ["BRC Campaign service unavailable"]
 
     for label, method_name, target in [
         ("operator actions", "list_operator_actions", "actions"),
         ("workflow runs", "list_workflow_runs", "workflows"),
-        ("review decisions", "list_review_decisions", "reviews"),
+        ("review outcomes", "list_review_decisions", "reviews"),
     ]:
         method = getattr(service, method_name, None)
         if not callable(method):
@@ -3261,9 +3245,9 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
         except Exception as exc:  # pragma: no cover - defensive product summary
             errors.append(f"{label} read failed: {exc}")
 
-    action_payloads = [_dump_jsonable(item) for item in actions]
-    workflow_payloads = [_dump_jsonable(item) for item in workflows]
-    review_payloads = [_dump_jsonable(item) for item in reviews]
+    action_payloads = [jsonable_mapping(item) for item in actions]
+    workflow_payloads = [jsonable_mapping(item) for item in workflows]
+    review_payloads = [review_outcome_storage_projection(item) for item in reviews]
     timeline: list[dict[str, Any]] = []
     timeline.extend(operation_timeline)
     for item in action_payloads:
@@ -3295,10 +3279,11 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
     for item in review_payloads:
         timeline.append(
             {
-                "type": "review_decision",
+                "type": "review_outcome",
                 "id": item.get("review_id"),
-                "title": "复盘决策 / Review decision",
-                "result": item.get("decision"),
+                "title": "复盘结果 / Review outcome",
+                "result": item.get("review_outcome"),
+                "result_source_role": "review_outcome_provenance",
                 "occurred_at_ms": item.get("created_at_ms"),
                 "summary": item.get("reason_text") or item.get("next_recommended_task"),
                 "account_impact": "复盘记录只写数据库事实，不创建 campaign 或触发 testnet.",
@@ -3311,7 +3296,7 @@ async def _audit_summary(service: Any, *, limit: int = 10) -> tuple[dict[str, An
         "operation_results": operation_payloads,
         "operator_actions": action_payloads,
         "workflow_runs": workflow_payloads,
-        "review_decisions": review_payloads,
+        "review_outcomes": review_payloads,
         "latest_event": timeline[0] if timeline else None,
     }, errors
 
@@ -3349,7 +3334,7 @@ def _action(
     enabled: bool,
     disabled_reason: Optional[str],
     route: Optional[str],
-    button_label: str,
+    action_label: str,
     what_happens: str,
     risk_level: Literal["read_only", "controlled_testnet", "blocked"] = "read_only",
 ) -> BrcActionReadiness:
@@ -3360,7 +3345,7 @@ def _action(
         enabled=enabled,
         disabled_reason=None if enabled else disabled_reason,
         route=route if enabled else route,
-        button_label=button_label,
+        action_label=action_label,
         what_happens=what_happens,
         risk_level=risk_level if enabled else "blocked",
     )
@@ -3429,14 +3414,14 @@ def _fact_snapshot_id(
     return ":".join(parts)
 
 
-def _action_card(
+def _action_item(
     *,
-    action_type: ActionCardType,
+    action_type: ActionItemType,
     title: str,
     enabled: bool,
     disabled_reason: Optional[str],
     route: Optional[str],
-    button_label: str,
+    action_label: str,
     fact_snapshot_id: str,
     current_state: RuntimeState,
     allowed_next_states: list[RuntimeState],
@@ -3450,21 +3435,21 @@ def _action_card(
     what_will_change: str = "只读取当前系统状态。",
     what_will_not_change: str = "不会启用真实实盘、提现/转账、自动 sizing/leverage 或策略池执行。",
     expiry_seconds: Optional[int] = 300,
-) -> BrcActionCard:
-    action_card_id = f"brc-card-{action_type}"
+) -> BrcActionItem:
+    action_item_id = f"brc-action-{action_type}"
     preflight_result_id = f"preflight-{action_type}-{'allow' if enabled else 'block'}"
     expiry_time = int(time.time() * 1000) + expiry_seconds * 1000 if expiry_seconds is not None else None
     blocks = list(hard_blocks or [])
     if not enabled and disabled_reason:
         blocks.append(disabled_reason)
-    return BrcActionCard(
-        action_card_id=action_card_id,
+    return BrcActionItem(
+        action_item_id=action_item_id,
         title=title,
         action_type=action_type,
         enabled=enabled,
         disabled_reason=None if enabled else disabled_reason,
         route=route,
-        button_label=button_label,
+        action_label=action_label,
         fact_snapshot_id=fact_snapshot_id,
         preflight_result_id=preflight_result_id,
         idempotency_key=f"{fact_snapshot_id}:{action_type}",
@@ -3566,7 +3551,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     elif testnet_ready:
         mode = "testnet_ready"
         conclusion = "当前满足受控测试网 workflow 的基础门槛。"
-        next_step = "主链路已可进入：打开 LLM Copilot，创建 testnet_rehearsal action card，并手动输入确认短语。"
+        next_step = "主链路已可进入：打开 LLM Copilot，创建 testnet_rehearsal action item，并手动输入确认短语。"
     else:
         mode = "brc_ready"
         conclusion = "当前可以进行 BRC 只读治理操作；testnet 演练仍需额外门槛。"
@@ -3594,7 +3579,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             enabled=True,
             disabled_reason=None,
             route="/runtime-safety",
-            button_label="查看运行安全",
+            action_label="查看运行安全",
             what_happens="打开只读安全检查页面，不会触发 runtime 或 exchange 动作。",
         ),
         _action(
@@ -3604,7 +3589,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             enabled=runtime_ready,
             disabled_reason=no_runtime_reason,
             route="/operator",
-            button_label="生成只读计划",
+            action_label="生成只读计划",
             what_happens="创建一条 operator action 计划；执行前仍需手动输入确认短语。",
         ),
         _action(
@@ -3614,18 +3599,18 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             enabled=runtime_ready,
             disabled_reason=no_runtime_reason,
             route="/workflow",
-            button_label="创建 Workflow",
+            action_label="创建 Workflow",
             what_happens="创建 workflow run；不会自动执行交易或绕过 Owner confirmation。",
         ),
         _action(
-            action_id="write_review_decision",
+            action_id="write_review_outcome",
             title="写入复盘决策 Review",
             description="基于最近 campaign 证据写入 Owner 复盘结论和下一步任务。",
             enabled=runtime_ready and has_campaign,
             disabled_reason=no_campaign_reason if runtime_ready else no_runtime_reason,
             route="/review",
-            button_label="写复盘决策",
-            what_happens="写入 review decision 记录，不会创建 campaign 或触发 testnet。",
+            action_label="写复盘决策",
+            what_happens="写入 review outcome 记录，不会创建 campaign 或触发 testnet。",
         ),
         _action(
             action_id="view_ledger",
@@ -3634,7 +3619,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             enabled=runtime_ready,
             disabled_reason=no_runtime_reason,
             route="/ledger",
-            button_label="查看操作记录",
+            action_label="查看操作记录",
             what_happens="读取数据库事实记录，不会重放或修改任何历史动作。",
         ),
         _action(
@@ -3644,7 +3629,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             enabled=testnet_ready,
             disabled_reason=no_testnet_reason,
             route="/workflow",
-            button_label="准备 testnet 演练",
+            action_label="准备 testnet 演练",
             what_happens="只有在专用确认短语输入后，固定 workflow 才会临时打开 entry window，并在结束后恢复 GKS/Startup Guard 保护态。",
             risk_level="controlled_testnet",
         ),
@@ -3762,14 +3747,14 @@ async def get_brc_readiness() -> BrcReadinessResponse:
     monitor_enabled = runtime_ready and risk_decision in {"ALLOW_MONITOR", "BLOCK_TESTNET"}
     testnet_action_enabled = testnet_ready and risk_decision == "ALLOW_MONITOR"
     cutoff_enabled = runtime_ready
-    action_cards = [
-        _action_card(
+    action_items = [
+        _action_item(
             action_type="read_status",
             title="Read current status",
             enabled=read_enabled,
             disabled_reason=None,
             route="/command-center",
-            button_label="查看状态",
+            action_label="查看状态",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=[runtime_state],
@@ -3777,13 +3762,13 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             final_state_proof_required=False,
             what_will_change="只刷新 Command Center / Risk & Account 的只读状态。",
         ),
-        _action_card(
+        _action_item(
             action_type="enter_monitor",
             title="Enter monitor",
             enabled=monitor_enabled,
             disabled_reason="需要绑定 runtime、BRC 服务、可读风险状态，并且不能处于 attention_required。",
             route="/llm-copilot",
-            button_label="准备 monitor",
+            action_label="准备 monitor",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=["monitor"],
@@ -3792,15 +3777,15 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             final_state_proof_required=False,
             advisory_warnings=["Monitor 不授予订单权限。"],
             confirmation_phrase="CONFIRM_READ_ONLY_BRC",
-            what_will_change="生成进入 monitor 的应用层 action card；不会直接下单。",
+            what_will_change="生成进入 monitor 的应用层 action item；不会直接下单。",
         ),
-        _action_card(
+        _action_item(
             action_type="testnet_rehearsal",
             title="Fixed BRC testnet rehearsal",
             enabled=testnet_action_enabled,
             disabled_reason=no_testnet_reason if not testnet_ready else "当前风险判定不允许 testnet_rehearsal。",
             route="/llm-copilot",
-            button_label="准备 testnet_rehearsal",
+            action_label="准备 testnet_rehearsal",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=["testnet_rehearsal", "attention_required"],
@@ -3817,13 +3802,13 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         ),
     ]
     global_cutoff_controls = [
-        _action_card(
+        _action_item(
             action_type="pause_new_entries",
             title="Pause new entries",
             enabled=cutoff_enabled,
             disabled_reason=no_runtime_reason,
             route="/runtime-control",
-            button_label="Pause",
+            action_label="Pause",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=["paused"],
@@ -3832,13 +3817,13 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             confirmation_phrase="CONFIRM_READ_ONLY_BRC",
             what_will_change="停止新增开仓意图；不主动平掉已有 exposure。",
         ),
-        _action_card(
+        _action_item(
             action_type="emergency_stop_runtime",
             title="Emergency stop runtime",
             enabled=cutoff_enabled,
             disabled_reason=no_runtime_reason,
             route="/runtime-control",
-            button_label="Stop runtime",
+            action_label="Stop runtime",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=["stopped"],
@@ -3847,13 +3832,13 @@ async def get_brc_readiness() -> BrcReadinessResponse:
             confirmation_phrase="CONFIRM_READ_ONLY_BRC",
             what_will_change="停止 runtime-driven 活动；不代表交易所残留单已自动消失。",
         ),
-        _action_card(
+        _action_item(
             action_type="emergency_flatten",
             title="Emergency flatten dry-run",
             enabled=cutoff_enabled,
             disabled_reason=no_runtime_reason,
             route="/runtime-control",
-            button_label="Dry-run plan",
+            action_label="Dry-run plan",
             fact_snapshot_id=fact_snapshot_id,
             current_state=runtime_state,
             allowed_next_states=["attention_required"],
@@ -3879,7 +3864,7 @@ async def get_brc_readiness() -> BrcReadinessResponse:
         risk_decision=risk_decision,
         risk_account_summary=risk_account_summary,
         strategy_playbook_summary=strategy_playbook_summary,
-        action_cards=action_cards,
+        action_items=action_items,
         global_cutoff_controls=global_cutoff_controls,
         latest_audit=audit_summary.get("latest_event"),
         runtime_summary={
@@ -3946,13 +3931,13 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
     )
 
     if gks_active is True:
-        verdict = "blocked_gks_active"
+        readiness_status = "blocked_gks_active"
         blockers = ["GKS active=True blocks new entries"]
     elif startup_guard_armed is True:
-        verdict = "ready_for_trial_start_after_owner_approval"
+        readiness_status = "ready_for_trial_start_after_owner_approval"
         blockers = []
     else:
-        verdict = "blocked_startup_guard_runtime_coupled"
+        readiness_status = "blocked_startup_guard_runtime_coupled"
         blockers = [
             "StartupTradingGuardService is runtime-owned and is not armed in this console process"
         ]
@@ -4053,12 +4038,12 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
 
     return Mi001SolOwnerConsoleE2EResponse(
         candidate=Mi001SolCandidateView(
-            status=verdict,
+            status=readiness_status,
         ),
         evidence=Mi001SolEvidenceView(),
         risk_policy=Mi001SolRiskPolicyView(),
         readiness=Mi001SolReadinessView(
-            verdict=verdict,
+            status=readiness_status,
             blockers=blockers,
             checks=checks,
         ),
@@ -4078,7 +4063,7 @@ async def get_mi001_sol_owner_console_e2e() -> Mi001SolOwnerConsoleE2EResponse:
         ),
         terminal_state=(
             "ready_for_trial_start_after_owner_approval"
-            if verdict == "ready_for_trial_start_after_owner_approval"
+            if readiness_status == "ready_for_trial_start_after_owner_approval"
             else "blocked_until_startup_guard_preflight"
         ),
         source_refs=[
@@ -4108,7 +4093,7 @@ async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLive
     """Return MI/CPM read-only observation v1 status without starting runtime."""
     return await _strategy_group_live_readonly_observation_response(
         record_observation=False,
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
     )
 
 
@@ -4117,7 +4102,7 @@ async def get_strategy_group_live_readonly_observation_v1() -> StrategyGroupLive
     response_model=StrategyGroupLiveReadOnlyObservationResponse,
 )
 async def run_strategy_group_live_readonly_observation_v1_once(
-    source: Literal["local_sqlite_fallback", "live_market"] = Query(default="local_sqlite_fallback"),
+    source: Literal["local_sqlite_read_only", "live_market"] = Query(default="local_sqlite_read_only"),
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
     """Record one observe-only MI/CPM signal snapshot without runtime start."""
     return await _strategy_group_live_readonly_observation_response(
@@ -4334,19 +4319,19 @@ async def activate_owner_trial_flow_live_authorization(
 
 
 @router.post(
-    "/owner-trial-flow/live-execution-bridge/dry-run",
-    response_model=BnbLiveExecutionBridgeDryRunResponse,
+    "/owner-trial-flow/live-execution-boundary/dry-run",
+    response_model=BnbLiveExecutionBoundaryDryRunResponse,
 )
-async def dry_run_bnb_live_execution_bridge(
-    body: BnbLiveExecutionBridgeDryRunRequest | None = None,
-) -> BnbLiveExecutionBridgeDryRunResponse:
-    """Dry-run an Owner authorization to execution-boundary bridge.
+async def dry_run_bnb_live_execution_boundary(
+    body: BnbLiveExecutionBoundaryDryRunRequest | None = None,
+) -> BnbLiveExecutionBoundaryDryRunResponse:
+    """Dry-run an Owner authorization to the execution boundary.
 
     This endpoint is read-only with respect to execution: it does not create an
     execution intent, create an order, grant permissions, start runtime, or call
     exchange write APIs.
     """
-    request = body or BnbLiveExecutionBridgeDryRunRequest()
+    request = body or BnbLiveExecutionBoundaryDryRunRequest()
     profile = _strategy_profile_for_owner_action_scope(
         carrier_id=request.carrier_id,
         symbol=request.symbol,
@@ -4354,7 +4339,7 @@ async def dry_run_bnb_live_execution_bridge(
     )
     collector = _strategy_trial_preflight_fact_collector(_api_module())
     fact_snapshot = await collector.collect(profile)
-    service = BnbLiveExecutionBridgeDryRunService(
+    service = BnbLiveExecutionBoundaryDryRunService(
         owner_trial_flow_service=_owner_trial_flow_service_instance(),
     )
     return await service.run(request, fact_snapshot=fact_snapshot)
@@ -4408,7 +4393,7 @@ async def get_owner_bounded_live_trial_execute_readiness(
         None,
     )
     readiness_service = OwnerBoundedExecutionService(
-        final_gate_service=BnbLiveExecutionBridgeDryRunService(
+        final_gate_service=BnbLiveExecutionBoundaryDryRunService(
             owner_trial_flow_service=owner_trial_service,
             session_maker=injected_session_maker,
         ),
@@ -4454,7 +4439,7 @@ async def get_owner_bounded_live_trial_execution_state(
         None,
     )
     state_service = OwnerBoundedExecutionService(
-        final_gate_service=BnbLiveExecutionBridgeDryRunService(
+        final_gate_service=BnbLiveExecutionBoundaryDryRunService(
             owner_trial_flow_service=owner_trial_service,
             session_maker=injected_session_maker,
         ),
@@ -4528,7 +4513,7 @@ async def get_owner_bounded_live_trial_final_gate_dry_run(
         if carrier is not None
         else authorization.protection_plan_type
     )
-    request = BnbLiveExecutionBridgeDryRunRequest(
+    request = BnbLiveExecutionBoundaryDryRunRequest(
         carrier_id=authorization.carrier_id,
         symbol=scope_symbol,
         side=scope_side,
@@ -4592,7 +4577,7 @@ async def get_owner_bounded_live_trial_final_gate_dry_run(
             allow_order_permission_for_read_only_facts=True,
         )
         fact_snapshot = await collector.collect(profile)
-        final_gate = await BnbLiveExecutionBridgeDryRunService(
+        final_gate = await BnbLiveExecutionBoundaryDryRunService(
             owner_trial_flow_service=owner_trial_service,
             session_maker=injected_session_maker,
             permission_mode="official_execute",
@@ -4653,7 +4638,7 @@ async def execute_owner_bounded_live_trial_authorization(
         allow_order_permission_for_read_only_facts=True,
     )
     fact_snapshot = await collector.collect(profile)
-    final_gate_service = BnbLiveExecutionBridgeDryRunService(
+    final_gate_service = BnbLiveExecutionBoundaryDryRunService(
         owner_trial_flow_service=owner_trial_service,
         session_maker=injected_session_maker,
         permission_mode="official_execute",
@@ -5817,7 +5802,7 @@ class _BnbFinalGateLiveReadOnlyFacts:
             try:
                 fetched_positions = await _call_fetch_positions(client, str(profile.symbol))
                 positions = [
-                    _dump_jsonable(item)
+                    jsonable_mapping(item)
                     for item in fetched_positions
                     if _position_nonzero(item)
                 ]
@@ -6271,11 +6256,11 @@ def _classify_retryable_pre_order_intent_row(row: Any, *, local_order_count: int
 async def _strategy_group_live_readonly_observation_response(
     *,
     record_observation: bool,
-    source_name: Literal["local_sqlite_fallback", "live_market"] = "local_sqlite_fallback",
+    source_name: Literal["local_sqlite_read_only", "live_market"] = "local_sqlite_read_only",
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
+    source = _observation_market_source(source_name)
+    preview = build_strategy_group_live_readonly_observation_v1(market_source=source)
     try:
-        source = _observation_market_source(source_name)
-        preview = build_strategy_group_live_readonly_observation_v1(market_source=source)
         repo = PgStrategyGroupObservationRepository()
         pg_available = await probe_pg_connectivity()
         if not pg_available:
@@ -6319,7 +6304,7 @@ async def _strategy_group_live_readonly_observation_response(
             }
         )
         input_source_summary = dict(preview.input_source_summary)
-        input_source_summary["source_type"] = "local_sqlite_fallback"
+        input_source_summary["source_type"] = LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
         input_source_summary["fallback_used"] = True
         input_source_summary["requested_source"] = source_name
         input_source_summary["source_error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
@@ -6332,7 +6317,7 @@ async def _strategy_group_live_readonly_observation_response(
 
 
 def _observation_market_source(
-    source_name: Literal["local_sqlite_fallback", "live_market"],
+    source_name: Literal["local_sqlite_read_only", "live_market"],
 ):
     if source_name == "live_market":
         return BinancePublicKlineMarketSource()
@@ -6427,7 +6412,7 @@ async def arm_startup_guard_readiness(
             runtime_bound=runtime_bound,
             runtime_control_api_enabled=control_enabled,
             runtime_effect="none",
-            next_checklist_verdict="blocked_runtime_start_required",
+            next_checklist_status="blocked_runtime_start_required",
             notes=[
                 *base_notes,
                 "runtime_owned_startup_guard_unavailable",
@@ -6443,7 +6428,7 @@ async def arm_startup_guard_readiness(
             runtime_bound=runtime_bound,
             runtime_control_api_enabled=False,
             runtime_effect="none",
-            next_checklist_verdict="blocked_startup_guard_runtime_coupled",
+            next_checklist_status="blocked_startup_guard_runtime_coupled",
             notes=[
                 *base_notes,
                 "runtime_control_api_disabled",
@@ -6459,7 +6444,7 @@ async def arm_startup_guard_readiness(
             runtime_bound=True,
             runtime_control_api_enabled=True,
             runtime_effect="none",
-            next_checklist_verdict="ready_for_trial_start_after_owner_approval",
+            next_checklist_status="ready_for_trial_start_after_owner_approval",
             notes=[*base_notes, "startup_guard_already_armed"],
         )
 
@@ -6472,7 +6457,7 @@ async def arm_startup_guard_readiness(
             runtime_bound=True,
             runtime_control_api_enabled=True,
             runtime_effect="none",
-            next_checklist_verdict="blocked_boundary_risk",
+            next_checklist_status="blocked_boundary_risk",
             notes=[*base_notes, "startup_guard_manual_arm_unavailable"],
         )
 
@@ -6485,7 +6470,7 @@ async def arm_startup_guard_readiness(
         runtime_bound=True,
         runtime_control_api_enabled=True,
         runtime_effect="startup_guard_process_state_only" if armed_after is True else "none",
-        next_checklist_verdict=(
+        next_checklist_status=(
             "ready_for_trial_start_after_owner_approval"
             if armed_after is True
             else "blocked_startup_guard_runtime_coupled"
@@ -6569,15 +6554,15 @@ async def create_brc_strategy_family_version(
 
 
 @router.post(
-    "/admissions/evidence-packets",
-    response_model=AdmissionEvidencePacket,
+    "/admissions/admission-evidence",
+    response_model=AdmissionEvidence,
 )
-async def create_brc_admission_evidence_packet(
-    body: BrcEvidencePacketCreateRequest,
-) -> AdmissionEvidencePacket:
+async def create_brc_admission_evidence(
+    body: BrcAdmissionEvidenceCreateRequest,
+) -> AdmissionEvidence:
     service = await _get_admission_service()
     try:
-        return await service.create_evidence_packet(**body.model_dump())
+        return await service.create_admission_evidence(**body.model_dump())
     except Exception as exc:
         _raise_admission_error(exc)
         raise
@@ -6811,7 +6796,7 @@ async def get_brc_audit_trail(limit: int = Query(default=50, ge=1, le=200)) -> B
         operation_results=list(summary.get("operation_results", [])),
         operator_actions=list(summary.get("operator_actions", [])),
         workflow_runs=list(summary.get("workflow_runs", [])),
-        review_decisions=list(summary.get("review_decisions", [])),
+        review_outcomes=list(summary.get("review_outcomes", [])),
         developer_details={"errors": errors},
     )
 
@@ -6915,9 +6900,9 @@ async def get_evidence(request: Request) -> runtime.BrcEvidenceResponse:
     return await runtime.get_brc_evidence(request)
 
 
-@router.get("/review-packet", response_model=runtime.BrcReviewPacketResponse)
-async def get_review_packet(request: Request) -> runtime.BrcReviewPacketResponse:
-    return await runtime.get_brc_review_packet(request)
+@router.get("/review-artifact", response_model=runtime.BrcReviewArtifactResponse)
+async def get_review_artifact(request: Request) -> runtime.BrcReviewArtifactResponse:
+    return await runtime.get_brc_review_artifact(request)
 
 
 @router.get("/next-eligibility", response_model=runtime.BrcNextEligibilityResponse)
@@ -7386,7 +7371,7 @@ async def create_live_lifecycle_closed_reviewed(
     metadata = {
         **body.metadata,
         "ledger_write_path": "official_api_brc_live_lifecycle_reviews_closed_reviewed",
-        "review_decision": body.review_decision,
+        "review_outcome": body.review_outcome,
         "strategy_outcome": body.strategy_outcome,
         "close_reason": body.close_reason,
         "cleanup_evidence_ref": body.cleanup_evidence_ref,
@@ -7471,26 +7456,26 @@ async def list_live_lifecycle_reviews(
     )
 
 
-@router.post("/review-decisions", response_model=runtime.BrcReviewDecisionResponse)
-async def create_review_decision(
+@router.post("/review-outcomes", response_model=runtime.BrcReviewOutcomeResponse)
+async def create_review_outcome(
     request: Request,
-    body: runtime.BrcReviewDecisionRequest,
-) -> runtime.BrcReviewDecisionResponse:
-    return await runtime.create_brc_review_decision(request, body)
+    body: runtime.BrcReviewOutcomeRequest,
+) -> runtime.BrcReviewOutcomeResponse:
+    return await runtime.create_brc_review_outcome(request, body)
 
 
-@router.get("/review-decisions/latest", response_model=runtime.BrcReviewDecisionResponse)
-async def get_latest_review_decision(request: Request) -> runtime.BrcReviewDecisionResponse:
-    return await runtime.get_latest_brc_review_decision(request)
+@router.get("/review-outcomes/latest", response_model=runtime.BrcReviewOutcomeResponse)
+async def get_latest_review_outcome(request: Request) -> runtime.BrcReviewOutcomeResponse:
+    return await runtime.get_latest_brc_review_outcome(request)
 
 
-@router.get("/review-decisions", response_model=runtime.BrcReviewDecisionListResponse)
-async def list_review_decisions(
+@router.get("/review-outcomes", response_model=runtime.BrcReviewOutcomeListResponse)
+async def list_review_outcomes(
     request: Request,
     campaign_id: Optional[str] = Query(default=None, max_length=128),
     limit: int = Query(default=50, ge=1, le=200),
-) -> runtime.BrcReviewDecisionListResponse:
-    return await runtime.list_brc_review_decisions(request, campaign_id=campaign_id, limit=limit)
+) -> runtime.BrcReviewOutcomeListResponse:
+    return await runtime.list_brc_review_outcomes(request, campaign_id=campaign_id, limit=limit)
 
 
 @operator_router.post("/draft", response_model=runtime.BrcOperatorIntentDraftResponse)
@@ -7614,10 +7599,10 @@ async def create_llm_advisory_event(
         strategy_family_ids=list(body.strategy_family_ids),
         dedupe_key=body.dedupe_key,
         occurred_at_ms=body.occurred_at_ms or now_ms,
-        context_packet=build_llm_context_packet(
-            raw_packet=body.context_packet,
+        context_artifact=build_llm_advisory_context_artifact(
+            raw_artifact=body.context_artifact,
             now_ms=now_ms,
-            fallback_packet_id=f"llm-packet-{uuid.uuid4().hex[:12]}",
+            default_artifact_id=f"llm-artifact-{uuid.uuid4().hex[:12]}",
         ),
         allowed_llm_actions=list(
             body.allowed_llm_actions or _default_allowed_llm_actions(body.event_type)

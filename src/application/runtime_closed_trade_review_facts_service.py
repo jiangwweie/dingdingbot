@@ -7,9 +7,9 @@ from typing import Protocol
 
 from src.domain.models import Order, Position
 from src.domain.runtime_closed_trade_review_facts import (
-    RuntimeClosedTradeReviewFactsPacket,
+    RuntimeClosedTradeReviewFactsArtifact,
     RuntimeClosedTradeReviewFactsStatus,
-    build_runtime_closed_trade_review_facts_packet,
+    build_runtime_closed_trade_review_facts_artifact,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
@@ -44,24 +44,24 @@ class RuntimeClosedTradeReviewFactsService:
         self._order_repository = order_repository
         self._position_repository = position_repository
 
-    async def build_packet(
+    async def build_artifact(
         self,
         *,
         runtime_instance_id: str,
         order_limit: int = 100,
         now_ms: int | None = None,
-    ) -> RuntimeClosedTradeReviewFactsPacket:
+    ) -> RuntimeClosedTradeReviewFactsArtifact:
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
         runtime = await self._runtime_repository.get(runtime_instance_id)
         if runtime is None:
-            return RuntimeClosedTradeReviewFactsPacket(
-                packet_id=f"runtime-closed-review-facts-{runtime_instance_id}-{now_ms}",
+            return RuntimeClosedTradeReviewFactsArtifact(
+                artifact_id=f"runtime-closed-review-facts-{runtime_instance_id}-{now_ms}",
                 status=RuntimeClosedTradeReviewFactsStatus.BLOCKED,
                 runtime_instance_id=runtime_instance_id,
                 symbol="unknown",
                 active_position_count=0,
                 open_order_count=0,
-                recommended_next_action="repair_runtime_before_closed_review",
+                recommended_review_checkpoint="repair_runtime_before_closed_review",
                 blockers=["runtime_not_found"],
                 created_at_ms=now_ms,
             )
@@ -75,7 +75,7 @@ class RuntimeClosedTradeReviewFactsService:
             limit=max(runtime.boundary.max_active_positions + 5, 20),
         )
         open_orders = await self._order_repository.get_open_orders(runtime.symbol)
-        return build_runtime_closed_trade_review_facts_packet(
+        return build_runtime_closed_trade_review_facts_artifact(
             runtime=runtime,
             orders=orders,
             active_positions=active_positions,

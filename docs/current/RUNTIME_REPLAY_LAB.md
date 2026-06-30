@@ -29,11 +29,11 @@ signal shape
 Replay exists to make the real live path faster to debug and more profitable
 to iterate. It is not an execution authority.
 
-Replay is now a required input to the minimal StrategyGroup Decision Ledger
-when it changes a decision: keep observing, revise, promote, park, kill,
-go live, do not go live, or block for safety. Replay output should not grow as
-a report-only surface, and routine replay samples should remain lower-level
-evidence instead of becoming main-control rows.
+Replay is now a required input to Strategy Asset State pre-live evidence when it
+changes a decision: keep observing, revise, promote, park, kill, go live, do
+not go live, or block for safety. Replay output should not grow as a report-only
+surface, and routine replay samples should remain lower-level evidence instead
+of becoming main-control rows.
 
 ## Current Scope
 
@@ -45,11 +45,11 @@ evidence instead of becoming main-control rows.
 | Runtime source | local domain contract and local fixture files |
 | Report runner | `scripts/run_strategygroup_runtime_replay_lab.py` |
 | Dry-run integration | `scripts/runtime_dry_run_audit_chain.py` includes replay-lab validation |
-| Output intent | local audit packet and Owner-readable local progress note |
+| Output intent | local audit report and Owner-readable local progress note |
 | Replay corpus | `MPG-001` has eight local replay windows; `BTPC-001` has five L2 shadow replay windows; `VCB-001`, `LSR-001`, and `BRF-001` each have five L1 observe-only replay windows |
 | Post-submit simulator | local matrix covers accepted, failed-protection, partial-fill, reject, closed, and still-open shapes |
 | Cost review | fee, slippage, funding, min-qty/step-size, and net-edge note fields are review inputs only |
-| Server deployment | out of scope for the P0.5 replay/simulator checkpoint |
+| Server deployment | out of scope for the Signal Observation grade replay/simulator checkpoint |
 | Real order | out of scope |
 | Exchange write | out of scope |
 
@@ -287,7 +287,7 @@ Operation Layer, protection, reconciliation, settlement, and review.
 
 ## Acceptance
 
-The current P0.5 checkpoint is accepted when:
+The current Signal Observation grade checkpoint is accepted when:
 
 1. `MPG-001` replay corpus validates locally.
 2. `BTPC-001` L2 shadow replay corpus validates locally without L4 authority.
@@ -302,7 +302,7 @@ The current P0.5 checkpoint is accepted when:
 7. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
    reject, closed-by-SL, closed-by-TP1, and still-open shapes.
 8. Cost-review fields are present as review inputs only.
-9. Runtime dry-run audit exposes replay-lab checks in the unified packet.
+9. Runtime dry-run audit exposes replay-lab checks in the unified audit artifact.
 10. All replay and dry-run paths prove:
 
 ```text

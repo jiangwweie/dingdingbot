@@ -42,7 +42,7 @@ def _args(**overrides):
         "playbook_id": None,
         "output_dir": "output/unit-active-monitor",
         "output_json": None,
-        "include_runtime_packets": False,
+        "include_runtime_artifacts": False,
         "owner_operator_id": "owner",
         "owner_confirmation_reference": "owner-authorized-unit",
         "reason": "unit test",
@@ -97,10 +97,10 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
-            "latest_packet": {
+            "observation_cycle_plan": {"next_step": "wait"},
+            "latest_artifact": {
                 "observation_payload": {
-                    "signal_packet": {
+                    "signal_artifact": {
                         "evaluation_result": {
                             "status": "observe_only",
                             "evaluator_id": "BTPC001PriceActionEvaluator",
@@ -145,10 +145,10 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path)),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert [item["runtime_instance_id"] for item in seen] == [
@@ -161,7 +161,8 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
     assert packet["monitored_runtime_count"] == 2
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert "operator_command_plan" not in packet
+    assert packet["observation_monitor_plan"]["places_order"] is False
     for summary in packet["runtime_summaries"]:
         report_path = summary["report_path"]
         with open(report_path, encoding="utf-8") as handle:
@@ -198,7 +199,7 @@ def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
+            "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
                 "prepare_records_created": False,
                 "exchange_write_called": False,
@@ -207,13 +208,13 @@ def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
             output_dir=str(tmp_path),
             runtime_instance_id=["runtime-ada", "runtime-avax"],
         ),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert seen == ["runtime-ada", "runtime-avax"]
@@ -255,7 +256,7 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
+            "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
                 "prepare_records_created": False,
                 "exchange_write_called": False,
@@ -264,10 +265,10 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path), strategy_family_id=["MPG-001", "TEQ-001"]),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert seen == [("runtime-mpg", "MPG-001"), ("runtime-teq", "TEQ-001")]
@@ -298,7 +299,7 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
                     "order_candidate_id_or_authorization_id_required",
                 ],
                 "warnings": [],
-                "operator_command_plan": {"next_step": "resolve"},
+                "observation_cycle_plan": {"next_step": "resolve"},
                 "safety_invariants": {
                     "prepare_records_created": False,
                     "exchange_write_called": False,
@@ -314,7 +315,7 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
+            "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
                 "prepare_records_created": False,
                 "exchange_write_called": False,
@@ -323,10 +324,10 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path)),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert packet["status"] == "waiting_for_signal"
@@ -338,7 +339,8 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
         "non_actionable_observation_blocker:runtime_attempts_exhausted"
         in old_summary["warnings"]
     )
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert "operator_command_plan" not in packet
+    assert packet["observation_monitor_plan"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
@@ -355,10 +357,10 @@ def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
         ]
     )
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path)),
         client=client,
-        monitor_builder=lambda args: {
+        runtime_artifact_builder=lambda args: {
             "status": "blocked",
             "ready_for_prepare": False,
             "ready_for_final_gate_preflight": False,
@@ -367,10 +369,10 @@ def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
                 "order_candidate_id_or_authorization_id_required",
             ],
             "warnings": [],
-            "operator_command_plan": {"next_step": "resolve"},
-            "latest_packet": {
+            "observation_cycle_plan": {"next_step": "resolve"},
+            "latest_artifact": {
                 "observation_payload": {
-                    "signal_packet": {
+                    "signal_artifact": {
                         "evaluation_result": {
                             "status": "ready_for_semantic_binding",
                             "evaluator_id": "TEQ001PilotReferenceEvaluator",
@@ -425,7 +427,8 @@ def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
         "non_actionable_observation_blocker:order_candidate_id_or_authorization_id_required"
         in summary["warnings"]
     )
-    assert packet["operator_command_plan"]["places_order"] is False
+    assert "operator_command_plan" not in packet
+    assert packet["observation_monitor_plan"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
@@ -441,19 +444,19 @@ def test_active_monitor_keeps_stop_reference_gap_hard_when_not_observe_only(tmp_
         ]
     )
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path)),
         client=client,
-        monitor_builder=lambda args: {
+        runtime_artifact_builder=lambda args: {
             "status": "blocked",
             "ready_for_prepare": False,
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_stop_reference_unavailable"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "resolve"},
-            "latest_packet": {
+            "observation_cycle_plan": {"next_step": "resolve"},
+            "latest_artifact": {
                 "observation_payload": {
-                    "signal_packet": {
+                    "signal_artifact": {
                         "evaluation_result": {
                             "status": "ready_for_semantic_binding",
                             "output": {
@@ -485,16 +488,16 @@ def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effec
 ):
     client = _FakeClient([_runtime("runtime-prepared", strategy_family_id="MPG-001")])
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path)),
         client=client,
-        monitor_builder=lambda args: {
+        runtime_artifact_builder=lambda args: {
             "status": "blocked",
             "ready_for_prepare": False,
             "ready_for_final_gate_preflight": False,
             "blockers": ["order_candidate_id_or_authorization_id_required"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "resolve"},
+            "observation_cycle_plan": {"next_step": "resolve"},
             "safety_invariants": {
                 "prepare_records_created": True,
                 "shadow_candidate_created": True,
@@ -514,19 +517,19 @@ def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effec
 def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):
     client = _FakeClient([_runtime("runtime-ada", symbol="ADA/USDT:USDT")])
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
             output_dir=str(tmp_path),
             runtime_instance_id=["runtime-ada", "runtime-missing"],
         ),
         client=client,
-        monitor_builder=lambda args: {
+        runtime_artifact_builder=lambda args: {
             "status": "waiting_for_signal",
             "ready_for_prepare": False,
             "ready_for_final_gate_preflight": False,
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
+            "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
                 "prepare_records_created": False,
                 "exchange_write_called": False,
@@ -555,7 +558,7 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
             "ready_for_final_gate_preflight": True,
             "blockers": [],
             "warnings": [],
-            "operator_command_plan": {
+            "observation_cycle_plan": {
                 "prepared_authorization_id": "auth-1",
                 "signal_input_json": "/tmp/signal.json",
             },
@@ -573,15 +576,16 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(allow_prepare_records=True),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert packet["status"] == "ready_for_final_gate_preflight"
-    assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
-    assert packet["operator_command_plan"]["creates_execution_intent"] is False
+    assert "operator_command_plan" not in packet
+    assert packet["observation_monitor_plan"]["creates_shadow_candidate"] is True
+    assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
     assert packet["safety_invariants"]["prepare_records_created"] is True
     assert packet["safety_invariants"]["shadow_candidate_created"] is True
     assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
@@ -612,7 +616,7 @@ def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": [],
-            "operator_command_plan": {"next_step": "wait"},
+            "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
                 "prepare_records_created": False,
                 "exchange_write_called": False,
@@ -621,10 +625,10 @@ def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
             },
         }
 
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(output_dir=str(tmp_path), timeout_seconds=120.0),
         client=client,
-        monitor_builder=builder,
+        runtime_artifact_builder=builder,
     )
 
     assert seen == [60.0]
@@ -636,16 +640,17 @@ def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
 
 
 def test_active_monitor_handles_no_active_runtimes():
-    packet = runtime_active_observation_monitor._build_packet(
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(),
         client=_FakeClient([_runtime("runtime-revoked", status="revoked")]),
-        monitor_builder=lambda args: {"status": "waiting_for_signal"},
+        runtime_artifact_builder=lambda args: {"status": "waiting_for_signal"},
     )
 
     assert packet["status"] == "no_active_runtimes"
     assert packet["active_runtime_count"] == 0
     assert packet["monitored_runtime_count"] == 0
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert "operator_command_plan" not in packet
+    assert packet["observation_monitor_plan"]["next_step"] == (
         "start_or_authorize_a_runtime_before_monitoring"
     )
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -654,7 +659,7 @@ def test_active_monitor_handles_no_active_runtimes():
 def test_active_monitor_cli_can_write_output_json(monkeypatch, capsys, tmp_path):
     output_path = tmp_path / "active-monitor.json"
 
-    def fake_build_packet(args):
+    def fake_build_monitor_artifact(args):
         return {
             "status": "waiting_for_signal",
             "active_runtime_count": 1,
@@ -663,8 +668,8 @@ def test_active_monitor_cli_can_write_output_json(monkeypatch, capsys, tmp_path)
 
     monkeypatch.setattr(
         runtime_active_observation_monitor,
-        "_build_packet",
-        fake_build_packet,
+        "_build_monitor_artifact",
+        fake_build_monitor_artifact,
     )
     monkeypatch.setattr(
         sys,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
+from decimal import InvalidOperation
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,7 +24,9 @@ from src.application.runtime_strategy_signal_scheduler_planning_service import (
 )
 from src.application.strategy_group_live_readonly_observation import (
     InMemoryStrategyGroupObservationSink,
+    LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE,
     MI001MomentumImpulseReadOnlyEvaluator,
+    RecentCandle,
     SampleStrategyGroupMarketBarSource,
     build_strategy_group_live_readonly_observation_v1,
     run_strategy_group_live_readonly_observation_once,
@@ -45,6 +49,9 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstanceStatus,
 )
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
+from src.infrastructure.local_sqlite_observation_market_source import (
+    LocalSqliteObservationMarketSource,
+)
 from src.infrastructure.pg_models import PGBrcStrategyGroupForwardReviewORM, PGBrcStrategyGroupObservationORM
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
@@ -296,6 +303,154 @@ def test_live_market_source_records_observe_only_history_with_live_source_metada
     assert all(record.not_execution_intent is True for record in payload.signal_history)
 
 
+def test_local_sqlite_source_type_is_read_only_not_fallback():
+    source = LocalSqliteObservationMarketSource()
+
+    assert source.source_type == LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
+
+
+def test_local_sqlite_missing_db_uses_sample_fallback_as_read_only_evidence(tmp_path):
+    source = LocalSqliteObservationMarketSource(tmp_path / "missing.db")
+
+    candles = source.latest_closed_candles(
+        symbol="SOL/USDT:USDT",
+        timeframe="1h",
+        limit=3,
+    )
+
+    assert len(candles) == 3
+    assert source.fallback_used is True
+
+
+def test_local_sqlite_bad_numeric_data_does_not_use_sample_fallback(tmp_path):
+    db_path = tmp_path / "bad-klines.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE klines (
+                timestamp INTEGER,
+                open TEXT,
+                high TEXT,
+                low TEXT,
+                close TEXT,
+                volume TEXT,
+                symbol TEXT,
+                timeframe TEXT,
+                is_closed INTEGER
+            )
+            """
+        )
+        for index in range(3):
+            conn.execute(
+                """
+                INSERT INTO klines (
+                    timestamp, open, high, low, close, volume, symbol, timeframe, is_closed
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    index,
+                    "not-a-decimal" if index == 0 else "100",
+                    "101",
+                    "99",
+                    "100",
+                    "10",
+                    "SOL/USDT:USDT",
+                    "1h",
+                ),
+            )
+
+    source = LocalSqliteObservationMarketSource(db_path)
+
+    with pytest.raises(InvalidOperation):
+        source.latest_closed_candles(
+            symbol="SOL/USDT:USDT",
+            timeframe="1h",
+            limit=3,
+        )
+
+    assert source.fallback_used is False
+
+
+def test_sqlite_source_without_explicit_type_infers_read_only_not_fallback():
+    class _SqliteReadOnlySource:
+        source_id = "unit_sqlite_closed_klines_read_only"
+
+        def latest_closed_candles(
+            self,
+            *,
+            symbol: str,
+            timeframe: str,
+            limit: int,
+        ) -> list[RecentCandle]:
+            return SampleStrategyGroupMarketBarSource().latest_closed_candles(
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
+
+    payload = build_strategy_group_live_readonly_observation_v1(
+        market_source=_SqliteReadOnlySource()
+    )
+
+    assert payload.input_source_summary["source_type"] == LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
+    assert payload.input_source_summary["fallback_used"] is False
+    assert all(
+        record.source_type == LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
+        for record in payload.current_signals
+    )
+
+
+def test_readonly_observation_market_source_error_becomes_blocked_candidate():
+    class _FailingMarketSource:
+        source_id = "unit_failing_market_source"
+        source_type = LOCAL_SQLITE_READ_ONLY_SOURCE_TYPE
+
+        def latest_closed_candles(
+            self,
+            *,
+            symbol: str,
+            timeframe: str,
+            limit: int,
+        ) -> list[RecentCandle]:
+            raise RuntimeError(f"closed candles unavailable for {symbol} {timeframe}")
+
+    payload = build_strategy_group_live_readonly_observation_v1(
+        market_source=_FailingMarketSource()
+    )
+
+    assert payload.current_signals == []
+    assert payload.sink_summary["sink_status"] == "source_blocked_no_recording"
+    assert payload.input_source_summary["source_blockers"] == [
+        "market_source_evaluation_failed"
+    ]
+    assert all(
+        candidate.readiness_status == "blocked_market_source_or_context_unavailable"
+        for candidate in payload.candidates
+    )
+    assert all(
+        candidate.latest_signal_preview["reason_codes"]
+        == ["observation_source_unavailable"]
+        for candidate in payload.candidates
+    )
+
+
+def test_readonly_observation_evaluator_error_is_not_source_fallback(monkeypatch):
+    def _raise_evaluator_bug(self, signal_input):
+        raise RuntimeError("unit evaluator bug")
+
+    monkeypatch.setattr(
+        MI001MomentumImpulseReadOnlyEvaluator,
+        "evaluate",
+        _raise_evaluator_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="unit evaluator bug"):
+        build_strategy_group_live_readonly_observation_v1(
+            market_source=SampleStrategyGroupMarketBarSource()
+        )
+
+
 @pytest.mark.asyncio
 async def test_pg_observation_repository_round_trip(observation_repo):
     payload = run_strategy_group_live_readonly_observation_once(
@@ -339,12 +494,12 @@ async def test_pg_observation_repository_round_trip(observation_repo):
 @pytest.mark.asyncio
 async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observation_repo):
     first = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=observation_repo,
     )
     second = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=observation_repo,
     )
@@ -435,7 +590,7 @@ async def test_scheduled_observation_can_handoff_to_non_executing_shadow_planner
     planning_service = _PlanningService()
 
     result = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=observation_repo,
         runtime_resolver=resolver,
@@ -536,7 +691,7 @@ async def test_scheduled_observation_resolves_active_shadow_runtime_before_hando
     planning_service = _PlanningService()
 
     result = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=observation_repo,
         runtime_resolver=resolver,
@@ -648,7 +803,7 @@ async def test_scheduled_observation_planner_requires_runtime_resolver(observati
             raise AssertionError("planner must not be called without runtime resolver")
 
     result = await run_scheduled_readonly_observation_once(
-        source_name="local_sqlite_fallback",
+        source_name="local_sqlite_read_only",
         market_source=SampleStrategyGroupMarketBarSource(),
         repository=observation_repo,
         runtime_signal_planning_service=_PlanningService(),
@@ -663,6 +818,48 @@ async def test_scheduled_observation_planner_requires_runtime_resolver(observati
     assert all(item.planner_call_performed is False for item in result.candidate_results)
     assert all(item.order_candidate_created is False for item in result.candidate_results)
     assert all(item.execution_intent_created is False for item in result.candidate_results)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_observation_surfaces_runtime_resolver_error(observation_repo):
+    class _RuntimeResolver:
+        async def resolve_runtime_for_signal(self, signal_input, observation):
+            raise RuntimeError("resolver_modeling_defect")
+
+    class _PlanningService:
+        async def plan_signal_input_if_ready(self, signal_input, **kwargs):
+            raise AssertionError("planner must not be called after resolver error")
+
+    with pytest.raises(RuntimeError, match="resolver_modeling_defect"):
+        await run_scheduled_readonly_observation_once(
+            source_name="local_sqlite_read_only",
+            market_source=SampleStrategyGroupMarketBarSource(),
+            repository=observation_repo,
+            runtime_resolver=_RuntimeResolver(),
+            runtime_signal_planning_service=_PlanningService(),
+            allow_shadow_candidate_creation=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_observation_surfaces_shadow_planner_error(observation_repo):
+    class _RuntimeResolver:
+        async def resolve_runtime_for_signal(self, signal_input, observation):
+            return _shadow_runtime_for_signal(signal_input)
+
+    class _PlanningService:
+        async def plan_signal_input_if_ready(self, signal_input, **kwargs):
+            raise RuntimeError("shadow_planner_modeling_defect")
+
+    with pytest.raises(RuntimeError, match="shadow_planner_modeling_defect"):
+        await run_scheduled_readonly_observation_once(
+            source_name="local_sqlite_read_only",
+            market_source=SampleStrategyGroupMarketBarSource(),
+            repository=observation_repo,
+            runtime_resolver=_RuntimeResolver(),
+            runtime_signal_planning_service=_PlanningService(),
+            allow_shadow_candidate_creation=True,
+        )
 
 
 @pytest.mark.asyncio

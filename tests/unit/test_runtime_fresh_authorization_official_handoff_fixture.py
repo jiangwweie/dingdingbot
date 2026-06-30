@@ -34,17 +34,28 @@ def test_fresh_authorization_official_handoff_fixture_reaches_disabled_smoke(tmp
 def test_final_handoff_uses_fresh_authorization_not_consumed_authorization(tmp_path):
     report = script._build_report(_args(tmp_path))
 
-    final_packet = report["final_handoff"]["packet"]
-    assert final_packet["fresh_submit_authorization_id"] == "fresh-submit-auth-rtf059"
-    assert final_packet["source_consumed_authorization_id"] == (
+    final_handoff = report["final_handoff"]["handoff_artifact"]
+    assert final_handoff["fresh_submit_authorization_id"] == "fresh-submit-auth-rtf059"
+    assert final_handoff["source_consumed_authorization_id"] == (
         "consumed-submit-auth-rtf059"
     )
-    assert final_packet["fresh_submit_authorization_id"] != (
-        final_packet["source_consumed_authorization_id"]
+    assert final_handoff["fresh_submit_authorization_id"] != (
+        final_handoff["source_consumed_authorization_id"]
     )
-    assert final_packet["official_query"][
+    assert final_handoff["official_query"][
         "owner_confirmed_for_first_real_submit_action"
     ] is False
+
+
+def test_handoff_artifact_ignores_legacy_packet_wrapper():
+    assert script._handoff_artifact(
+        {
+            "packet": {
+                "status": "ready_for_official_submit_call",
+                "fresh_submit_authorization_id": "legacy-auth-must-not-win",
+            }
+        }
+    ) == {}
 
 
 def test_fixture_writes_stage_artifacts_and_output(tmp_path):

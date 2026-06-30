@@ -1,9 +1,9 @@
 """LLM advisory plane domain models.
 
-The advisory plane consumes typed system events and structured context packets.
-It may recommend registered strategy families or summarize audit evidence, but
-it never creates execution authority, order parameters, transfers, or
-withdrawal instructions.
+The advisory plane consumes typed system events and structured context
+artifacts. It may recommend registered strategy families or summarize audit
+evidence, but it never creates execution authority, order parameters,
+transfers, or withdrawal instructions.
 """
 
 from __future__ import annotations
@@ -72,9 +72,15 @@ class LlmAdvisoryStatus(str, Enum):
     PUSH_FAILED = "push_failed"
 
 
-class LlmContextPacket(LlmAdvisoryModel):
-    packet_id: str = Field(min_length=1, max_length=128)
-    packet_type: str = Field(default="llm_advisory_context", max_length=64)
+class LlmAdvisoryContextArtifact(LlmAdvisoryModel):
+    artifact_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+    artifact_type: str = Field(
+        default="llm_advisory_context_artifact",
+        max_length=64,
+    )
     produced_at_ms: int = Field(ge=0)
     market: dict[str, Any] = Field(default_factory=dict)
     runtime: dict[str, Any] = Field(default_factory=dict)
@@ -97,7 +103,7 @@ class LlmConsumableEvent(LlmAdvisoryModel):
     strategy_family_ids: list[str] = Field(default_factory=list)
     dedupe_key: Optional[str] = Field(default=None, max_length=256)
     occurred_at_ms: int = Field(ge=0)
-    context_packet: LlmContextPacket
+    context_artifact: LlmAdvisoryContextArtifact
     allowed_llm_actions: list[LlmAdvisoryAllowedAction] = Field(default_factory=list)
     delivery_policy: list[LlmAdvisoryDeliveryChannel] = Field(
         default_factory=lambda: [LlmAdvisoryDeliveryChannel.LEDGER_ONLY]

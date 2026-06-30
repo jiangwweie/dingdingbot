@@ -55,7 +55,7 @@ ADMISSION_CHAIN = [
     "Review",
 ]
 
-BRIDGE_ARTIFACTS = [
+LIFECYCLE_EVIDENCE_ARTIFACTS = [
     "TrendObservation",
     "StrategyGroupMappingProposal",
     "CarrierCandidate",
@@ -78,7 +78,7 @@ OFFICIAL_ACTION_API_ENDPOINTS = {
     "activate_live_authorization": (
         "POST /api/brc/owner-trial-flow/authorization-draft/{draft_id}/activate-live-authorization"
     ),
-    "final_gate_dry_run": "POST /api/brc/owner-trial-flow/live-execution-bridge/dry-run",
+    "final_gate_dry_run": "POST /api/brc/owner-trial-flow/live-execution-boundary/dry-run",
     "execute_authorization": "POST /api/brc/owner-trial-flow/authorizations/{authorization_id}/execute",
 }
 
@@ -364,7 +364,7 @@ class CandidateActionability(ProductionAdmissionModel):
     carrier_id: Optional[str] = None
     admission_level: AdmissionLevelCode
     actionability: Literal[
-        "historical_proof_not_current_action",
+        "historical_proof_not_current_authority",
         "displayable",
         "proposal_review",
         "owner_scope_final_gate_ready",
@@ -380,7 +380,7 @@ class CandidateActionability(ProductionAdmissionModel):
     disabled_reason: str
     next_hard_gate: str
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class ProtectionTemplateSpec(ProductionAdmissionModel):
@@ -399,7 +399,7 @@ class ProtectionTemplateSpec(ProductionAdmissionModel):
     hard_blockers_for_live_action: list[str] = Field(default_factory=list)
     review_template_ref: str
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class FinalGatePreviewInputModel(ProductionAdmissionModel):
@@ -432,7 +432,7 @@ class FinalGatePreviewInputModel(ProductionAdmissionModel):
     final_gate_endpoint: str = OFFICIAL_ACTION_API_ENDPOINTS["final_gate_dry_run"]
     operation_layer_required: bool = True
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class ProductBackboneCarrierExample(ProductionAdmissionModel):
@@ -462,7 +462,7 @@ class ProductBackboneCarrierExample(ProductionAdmissionModel):
     hard_blockers: list[str] = Field(default_factory=list)
     final_gate_preview_ref: Optional[str] = None
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class ProductBackboneReadModel(ProductionAdmissionModel):
@@ -539,8 +539,8 @@ class TradingConsoleCandidateActionReadModel(ProductionAdmissionModel):
     candidate_output_ref: str = "trading_console_candidate_output"
     action_entry_output_ref: str = "trading_console_action_entry_output"
     product_backbone_ref: str = "product_backbone"
-    frontend_policy: str = "operate_as_candidate_action_entry_not_document_or_code_explanation"
-    action_enablement_source: Literal["backend_actionable_only"] = "backend_actionable_only"
+    action_entry_policy: str = "operate_as_candidate_action_entry_not_document_or_code_explanation"
+    action_enablement_source: Literal["official_action_state_only"] = "official_action_state_only"
     official_submit_paths: list[str] = Field(default_factory=lambda: list(OFFICIAL_ACTION_API_ENDPOINTS.values()))
     disabled_action_policy: str = "show exact hard blockers and retry conditions when action is disabled"
     never_show_as: list[str] = Field(
@@ -580,7 +580,7 @@ class ActionCandidateSpec(ProductionAdmissionModel):
     post_action_acceptance_outputs: list[str] = Field(default_factory=list)
     final_gate_required: bool = True
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -597,13 +597,13 @@ class TradingConsoleCandidateOutput(ProductionAdmissionModel):
     action_registry_supported: bool
     warning_count: int
     hard_blocker_count: int
-    owner_decision_text: str
+    owner_review_text: str
     research_quality_status: ResearchRiskClassification = "warning"
     risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
         default_factory=list
     )
     owner_risk_acceptance_required: bool = True
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
 
 
@@ -665,7 +665,7 @@ class GenericActionSpec(ProductionAdmissionModel):
     final_gate_adapter_ref: str = "generic_final_gate_adapter_contract"
     action_entry_payload_ref: Optional[str] = None
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -697,7 +697,7 @@ class ActionEntryPayloadContract(ProductionAdmissionModel):
     )
     action_allowed: Literal[False] = False
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class GenericFinalGateAdapterContract(ProductionAdmissionModel):
@@ -731,7 +731,7 @@ class GenericFinalGateAdapterContract(ProductionAdmissionModel):
             "insufficient_research",
             "incomplete signal markers",
             "fee/funding/slippage gaps",
-            "incomplete review UI",
+            "incomplete review surface",
             "non-core read-model degradation",
         ]
     )
@@ -752,7 +752,7 @@ class GenericFinalGateAdapterContract(ProductionAdmissionModel):
     )
     live_action_policy: str = "fail_closed_until_official_final_gate_passes"
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
     mutates_pg: Literal[False] = False
@@ -774,7 +774,7 @@ class TradingConsoleActionEntryOutput(ProductionAdmissionModel):
     required_owner_scope_fields: list[str] = Field(default_factory=list)
     warning_count: int
     hard_blocker_count: int
-    owner_decision_text: str
+    owner_review_text: str
     research_quality_status: ResearchRiskClassification = "warning"
     risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
         default_factory=list
@@ -782,7 +782,7 @@ class TradingConsoleActionEntryOutput(ProductionAdmissionModel):
     owner_risk_acceptance_required: bool = True
     owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class CandidatePipelineStandard(ProductionAdmissionModel):
@@ -801,7 +801,7 @@ class CandidatePipelineStandard(ProductionAdmissionModel):
                 "owner_risk_acceptance_required",
                 "incomplete signal markers",
                 "incomplete fee/funding/slippage",
-                "incomplete review UI",
+                "incomplete review surface",
                 "non-core read-model degradation",
             ],
             hard_blockers_for_live_action=[
@@ -864,12 +864,12 @@ class BlockerRecord(ProductionAdmissionModel):
     blocked_path: str
     evidence: str
     severity: Literal["hard_blocker", "warning", "deferred"]
-    bridge_method: str
+    evidence_method: str
     next_retry_condition: str
 
 
-class BridgeArtifactStatus(ProductionAdmissionModel):
-    bridge_method: str
+class LifecycleEvidenceStatus(ProductionAdmissionModel):
+    evidence_method: str
     status: Literal["present", "draft", "blocked", "mixed"]
     families: list[str] = Field(default_factory=list)
     row_statuses: dict[str, str] = Field(default_factory=dict)
@@ -903,7 +903,7 @@ class ObjectiveAcceptanceAuditRow(ProductionAdmissionModel):
     verification_scope: str
     completion_evidence: Literal[
         "proved_by_read_model_and_targeted_tests",
-        "blocked_with_bridge_artifact",
+        "blocked_with_lifecycle_evidence",
         "deferred_by_scope",
     ]
     evidence_refs: list[str] = Field(default_factory=list)
@@ -948,7 +948,7 @@ class ProductionBaselineContext(ProductionAdmissionModel):
     reusable_for_strategy_family_authorization: Literal[False] = False
     grants_execution_permission: Literal[False] = False
     grants_order_permission: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     requires_fresh_pre_action_pg_evidence: Literal[True] = True
     requires_fresh_pre_action_exchange_evidence: Literal[True] = True
     creates_authorization: Literal[False] = False
@@ -962,7 +962,7 @@ class ProductionBaselineContext(ProductionAdmissionModel):
 
 class ReviewContract(ProductionAdmissionModel):
     status: Literal["draft_no_action_evidence"] = "draft_no_action_evidence"
-    bridge_method: Literal["ReviewContract"] = "ReviewContract"
+    evidence_method: Literal["ReviewContract"] = "ReviewContract"
     required: bool = True
     family: Optional[str] = None
     metrics: list[str] = Field(default_factory=list)
@@ -988,7 +988,7 @@ class ReviewContract(ProductionAdmissionModel):
 
 class RiskDisclosureDraft(ProductionAdmissionModel):
     status: Literal["draft_for_owner_review"] = "draft_for_owner_review"
-    bridge_method: Literal["RiskDisclosureDraft"] = "RiskDisclosureDraft"
+    evidence_method: Literal["RiskDisclosureDraft"] = "RiskDisclosureDraft"
     family: str
     strategy_group: str
     summary: str
@@ -1021,7 +1021,7 @@ class RiskDisclosureDraft(ProductionAdmissionModel):
 
 class StrategyGroupMappingProposal(ProductionAdmissionModel):
     status: Literal["mapped_proposal"] = "mapped_proposal"
-    bridge_method: Literal["StrategyGroupMappingProposal"] = "StrategyGroupMappingProposal"
+    evidence_method: Literal["StrategyGroupMappingProposal"] = "StrategyGroupMappingProposal"
     family: str
     strategy_family_id: Optional[str] = None
     strategy_family_type: Optional[str] = None
@@ -1042,7 +1042,7 @@ class CarrierCandidate(ProductionAdmissionModel):
         "observation_candidate_only",
         "candidate_missing",
     ]
-    bridge_method: Literal["CarrierCandidate"] = "CarrierCandidate"
+    evidence_method: Literal["CarrierCandidate"] = "CarrierCandidate"
     family: str
     strategy_family_id: Optional[str] = None
     carrier_id: Optional[str] = None
@@ -1073,7 +1073,7 @@ class CarrierReadinessReport(ProductionAdmissionModel):
         "candidate_registered_not_actionable",
         "candidate_missing",
     ]
-    bridge_method: Literal["CarrierReadinessReport"] = "CarrierReadinessReport"
+    evidence_method: Literal["CarrierReadinessReport"] = "CarrierReadinessReport"
     family: str
     carrier_id: Optional[str] = None
     carrier_status: Optional[str] = None
@@ -1090,7 +1090,7 @@ class CarrierReadinessReport(ProductionAdmissionModel):
     blockers: list[str] = Field(default_factory=list)
     next_retry_condition: str
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
     mutates_pg: Literal[False] = False
@@ -1101,7 +1101,7 @@ class ProtectionPlanDraft(ProductionAdmissionModel):
         "draft_required_mandatory_tp_sl",
         "scope_reviewed_draft_only",
     ] = "draft_required_mandatory_tp_sl"
-    bridge_method: Literal["ProtectionPlanDraft"] = "ProtectionPlanDraft"
+    evidence_method: Literal["ProtectionPlanDraft"] = "ProtectionPlanDraft"
     mandatory: bool = True
     required_components: list[str] = Field(default_factory=lambda: ["TP", "SL"])
     scope: dict[str, object] = Field(default_factory=dict)
@@ -1131,7 +1131,7 @@ class BudgetEnvelopeDraft(ProductionAdmissionModel):
         "scope_incomplete_no_numbers_fabricated",
         "scope_complete_dry_run_only",
     ] = "scope_incomplete_no_numbers_fabricated"
-    bridge_method: Literal["BudgetEnvelopeDraft"] = "BudgetEnvelopeDraft"
+    evidence_method: Literal["BudgetEnvelopeDraft"] = "BudgetEnvelopeDraft"
     required_scope_fields: list[str] = Field(default_factory=lambda: list(REQUIRED_OWNER_SCOPE_FIELDS))
     scope: dict[str, object] = Field(default_factory=dict)
     provided_scope_fields: list[str] = Field(default_factory=list)
@@ -1172,7 +1172,7 @@ class ProductionCapitalBoundaryRow(ProductionAdmissionModel):
     strategy_family_id: Optional[str] = None
     carrier_id: Optional[str] = None
     status: Literal["scope_required", "scope_reviewed_dry_run_only"]
-    scope_review_verdict: str
+    scope_review_status: str
     required_scope_fields: list[str] = Field(default_factory=list)
     provided_scope_fields: list[str] = Field(default_factory=list)
     missing_scope_fields: list[str] = Field(default_factory=list)
@@ -1217,7 +1217,7 @@ class FinalGateDryRun(ProductionAdmissionModel):
 
 class PreExecutionBlockedReview(ProductionAdmissionModel):
     status: Literal["blocked"] = "blocked"
-    bridge_method: Literal["PreExecutionBlockedReview"] = "PreExecutionBlockedReview"
+    evidence_method: Literal["PreExecutionBlockedReview"] = "PreExecutionBlockedReview"
     family: Optional[str] = None
     carrier_id: Optional[str] = None
     blocked_reason: str
@@ -1226,7 +1226,7 @@ class PreExecutionBlockedReview(ProductionAdmissionModel):
     unresolved_blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     action_allowed: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
     mutates_pg: Literal[False] = False
@@ -1310,7 +1310,7 @@ class ApiBackedAuthorizationFlow(ProductionAdmissionModel):
             )
         ]
     )
-    frontend_action_enablement_source: Literal["backend_actionable_only"] = "backend_actionable_only"
+    owner_action_enablement_source: Literal["official_action_state_only"] = "official_action_state_only"
     trading_console_direct_action_api: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -1358,7 +1358,7 @@ class ActionCandidate(ProductionAdmissionModel):
         "unsupported_by_current_official_action_api",
         "supported_but_backend_not_actionable",
     ] = "unsupported_by_current_official_action_api"
-    bridge_method: Literal["ActionCandidate"] = "ActionCandidate"
+    evidence_method: Literal["ActionCandidate"] = "ActionCandidate"
     family: str
     carrier_id: Optional[str] = None
     candidate_carrier_id: Optional[str] = None
@@ -1384,7 +1384,7 @@ class ActionCandidate(ProductionAdmissionModel):
     next_retry_condition: str
     action_allowed: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -1395,17 +1395,17 @@ class ChainStageState(ProductionAdmissionModel):
     stage: str
     status: str
     evidence: str
-    bridge_method: Optional[str] = None
+    evidence_method: Optional[str] = None
     blocker_id: Optional[str] = None
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
 
 
-class ObservationBridge(ProductionAdmissionModel):
+class ObservationEvidence(ProductionAdmissionModel):
     family: str
-    bridge_method: Literal["TrendObservation", "CarrierReadinessReport", "CarrierCandidate"]
+    evidence_method: Literal["TrendObservation", "CarrierReadinessReport", "CarrierCandidate"]
     status: Literal[
-        "observation_bridge_only",
+        "observation_evidence_only",
         "readiness_report_only",
         "candidate_metadata_only",
         "missing_candidate",
@@ -1443,7 +1443,7 @@ class PrePostEvidenceContract(ProductionAdmissionModel):
 
 class AuditChainGapReport(ProductionAdmissionModel):
     status: Literal["gap_open_no_live_action_evidence"] = "gap_open_no_live_action_evidence"
-    bridge_method: Literal["AuditChainGapReport"] = "AuditChainGapReport"
+    evidence_method: Literal["AuditChainGapReport"] = "AuditChainGapReport"
     family: Optional[str] = None
     carrier_id: Optional[str] = None
     required_chain: list[str] = Field(
@@ -1486,21 +1486,21 @@ class ApiRequestDraft(ProductionAdmissionModel):
     mutates_exchange: Literal[False] = False
 
 
-class FamilyAdmissionVerdict(ProductionAdmissionModel):
-    verdict: Literal[
+class FamilyAdmissionOutcome(ProductionAdmissionModel):
+    status: Literal[
         "dry_run_only_scope_required",
         "dry_run_only_scope_reviewed",
         "blocked_backend_final_gate",
         "blocked_scope_required",
         "blocked_candidate_mismatch",
     ]
-    frontend_summary: str
+    owner_summary: str
     completed_stages: list[str] = Field(default_factory=list)
     blocked_stages: list[str] = Field(default_factory=list)
     remaining_requirements: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class FamilyCompletionSummary(ProductionAdmissionModel):
@@ -1515,11 +1515,11 @@ class FamilyCompletionSummary(ProductionAdmissionModel):
     blocked_stages: list[str] = Field(default_factory=list)
     blocked_stage_statuses: dict[str, str] = Field(default_factory=dict)
     blocker_ids: list[str] = Field(default_factory=list)
-    bridge_methods: list[str] = Field(default_factory=list)
+    evidence_methods: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -1533,7 +1533,7 @@ class AdmissionRiskControlSummary(ProductionAdmissionModel):
     carrier_id: Optional[str] = None
     admission_level: str
     classification: Literal["actionable", "dry-run-only", "blocked", "deferred"]
-    scope_review_verdict: str
+    scope_review_status: str
     risk_disclosure_status: str
     budget_envelope_status: str
     authorization_draft_status: str
@@ -1547,7 +1547,7 @@ class AdmissionRiskControlSummary(ProductionAdmissionModel):
     blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     action_allowed: Literal[False] = False
     creates_authorization: Literal[False] = False
@@ -1565,13 +1565,13 @@ class FullChainEvidenceRow(ProductionAdmissionModel):
     stage_order: int
     stage: str
     status: str
-    bridge_method: Optional[str] = None
+    evidence_method: Optional[str] = None
     evidence: str
     required_evidence_refs: list[str] = Field(default_factory=list)
     blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -1614,7 +1614,7 @@ class BlockerRetryRow(ProductionAdmissionModel):
     stage: str
     blocked_path: str
     severity: Literal["hard_blocker", "warning", "deferred"]
-    bridge_method: str
+    evidence_method: str
     evidence: str
     next_retry_condition: str
     retry_ready: Literal[False] = False
@@ -1628,13 +1628,13 @@ class BlockerRetryRow(ProductionAdmissionModel):
     mutates_pg: Literal[False] = False
 
 
-class OwnerAuthorizationPacket(ProductionAdmissionModel):
+class OwnerAuthorizationArtifact(ProductionAdmissionModel):
     family: str
     strategy_family_id: Optional[str] = None
     carrier_id: Optional[str] = None
     status: Literal["scope_required", "scope_reviewed_dry_run_only"]
     owner_can_review: Literal[True] = True
-    owner_scope_verdict: str
+    owner_scope_status: str
     risk_disclosure_status: str
     budget_envelope_status: str
     authorization_draft_status: str
@@ -1663,7 +1663,7 @@ class OwnerReviewHandoffRow(ProductionAdmissionModel):
     carrier_id: Optional[str] = None
     status: Literal["review_ready_scope_required", "review_ready_dry_run_only"]
     owner_can_review_risk_scope: Literal[True] = True
-    owner_scope_verdict: str
+    owner_scope_status: str
     risk_disclosure_status: str
     risk_failure_modes: list[str] = Field(default_factory=list)
     budget_envelope_status: str
@@ -1685,8 +1685,8 @@ class OwnerReviewHandoffRow(ProductionAdmissionModel):
     required_before_submit: list[str] = Field(default_factory=list)
     blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
-    frontend_action_enabled: Literal[False] = False
-    action_enablement_source: Literal["backend_actionable_only"] = "backend_actionable_only"
+    owner_action_enabled: Literal[False] = False
+    action_enablement_source: Literal["official_action_state_only"] = "official_action_state_only"
     not_authorization: Literal[True] = True
     not_execution_permission: Literal[True] = True
     not_order_permission: Literal[True] = True
@@ -1708,7 +1708,7 @@ class OfficialApiRequestDraftSummary(ProductionAdmissionModel):
     method: Literal["GET", "POST"]
     endpoint: str
     status: Literal["proposal_only_not_submitted"] = "proposal_only_not_submitted"
-    owner_scope_verdict: str
+    owner_scope_status: str
     unresolved_refs: list[str] = Field(default_factory=list)
     required_before_submit: list[str] = Field(default_factory=list)
     payload_template_keys: list[str] = Field(default_factory=list)
@@ -1741,12 +1741,12 @@ class LiveActionEligibilityRow(ProductionAdmissionModel):
     strategy_family_id: Optional[str] = None
     carrier_id: Optional[str] = None
     eligibility: Literal["not_eligible"] = "not_eligible"
-    decision: str
+    eligibility_result: str
     checks: list[LiveActionEligibilityCheck] = Field(default_factory=list)
     blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -1769,13 +1769,13 @@ class FinalGateReadinessRow(ProductionAdmissionModel):
     final_gate_endpoint: str
     execute_endpoint: str
     final_gate_reason: str
-    owner_scope_verdict: str
+    owner_scope_status: str
     checks: list[LiveActionEligibilityCheck] = Field(default_factory=list)
     blocking_stages: list[str] = Field(default_factory=list)
     blocker_ids: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -1786,14 +1786,14 @@ class FinalGateReadinessRow(ProductionAdmissionModel):
     exchange_write_action: Literal[False] = False
 
 
-class ProductionActionDecisionRow(ProductionAdmissionModel):
+class ProductionActionResultRow(ProductionAdmissionModel):
     family: str
     strategy_family_id: Optional[str] = None
     carrier_id: Optional[str] = None
-    decision: Literal["do_not_execute"] = "do_not_execute"
+    command_result: Literal["do_not_execute"] = "do_not_execute"
     selection_status: Literal["not_selected_for_live_action"] = "not_selected_for_live_action"
     reason: str
-    owner_scope_verdict: str
+    owner_scope_status: str
     action_api_status: str
     final_gate_reason: str
     missing_evidence: list[str] = Field(default_factory=list)
@@ -1801,7 +1801,7 @@ class ProductionActionDecisionRow(ProductionAdmissionModel):
     next_retry_conditions: list[str] = Field(default_factory=list)
     live_action_taken: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -1860,13 +1860,13 @@ class ScopeReview(ProductionAdmissionModel):
     missing_fields: list[str] = Field(default_factory=list)
     mismatches: list[str] = Field(default_factory=list)
     sanitized_scope: dict[str, object] = Field(default_factory=dict)
-    verdict: Literal[
+    status: Literal[
         "not_provided",
         "incomplete",
         "candidate_mismatch",
         "complete_dry_run_only",
     ] = "not_provided"
-    actionability: Literal["disabled_until_backend_actionable"] = "disabled_until_backend_actionable"
+    actionability: Literal["disabled_until_official_action_ready"] = "disabled_until_official_action_ready"
 
 
 class AdmissionContract(ProductionAdmissionModel):
@@ -1889,7 +1889,7 @@ class FamilyAdmissionRow(ProductionAdmissionModel):
     admission_level: str
     classification: Literal["actionable", "dry-run-only", "blocked", "deferred"]
     backend_actionable: bool = False
-    frontend_action_enabled: bool = False
+    owner_action_enabled: bool = False
     required_scope_missing: list[str] = Field(default_factory=lambda: list(REQUIRED_OWNER_SCOPE_FIELDS))
     research_quality_status: ResearchRiskClassification = "warning"
     risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
@@ -1925,18 +1925,18 @@ class FamilyAdmissionRow(ProductionAdmissionModel):
         default_factory=CandidateActionApiCompatibility
     )
     action_candidate: ActionCandidate
-    observation_bridge: ObservationBridge
+    observation_evidence: ObservationEvidence
     chain_stage_states: list[ChainStageState] = Field(default_factory=list)
     pre_post_evidence_contract: PrePostEvidenceContract = Field(default_factory=PrePostEvidenceContract)
     audit_chain_gap_report: AuditChainGapReport = Field(default_factory=AuditChainGapReport)
     gate_blocker_records: list[BlockerRecord] = Field(default_factory=list)
     api_request_drafts: list[ApiRequestDraft] = Field(default_factory=list)
-    admission_verdict: Optional[FamilyAdmissionVerdict] = None
+    admission_outcome: Optional[FamilyAdmissionOutcome] = None
     final_gate_dry_run: FinalGateDryRun = Field(default_factory=FinalGateDryRun)
     pre_execution_blocked_review: PreExecutionBlockedReview
     audit_state: Literal["no_new_action_audit"] = "no_new_action_audit"
     blocker_record: BlockerRecord
-    bridge_method: str
+    evidence_method: str
     next_retry_condition: str
     scope_review: ScopeReview = Field(default_factory=ScopeReview)
 
@@ -1945,8 +1945,8 @@ class TradingConsoleAuthorizationReadiness(ProductionAdmissionModel):
     status: Literal["pass_with_constraint"] = "pass_with_constraint"
     owner_can_review_risk_scope: bool = True
     api_backed_authorization_flow_available: str = "deferred_until_complete_scope"
-    frontend_action_enabled: bool = False
-    action_enablement_source: Literal["backend_actionable_only"] = "backend_actionable_only"
+    owner_action_enabled: bool = False
+    action_enablement_source: Literal["official_action_state_only"] = "official_action_state_only"
     current_authorization_state: dict = Field(default_factory=dict)
 
 
@@ -2020,7 +2020,7 @@ class ScopedDryRunExample(ProductionAdmissionModel):
     strategy_group: str
     classification: Literal["actionable", "dry-run-only", "blocked", "deferred"]
     owner_scope_query: dict[str, object]
-    expected_scope_verdict: Literal["complete_dry_run_only"] = "complete_dry_run_only"
+    expected_scope_status: Literal["complete_dry_run_only"] = "complete_dry_run_only"
     expected_authorization_draft_status: Literal["scope_reviewed_dry_run_only"] = (
         "scope_reviewed_dry_run_only"
     )
@@ -2032,7 +2032,7 @@ class ScopedDryRunExample(ProductionAdmissionModel):
         "unsupported_by_current_official_action_api",
         "supported_by_current_official_action_api_but_not_actionable",
     ] = "unsupported_by_current_official_action_api"
-    expected_eligibility_decision: Literal[
+    expected_eligibility_result: Literal[
         "scope_complete_but_candidate_action_api_unsupported",
         "scope_complete_but_backend_final_gate_blocked",
     ] = "scope_complete_but_candidate_action_api_unsupported"
@@ -2048,14 +2048,14 @@ class ScopedDryRunExample(ProductionAdmissionModel):
     mutates_pg: Literal[False] = False
 
 
-class SprintAcceptanceVerdict(ProductionAdmissionModel):
+class SprintAcceptanceOutcome(ProductionAdmissionModel):
     status: Literal["in_progress_pass_with_constraint"] = "in_progress_pass_with_constraint"
     completed_family_count: int = 0
     dry_run_only_family_count: int = 0
     blocked_family_count: int = 0
     actionable_family_count: int = 0
     live_execution_ready: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     live_actions_taken: Literal[False] = False
     summary: str = (
         "Admission sprint has candidate/action-entry backbone artifacts; no candidate "
@@ -2064,8 +2064,8 @@ class SprintAcceptanceVerdict(ProductionAdmissionModel):
     remaining_global_requirements: list[str] = Field(default_factory=list)
 
 
-class FinalReportSection(ProductionAdmissionModel):
-    section: str
+class FinalReportGroup(ProductionAdmissionModel):
+    group: str
     status: Literal["PASS", "PASS_WITH_CONSTRAINT", "DEFERRED", "BLOCKED"]
     evidence_refs: list[str] = Field(default_factory=list)
     blocker_refs: list[str] = Field(default_factory=list)
@@ -2087,14 +2087,14 @@ class FamilyFinalReportRow(ProductionAdmissionModel):
     live_action_status: Literal["BLOCKED"] = "BLOCKED"
     pg_exchange_evidence_status: Literal["BLOCKED"] = "BLOCKED"
     blocker_count: int
-    bridge_methods: list[str] = Field(default_factory=list)
+    evidence_methods: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     next_retry_conditions: list[str] = Field(default_factory=list)
     safety_flags: dict[str, bool] = Field(default_factory=dict)
     live_action_taken: Literal[False] = False
     runtime_started: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
@@ -2111,7 +2111,7 @@ class FinalReportPackage(ProductionAdmissionModel):
         "Read-only/proposal admission package is available for Owner review; no "
         "strategy-family candidate is live-executable through the official action path."
     )
-    sections: list[FinalReportSection] = Field(default_factory=list)
+    evidence_groups: list[FinalReportGroup] = Field(default_factory=list)
     required_validation_commands: list[str] = Field(default_factory=list)
     live_actions_taken: Literal[False] = False
     runtime_started: Literal[False] = False
@@ -2171,21 +2171,21 @@ class ProductionStrategyFamilyAdmissionState(ProductionAdmissionModel):
         default_factory=list
     )
     blocker_retry_matrix: list[BlockerRetryRow] = Field(default_factory=list)
-    owner_authorization_packet_matrix: list[OwnerAuthorizationPacket] = Field(default_factory=list)
+    owner_authorization_artifact_matrix: list[OwnerAuthorizationArtifact] = Field(default_factory=list)
     owner_review_handoff_matrix: list[OwnerReviewHandoffRow] = Field(default_factory=list)
     official_api_request_draft_matrix: list[OfficialApiRequestDraftSummary] = Field(
         default_factory=list
     )
     live_action_eligibility_matrix: list[LiveActionEligibilityRow] = Field(default_factory=list)
     final_gate_readiness_matrix: list[FinalGateReadinessRow] = Field(default_factory=list)
-    production_action_decision_matrix: list[ProductionActionDecisionRow] = Field(
+    production_action_result_matrix: list[ProductionActionResultRow] = Field(
         default_factory=list
     )
     classification_counts: dict[str, int]
     trading_console_authorization_readiness: TradingConsoleAuthorizationReadiness
     scope_review: ScopeReview = Field(default_factory=ScopeReview)
-    bridge_artifacts: list[str] = Field(default_factory=lambda: list(BRIDGE_ARTIFACTS))
-    bridge_artifact_statuses: list[BridgeArtifactStatus] = Field(default_factory=list)
+    lifecycle_evidence_artifacts: list[str] = Field(default_factory=lambda: list(LIFECYCLE_EVIDENCE_ARTIFACTS))
+    lifecycle_evidence_statuses: list[LifecycleEvidenceStatus] = Field(default_factory=list)
     objective_acceptance_audit_matrix: list[ObjectiveAcceptanceAuditRow] = Field(
         default_factory=list
     )
@@ -2211,7 +2211,7 @@ class ProductionStrategyFamilyAdmissionState(ProductionAdmissionModel):
     official_transition_readiness_matrix: list[OfficialTransitionReadiness] = Field(
         default_factory=list
     )
-    sprint_acceptance_verdict: SprintAcceptanceVerdict = Field(default_factory=SprintAcceptanceVerdict)
+    sprint_acceptance_outcome: SprintAcceptanceOutcome = Field(default_factory=SprintAcceptanceOutcome)
     family_final_report_matrix: list[FamilyFinalReportRow] = Field(default_factory=list)
     final_report_package: FinalReportPackage = Field(default_factory=FinalReportPackage)
 
@@ -2232,7 +2232,7 @@ class _FamilyConfig(ProductionAdmissionModel):
     blocker_id: str
     blocker_stage: str
     blocker_evidence: str
-    bridge_method: str
+    evidence_method: str
     next_retry_condition: str
 
 
@@ -2262,7 +2262,7 @@ def build_production_strategy_family_admission_state(
                 blocked_path=f"{config.family_label} -> registry",
                 evidence="Strategy family registry does not include a concrete candidate.",
                 severity="hard_blocker",
-                bridge_method="StrategyGroupMappingProposal",
+                evidence_method="StrategyGroupMappingProposal",
                 next_retry_condition="Registry seed includes a concrete candidate for this family.",
             )
             rows.append(
@@ -2323,7 +2323,7 @@ def build_production_strategy_family_admission_state(
                         scope_review=scope_review,
                         action_api_compatibility=_action_api_compatibility(None),
                     ),
-                    observation_bridge=_observation_bridge(
+                    observation_evidence=_observation_evidence(
                         config=config,
                         family_id=None,
                         carrier_id=None,
@@ -2358,7 +2358,7 @@ def build_production_strategy_family_admission_state(
                         timeframes=[],
                         scope_review=scope_review,
                     ),
-                    admission_verdict=_admission_verdict(
+                    admission_outcome=_admission_outcome(
                         classification="blocked",
                         scope_review=scope_review,
                         action_api_compatibility=_action_api_compatibility(None),
@@ -2371,7 +2371,7 @@ def build_production_strategy_family_admission_state(
                         ),
                     ),
                     blocker_record=blocker,
-                    bridge_method=blocker.bridge_method,
+                    evidence_method=blocker.evidence_method,
                     next_retry_condition=blocker.next_retry_condition,
                     final_gate_dry_run=_final_gate_dry_run(action_api_compatible=False),
                     pre_execution_blocked_review=_pre_execution_blocked_review(
@@ -2409,7 +2409,7 @@ def build_production_strategy_family_admission_state(
             blocked_path=f"{config.family_label} -> {family.family_id} -> production entry",
             evidence=config.blocker_evidence,
             severity="hard_blocker",
-            bridge_method=config.bridge_method,
+            evidence_method=config.evidence_method,
             next_retry_condition=config.next_retry_condition,
         )
         rows.append(
@@ -2486,7 +2486,7 @@ def build_production_strategy_family_admission_state(
                     scope_review=scope_review,
                     action_api_compatibility=action_api_compatibility,
                 ),
-                observation_bridge=_observation_bridge(
+                observation_evidence=_observation_evidence(
                     config=config,
                     family_id=family.family_id,
                     carrier_id=carrier_id,
@@ -2521,7 +2521,7 @@ def build_production_strategy_family_admission_state(
                     timeframes=[family.primary_timeframe, *family.context_timeframes],
                     scope_review=scope_review,
                 ),
-                admission_verdict=_admission_verdict(
+                admission_outcome=_admission_outcome(
                     classification=config.classification,
                     scope_review=scope_review,
                     action_api_compatibility=action_api_compatibility,
@@ -2555,7 +2555,7 @@ def build_production_strategy_family_admission_state(
                     ),
                 ),
                 blocker_record=blocker,
-                bridge_method=config.bridge_method,
+                evidence_method=config.evidence_method,
                 next_retry_condition=config.next_retry_condition,
                 scope_review=scope_review,
             )
@@ -2593,18 +2593,18 @@ def build_production_strategy_family_admission_state(
         full_chain_evidence_matrix=_full_chain_evidence_matrix(rows),
         protection_review_audit_matrix=_protection_review_audit_matrix(rows),
         blocker_retry_matrix=_blocker_retry_matrix(rows),
-        owner_authorization_packet_matrix=_owner_authorization_packet_matrix(rows),
+        owner_authorization_artifact_matrix=_owner_authorization_artifact_matrix(rows),
         owner_review_handoff_matrix=_owner_review_handoff_matrix(rows),
         official_api_request_draft_matrix=_official_api_request_draft_matrix(rows),
         live_action_eligibility_matrix=_live_action_eligibility_matrix(rows),
         final_gate_readiness_matrix=_final_gate_readiness_matrix(rows),
-        production_action_decision_matrix=_production_action_decision_matrix(rows),
+        production_action_result_matrix=_production_action_result_matrix(rows),
         classification_counts=_count_classifications(rows),
         trading_console_authorization_readiness=TradingConsoleAuthorizationReadiness(
             current_authorization_state=current_authorization_state or {}
         ),
         scope_review=aggregate_scope_review,
-        bridge_artifact_statuses=_bridge_artifact_statuses(rows),
+        lifecycle_evidence_statuses=_lifecycle_evidence_statuses(rows),
         objective_acceptance_audit_matrix=_objective_acceptance_audit_matrix(
             rows=rows,
             scope_review=aggregate_scope_review,
@@ -2623,13 +2623,13 @@ def build_production_strategy_family_admission_state(
         evidence_collection_summary_matrix=_evidence_collection_summary_matrix(rows),
         scoped_dry_run_examples=_scoped_dry_run_examples(rows),
         official_transition_readiness_matrix=_official_transition_readiness_matrix(rows),
-        sprint_acceptance_verdict=_sprint_acceptance_verdict(rows),
+        sprint_acceptance_outcome=_sprint_acceptance_outcome(rows),
         family_final_report_matrix=_family_final_report_matrix(rows),
         final_report_package=_final_report_package(rows),
     )
 
 
-def _sprint_acceptance_verdict(rows: list[FamilyAdmissionRow]) -> SprintAcceptanceVerdict:
+def _sprint_acceptance_outcome(rows: list[FamilyAdmissionRow]) -> SprintAcceptanceOutcome:
     blocked = sum(1 for row in rows if row.classification == "blocked")
     dry_run = sum(1 for row in rows if row.classification == "dry-run-only")
     actionable = sum(1 for row in rows if row.classification == "actionable")
@@ -2644,7 +2644,7 @@ def _sprint_acceptance_verdict(rows: list[FamilyAdmissionRow]) -> SprintAcceptan
     ]:
         if requirement not in remaining:
             remaining.append(requirement)
-    return SprintAcceptanceVerdict(
+    return SprintAcceptanceOutcome(
         completed_family_count=0,
         dry_run_only_family_count=dry_run,
         blocked_family_count=blocked,
@@ -2658,21 +2658,21 @@ def _family_final_report_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyFi
     evidence_summary_by_family = {
         item.family: item for item in _evidence_collection_summary_matrix(rows)
     }
-    decision_by_family = {
-        item.family: item for item in _production_action_decision_matrix(rows)
+    result_by_family = {
+        item.family: item for item in _production_action_result_matrix(rows)
     }
     matrix: list[FamilyFinalReportRow] = []
     for row in rows:
         completion = completion_by_family[row.family]
         evidence_summary = evidence_summary_by_family[row.family]
-        decision = decision_by_family[row.family]
+        production_result = result_by_family[row.family]
         blockers = _dedupe(
             [row.blocker_record.id, *[blocker.id for blocker in row.gate_blocker_records]]
         )
         next_retry_conditions = _dedupe(
             [
                 *completion.next_retry_conditions,
-                *decision.next_retry_conditions,
+                *production_result.next_retry_conditions,
                 evidence_summary.next_retry_condition,
             ]
         )
@@ -2682,13 +2682,13 @@ def _family_final_report_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyFi
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
                 blocker_count=len(blockers),
-                bridge_methods=list(completion.bridge_methods),
+                evidence_methods=list(completion.evidence_methods),
                 evidence_refs=[
                     f"family_completion_matrix:{row.family}",
                     f"admission_risk_control_matrix:{row.family}",
-                    f"owner_authorization_packet_matrix:{row.family}",
+                    f"owner_authorization_artifact_matrix:{row.family}",
                     f"owner_review_handoff_matrix:{row.family}",
-                    f"production_action_decision_matrix:{row.family}",
+                    f"production_action_result_matrix:{row.family}",
                     f"evidence_collection_summary_matrix:{row.family}",
                     f"blocker_retry_matrix:{row.family}",
                 ],
@@ -2697,7 +2697,7 @@ def _family_final_report_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyFi
                     "live_action_taken": False,
                     "runtime_started": False,
                     "backend_actionable": False,
-                    "frontend_action_enabled": False,
+                    "owner_action_enabled": False,
                     "places_order": False,
                     "mutates_pg": False,
                     "exchange_write_action": False,
@@ -2716,9 +2716,9 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
         if blocker.severity == "hard_blocker"
     ]
     family_refs = [f"{row.family}:{row.strategy_family_id}:{row.carrier_id}" for row in rows]
-    sections = [
-        FinalReportSection(
-            section="completed_work_by_family",
+    evidence_groups = [
+        FinalReportGroup(
+            group="completed_work_by_family",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "family_completion_matrix",
@@ -2728,8 +2728,8 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
             ],
             blocker_refs=hard_blockers,
         ),
-        FinalReportSection(
-            section="strategy_group_carrier_mappings",
+        FinalReportGroup(
+            group="strategy_group_carrier_mappings",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "families[*].strategy_group_mapping",
@@ -2743,19 +2743,19 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
                 if blocker.stage == "Carrier"
             ],
         ),
-        FinalReportSection(
-            section="admission_risk_control_changes",
+        FinalReportGroup(
+            group="admission_risk_control_changes",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "admission_risk_control_matrix",
                 "production_capital_boundary_matrix",
-                "owner_authorization_packet_matrix",
+                "owner_authorization_artifact_matrix",
                 "protection_review_audit_matrix",
             ],
             blocker_refs=hard_blockers,
         ),
-        FinalReportSection(
-            section="trading_console_authorization_readiness",
+        FinalReportGroup(
+            group="trading_console_authorization_readiness",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "trading_console_authorization_readiness",
@@ -2772,19 +2772,19 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
                 if blocker.stage == "BoundedLiveAuthorization"
             ],
         ),
-        FinalReportSection(
-            section="live_actions_taken",
+        FinalReportGroup(
+            group="live_actions_taken",
             status="BLOCKED",
             evidence_refs=[
                 "live_actions_taken=[]",
                 "production_baseline_context",
-                "production_action_decision_matrix",
-                "sprint_acceptance_verdict.live_execution_ready=false",
+                "production_action_result_matrix",
+                "sprint_acceptance_outcome.live_execution_ready=false",
             ],
             blocker_refs=hard_blockers,
         ),
-        FinalReportSection(
-            section="pg_exchange_evidence",
+        FinalReportGroup(
+            group="pg_exchange_evidence",
             status="BLOCKED",
             evidence_refs=[
                 "pg_exchange_evidence_matrix",
@@ -2799,20 +2799,20 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
                 if blocker.stage == "PreExecutionBlockedReview"
             ],
         ),
-        FinalReportSection(
-            section="blocker_records_and_bridge_artifacts",
+        FinalReportGroup(
+            group="blocker_records_and_lifecycle_evidence_artifacts",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "blocker_records",
                 "blocker_retry_matrix",
-                "bridge_artifact_statuses",
+                "lifecycle_evidence_statuses",
                 "acceptance_evidence_matrix",
                 "objective_acceptance_audit_matrix",
             ],
             blocker_refs=hard_blockers,
         ),
-        FinalReportSection(
-            section="tests_checks",
+        FinalReportGroup(
+            group="tests_checks",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "required_validation_commands",
@@ -2823,17 +2823,17 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
             ],
             blocker_refs=[],
         ),
-        FinalReportSection(
-            section="next_retry_conditions",
+        FinalReportGroup(
+            group="next_retry_conditions",
             status="PASS_WITH_CONSTRAINT",
             evidence_refs=[
                 "blocker_retry_matrix",
-                "sprint_acceptance_verdict.remaining_global_requirements",
+                "sprint_acceptance_outcome.remaining_global_requirements",
             ],
             blocker_refs=hard_blockers,
         ),
-        FinalReportSection(
-            section="safety_proof",
+        FinalReportGroup(
+            group="safety_proof",
             status="PASS",
             evidence_refs=[
                 "production_baseline_context",
@@ -2849,7 +2849,7 @@ def _final_report_package(rows: list[FamilyAdmissionRow]) -> FinalReportPackage:
         ),
     ]
     return FinalReportPackage(
-        sections=sections,
+        evidence_groups=evidence_groups,
         required_validation_commands=[
             "python3 -m py_compile src/application/production_strategy_family_admission.py src/application/readmodels/trading_console.py src/interfaces/api_trading_console.py src/domain/strategy_family_registry.py",
             "python3 -m pytest -q tests/unit/test_production_strategy_family_admission.py tests/unit/test_trading_console_readmodels.py tests/unit/test_strategy_family_registry.py",
@@ -3039,7 +3039,7 @@ def _scoped_dry_run_examples(rows: list[FamilyAdmissionRow]) -> list[ScopedDryRu
                     else "official_action_api_candidate_not_supported"
                 ),
                 expected_action_api_status=row.action_api_compatibility.status,
-                expected_eligibility_decision=(
+                expected_eligibility_result=(
                     "scope_complete_but_backend_final_gate_blocked"
                     if action_api_supported
                     else "scope_complete_but_candidate_action_api_unsupported"
@@ -3074,7 +3074,7 @@ def _official_transition_readiness_matrix(
             endpoint=API_BACKED_AUTHORIZATION_ENDPOINTS["create_admission_request"],
             required_refs=[
                 "strategy_family_version_id",
-                "evidence_packet_id",
+                "admission_evidence_id",
                 "owner_market_regime_input_id",
                 "pre_action_account_facts_snapshot_ref",
                 "playbook_id",
@@ -3181,9 +3181,9 @@ def _official_transition_readiness_matrix(
 def _family_completion_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyCompletionSummary]:
     summaries: list[FamilyCompletionSummary] = []
     for row in rows:
-        admission_verdict = row.admission_verdict
-        completed = list(admission_verdict.completed_stages) if admission_verdict else []
-        blocked = list(admission_verdict.blocked_stages) if admission_verdict else []
+        admission_outcome = row.admission_outcome
+        completed = list(admission_outcome.completed_stages) if admission_outcome else []
+        blocked = list(admission_outcome.blocked_stages) if admission_outcome else []
         stage_statuses = {stage.stage: stage.status for stage in row.chain_stage_states}
         blocked_stage_statuses = {
             stage: stage_statuses.get(stage, "blocked") for stage in blocked
@@ -3215,24 +3215,24 @@ def _family_completion_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyComp
                         *[blocker.id for blocker in row.gate_blocker_records],
                     ]
                 ),
-                bridge_methods=_dedupe(
+                evidence_methods=_dedupe(
                     [
-                        row.strategy_group_mapping.bridge_method,
-                        row.carrier_candidate.bridge_method,
-                        row.carrier_readiness_report.bridge_method,
-                        row.action_candidate.bridge_method,
-                        row.risk_disclosure_contract.bridge_method,
-                        row.authorization_draft_proposal.budget_envelope.bridge_method,
-                        row.protection_plan_draft.bridge_method,
-                        row.review_contract.bridge_method,
+                        row.strategy_group_mapping.evidence_method,
+                        row.carrier_candidate.evidence_method,
+                        row.carrier_readiness_report.evidence_method,
+                        row.action_candidate.evidence_method,
+                        row.risk_disclosure_contract.evidence_method,
+                        row.authorization_draft_proposal.budget_envelope.evidence_method,
+                        row.protection_plan_draft.evidence_method,
+                        row.review_contract.evidence_method,
                         row.final_gate_dry_run.__class__.__name__,
-                        row.pre_execution_blocked_review.bridge_method,
-                        row.audit_chain_gap_report.bridge_method,
+                        row.pre_execution_blocked_review.evidence_method,
+                        row.audit_chain_gap_report.evidence_method,
                     ]
                 ),
                 evidence_refs=[
                     f"classification={row.classification}",
-                    f"scope_review={row.scope_review.verdict}",
+                    f"scope_review={row.scope_review.status}",
                     f"action_api={row.action_api_compatibility.status}",
                     f"final_gate={row.final_gate_dry_run.reason}",
                     f"protection={row.protection_plan_draft.status}",
@@ -3240,8 +3240,8 @@ def _family_completion_matrix(rows: list[FamilyAdmissionRow]) -> list[FamilyComp
                     f"audit={row.audit_chain_gap_report.status}",
                 ],
                 next_retry_conditions=(
-                    list(admission_verdict.next_retry_conditions)
-                    if admission_verdict
+                    list(admission_outcome.next_retry_conditions)
+                    if admission_outcome
                     else [row.next_retry_condition]
                 ),
             )
@@ -3276,7 +3276,7 @@ def _admission_risk_control_matrix(
                 carrier_id=row.carrier_id,
                 admission_level=row.admission_level,
                 classification=row.classification,
-                scope_review_verdict=row.scope_review.verdict,
+                scope_review_status=row.scope_review.status,
                 risk_disclosure_status=row.risk_disclosure_contract.status,
                 budget_envelope_status=row.budget_envelope_draft.status,
                 authorization_draft_status=row.authorization_draft_proposal.status,
@@ -3311,7 +3311,7 @@ def _production_capital_boundary_matrix(
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
                 status=status,
-                scope_review_verdict=row.scope_review.verdict,
+                scope_review_status=row.scope_review.status,
                 required_scope_fields=list(budget.required_scope_fields),
                 provided_scope_fields=list(budget.provided_scope_fields),
                 missing_scope_fields=list(budget.missing_scope_fields),
@@ -3339,7 +3339,7 @@ def _bounded_live_authorization_state(
     "blocked_candidate_action_api_unsupported",
     "blocked_backend_final_gate",
 ]:
-    if scope_review.verdict != "complete_dry_run_only":
+    if scope_review.status != "complete_dry_run_only":
         return "blocked_scope_incomplete"
     if not action_api_compatibility.compatible:
         return "blocked_candidate_action_api_unsupported"
@@ -3366,7 +3366,7 @@ def _full_chain_evidence_matrix(rows: list[FamilyAdmissionRow]) -> list[FullChai
                     stage_order=order,
                     stage=stage_state.stage,
                     status=stage_state.status,
-                    bridge_method=stage_state.bridge_method,
+                    evidence_method=stage_state.evidence_method,
                     evidence=stage_state.evidence,
                     required_evidence_refs=_required_evidence_refs_for_stage(stage_state.stage),
                     blocker_ids=_dedupe([blocker.id for blocker in related_blockers]),
@@ -3465,7 +3465,7 @@ def _protection_review_audit_matrix(
                     blocker.id
                     for blocker in row.gate_blocker_records
                     if blocker.stage in {"TP/SL", "Review"}
-                    or blocker.bridge_method in {"ProtectionPlanDraft", "ReviewContract"}
+                    or blocker.evidence_method in {"ProtectionPlanDraft", "ReviewContract"}
                 ],
             ]
         )
@@ -3478,7 +3478,7 @@ def _protection_review_audit_matrix(
                     blocker.next_retry_condition
                     for blocker in row.gate_blocker_records
                     if blocker.stage in {"TP/SL", "Review"}
-                    or blocker.bridge_method in {"ProtectionPlanDraft", "ReviewContract"}
+                    or blocker.evidence_method in {"ProtectionPlanDraft", "ReviewContract"}
                 ],
             ]
         )
@@ -3529,17 +3529,17 @@ def _blocker_retry_matrix(rows: list[FamilyAdmissionRow]) -> list[BlockerRetryRo
                     stage=blocker.stage,
                     blocked_path=blocker.blocked_path,
                     severity=blocker.severity,
-                    bridge_method=blocker.bridge_method,
+                    evidence_method=blocker.evidence_method,
                     evidence=blocker.evidence,
                     next_retry_condition=blocker.next_retry_condition,
-                    retry_requires=_retry_requires_for_bridge_method(blocker.bridge_method),
+                    retry_requires=_retry_requires_for_evidence_method(blocker.evidence_method),
                 )
             )
     return matrix
 
 
-def _retry_requires_for_bridge_method(bridge_method: str) -> list[str]:
-    requirements_by_bridge = {
+def _retry_requires_for_evidence_method(evidence_method: str) -> list[str]:
+    requirements_by_evidence = {
         "TrendObservation": [
             "Owner reviews trend observation",
             "official action API supports the scoped candidate",
@@ -3604,13 +3604,13 @@ def _retry_requires_for_bridge_method(bridge_method: str) -> list[str]:
             "post-action review is recorded",
         ],
     }
-    return list(requirements_by_bridge.get(bridge_method, ["official evidence exists"]))
+    return list(requirements_by_evidence.get(evidence_method, ["official evidence exists"]))
 
 
-def _owner_authorization_packet_matrix(
+def _owner_authorization_artifact_matrix(
     rows: list[FamilyAdmissionRow],
-) -> list[OwnerAuthorizationPacket]:
-    matrix: list[OwnerAuthorizationPacket] = []
+) -> list[OwnerAuthorizationArtifact]:
+    matrix: list[OwnerAuthorizationArtifact] = []
     for row in rows:
         unresolved_refs = _dedupe(
             [ref for draft in row.api_request_drafts for ref in draft.unresolved_refs]
@@ -3633,12 +3633,12 @@ def _owner_authorization_packet_matrix(
             ]
         )
         matrix.append(
-            OwnerAuthorizationPacket(
+            OwnerAuthorizationArtifact(
                 family=row.family,
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
                 status=row.authorization_draft_proposal.status,
-                owner_scope_verdict=row.scope_review.verdict,
+                owner_scope_status=row.scope_review.status,
                 risk_disclosure_status=row.risk_disclosure_contract.status,
                 budget_envelope_status=row.budget_envelope_draft.status,
                 authorization_draft_status=row.authorization_draft_proposal.status,
@@ -3686,7 +3686,7 @@ def _owner_review_handoff_matrix(
         )
         status: Literal["review_ready_scope_required", "review_ready_dry_run_only"] = (
             "review_ready_dry_run_only"
-            if row.scope_review.verdict == "complete_dry_run_only"
+            if row.scope_review.status == "complete_dry_run_only"
             else "review_ready_scope_required"
         )
         matrix.append(
@@ -3695,7 +3695,7 @@ def _owner_review_handoff_matrix(
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
                 status=status,
-                owner_scope_verdict=row.scope_review.verdict,
+                owner_scope_status=row.scope_review.status,
                 risk_disclosure_status=row.risk_disclosure_contract.status,
                 risk_failure_modes=list(row.risk_disclosure_contract.failure_modes),
                 budget_envelope_status=row.budget_envelope_draft.status,
@@ -3730,7 +3730,7 @@ def _official_api_request_draft_matrix(
                     draft_name=draft.name,
                     method=draft.method,
                     endpoint=draft.endpoint,
-                    owner_scope_verdict=row.scope_review.verdict,
+                    owner_scope_status=row.scope_review.status,
                     unresolved_refs=list(draft.unresolved_refs),
                     required_before_submit=list(draft.required_before_submit),
                     payload_template_keys=list(draft.payload_template.keys()),
@@ -3746,7 +3746,7 @@ def _official_api_request_draft_matrix(
 def _live_action_eligibility_matrix(rows: list[FamilyAdmissionRow]) -> list[LiveActionEligibilityRow]:
     matrix: list[LiveActionEligibilityRow] = []
     for row in rows:
-        scope_complete = row.scope_review.verdict == "complete_dry_run_only"
+        scope_complete = row.scope_review.status == "complete_dry_run_only"
         action_api_supported = row.action_api_compatibility.compatible
         blocker_ids = _dedupe(
             [row.blocker_record.id, *[blocker.id for blocker in row.gate_blocker_records]]
@@ -3756,7 +3756,7 @@ def _live_action_eligibility_matrix(rows: list[FamilyAdmissionRow]) -> list[Live
                 family=row.family,
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
-                decision=(
+                eligibility_result=(
                     "scope_complete_but_candidate_action_api_unsupported"
                     if scope_complete and not action_api_supported
                     else "scope_complete_but_backend_final_gate_blocked"
@@ -3767,7 +3767,7 @@ def _live_action_eligibility_matrix(rows: list[FamilyAdmissionRow]) -> list[Live
                     LiveActionEligibilityCheck(
                         code="owner_scope_complete",
                         status="pass" if scope_complete else "block",
-                        evidence=f"scope_review.verdict={row.scope_review.verdict}",
+                        evidence=f"scope_review.status={row.scope_review.status}",
                         next_retry_condition="Owner supplies complete matched bounded production scope.",
                     ),
                     LiveActionEligibilityCheck(
@@ -3843,7 +3843,7 @@ def _final_gate_readiness_matrix(rows: list[FamilyAdmissionRow]) -> list[FinalGa
     matrix: list[FinalGateReadinessRow] = []
     for row in rows:
         eligibility = eligibility_by_family[row.family]
-        scope_complete = row.scope_review.verdict == "complete_dry_run_only"
+        scope_complete = row.scope_review.status == "complete_dry_run_only"
         action_api_supported = row.action_api_compatibility.compatible
         readiness_level: Literal[
             "scope_required",
@@ -3879,7 +3879,7 @@ def _final_gate_readiness_matrix(rows: list[FamilyAdmissionRow]) -> list[FinalGa
                 final_gate_endpoint=OFFICIAL_ACTION_API_ENDPOINTS["final_gate_dry_run"],
                 execute_endpoint=OFFICIAL_ACTION_API_ENDPOINTS["execute_authorization"],
                 final_gate_reason=row.final_gate_dry_run.reason,
-                owner_scope_verdict=row.scope_review.verdict,
+                owner_scope_status=row.scope_review.status,
                 checks=list(eligibility.checks),
                 blocking_stages=_dedupe(blocking_stages),
                 blocker_ids=list(eligibility.blocker_ids),
@@ -3889,16 +3889,16 @@ def _final_gate_readiness_matrix(rows: list[FamilyAdmissionRow]) -> list[FinalGa
     return matrix
 
 
-def _production_action_decision_matrix(
+def _production_action_result_matrix(
     rows: list[FamilyAdmissionRow],
-) -> list[ProductionActionDecisionRow]:
+) -> list[ProductionActionResultRow]:
     readiness_by_family = {
         item.family: item for item in _final_gate_readiness_matrix(rows)
     }
-    matrix: list[ProductionActionDecisionRow] = []
+    matrix: list[ProductionActionResultRow] = []
     for row in rows:
         readiness = readiness_by_family[row.family]
-        if row.scope_review.verdict != "complete_dry_run_only":
+        if row.scope_review.status != "complete_dry_run_only":
             reason = "owner_scope_incomplete_or_unmatched"
         elif not row.action_api_compatibility.compatible:
             reason = "official_action_api_candidate_not_supported"
@@ -3908,16 +3908,16 @@ def _production_action_decision_matrix(
             [
                 *row.audit_chain_gap_report.missing_evidence,
                 "final_gate_actionable_true",
-                "live_action_decision",
+                "live_action_result",
             ]
         )
         matrix.append(
-            ProductionActionDecisionRow(
+            ProductionActionResultRow(
                 family=row.family,
                 strategy_family_id=row.strategy_family_id,
                 carrier_id=row.carrier_id,
                 reason=reason,
-                owner_scope_verdict=row.scope_review.verdict,
+                owner_scope_status=row.scope_review.status,
                 action_api_status=row.action_api_compatibility.status,
                 final_gate_reason=readiness.final_gate_reason,
                 missing_evidence=missing_evidence,
@@ -3967,13 +3967,13 @@ def _acceptance_evidence_matrix(
             item="owner_risk_scope_review",
             status=(
                 "PASS_WITH_CONSTRAINT"
-                if scope_review.verdict == "complete_dry_run_only"
+                if scope_review.status == "complete_dry_run_only"
                 else "BLOCKED"
             ),
             families=families,
             evidence_refs=[
                 "owner_review_handoff_matrix",
-                f"scope_review.verdict={scope_review.verdict}",
+                f"scope_review.status={scope_review.status}",
                 f"scope_review.missing_fields={','.join(scope_review.missing_fields) or 'none'}",
             ],
             blocker_ids=[
@@ -3981,7 +3981,7 @@ def _acceptance_evidence_matrix(
             ],
             next_retry_condition=(
                 "Owner supplies complete matched bounded production scope."
-                if scope_review.verdict != "complete_dry_run_only"
+                if scope_review.status != "complete_dry_run_only"
                 else "Official action API and backend final gate support the scoped candidate."
             ),
         ),
@@ -4005,15 +4005,15 @@ def _acceptance_evidence_matrix(
             ),
         ),
         AcceptanceEvidenceItem(
-            item="frontend_action_disabled_until_backend_actionable",
+            item="owner_action_disabled_until_official_action_ready",
             status="PASS",
             families=families,
             evidence_refs=[
                 "families[*].backend_actionable=false",
-                "families[*].frontend_action_enabled=false",
-                "trading_console_authorization_readiness.action_enablement_source=backend_actionable_only",
+                "families[*].owner_action_enabled=false",
+                "trading_console_authorization_readiness.action_enablement_source=official_action_state_only",
             ],
-            next_retry_condition="No retry required; frontend action remains disabled.",
+            next_retry_condition="No retry required; owner action remains disabled.",
         ),
         AcceptanceEvidenceItem(
             item="production_capital_boundary",
@@ -4119,8 +4119,8 @@ def _acceptance_evidence_matrix(
             families=families,
             evidence_refs=[
                 "live_actions_taken=[]",
-                "sprint_acceptance_verdict.live_execution_ready=false",
-                "sprint_acceptance_verdict.actionable_family_count=0",
+                "sprint_acceptance_outcome.live_execution_ready=false",
+                "sprint_acceptance_outcome.actionable_family_count=0",
             ],
             blocker_ids=blocker_ids,
             next_retry_condition=(
@@ -4199,7 +4199,7 @@ def _objective_acceptance_audit_matrix(
             ),
             status="PASS_WITH_CONSTRAINT",
             verification_scope="candidate/proposal chain rows for each family",
-            completion_evidence="blocked_with_bridge_artifact",
+            completion_evidence="blocked_with_lifecycle_evidence",
             evidence_refs=[
                 "full_chain_evidence_matrix",
                 "family_completion_matrix",
@@ -4214,14 +4214,14 @@ def _objective_acceptance_audit_matrix(
             requirement_id="trading_console_authorization_path",
             requirement=(
                 "Owner can review risk/scope and see API-backed authorization flow while "
-                "frontend action remains disabled unless backend says actionable."
+                "owner action remains disabled unless backend says actionable."
             ),
             status="PASS_WITH_CONSTRAINT",
             verification_scope="Trading Console read-model handoff; no action API exposed",
-            completion_evidence="blocked_with_bridge_artifact",
+            completion_evidence="blocked_with_lifecycle_evidence",
             evidence_refs=[
                 "owner_review_handoff_matrix",
-                "owner_authorization_packet_matrix",
+                "owner_authorization_artifact_matrix",
                 "api_backed_authorization_flow",
                 "trading_console_authorization_readiness",
             ],
@@ -4255,7 +4255,7 @@ def _objective_acceptance_audit_matrix(
             ),
             status="PASS_WITH_CONSTRAINT",
             verification_scope="admission/risk-control, final-gate, review, and audit matrices",
-            completion_evidence="blocked_with_bridge_artifact",
+            completion_evidence="blocked_with_lifecycle_evidence",
             evidence_refs=[
                 "admission_risk_control_matrix",
                 "final_gate_readiness_matrix",
@@ -4279,7 +4279,7 @@ def _objective_acceptance_audit_matrix(
             evidence_refs=[
                 "production_capital_boundary_matrix",
                 "budget_envelope_draft.numbers_source=owner_scope_only_no_fabrication",
-                f"scope_review.verdict={scope_review.verdict}",
+                f"scope_review.status={scope_review.status}",
             ],
             blocker_ids=authorization_blocker_ids,
             next_retry_condition=(
@@ -4287,16 +4287,16 @@ def _objective_acceptance_audit_matrix(
             ),
         ),
         ObjectiveAcceptanceAuditRow(
-            requirement_id="live_action_decision",
+            requirement_id="live_action_result",
             requirement=(
                 "Execute full production chain only if scoped Owner authorization and hard gates pass; "
                 "otherwise produce dry-run/proposal artifacts."
             ),
             status="BLOCKED",
-            verification_scope="per-family live action decision and hard-gate matrices",
-            completion_evidence="blocked_with_bridge_artifact",
+            verification_scope="per-family live action result and hard-gate matrices",
+            completion_evidence="blocked_with_lifecycle_evidence",
             evidence_refs=[
-                "production_action_decision_matrix",
+                "production_action_result_matrix",
                 "live_action_eligibility_matrix",
                 "live_actions_taken=[]",
             ],
@@ -4311,7 +4311,7 @@ def _objective_acceptance_audit_matrix(
             requirement="Every live action requires pre/post PG and exchange evidence.",
             status="BLOCKED",
             verification_scope="required evidence contract only; no live action evidence collected",
-            completion_evidence="blocked_with_bridge_artifact",
+            completion_evidence="blocked_with_lifecycle_evidence",
             evidence_refs=[
                 "pg_exchange_evidence_matrix",
                 "family_evidence_collection_matrix",
@@ -4323,15 +4323,15 @@ def _objective_acceptance_audit_matrix(
             ),
         ),
         ObjectiveAcceptanceAuditRow(
-            requirement_id="blocker_records_and_bridges",
-            requirement="Blocked paths are recorded with bridge artifacts and retry conditions.",
+            requirement_id="blocker_records_and_lifecycle_evidence",
+            requirement="Blocked paths are recorded with lifecycle evidence artifacts and retry conditions.",
             status="PASS_WITH_CONSTRAINT",
-            verification_scope="first-class blocker and bridge matrices",
+            verification_scope="first-class blocker and lifecycle evidence matrices",
             completion_evidence="proved_by_read_model_and_targeted_tests",
             evidence_refs=[
                 "blocker_records",
                 "blocker_retry_matrix",
-                "bridge_artifact_statuses",
+                "lifecycle_evidence_statuses",
             ],
             blocker_ids=hard_blocker_ids,
             next_retry_condition="Retry each blocker only when its recorded next_retry_condition is satisfied.",
@@ -4340,12 +4340,14 @@ def _objective_acceptance_audit_matrix(
             requirement_id="final_report_package",
             requirement="Final report includes family work, mappings, risk control, readiness, evidence, blockers, tests, retry conditions, and safety proof.",
             status="PASS_WITH_CONSTRAINT",
-            verification_scope="final report sections and required validation command list",
+            verification_scope=(
+                "final report evidence groups and required validation command list"
+            ),
             completion_evidence="proved_by_read_model_and_targeted_tests",
             evidence_refs=[
                 "final_report_package",
                 "family_final_report_matrix",
-                "sprint_acceptance_verdict",
+                "sprint_acceptance_outcome",
             ],
             blocker_ids=hard_blocker_ids,
             next_retry_condition="All BLOCKED objective audit rows become passable through official evidence.",
@@ -4370,13 +4372,13 @@ def _objective_acceptance_audit_matrix(
     ]
 
 
-def _bridge_artifact_statuses(rows: list[FamilyAdmissionRow]) -> list[BridgeArtifactStatus]:
+def _lifecycle_evidence_statuses(rows: list[FamilyAdmissionRow]) -> list[LifecycleEvidenceStatus]:
     families = [row.family for row in rows]
     status_by_method: dict[str, dict[str, str]] = {
         "TrendObservation": {
             row.family: (
-                row.observation_bridge.status
-                if row.observation_bridge.bridge_method == "TrendObservation"
+                row.observation_evidence.status
+                if row.observation_evidence.evidence_method == "TrendObservation"
                 else "not_applicable"
             )
             for row in rows
@@ -4470,8 +4472,8 @@ def _bridge_artifact_statuses(rows: list[FamilyAdmissionRow]) -> list[BridgeArti
             "Official action path records the complete AuthorizationDraft -> Review/Audit evidence chain."
         ),
     }
-    results: list[BridgeArtifactStatus] = []
-    for method in BRIDGE_ARTIFACTS:
+    results: list[LifecycleEvidenceStatus] = []
+    for method in LIFECYCLE_EVIDENCE_ARTIFACTS:
         row_statuses = status_by_method[method]
         applicable_families = [
             family for family, status in row_statuses.items() if status != "not_applicable"
@@ -4481,8 +4483,8 @@ def _bridge_artifact_statuses(rows: list[FamilyAdmissionRow]) -> list[BridgeArti
             statuses = {value for value in row_statuses.values() if value != "not_applicable"}
             status = "present" if len(statuses) == 1 else "mixed"
         results.append(
-            BridgeArtifactStatus(
-                bridge_method=method,
+            LifecycleEvidenceStatus(
+                evidence_method=method,
                 status=status,
                 families=applicable_families or families,
                 row_statuses=row_statuses,
@@ -4496,15 +4498,15 @@ def _bridge_artifact_statuses(rows: list[FamilyAdmissionRow]) -> list[BridgeArti
     return results
 
 
-def _admission_verdict(
+def _admission_outcome(
     *,
     classification: str,
     scope_review: ScopeReview,
     action_api_compatibility: CandidateActionApiCompatibility,
     gate_blockers: list[BlockerRecord],
-) -> FamilyAdmissionVerdict:
-    if classification == "dry-run-only" and scope_review.verdict == "complete_dry_run_only":
-        verdict: Literal[
+) -> FamilyAdmissionOutcome:
+    if classification == "dry-run-only" and scope_review.status == "complete_dry_run_only":
+        status: Literal[
             "dry_run_only_scope_required",
             "dry_run_only_scope_reviewed",
             "blocked_backend_final_gate",
@@ -4513,26 +4515,26 @@ def _admission_verdict(
         ] = "dry_run_only_scope_reviewed"
         summary = "Owner scope is complete for dry-run review, but live execution remains blocked."
     elif classification == "dry-run-only":
-        verdict = "dry_run_only_scope_required"
+        status = "dry_run_only_scope_required"
         summary = "Candidate is dry-run-only and still requires complete matched Owner scope."
-    elif scope_review.verdict == "candidate_mismatch":
-        verdict = "blocked_candidate_mismatch"
+    elif scope_review.status == "candidate_mismatch":
+        status = "blocked_candidate_mismatch"
         summary = "Candidate remains blocked because supplied scope does not match this family/carrier."
-    elif scope_review.verdict == "complete_dry_run_only" and action_api_compatibility.compatible:
-        verdict = "blocked_backend_final_gate"
+    elif scope_review.status == "complete_dry_run_only" and action_api_compatibility.compatible:
+        status = "blocked_backend_final_gate"
         summary = (
             "Owner scope is complete and the carrier is supported by the action registry, "
             "but backend final gate and required action evidence remain blocked."
         )
     else:
-        verdict = "blocked_scope_required"
+        status = "blocked_scope_required"
         summary = "Candidate remains blocked and requires scope/readiness evidence before retry."
 
     completed = ["StrategyFamily", "StrategyGroup"]
     if classification == "dry-run-only":
         completed.append("Carrier")
     completed.append("RiskDisclosure")
-    if scope_review.verdict == "complete_dry_run_only":
+    if scope_review.status == "complete_dry_run_only":
         completed.append("AuthorizationDraft")
     blocked_stages = _dedupe([blocker.stage for blocker in gate_blockers])
     remaining = [
@@ -4544,9 +4546,9 @@ def _admission_verdict(
         "candidate supported by official action API registry" not in remaining
     ):
         remaining.append("candidate supported by official action API registry")
-    return FamilyAdmissionVerdict(
-        verdict=verdict,
-        frontend_summary=summary,
+    return FamilyAdmissionOutcome(
+        status=status,
+        owner_summary=summary,
         completed_stages=_dedupe(completed),
         blocked_stages=blocked_stages,
         remaining_requirements=_dedupe(remaining),
@@ -4572,7 +4574,7 @@ def _pre_execution_blocked_review(
     gate_blockers: list[BlockerRecord],
     final_gate_dry_run: FinalGateDryRun,
 ) -> PreExecutionBlockedReview:
-    if scope_review.verdict != "complete_dry_run_only":
+    if scope_review.status != "complete_dry_run_only":
         reason = "owner_scope_incomplete_or_unmatched"
     elif not action_api_compatibility.compatible:
         reason = "official_action_api_candidate_not_supported"
@@ -4644,14 +4646,14 @@ def _aggregate_pre_execution_blocked_review(rows: list[FamilyAdmissionRow]) -> P
                 "source": "families",
             },
             {
-                "code": "frontend_action_enabled",
+                "code": "owner_action_enabled",
                 "status": "false",
-                "source": "backend_actionable_only",
+                "source": "official_action_state_only",
             },
             {
                 "code": "live_execution_ready",
                 "status": "false",
-                "source": "sprint_acceptance_verdict",
+                "source": "sprint_acceptance_outcome",
             },
         ],
         blocking_stages=_dedupe(blocking_stages),
@@ -4707,7 +4709,7 @@ def _aggregate_audit_chain_gap_report(rows: list[FamilyAdmissionRow]) -> AuditCh
         present_evidence=_dedupe(present),
         missing_evidence=_dedupe(missing),
         reason=(
-            "Sprint read model produced proposal/bridge evidence only; no candidate has "
+            "Sprint read model produced proposal/evidence only; no candidate has "
             "official action evidence or a closed audit chain."
         ),
         next_retry_condition=(
@@ -4731,15 +4733,15 @@ def _api_request_drafts(
     playbook_id = carrier_id or "<required:playbook_id>"
     common_required = [
         "strategy family/version exists in BRC admission repository",
-        "evidence packet is created through official API",
+        "admission evidence is created through official API",
         "owner regime input is created through official API",
         "complete matched Owner scope",
     ]
     return [
         ApiRequestDraft(
-            name="create_admission_evidence_packet",
+            name="create_admission_evidence",
             method="POST",
-            endpoint="POST /api/brc/admissions/evidence-packets",
+            endpoint="POST /api/brc/admissions/admission-evidence",
             payload_template={
                 "strategy_family_version_id": strategy_family_version_id,
                 "payload_json": {
@@ -4785,7 +4787,7 @@ def _api_request_drafts(
             endpoint="POST /api/brc/admissions/requests",
             payload_template={
                 "strategy_family_version_id": strategy_family_version_id,
-                "evidence_packet_id": "<required:evidence_packet_id>",
+                "admission_evidence_id": "<required:admission_evidence_id>",
                 "owner_market_regime_input_id": "<required:owner_market_regime_input_id>",
                 "trial_env": "live",
                 "trial_stage": "funded_validation",
@@ -4800,7 +4802,7 @@ def _api_request_drafts(
                 "requested_by": "owner",
             },
             unresolved_refs=[
-                "evidence_packet_id",
+                "admission_evidence_id",
                 "owner_market_regime_input_id",
                 "pre_action_account_facts_snapshot_ref",
                 *([] if family_id else ["strategy_family_version_id"]),
@@ -4866,23 +4868,23 @@ def _api_request_drafts(
     ]
 
 
-def _observation_bridge(
+def _observation_evidence(
     *,
     config: _FamilyConfig,
     family_id: Optional[str],
     carrier_id: Optional[str],
     supported_symbols: list[str],
     timeframes: list[str],
-) -> ObservationBridge:
+) -> ObservationEvidence:
     clean_timeframes = [item for item in timeframes if item]
     if family_id is None:
-        return ObservationBridge(
+        return ObservationEvidence(
             family=config.family_label,
-            bridge_method=(
+            evidence_method=(
                 "TrendObservation"
                 if config.family_type == StrategyFamilyType.TREND_FOLLOWING
-                else config.bridge_method
-                if config.bridge_method in {"CarrierReadinessReport", "CarrierCandidate"}
+                else config.evidence_method
+                if config.evidence_method in {"CarrierReadinessReport", "CarrierCandidate"}
                 else "CarrierCandidate"
             ),
             status="missing_candidate",
@@ -4892,10 +4894,10 @@ def _observation_bridge(
             next_retry_condition="Register a concrete strategy-family candidate before observation.",
         )
     if config.family_type == StrategyFamilyType.TREND_FOLLOWING:
-        return ObservationBridge(
+        return ObservationEvidence(
             family=config.family_label,
-            bridge_method="TrendObservation",
-            status="observation_bridge_only",
+            evidence_method="TrendObservation",
+            status="observation_evidence_only",
             supported_symbols=supported_symbols,
             timeframes=clean_timeframes,
             evidence=(
@@ -4909,18 +4911,18 @@ def _observation_bridge(
             ),
         )
     if config.family_type == StrategyFamilyType.VOLATILITY_BREAKOUT:
-        return ObservationBridge(
+        return ObservationEvidence(
             family=config.family_label,
-            bridge_method="CarrierReadinessReport",
+            evidence_method="CarrierReadinessReport",
             status="readiness_report_only",
             supported_symbols=supported_symbols,
             timeframes=clean_timeframes,
             evidence="Volatility expansion candidate remains a readiness report, not a runner.",
             next_retry_condition=config.next_retry_condition,
         )
-    return ObservationBridge(
+    return ObservationEvidence(
         family=config.family_label,
-        bridge_method="CarrierCandidate",
+        evidence_method="CarrierCandidate",
         status="candidate_metadata_only",
         supported_symbols=supported_symbols,
         timeframes=clean_timeframes,
@@ -4947,7 +4949,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Strategy family registry candidate is missing.",
                 severity="hard_blocker",
-                bridge_method="StrategyGroupMappingProposal",
+                evidence_method="StrategyGroupMappingProposal",
                 next_retry_condition="Register a concrete strategy-family candidate.",
             )
         )
@@ -4959,11 +4961,11 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Carrier candidate is missing.",
                 severity="hard_blocker",
-                bridge_method="CarrierCandidate",
+                evidence_method="CarrierCandidate",
                 next_retry_condition="Create a concrete carrier candidate for the family.",
             )
         )
-    if scope_review.verdict != "complete_dry_run_only":
+    if scope_review.status != "complete_dry_run_only":
         records.append(
             BlockerRecord(
                 id=f"{config.blocker_id}-SCOPE",
@@ -4971,11 +4973,11 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence=(
                     "Owner scope is not complete and matched. "
-                    f"verdict={scope_review.verdict}; missing={scope_review.missing_fields}; "
+                    f"status={scope_review.status}; missing={scope_review.missing_fields}; "
                     f"mismatches={scope_review.mismatches}"
                 ),
                 severity="hard_blocker",
-                bridge_method="AuthorizationDraftProposal",
+                evidence_method="AuthorizationDraftProposal",
                 next_retry_condition=(
                     "Owner provides complete symbol/side/quantity/max_notional/leverage/"
                     "max_attempts/protection_mode/review_requirement scope for this candidate."
@@ -4990,7 +4992,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Candidate carrier is not supported by current official action API registry.",
                 severity="hard_blocker",
-                bridge_method="ActionCandidate",
+                evidence_method="ActionCandidate",
                 next_retry_condition=(
                     "Owner trial-flow and bounded-execution registries support the exact candidate carrier."
                 ),
@@ -5004,7 +5006,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Backend final gate has not returned actionable=true for this candidate.",
                 severity="hard_blocker",
-                bridge_method="FinalGateDryRun",
+                evidence_method="FinalGateDryRun",
                 next_retry_condition="Official backend final gate returns actionable=true.",
             ),
             BlockerRecord(
@@ -5013,7 +5015,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Required pre-action PG and exchange evidence has not been collected.",
                 severity="hard_blocker",
-                bridge_method="PreExecutionBlockedReview",
+                evidence_method="PreExecutionBlockedReview",
                 next_retry_condition="Pre-action PG and exchange snapshots are collected through official service/API.",
             ),
             BlockerRecord(
@@ -5022,7 +5024,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Mandatory TP/SL plan is draft-only and not executable.",
                 severity="hard_blocker",
-                bridge_method="ProtectionPlanDraft",
+                evidence_method="ProtectionPlanDraft",
                 next_retry_condition="Mandatory TP/SL plan is valid for the exact candidate scope.",
             ),
             BlockerRecord(
@@ -5031,7 +5033,7 @@ def _gate_blocker_records(
                 blocked_path=blocked_path,
                 evidence="Post-action review contract is draft-only and has no action evidence to review.",
                 severity="deferred",
-                bridge_method="ReviewContract",
+                evidence_method="ReviewContract",
                 next_retry_condition="Live action evidence exists and post-action review is recorded.",
             ),
         ]
@@ -5059,14 +5061,14 @@ def _chain_stage_states(
     )
     authorization_status = (
         "scope_reviewed_dry_run_only"
-        if scope_review.verdict == "complete_dry_run_only"
+        if scope_review.status == "complete_dry_run_only"
         else "proposal_only_scope_required"
     )
     bounded_authorization_status = (
         "blocked_candidate_action_api_unsupported"
-        if scope_review.verdict == "complete_dry_run_only" and not action_api_compatibility.compatible
+        if scope_review.status == "complete_dry_run_only" and not action_api_compatibility.compatible
         else "blocked_backend_final_gate"
-        if scope_review.verdict == "complete_dry_run_only" and action_api_compatibility.compatible
+        if scope_review.status == "complete_dry_run_only" and action_api_compatibility.compatible
         else "blocked_scope_incomplete_or_unmatched"
     )
     return [
@@ -5074,35 +5076,35 @@ def _chain_stage_states(
             stage="StrategyFamily",
             status=strategy_family_status,
             evidence=family_id or "No registry candidate found.",
-            bridge_method="StrategyGroupMappingProposal" if family_id is None else None,
+            evidence_method="StrategyGroupMappingProposal" if family_id is None else None,
             blocker_id=blocker.id if family_id is None else None,
         ),
         ChainStageState(
             stage="StrategyGroup",
             status="mapped" if family_id else "blocked",
             evidence=f"{family_label} strategy group mapping recorded.",
-            bridge_method="StrategyGroupMappingProposal",
+            evidence_method="StrategyGroupMappingProposal",
             blocker_id=None if family_id else blocker.id,
         ),
         ChainStageState(
             stage="Carrier",
             status=carrier_status,
             evidence=carrier_id or "Carrier candidate missing.",
-            bridge_method="CarrierCandidate",
+            evidence_method="CarrierCandidate",
             blocker_id=blocker.id if not carrier_id else None,
         ),
         ChainStageState(
             stage="RiskDisclosure",
             status="draft_required",
             evidence="Risk disclosure draft is present for Owner review.",
-            bridge_method="RiskDisclosureDraft",
+            evidence_method="RiskDisclosureDraft",
         ),
         ChainStageState(
             stage="AuthorizationDraft",
             status=authorization_status,
-            evidence=f"Owner scope review verdict: {scope_review.verdict}.",
-            bridge_method="AuthorizationDraftProposal",
-            blocker_id=blocker.id if scope_review.verdict != "complete_dry_run_only" else None,
+            evidence=f"Owner scope review status: {scope_review.status}.",
+            evidence_method="AuthorizationDraftProposal",
+            blocker_id=blocker.id if scope_review.status != "complete_dry_run_only" else None,
         ),
         ChainStageState(
             stage="BoundedLiveAuthorization",
@@ -5112,35 +5114,35 @@ def _chain_stage_states(
                 if not action_api_compatibility.compatible
                 else "Candidate action API is supported but backend final gate remains blocked."
             ),
-            bridge_method="FinalGateDryRun",
+            evidence_method="FinalGateDryRun",
             blocker_id=blocker.id,
         ),
         ChainStageState(
             stage="ExecutionIntent",
             status="not_created",
             evidence="Read model does not create execution intents.",
-            bridge_method="PreExecutionBlockedReview",
+            evidence_method="PreExecutionBlockedReview",
             blocker_id=blocker.id,
         ),
         ChainStageState(
             stage="Entry",
             status="not_executed",
             evidence="No entry order was submitted.",
-            bridge_method="ActionCandidate",
+            evidence_method="ActionCandidate",
             blocker_id=blocker.id,
         ),
         ChainStageState(
             stage="TP/SL",
             status="draft_required_mandatory_tp_sl",
             evidence="Mandatory TP/SL plan is required before any live action.",
-            bridge_method="ProtectionPlanDraft",
+            evidence_method="ProtectionPlanDraft",
             blocker_id=blocker.id,
         ),
         ChainStageState(
             stage="Review",
             status="review_contract_draft",
             evidence="Post-action review is required before promotion.",
-            bridge_method="ReviewContract",
+            evidence_method="ReviewContract",
         ),
     ]
 
@@ -5150,7 +5152,7 @@ def _final_gate_dry_run(
     scope_review: Optional[ScopeReview] = None,
     action_api_compatible: bool = False,
 ) -> FinalGateDryRun:
-    owner_scope_status = "pass" if scope_review and scope_review.verdict == "complete_dry_run_only" else "block"
+    owner_scope_status = "pass" if scope_review and scope_review.status == "complete_dry_run_only" else "block"
     reason = (
         "official_action_api_candidate_not_supported"
         if owner_scope_status == "pass" and not action_api_compatible
@@ -5193,7 +5195,7 @@ def _budget_envelope_draft(
     validation_checks = [
         {
             "code": "owner_scope_complete",
-            "status": "pass" if scope_review.verdict == "complete_dry_run_only" else "block",
+            "status": "pass" if scope_review.status == "complete_dry_run_only" else "block",
             "source": "scope_review",
         },
         {
@@ -5251,7 +5253,7 @@ def _budget_envelope_draft(
         "protection_mode": scope.protection_mode,
         "review_requirement": scope.review_requirement,
     }
-    if scope_review.verdict != "complete_dry_run_only":
+    if scope_review.status != "complete_dry_run_only":
         return BudgetEnvelopeDraft(**common)
     return BudgetEnvelopeDraft(
         status="scope_complete_dry_run_only",
@@ -5290,14 +5292,14 @@ def _protection_plan_draft(*, scope_review: ScopeReview) -> ProtectionPlanDraft:
         "stop_loss_price",
         *(
             []
-            if scope_review.verdict == "complete_dry_run_only"
+            if scope_review.status == "complete_dry_run_only"
             else ["complete_matched_owner_scope"]
         ),
     ]
     return ProtectionPlanDraft(
         status=(
             "scope_reviewed_draft_only"
-            if scope_review.verdict == "complete_dry_run_only"
+            if scope_review.status == "complete_dry_run_only"
             else "draft_required_mandatory_tp_sl"
         ),
         scope=scope,
@@ -5305,7 +5307,7 @@ def _protection_plan_draft(*, scope_review: ScopeReview) -> ProtectionPlanDraft:
             {
                 "code": "owner_scope_complete",
                 "status": "pass"
-                if scope_review.verdict == "complete_dry_run_only"
+                if scope_review.status == "complete_dry_run_only"
                 else "block",
             },
             {"code": "take_profit_defined", "status": "missing"},
@@ -5314,7 +5316,7 @@ def _protection_plan_draft(*, scope_review: ScopeReview) -> ProtectionPlanDraft:
             {"code": "exchange_protection_orders_created", "status": "not_created"},
         ],
         missing_fields=missing,
-        not_executable_until_scope_complete=scope_review.verdict != "complete_dry_run_only",
+        not_executable_until_scope_complete=scope_review.status != "complete_dry_run_only",
     )
 
 
@@ -5507,7 +5509,7 @@ def _action_candidate(
     action_api_compatibility: CandidateActionApiCompatibility,
 ) -> ActionCandidate:
     blockers: list[str] = list(action_api_compatibility.blockers)
-    if scope_review.verdict != "complete_dry_run_only":
+    if scope_review.status != "complete_dry_run_only":
         blockers.append("complete_matched_owner_scope_required")
     blockers.extend(
         [
@@ -5562,7 +5564,7 @@ def _authorization_draft_proposal(
     return AuthorizationDraftProposal(
         status=(
             "scope_reviewed_dry_run_only"
-            if scope_review.verdict == "complete_dry_run_only"
+            if scope_review.status == "complete_dry_run_only"
             else "scope_required"
         ),
         scope=scope_review.sanitized_scope,
@@ -5613,7 +5615,7 @@ def _scope_review_for_missing_candidate(
         missing_fields=_missing_scope_fields(scope),
         mismatches=[f"strategy family missing in registry: {config.family_label}"],
         sanitized_scope=_sanitized_scope(scope),
-        verdict="candidate_mismatch",
+        status="candidate_mismatch",
     )
 
 
@@ -5640,24 +5642,24 @@ def _scope_review_for_candidate(
         mismatches.append("carrier_id mismatch")
     if scope.symbol and scope.symbol not in supported_symbols:
         mismatches.append("symbol not supported by candidate")
-    verdict: Literal["incomplete", "candidate_mismatch", "complete_dry_run_only"]
+    status: Literal["incomplete", "candidate_mismatch", "complete_dry_run_only"]
     if missing:
-        verdict = "incomplete"
+        status = "incomplete"
     elif mismatches:
-        verdict = "candidate_mismatch"
+        status = "candidate_mismatch"
     else:
-        verdict = "complete_dry_run_only"
+        status = "complete_dry_run_only"
     return ScopeReview(
         provided=True,
         target_family=scope.family,
         target_strategy_family_id=scope.strategy_family_id,
         target_carrier_id=scope.carrier_id,
         complete=not missing,
-        matched_candidate=verdict == "complete_dry_run_only",
+        matched_candidate=status == "complete_dry_run_only",
         missing_fields=missing,
         mismatches=mismatches,
         sanitized_scope=_sanitized_scope(scope),
-        verdict=verdict,
+        status=status,
     )
 
 
@@ -5666,7 +5668,7 @@ def _aggregate_scope_review(rows: list[FamilyAdmissionRow]) -> ScopeReview:
     if not provided:
         return ScopeReview()
     matched = next(
-        (row.scope_review for row in rows if row.scope_review.verdict == "complete_dry_run_only"),
+        (row.scope_review for row in rows if row.scope_review.status == "complete_dry_run_only"),
         None,
     )
     if matched is not None:
@@ -5681,7 +5683,7 @@ def _aggregate_scope_review(rows: list[FamilyAdmissionRow]) -> ScopeReview:
         for item in row.scope_review.mismatches:
             if item not in mismatches:
                 mismatches.append(item)
-    verdict: Literal["incomplete", "candidate_mismatch"] = (
+    status: Literal["incomplete", "candidate_mismatch"] = (
         "incomplete" if missing else "candidate_mismatch"
     )
     return first.model_copy(
@@ -5690,7 +5692,7 @@ def _aggregate_scope_review(rows: list[FamilyAdmissionRow]) -> ScopeReview:
             "matched_candidate": False,
             "missing_fields": missing,
             "mismatches": mismatches,
-            "verdict": verdict,
+            "status": status,
         }
     )
 
@@ -6020,7 +6022,7 @@ def _candidate_actionability(rows: list[FamilyAdmissionRow]) -> list[CandidateAc
         generic_status = _generic_action_spec_status(row, _carrier_scope_template(row))
         if generic_status == "valid_blocked_final_gate":
             status: Literal[
-                "historical_proof_not_current_action",
+                "historical_proof_not_current_authority",
                 "displayable",
                 "proposal_review",
                 "owner_scope_final_gate_ready",
@@ -6368,7 +6370,7 @@ def _trading_console_action_entry_output(
                 required_owner_scope_fields=list(REQUIRED_OWNER_SCOPE_FIELDS),
                 warning_count=len(row.risk_disclosure_contract.failure_modes),
                 hard_blocker_count=len(_row_hard_blockers(row)),
-                owner_decision_text=_action_entry_owner_decision_text(row, generic_status),
+                owner_review_text=_action_entry_owner_review_text(row, generic_status),
                 research_quality_status=row.research_quality_status,
                 risk_disclosure_classifications=list(row.risk_disclosure_classifications),
                 owner_risk_acceptance_required=row.owner_risk_acceptance_required,
@@ -6392,7 +6394,7 @@ def _trading_console_candidate_output(rows: list[FamilyAdmissionRow]) -> list[Tr
             action_registry_supported=row.action_api_compatibility.compatible,
             warning_count=len(row.risk_disclosure_contract.failure_modes),
             hard_blocker_count=len(_row_hard_blockers(row)),
-            owner_decision_text=_owner_decision_text(row),
+            owner_review_text=_owner_review_text(row),
             research_quality_status=row.research_quality_status,
             risk_disclosure_classifications=list(row.risk_disclosure_classifications),
             owner_risk_acceptance_required=row.owner_risk_acceptance_required,
@@ -6446,7 +6448,7 @@ def _action_entry_state(
     return "blocked"
 
 
-def _action_entry_owner_decision_text(row: FamilyAdmissionRow, status: str) -> str:
+def _action_entry_owner_review_text(row: FamilyAdmissionRow, status: str) -> str:
     if status == "valid_blocked_final_gate":
         return (
             "Owner may review exact action-entry payload, but execution remains blocked "
@@ -6691,7 +6693,7 @@ def _candidate_state(row: FamilyAdmissionRow) -> str:
     return "parked"
 
 
-def _owner_decision_text(row: FamilyAdmissionRow) -> str:
+def _owner_review_text(row: FamilyAdmissionRow) -> str:
     if row.admission_level_code == "L3":
         return (
             "Owner may review exact bounded live scope; proceed only after explicit "
@@ -6750,7 +6752,7 @@ def _family_configs() -> list[_FamilyConfig]:
                 "Trend carrier is in the official action registry, but no current explicit "
                 "Owner authorization/live preflight evidence is attached to this read model."
             ),
-            bridge_method="AuthorizationDraftProposal",
+            evidence_method="AuthorizationDraftProposal",
             next_retry_condition=(
                 "Owner provides exact Trend scope, acknowledges risk, creates live authorization, "
                 "and backend final gate passes with PG/exchange evidence plus TP/SL readiness."
@@ -6777,7 +6779,7 @@ def _family_configs() -> list[_FamilyConfig]:
                 "but it is not supported by the current official action API / FinalGate "
                 "execution path for bounded live action."
             ),
-            bridge_method="ActionCandidate",
+            evidence_method="ActionCandidate",
             next_retry_condition=(
                 "Official action API and FinalGate support the exact carrier, Owner accepts "
                 "disclosed research risk, and all execution safety gates pass."
@@ -6806,7 +6808,7 @@ def _family_configs() -> list[_FamilyConfig]:
                 "but it is not supported by the current official action API / FinalGate "
                 "execution path for bounded live action."
             ),
-            bridge_method="ActionCandidate",
+            evidence_method="ActionCandidate",
             next_retry_condition=(
                 "Official action API and FinalGate support the exact carrier, Owner accepts "
                 "disclosed research risk, and all execution safety gates pass."

@@ -17,7 +17,7 @@ from typing import Mapping
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.application.bnb_live_execution_bridge import BnbLiveExecutionBridgeDryRunService
+from src.application.bnb_live_execution_boundary import BnbLiveExecutionBoundaryDryRunService
 from src.application.owner_action_carrier_catalog import (
     TREND_OWNER_ACTION_CARRIER_ID,
     get_owner_action_carrier,
@@ -187,7 +187,7 @@ async def run_probe(env: Mapping[str, str]) -> dict:
             session_maker=session_maker,
         )
         fact_snapshot = await collector.collect(profile)
-        service = BnbLiveExecutionBridgeDryRunService(
+        service = BnbLiveExecutionBoundaryDryRunService(
             owner_trial_flow_service=owner_trial_service,
             session_maker=session_maker,
         )
@@ -210,7 +210,7 @@ async def run_probe(env: Mapping[str, str]) -> dict:
                 for fact_id, fact in facts.items()
             },
             "final_gate": {
-                "bridge_status": final_gate.bridge_status,
+                "projection_status": final_gate.projection_status,
                 "hard_blockers": final_gate.hard_blockers,
                 "owner_trigger_visible": final_gate.owner_execution_trigger.visible,
                 "owner_trigger_enabled": final_gate.owner_execution_trigger.enabled,

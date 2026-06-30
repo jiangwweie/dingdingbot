@@ -108,6 +108,8 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
     )
     assert packet["exchange_rules"]["symbols"]["BTCUSDT"]["status"] == "TRADING"
     assert packet["account"]["status"] == "fresh"
+    assert packet["account"]["exchange_account_trade_permission"] is True
+    assert "can_trade" not in packet["account"]
     assert packet["account"]["available_balance_present"] is True
     assert "100.00" not in json.dumps(packet)
     assert packet["active_position"]["status"] == "active_position_present"

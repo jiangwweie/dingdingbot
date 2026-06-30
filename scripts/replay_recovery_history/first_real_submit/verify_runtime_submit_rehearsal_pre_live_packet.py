@@ -36,8 +36,8 @@ from src.application.runtime_execution_intent_adapter_service import (
 from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
     RuntimeExecutionFirstRealSubmitEvidencePreparationService,
 )
-from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
-    RuntimeExecutionFirstRealSubmitEnablementPacketService,
+from src.application.runtime_execution_first_real_submit_enablement_evidence_service import (
+    RuntimeExecutionFirstRealSubmitEnablementEvidenceService,
 )
 from src.application.runtime_execution_planning_service import (
     RuntimeExecutionPlanningService,
@@ -715,9 +715,9 @@ async def build_pre_live_packet(
             enabled=exercise_exchange_submit_adapter_pre_execution,
         )
     )
-    first_real_submit_packet = evidence_preparation.packet
+    first_real_submit_packet = evidence_preparation.enablement_evidence
     if local_registration_rehearsal["enablement_decision_id"]:
-        packet_service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+        packet_service = RuntimeExecutionFirstRealSubmitEnablementEvidenceService(
             runtime_execution_intent_adapter_service=adapter_service
         )
         first_real_submit_packet = await packet_service.preview_for_authorization(
@@ -1448,7 +1448,7 @@ async def _exercise_local_registration_pre_exchange(
         "enablement_decision": None,
         "adapter_result": None,
         "intent_local_order_binding": None,
-        "exchange_submit_packet_preview": None,
+        "exchange_submit_preview": None,
     }
     if not enabled:
         return result
@@ -1572,7 +1572,7 @@ async def _exercise_local_registration_pre_exchange(
     binding = await adapter_service.intent_local_order_binding_for_authorization(
         authorization_id
     )
-    packet_preview = await adapter_service.exchange_submit_packet_preview_for_authorization(
+    submit_preview = await adapter_service.exchange_submit_preview_for_authorization(
         authorization_id
     )
     result.update(
@@ -1580,10 +1580,10 @@ async def _exercise_local_registration_pre_exchange(
             "ready": (
                 adapter_result.status.value == "registered_created_local_orders"
                 and binding.status.value == "ready_for_exchange_submit_design"
-                and packet_preview.status.value
+                and submit_preview.status.value
                 == "ready_for_exchange_submit_adapter_design"
                 and adapter_result.exchange_called is False
-                and packet_preview.exchange_called is False
+                and submit_preview.exchange_called is False
             ),
             "action_authorization_id": (
                 action_authorization.action_authorization_id
@@ -1593,7 +1593,7 @@ async def _exercise_local_registration_pre_exchange(
             "enablement_decision": enablement_decision,
             "adapter_result": adapter_result,
             "intent_local_order_binding": binding,
-            "exchange_submit_packet_preview": packet_preview,
+            "exchange_submit_preview": submit_preview,
         }
     )
     return result
@@ -1870,8 +1870,8 @@ def _local_registration_rehearsal_payload(rehearsal: dict[str, Any]) -> dict[str
         "intent_local_order_binding": _dump_optional_model(
             rehearsal["intent_local_order_binding"]
         ),
-        "exchange_submit_packet_preview": _dump_optional_model(
-            rehearsal["exchange_submit_packet_preview"]
+        "exchange_submit_preview": _dump_optional_model(
+            rehearsal["exchange_submit_preview"]
         ),
     }
 

@@ -22,12 +22,12 @@ from src.domain.runtime_execution_submit_authorization import (
 from src.domain.runtime_fresh_submit_authorization_resolution import (
     RuntimeFreshSubmitAuthorizationResolutionSource,
     RuntimeFreshSubmitAuthorizationResolutionStatus,
-    build_runtime_fresh_submit_authorization_resolution_packet,
+    build_runtime_fresh_submit_authorization_resolution_artifact,
 )
 from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
-    RuntimeOfficialSubmitHandoffPacket,
-    build_runtime_official_submit_handoff_packet,
+    RuntimeOfficialSubmitHandoffArtifact,
+    build_runtime_official_submit_handoff_artifact,
 )
 from tests.unit.test_runtime_official_submit_handoff import _readiness
 
@@ -36,20 +36,10 @@ class _Repo:
     def __init__(self, *authorizations: RuntimeExecutionSubmitAuthorization) -> None:
         self.items = {item.authorization_id: item for item in authorizations}
         self.get_calls: list[str] = []
-        self.candidate_calls: list[str] = []
 
     async def get(self, authorization_id: str):
         self.get_calls.append(authorization_id)
         return self.items.get(authorization_id)
-
-    async def get_by_order_candidate_id(self, order_candidate_id: str):
-        self.candidate_calls.append(order_candidate_id)
-        matches = [
-            item
-            for item in self.items.values()
-            if item.semantic_ids.order_candidate_id == order_candidate_id
-        ]
-        return matches[-1] if matches else None
 
 
 def _authorization(**overrides) -> RuntimeExecutionSubmitAuthorization:
@@ -81,12 +71,12 @@ def _authorization(**overrides) -> RuntimeExecutionSubmitAuthorization:
 
 def _handoff(**overrides):
     values = {
-        "readiness_packet": _readiness(),
+        "readiness_artifact": _readiness(),
         "fresh_submit_authorization_id": "fresh-auth-1",
         "now_ms": 1_765_000_000_001,
     }
     values.update(overrides)
-    return build_runtime_official_submit_handoff_packet(**values)
+    return build_runtime_official_submit_handoff_artifact(**values)
 
 
 @pytest.mark.asyncio
@@ -95,46 +85,44 @@ async def test_resolves_explicit_persisted_fresh_submit_authorization():
         submit_authorization_repository=_Repo(_authorization()),
     )
 
-    packet = await service.resolve_for_handoff(
+    artifact = await service.resolve_for_handoff(
         handoff=_handoff(),
         requested_fresh_submit_authorization_id="fresh-auth-1",
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
-    assert packet.resolution_source == (
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
+    assert artifact.resolution_source == (
         RuntimeFreshSubmitAuthorizationResolutionSource.EXPLICIT_AUTHORIZATION_ID
     )
-    assert packet.resolved_fresh_submit_authorization_id == "fresh-auth-1"
-    assert packet.official_endpoint_path.endswith(
+    assert artifact.resolved_fresh_submit_authorization_id == "fresh-auth-1"
+    assert artifact.official_endpoint_path.endswith(
         "/runtime-execution-first-real-submit-actions/authorizations/fresh-auth-1"
     )
-    assert packet.official_query[
+    assert artifact.official_query[
         "owner_confirmed_for_first_real_submit_action"
     ] is False
-    assert packet.ready_for_disabled_smoke_call is True
-    assert packet.calls_official_submit_endpoint is False
-    assert packet.exchange_called is False
+    assert artifact.ready_for_disabled_smoke_call is True
+    assert artifact.calls_official_submit_endpoint is False
+    assert artifact.exchange_called is False
 
 
 @pytest.mark.asyncio
-async def test_resolves_by_order_candidate_when_handoff_id_is_rehearsal_only():
+async def test_default_blocks_handoff_id_rehearsal_without_candidate_fallback():
     repo = _Repo(_authorization(authorization_id="persisted-auth-1"))
     service = RuntimeFreshSubmitAuthorizationResolutionService(
         submit_authorization_repository=repo,
     )
 
-    packet = await service.resolve_for_handoff(
+    artifact = await service.resolve_for_handoff(
         handoff=_handoff(fresh_submit_authorization_id="rehearsal-auth-1"),
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
-    assert packet.resolution_source == (
-        RuntimeFreshSubmitAuthorizationResolutionSource.ORDER_CANDIDATE_LATEST
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
+    assert artifact.resolution_source == (
+        RuntimeFreshSubmitAuthorizationResolutionSource.HANDOFF_AUTHORIZATION_ID
     )
-    assert packet.requested_fresh_submit_authorization_id == "rehearsal-auth-1"
-    assert packet.resolved_fresh_submit_authorization_id == "persisted-auth-1"
+    assert "fresh_submit_authorization_not_found" in artifact.blockers
     assert repo.get_calls == ["rehearsal-auth-1"]
-    assert repo.candidate_calls == ["order-candidate-1"]
 
 
 @pytest.mark.asyncio
@@ -143,19 +131,18 @@ async def test_blocks_when_fresh_authorization_missing():
         submit_authorization_repository=_Repo(),
     )
 
-    packet = await service.resolve_for_handoff(
+    artifact = await service.resolve_for_handoff(
         handoff=_handoff(),
-        allow_order_candidate_fallback=False,
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
-    assert "fresh_submit_authorization_not_found" in packet.blockers
-    assert packet.ready_for_disabled_smoke_call is False
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
+    assert "fresh_submit_authorization_not_found" in artifact.blockers
+    assert artifact.ready_for_disabled_smoke_call is False
 
 
 def test_blocks_reusing_consumed_authorization():
     handoff = _handoff(fresh_submit_authorization_id="consumed-auth-1")
-    packet = build_runtime_fresh_submit_authorization_resolution_packet(
+    artifact = build_runtime_fresh_submit_authorization_resolution_artifact(
         handoff=handoff,
         authorization=_authorization(authorization_id="consumed-auth-1"),
         resolution_source=(
@@ -166,9 +153,9 @@ def test_blocks_reusing_consumed_authorization():
         now_ms=1,
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
     assert "fresh_submit_authorization_reuses_consumed_authorization" in (
-        packet.blockers
+        artifact.blockers
     )
 
 
@@ -177,7 +164,7 @@ def test_blocks_already_executed_authorization():
     executed_authorization = _authorization().model_copy(
         update={"submit_executed": True},
     )
-    packet = build_runtime_fresh_submit_authorization_resolution_packet(
+    artifact = build_runtime_fresh_submit_authorization_resolution_artifact(
         handoff=handoff,
         authorization=executed_authorization,
         resolution_source=(
@@ -188,8 +175,8 @@ def test_blocks_already_executed_authorization():
         now_ms=1,
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
-    assert "fresh_submit_authorization_already_executed" in packet.blockers
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
+    assert "fresh_submit_authorization_already_executed" in artifact.blockers
 
 
 def test_blocks_real_gateway_handoff():
@@ -197,7 +184,7 @@ def test_blocks_real_gateway_handoff():
         mode=RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION,
         owner_confirmed_for_real_submit_action=True,
     )
-    packet = build_runtime_fresh_submit_authorization_resolution_packet(
+    artifact = build_runtime_fresh_submit_authorization_resolution_artifact(
         handoff=handoff,
         authorization=_authorization(),
         resolution_source=(
@@ -208,9 +195,9 @@ def test_blocks_real_gateway_handoff():
         now_ms=1,
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.BLOCKED
     assert "fresh_authorization_resolution_requires_disabled_smoke_handoff" in (
-        packet.blockers
+        artifact.blockers
     )
 
 
@@ -255,9 +242,8 @@ def _args(tmp_path, **overrides):
     )
     values = {
         "runtime_instance_id": "runtime-1",
-        "handoff_json": str(handoff_path),
+        "handoff_artifact_json": str(handoff_path),
         "requested_fresh_submit_authorization_id": "fresh-auth-1",
-        "allow_order_candidate_fallback": True,
         "additional_warning": None,
         "additional_blocker": None,
         "env_file": None,
@@ -283,10 +269,11 @@ def test_resolution_api_flow_posts_resolution_request(tmp_path):
         "/api/trading-console/strategy-runtimes/runtime-1/"
         "official-submit-handoff-fresh-authorizations/resolve"
     )
-    assert call["body"]["handoff_packet"]["handoff_id"].startswith(
+    assert call["body"]["handoff_artifact"]["handoff_id"].startswith(
         "runtime-official-submit-handoff-runtime-1"
     )
     assert call["body"]["requested_fresh_submit_authorization_id"] == "fresh-auth-1"
+    assert "allow_order_candidate_fallback" not in call["body"]
     assert call["body"]["non_executing"] is True
 
 
@@ -298,21 +285,21 @@ async def test_trading_console_endpoint_resolves_fresh_authorization(monkeypatch
         lambda: _Repo(_authorization()),
     )
 
-    packet = (
+    artifact = (
         await api_trading_console
         .runtime_official_submit_handoff_fresh_authorization_resolution(
             "runtime-1",
             RuntimeFreshSubmitAuthorizationResolutionRequest(
-                handoff_packet=_handoff(),
+                handoff_artifact=_handoff(),
                 requested_fresh_submit_authorization_id="fresh-auth-1",
                 non_executing=True,
             ),
         )
     )
 
-    assert packet.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
-    assert packet.resolved_fresh_submit_authorization_id == "fresh-auth-1"
-    assert packet.ready_for_disabled_smoke_call is True
+    assert artifact.status == RuntimeFreshSubmitAuthorizationResolutionStatus.RESOLVED
+    assert artifact.resolved_fresh_submit_authorization_id == "fresh-auth-1"
+    assert artifact.ready_for_disabled_smoke_call is True
 
 
 @pytest.mark.asyncio
@@ -329,14 +316,14 @@ async def test_trading_console_endpoint_rejects_runtime_mismatch(monkeypatch):
             .runtime_official_submit_handoff_fresh_authorization_resolution(
                 "other-runtime",
                 RuntimeFreshSubmitAuthorizationResolutionRequest(
-                    handoff_packet=_handoff(),
+                    handoff_artifact=_handoff(),
                     non_executing=True,
                 ),
             )
         )
 
     assert exc.value.status_code == 400
-    assert exc.value.detail == "handoff_packet_runtime_mismatch"
+    assert exc.value.detail == "handoff_artifact_runtime_mismatch"
 
 
 def test_resolution_api_flow_keeps_http_errors(tmp_path):
@@ -363,7 +350,7 @@ def test_resolution_api_flow_cli_stdout_is_json_only(monkeypatch, capsys):
             "runtime_fresh_submit_authorization_resolution_api_flow.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--handoff-json",
+            "--handoff-artifact-json",
             "handoff.json",
         ],
     )

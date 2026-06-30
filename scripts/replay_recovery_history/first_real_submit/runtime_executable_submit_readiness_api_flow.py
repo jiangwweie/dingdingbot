@@ -64,10 +64,17 @@ def _unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _strategy_planning_artifact_json_arg(args: argparse.Namespace) -> str:
+    path = getattr(args, "strategy_planning_artifact_json", None)
+    if not path:
+        raise ValueError("strategy planning artifact JSON path is required")
+    return str(path)
+
+
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "strategy_planning_packet": _read_json_file(
-            args.strategy_planning_packet_json
+        "strategy_planning_artifact": _read_json_file(
+            _strategy_planning_artifact_json_arg(args)
         ),
         "evidence": _read_json_file(args.evidence_json),
         "metadata": {
@@ -103,7 +110,7 @@ def _call_api(
     )
 
 
-def _build_packet(
+def _build_artifact(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
@@ -168,20 +175,23 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--strategy-planning-packet-json", required=True)
+    parser.add_argument("--strategy-planning-artifact-json")
     parser.add_argument("--evidence-json", required=True)
     parser.add_argument("--first-real-submit-packet-json")
     parser.add_argument("--additional-warning", action="append")
     parser.add_argument("--additional-blocker", action="append")
     parser.add_argument("--env-file")
     parser.add_argument("--api-base")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.strategy_planning_artifact_json:
+        parser.error("--strategy-planning-artifact-json is required")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
-        packet = _build_packet(args)
+        packet = _build_artifact(args)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if packet["status"] in {
         "ready_for_executable_submit",

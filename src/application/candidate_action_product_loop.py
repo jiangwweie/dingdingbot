@@ -92,7 +92,7 @@ class ProductLoopActionSpecDraft(CandidateActionProductLoopModel):
     max_attempts: Optional[int] = None
     validation_issues: list[dict[str, Any]] = Field(default_factory=list)
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     places_order: Literal[False] = False
 
 
@@ -111,7 +111,7 @@ class ProductLoopFinalGateReadiness(CandidateActionProductLoopModel):
     warnings: list[str] = Field(default_factory=list)
     official_final_gate_boundary: str = "official_final_gate_only"
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
 
 
 class ProductLoopOperationPreflight(CandidateActionProductLoopModel):
@@ -121,7 +121,7 @@ class ProductLoopOperationPreflight(CandidateActionProductLoopModel):
     preflight_endpoint: str = "POST /api/brc/operations/preflight"
     confirm_endpoint: str = "POST /api/brc/operations/{operation_id}/confirm"
     final_gate_dry_run_endpoint: str = (
-        "POST /api/brc/owner-trial-flow/live-execution-bridge/dry-run"
+        "POST /api/brc/owner-trial-flow/live-execution-boundary/dry-run"
     )
     auditable: Literal[True] = True
     not_submitted: Literal[True] = True
@@ -219,7 +219,7 @@ class CandidateActionReadinessLoop(CandidateActionProductLoopModel):
     post_action_readiness: ProductLoopPostActionReadiness
     backend_actionable: Literal[False] = False
     may_execute_live: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     creates_authorization: Literal[False] = False
     creates_execution_intent: Literal[False] = False
     places_order: Literal[False] = False
@@ -396,7 +396,7 @@ def _build_candidate_loop(
         proposal_role=str(action_spec.get("proposal_role") or "unknown"),
         candidate_state=str(candidate.get("candidate_state") or preview_status),
         candidate_reason=str(
-            candidate.get("owner_decision_text")
+            candidate.get("owner_review_text")
             or preview.get("product_message")
             or "Candidate awaits Owner review."
         ),

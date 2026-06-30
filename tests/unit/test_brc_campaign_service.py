@@ -311,7 +311,7 @@ async def test_brc_mock_pnl_rejects_ended_campaign_even_if_repo_returns_it():
 
 
 @pytest.mark.asyncio
-async def test_brc_review_packet_summarizes_latest_finalized_campaign():
+async def test_brc_review_artifact_summarizes_latest_finalized_campaign():
     service, _ = await _campaign_service()
     await service.switch_playbook(
         new_playbook_id="PB-004-BRC-CONTROLLED-TESTNET",
@@ -350,18 +350,18 @@ async def test_brc_review_packet_summarizes_latest_finalized_campaign():
         final_flat=True,
     )
 
-    packet = await service.build_review_packet(final_inventory={"all_flat": True})
+    artifact = await service.build_review_artifact(final_inventory={"all_flat": True})
 
-    assert packet.status == BrcCampaignStatus.ENDED
-    assert packet.outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED
-    assert packet.attempt_count == 2
-    assert packet.profit_protect_triggered is True
-    assert packet.loss_lock_triggered is True
-    assert packet.all_attempts_closed is True
-    assert packet.final_inventory_flat is True
-    assert all(check.passed for check in packet.invariant_checks)
-    assert packet.live_ready is False
-    assert packet.withdrawal_executed is False
+    assert artifact.status == BrcCampaignStatus.ENDED
+    assert artifact.outcome == CampaignOutcome.ENDED_TESTNET_REHEARSAL_COMPLETE_LOSS_LOCKED
+    assert artifact.attempt_count == 2
+    assert artifact.profit_protect_triggered is True
+    assert artifact.loss_lock_triggered is True
+    assert artifact.all_attempts_closed is True
+    assert artifact.final_inventory_flat is True
+    assert all(check.passed for check in artifact.invariant_checks)
+    assert artifact.live_ready is False
+    assert artifact.withdrawal_executed is False
 
 
 @pytest.mark.asyncio
@@ -403,7 +403,7 @@ async def test_brc_next_eligibility_requires_owner_review_after_loss_locked_outc
         final_inventory={"all_flat": True},
     )
 
-    assert eligibility.decision.value == "owner_review_required"
+    assert eligibility.eligibility_result.value == "owner_review_required"
     assert eligibility.cooldown_required is True
     assert eligibility.next_campaign_allowed is False
     assert eligibility.recommended_playbook_id == "PB-000-OBSERVE-ONLY"
@@ -462,7 +462,7 @@ async def test_brc_next_eligibility_blocks_when_inventory_is_not_flat():
         final_inventory={"all_flat": False},
     )
 
-    assert eligibility.decision.value == "blocked"
+    assert eligibility.eligibility_result.value == "blocked"
     assert "not flat" in eligibility.reason
 
 
@@ -489,6 +489,17 @@ async def test_brc_operator_intent_draft_blocks_unknown_text():
     assert draft.endpoint_path is None
     assert draft.executable_without_owner_confirmation is False
     assert "R2 only drafts read-only" in draft.blocked_reason
+
+
+@pytest.mark.asyncio
+async def test_brc_operator_intent_draft_does_not_treat_packet_as_current_action():
+    service, _ = await _campaign_service()
+
+    draft = service.draft_operator_intent(source_text="show packet")
+
+    assert draft.action.value == "unknown"
+    assert draft.endpoint_path is None
+    assert draft.executable_without_owner_confirmation is False
 
 
 @pytest.mark.asyncio
@@ -525,7 +536,7 @@ async def test_brc_operator_read_run_executes_only_read_action():
     assert run.mutation_executed is False
     assert run.withdrawal_executed is False
     assert run.live_ready is False
-    assert run.result["eligibility"]["decision"] == "blocked"
+    assert run.result["eligibility"]["eligibility_result"] == "blocked"
     action = next(iter(repo.operator_actions.values()))
     assert action.decision_result.value == "executed"
     assert action.confirmation_matched is True
@@ -539,7 +550,7 @@ async def test_brc_operator_plan_persists_and_canonical_run_uses_action_id():
     action = await service.create_operator_action_plan(source_text="帮我看复盘报告")
     assert action.action_id.startswith("brc-op-")
     assert action.decision_result.value == "planned"
-    assert action.plan_json["draft"]["action"] == "read_review_packet"
+    assert action.plan_json["draft"]["action"] == "read_review_artifact"
 
     run = await service.run_operator_action_by_id(
         action_id=action.action_id,
@@ -550,7 +561,7 @@ async def test_brc_operator_plan_persists_and_canonical_run_uses_action_id():
 
     assert run.executed is True
     assert stored.decision_result.value == "executed"
-    assert stored.result_json["action"] == "read_review_packet"
+    assert stored.result_json["action"] == "read_review_artifact"
     assert stored.mutation_executed is False
     assert stored.withdrawal_executed is False
 
@@ -573,7 +584,7 @@ async def test_brc_operator_unknown_text_is_persisted_as_blocked():
 
 
 @pytest.mark.asyncio
-async def test_brc_review_decision_records_owner_decision_without_live_authority():
+async def test_brc_review_outcome_records_owner_review_without_live_authority():
     service, repo = await _campaign_service()
 
     record = await service.record_review_decision(

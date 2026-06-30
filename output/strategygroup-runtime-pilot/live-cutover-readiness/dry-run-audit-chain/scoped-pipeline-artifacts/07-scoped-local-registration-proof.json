@@ -1,0 +1,255 @@
+{
+  "blockers": [],
+  "boundary_report": {
+    "at_expected_local_order_adapter_boundary": true,
+    "blockers": [],
+    "evidence_chain_report_path": "output/strategygroup-runtime-pilot/live-cutover-readiness/dry-run-audit-chain/scoped-pipeline-artifacts/06-evidence-chain.json",
+    "fresh_submit_authorization_id": "dry-run-fresh-auth-1",
+    "operator_command_preview": {
+      "command": [
+        "python",
+        "scripts/runtime_first_real_submit_api_flow.py",
+        "--mode",
+        "arm",
+        "--authorization-id",
+        "dry-run-fresh-auth-1",
+        "--skip-exchange-arm",
+        "--api-base",
+        "http://dry-run.local"
+      ],
+      "required_env": {
+        "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP": "dry-run-fresh-auth-1:attempt-local-registration:no-exchange-submit"
+      },
+      "scope": "local_registration_only_no_exchange_arm"
+    },
+    "prepared_evidence_ids": {
+      "attempt_outcome_policy_id": "dry-run-attempt-policy-1",
+      "protection_creation_failure_policy_id": "dry-run-protection-policy-1",
+      "submit_idempotency_policy_id": "dry-run-idempotency-1",
+      "trusted_submit_fact_snapshot_id": "dry-run-trusted-facts-1"
+    },
+    "safety_invariants": {
+      "boundary_classification_only": true,
+      "exchange_write_called": false,
+      "local_order_registration_called": false,
+      "non_executing": true,
+      "order_lifecycle_called": false,
+      "runtime_budget_mutated": false,
+      "sample_rehearsal_cannot_register_by_default": true,
+      "uses_official_trading_console_api": false,
+      "withdrawal_or_transfer_created": false
+    },
+    "scope": "runtime_scoped_local_order_adapter_boundary_from_evidence",
+    "source_kind": "current_live_signal",
+    "status": "ready_for_scoped_local_registration_proof",
+    "warnings": [
+      "current_live_signal_must_still_pass_official_gates"
+    ]
+  },
+  "flow_report": {
+    "api_base": "http://dry-run.local",
+    "blockers": [],
+    "ids": {
+      "attempt_mutation_id": "runtime-attempt-mutation-runtime-attempt-reservation-dry-run-fresh-auth-1",
+      "attempt_outcome_policy_id": "dry-run-attempt-policy-1",
+      "authorization_id": "dry-run-fresh-auth-1",
+      "exchange_submit_adapter_enablement_id": "exchange-submit-adapter-enable-dry-run-fresh-auth-1",
+      "execution_intent_id": "dry-run-execution-intent-1",
+      "local_order_registration_enablement_id": "local-order-registration-enable-dry-run-fresh-auth-1",
+      "local_registration_action_authorization_id": "dry-run-local-action-1",
+      "local_registration_adapter_result_id": "dry-run-local-adapter-result-1",
+      "local_registration_enablement_decision_id": "dry-run-local-enable-1",
+      "order_candidate_id": "dry-run-order-candidate-1",
+      "order_lifecycle_adapter_enablement_id": "order-lifecycle-adapter-enable-dry-run-fresh-auth-1",
+      "order_lifecycle_submit_enablement_id": "order-lifecycle-submit-enable-dry-run-fresh-auth-1",
+      "owner_real_submit_authorization_id": "owner-real-submit-authorization-dry-run-fresh-auth-1",
+      "protection_creation_failure_policy_id": "dry-run-protection-policy-1",
+      "protection_plan_id": "dry-run-protection-plan-1",
+      "reservation_id": "runtime-attempt-reservation-dry-run-fresh-auth-1",
+      "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
+      "runtime_instance_id": "dry-run-runtime-mpg-001",
+      "signal_evaluation_id": "dry-run-signal-eval-1",
+      "submit_idempotency_policy_id": "dry-run-idempotency-1",
+      "trusted_submit_fact_snapshot_id": "dry-run-trusted-facts-1"
+    },
+    "mode": "arm",
+    "next_attempt_gate": {},
+    "ready_for_real_submit_action": false,
+    "safety": {
+      "attempt_counter_mutated": false,
+      "env_confirmation_name": "OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT",
+      "exchange_arm_env_confirmation_name": "OWNER_APPROVED_RUNTIME_EXCHANGE_ARM_PREP",
+      "exchange_arm_requires_env_confirmation": true,
+      "exchange_order_submitted": false,
+      "local_registration_env_confirmation_name": "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP",
+      "local_registration_requires_env_confirmation": true,
+      "no_withdrawal_or_transfer": true,
+      "owner_authorization_required_for_real_submit": true,
+      "owner_chat_confirmation_required_for_real_submit": false,
+      "real_submit_guard_satisfied_by_standing_authorization": false,
+      "real_submit_requires_cli_flag": true,
+      "real_submit_requires_env_confirmation": true,
+      "runtime_budget_mutated": false,
+      "standing_authorized_first_real_submit": false,
+      "standing_authorized_scoped_evidence_preparation": true,
+      "uses_official_trading_console_api": true
+    },
+    "script": "runtime_first_real_submit_api_flow",
+    "steps": [
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {},
+        "method": "GET",
+        "name": "hydrate_controlled_submit_plan",
+        "path": "/api/trading-console/runtime-execution-controlled-submit-plans/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [],
+        "status": "ready_for_controlled_submit_adapter",
+        "warnings": []
+      },
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {},
+        "method": "POST",
+        "name": "record_protection_plan",
+        "path": "/api/trading-console/runtime-execution-protection-plans/intents/dry-run-execution-intent-1",
+        "query_keys": [],
+        "status": "ready_for_submit_adapter",
+        "warnings": []
+      },
+      {
+        "blockers": [
+          "preview_disabled_first_real_submit_action_http_404"
+        ],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {},
+        "method": "POST",
+        "name": "prepare_machine_evidence",
+        "path": "/api/trading-console/runtime-execution-first-real-submit-evidence-preparations/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [
+          "adapter_result_store_implemented",
+          "real_adapter_boundary_implemented"
+        ],
+        "status": "prepared_evidence_blocked",
+        "warnings": []
+      },
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {},
+        "method": "POST",
+        "name": "record_order_lifecycle_handoff_draft",
+        "path": "/api/trading-console/runtime-execution-order-lifecycle-handoff-drafts/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [],
+        "status": "ready_for_order_lifecycle_adapter",
+        "warnings": []
+      },
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {
+          "action_authorization_id": "dry-run-local-action-1"
+        },
+        "method": "POST",
+        "name": "record_local_registration_action_authorization",
+        "path": "/api/trading-console/runtime-execution-local-registration-action-authorizations/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [
+          "attempt_outcome_policy_id",
+          "local_order_registration_enablement_id",
+          "order_lifecycle_adapter_enablement_id",
+          "owner_confirmation_reference",
+          "owner_confirmed_for_local_registration_action",
+          "owner_operator_id",
+          "owner_real_submit_authorization_id",
+          "protection_creation_failure_policy_id",
+          "reason",
+          "submit_idempotency_policy_id",
+          "trusted_submit_fact_snapshot_id"
+        ],
+        "status": "approved_for_local_registration_action",
+        "warnings": []
+      },
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {
+          "decision_id": "dry-run-local-enable-1"
+        },
+        "method": "GET",
+        "name": "preview_local_registration_enablement",
+        "path": "/api/trading-console/runtime-execution-local-registration-enablements/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [
+          "attempt_outcome_policy_id",
+          "local_order_registration_enablement_id",
+          "local_registration_action_authorization_id",
+          "order_lifecycle_adapter_enablement_id",
+          "owner_real_submit_authorization_id",
+          "protection_creation_failure_policy_id",
+          "submit_idempotency_policy_id",
+          "trusted_submit_fact_snapshot_id"
+        ],
+        "status": "ready_for_local_registration_action",
+        "warnings": []
+      },
+      {
+        "blockers": [],
+        "detail": null,
+        "http_status": 200,
+        "id_summary": {
+          "adapter_result_id": "dry-run-local-adapter-result-1"
+        },
+        "method": "POST",
+        "name": "record_local_order_registration_result",
+        "path": "/api/trading-console/runtime-execution-order-lifecycle-adapter-results/authorizations/dry-run-fresh-auth-1",
+        "query_keys": [
+          "attempt_outcome_policy_id",
+          "local_order_registration_enabled",
+          "local_order_registration_enablement_id",
+          "local_registration_action_authorization_id",
+          "order_lifecycle_adapter_enabled",
+          "order_lifecycle_adapter_enablement_id",
+          "owner_real_submit_authorization_id",
+          "protection_creation_failure_policy_id",
+          "submit_idempotency_policy_id",
+          "trusted_submit_fact_snapshot_id"
+        ],
+        "status": "registered_created_local_orders",
+        "warnings": []
+      }
+    ],
+    "warnings": [
+      "next_attempt_gate_check_skipped_by_cli",
+      "existing_attempt_outcome_policy_reused_no_new_attempt_mutation"
+    ]
+  },
+  "fresh_submit_authorization_id": "dry-run-fresh-auth-1",
+  "local_registration_adapter_result_id": "dry-run-local-adapter-result-1",
+  "mode": "execute_scoped_local_registration_proof",
+  "safety_invariants": {
+    "exchange_arm_enabled": false,
+    "exchange_write_called": false,
+    "execute_real_submit": false,
+    "first_real_submit_action_called": false,
+    "local_registration_attempted": true,
+    "local_registration_recorded": true,
+    "non_executing_exchange": true,
+    "order_lifecycle_called_only_for_local_registration": true,
+    "post_submit_accounting_called": false,
+    "uses_official_trading_console_api": true,
+    "withdrawal_or_transfer_created": false
+  },
+  "scope": "runtime_scoped_local_registration_proof_from_evidence",
+  "status": "scoped_local_registration_proof_recorded",
+  "warnings": [
+    "current_live_signal_must_still_pass_official_gates",
+    "next_attempt_gate_check_skipped_by_cli",
+    "existing_attempt_outcome_policy_reused_no_new_attempt_mutation"
+  ]
+}

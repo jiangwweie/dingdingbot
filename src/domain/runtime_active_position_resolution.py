@@ -1,13 +1,13 @@
-"""Runtime active-position resolution packet.
+"""Runtime active-position resolution evidence.
 
-This packet consolidates the post-submit active-position surfaces:
+This artifact consolidates the post-submit active-position surfaces:
 
-RuntimeLivePositionMonitorPacket
+RuntimeLivePositionMonitorArtifact
 -> RuntimePositionExitPlan
--> RuntimePostCloseFollowupPacket
+-> RuntimePostCloseFollowupArtifact
 -> resolution decision
 
-It is packet-only. It does not create orders, close positions, call
+It is lifecycle evidence only. It does not create orders, close positions, call
 OrderLifecycle, call exchange write APIs, mutate runtime state, transfer funds,
 or withdraw funds.
 """
@@ -21,7 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.runtime_live_position_monitor import (
-    RuntimeLivePositionMonitorPacket,
+    RuntimeLivePositionMonitorArtifact,
     RuntimeLivePositionMonitorStatus,
 )
 from src.domain.runtime_position_exit_plan import (
@@ -29,7 +29,7 @@ from src.domain.runtime_position_exit_plan import (
     RuntimePositionExitPlanStatus,
 )
 from src.domain.runtime_post_close_followup import (
-    RuntimePostCloseFollowupPacket,
+    RuntimePostCloseFollowupArtifact,
     RuntimePostCloseFollowupStatus,
 )
 
@@ -45,10 +45,10 @@ class RuntimeActivePositionResolutionStatus(str, Enum):
     READY_FOR_NEXT_ATTEMPT_GATE = "ready_for_next_attempt_gate"
 
 
-class RuntimeActivePositionResolutionPacket(BaseModel):
+class RuntimeActivePositionResolutionArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    packet_id: str = Field(min_length=1, max_length=360)
+    artifact_id: str = Field(min_length=1, max_length=360)
     runtime_instance_id: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     side: str = Field(min_length=1, max_length=32)
@@ -70,13 +70,13 @@ class RuntimeActivePositionResolutionPacket(BaseModel):
     operation_layer_required: bool = True
     finalgate_required: bool = True
     closed_review_recorded: bool = False
-    recommended_next_action: str
+    recommended_review_checkpoint: str
     required_steps: list[str] = Field(default_factory=list)
     completed_steps: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    packet_only: Literal[True] = True
+    active_position_resolution_evidence_only: Literal[True] = True
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
     not_execution_authority: Literal[True] = True
@@ -93,7 +93,7 @@ class RuntimeActivePositionResolutionPacket(BaseModel):
     created_at_ms: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def _status_contract(self) -> "RuntimeActivePositionResolutionPacket":
+    def _status_contract(self) -> "RuntimeActivePositionResolutionArtifact":
         if self.status == RuntimeActivePositionResolutionStatus.BLOCKED and not self.blockers:
             raise ValueError("blocked active-position resolution requires blockers")
         if self.status == RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP:
@@ -107,14 +107,14 @@ class RuntimeActivePositionResolutionPacket(BaseModel):
         return self
 
 
-def build_runtime_active_position_resolution_packet(
+def build_runtime_active_position_resolution_artifact(
     *,
-    monitor: RuntimeLivePositionMonitorPacket,
+    monitor: RuntimeLivePositionMonitorArtifact,
     exit_plan: RuntimePositionExitPlan | None,
-    post_close_followup: RuntimePostCloseFollowupPacket | None,
+    post_close_followup: RuntimePostCloseFollowupArtifact | None,
     now_ms: int,
-) -> RuntimeActivePositionResolutionPacket:
-    """Build a non-executing resolution packet from already-read facts."""
+) -> RuntimeActivePositionResolutionArtifact:
+    """Build a non-executing resolution artifact from already-read facts."""
 
     warnings = _dedupe([
         *monitor.warnings,
@@ -161,7 +161,7 @@ def build_runtime_active_position_resolution_packet(
         RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW
     ):
         status = RuntimeActivePositionResolutionStatus.READY_FOR_CLOSED_REVIEW
-        recommended = post_close_followup.recommended_next_action
+        recommended = post_close_followup.recommended_review_checkpoint
         required_steps = list(post_close_followup.required_steps)
         completed_steps.extend(post_close_followup.completed_steps)
     elif post_close_followup is not None and post_close_followup.status == (
@@ -184,8 +184,8 @@ def build_runtime_active_position_resolution_packet(
     if status == RuntimeActivePositionResolutionStatus.BLOCKED:
         blockers = _dedupe(blockers)
 
-    return RuntimeActivePositionResolutionPacket(
-        packet_id=f"runtime-active-position-resolution-{monitor.runtime_instance_id}-{now_ms}",
+    return RuntimeActivePositionResolutionArtifact(
+        artifact_id=f"runtime-active-position-resolution-{monitor.runtime_instance_id}-{now_ms}",
         runtime_instance_id=monitor.runtime_instance_id,
         symbol=monitor.symbol,
         side=monitor.side,
@@ -243,7 +243,7 @@ def build_runtime_active_position_resolution_packet(
             if post_close_followup is not None
             else False
         ),
-        recommended_next_action=recommended,
+        recommended_review_checkpoint=recommended,
         required_steps=_dedupe(required_steps),
         completed_steps=_dedupe(completed_steps),
         blockers=blockers,

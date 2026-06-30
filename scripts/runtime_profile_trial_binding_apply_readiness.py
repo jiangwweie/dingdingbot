@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Resolve a trial binding and build a runtime profile apply-readiness packet.
+"""Resolve a trial binding and build runtime profile apply readiness.
 
-RTF-038 consumes an RTF-037 profile-confirmation packet plus a read-only trial
-binding list. It picks a compatible binding and produces the ready apply packet
+RTF-038 consumes an RTF-037 profile-confirmation plan plus a read-only trial
+binding list. It picks a compatible binding and produces the ready apply plan
 that can later be submitted through official APIs. The script itself is
 read-only and non-mutating.
 """
@@ -20,7 +20,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_profile_confirmation_apply_packet as apply_packet  # noqa: E402
+from scripts import runtime_profile_confirmation_apply_plan as apply_plan  # noqa: E402
 
 
 READY_STATUS = "ready_for_runtime_profile_apply_with_trial_binding"
@@ -171,21 +171,21 @@ def _safety_invariants() -> dict[str, bool]:
     }
 
 
-def _source_decision_packet(packet: dict[str, Any]) -> dict[str, Any]:
-    source = packet.get("source_decision_packet")
+def _source_confirmation_record(apply_source_artifact: dict[str, Any]) -> dict[str, Any]:
+    source = apply_source_artifact.get("source_confirmation_record")
     if isinstance(source, dict):
         return source
-    return packet
+    return apply_source_artifact
 
 
 def _owner_confirmation_value(
     *,
-    packet: dict[str, Any],
+    apply_source_artifact: dict[str, Any],
     override: str | None,
 ) -> str | None:
     if override is not None:
         return override
-    owner_confirmation = packet.get("owner_confirmation")
+    owner_confirmation = apply_source_artifact.get("owner_confirmation")
     if not isinstance(owner_confirmation, dict):
         return None
     if owner_confirmation.get("matches") is True:
@@ -195,20 +195,20 @@ def _owner_confirmation_value(
     return None
 
 
-def build_packet(
+def build_apply_readiness(
     *,
-    apply_decision_packet: dict[str, Any],
+    apply_confirmation_record: dict[str, Any],
     trial_bindings_payload: dict[str, Any] | list[Any],
     owner_confirmation_value: str | None = None,
 ) -> dict[str, Any]:
-    original_packet = apply_decision_packet
-    apply_decision_packet = _source_decision_packet(original_packet)
+    apply_source_artifact = apply_confirmation_record
+    apply_confirmation_record = _source_confirmation_record(apply_source_artifact)
     owner_confirmation_value = _owner_confirmation_value(
-        packet=original_packet,
+        apply_source_artifact=apply_source_artifact,
         override=owner_confirmation_value,
     )
     strategy_family_version_id = str(
-        apply_decision_packet.get("strategy_family_version_id") or ""
+        apply_confirmation_record.get("strategy_family_version_id") or ""
     )
     if not strategy_family_version_id:
         return {
@@ -216,7 +216,7 @@ def build_packet(
             "status": BLOCKED_STATUS,
             "selected_trial_binding": None,
             "candidate_trial_bindings": [],
-            "apply_packet": None,
+            "apply_plan": None,
             "checks": {
                 "ready_for_runtime_profile_apply_with_trial_binding": False,
                 "blockers": ["strategy_family_version_id_missing"],
@@ -235,13 +235,13 @@ def build_packet(
         return {
             "scope": "runtime_profile_trial_binding_apply_readiness",
             "status": WAITING_STATUS,
-            "strategy_family_id": apply_decision_packet.get("strategy_family_id"),
+            "strategy_family_id": apply_confirmation_record.get("strategy_family_id"),
             "strategy_family_version_id": strategy_family_version_id,
-            "symbol": apply_decision_packet.get("symbol"),
-            "side": apply_decision_packet.get("side"),
+            "symbol": apply_confirmation_record.get("symbol"),
+            "side": apply_confirmation_record.get("side"),
             "selected_trial_binding": None,
             "candidate_trial_bindings": candidates,
-            "apply_packet": None,
+            "apply_plan": None,
             "checks": {
                 "ready_for_runtime_profile_apply_with_trial_binding": False,
                 "matching_trial_binding_found": False,
@@ -257,14 +257,14 @@ def build_packet(
 
     selected = _candidate_summary(selected_raw, strategy_family_version_id)
     trial_binding_id = str(selected["binding_id"])
-    nested_apply = apply_packet.build_packet(
-        decision_packet=apply_decision_packet,
+    nested_apply = apply_plan.build_apply_plan(
+        confirmation_record=apply_confirmation_record,
         trial_binding_id=trial_binding_id,
         owner_confirmation_value=owner_confirmation_value,
     )
     ready = (
         nested_apply.get("status")
-        == apply_packet.READY_STATUS
+        == apply_plan.READY_STATUS
         and nested_apply.get("checks", {}).get(
             "ready_for_owner_authorized_runtime_profile_apply"
         )
@@ -274,13 +274,13 @@ def build_packet(
     return {
         "scope": "runtime_profile_trial_binding_apply_readiness",
         "status": READY_STATUS if ready else nested_apply.get("status", BLOCKED_STATUS),
-        "strategy_family_id": apply_decision_packet.get("strategy_family_id"),
+        "strategy_family_id": apply_confirmation_record.get("strategy_family_id"),
         "strategy_family_version_id": strategy_family_version_id,
-        "symbol": apply_decision_packet.get("symbol"),
-        "side": apply_decision_packet.get("side"),
+        "symbol": apply_confirmation_record.get("symbol"),
+        "side": apply_confirmation_record.get("side"),
         "selected_trial_binding": selected,
         "candidate_trial_bindings": candidates,
-        "apply_packet": nested_apply,
+        "apply_plan": nested_apply,
         "checks": {
             "ready_for_runtime_profile_apply_with_trial_binding": ready,
             "matching_trial_binding_found": True,
@@ -294,11 +294,11 @@ def build_packet(
         },
         "blockers": blockers,
         "warnings": [
-            "apply_readiness_packet_does_not_submit_api_requests",
+            "apply_readiness_does_not_submit_api_requests",
             (
-                "input_was_rtf037_apply_packet"
-                if original_packet is not apply_decision_packet
-                else "input_was_rtf036_decision_packet"
+                "input_was_rtf037_apply_plan"
+                if apply_source_artifact is not apply_confirmation_record
+                else "input_was_rtf036_confirmation_record"
             ),
             *list(nested_apply.get("warnings") or []),
         ],
@@ -310,7 +310,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Resolve a trial binding for RTF-037 apply readiness.",
     )
-    parser.add_argument("--apply-decision-json", required=True)
+    parser.add_argument("--apply-confirmation-record-json", required=True)
     parser.add_argument("--trial-bindings-json", required=True)
     parser.add_argument("--owner-confirmation-value")
     parser.add_argument("--output-json")
@@ -319,18 +319,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    packet = build_packet(
-        apply_decision_packet=_load_json(args.apply_decision_json),
+    readiness = build_apply_readiness(
+        apply_confirmation_record=_load_json(args.apply_confirmation_record_json),
         trial_bindings_payload=_load_json(args.trial_bindings_json),
         owner_confirmation_value=args.owner_confirmation_value,
     )
-    payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    payload = json.dumps(readiness, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
         output_path = Path(args.output_json).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
-    return 2 if packet["status"] == BLOCKED_STATUS else 0
+    return 2 if readiness["status"] == BLOCKED_STATUS else 0
 
 
 if __name__ == "__main__":

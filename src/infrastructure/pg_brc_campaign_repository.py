@@ -294,7 +294,7 @@ class PgBrcCampaignRepository:
                 )
                 session.add(row)
                 await session.flush()
-                return self._to_review_decision(row)
+                return self._to_review_record(row)
 
     async def get_latest_review_decision(self) -> Optional[BrcReviewDecisionRecord]:
         async with self._session_maker() as session:
@@ -305,7 +305,7 @@ class PgBrcCampaignRepository:
             )
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
-            return self._to_review_decision(row) if row is not None else None
+            return self._to_review_record(row) if row is not None else None
 
     async def list_review_decisions(
         self,
@@ -319,7 +319,7 @@ class PgBrcCampaignRepository:
                 stmt = stmt.where(PGBrcReviewDecisionORM.campaign_id == campaign_id)
             stmt = stmt.order_by(PGBrcReviewDecisionORM.created_at_ms.desc()).limit(limit)
             result = await session.execute(stmt)
-            return [self._to_review_decision(row) for row in result.scalars().all()]
+            return [self._to_review_record(row) for row in result.scalars().all()]
 
     async def save_llm_intent(self, intent: BrcLlmIntent) -> BrcLlmIntent:
         async with self._session_maker() as session:
@@ -534,7 +534,7 @@ class PgBrcCampaignRepository:
         )
 
     @staticmethod
-    def _to_review_decision(row: PGBrcReviewDecisionORM) -> BrcReviewDecisionRecord:
+    def _to_review_record(row: PGBrcReviewDecisionORM) -> BrcReviewDecisionRecord:
         return BrcReviewDecisionRecord.model_validate(
             {
                 "review_id": row.review_id,

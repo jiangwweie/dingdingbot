@@ -18,7 +18,7 @@ from src.application.runtime_advisory_event_adapter import (  # noqa: E402
     build_daily_check_advisory_event,
     build_review_due_advisory_event,
     build_trade_closed_advisory_event,
-    build_watcher_packet_advisory_event,
+    build_watcher_artifact_advisory_event,
     now_ms,
 )
 
@@ -33,17 +33,17 @@ def main(argv: list[str] | None = None) -> int:
     for path_value, builder in (
         (args.daily_check_json, build_daily_check_advisory_event),
         (args.completion_audit_json, build_completion_audit_advisory_event),
-        (args.watcher_json, build_watcher_packet_advisory_event),
+        (args.watcher_json, build_watcher_artifact_advisory_event),
         (args.trade_closed_json, build_trade_closed_advisory_event),
         (args.review_due_json, build_review_due_advisory_event),
     ):
         if path_value is None:
             continue
         path = Path(path_value)
-        packet = _read_json(path)
+        artifact = _read_json(path)
         events.append(
             builder(
-                packet,
+                artifact,
                 now=timestamp,
                 source_ref=str(path),
             ).model_dump(mode="json")

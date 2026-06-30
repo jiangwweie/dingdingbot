@@ -56,7 +56,7 @@ class BrcLiveLifecycleReviewRecord(BaseModel):
     places_order: Literal[False] = False
     mutates_exchange: Literal[False] = False
     grants_trading_permission: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     created_by: str = "codex"
     created_at_ms: int
     updated_at_ms: int
@@ -70,7 +70,7 @@ class BrcLiveLifecycleReviewRecord(BaseModel):
             or self.places_order
             or self.mutates_exchange
             or self.grants_trading_permission
-            or self.frontend_action_enabled
+            or self.owner_action_enabled
         ):
             raise ValueError("live lifecycle review records cannot grant or execute action")
         return self

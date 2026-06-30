@@ -13,10 +13,25 @@ from src.application.brc_admission_service import (
 )
 from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
 from src.application.brc_operation_layer import (
+    AdmissionRuntimeAdapterPayload,
     BrcOperationService,
+    BudgetRevokeAdapterPayload,
+    ConfirmationRequirement,
+    FixedTestnetRehearsalAdapterPayload,
     InMemoryOperationRepository,
+    OperationAdapterPayloadMetadata,
     OperationLayerError,
+    OperationRecord,
     OperationLayerReaders,
+    PreflightSnapshot,
+    RuntimeStopAdapterPayload,
+    SignalTradeIntentRecorderAdapterPayload,
+    _admission_runtime_adapter_payload,
+    _budget_revoke_adapter_payload,
+    _fixed_testnet_rehearsal_adapter_payload,
+    _operation_adapter_payload,
+    _runtime_stop_adapter_payload,
+    _signal_trade_intent_recorder_adapter_payload,
 )
 from src.application.execution_permission import ExecutionPermission, ExecutionPermissionResolver
 from src.domain.brc_admission import (
@@ -70,6 +85,342 @@ async def _campaign_service(*, create_campaign: bool = True):
             reason="test",
         )
     return service, repo
+
+
+def test_operation_adapter_payload_centralizes_operation_metadata():
+    operation = OperationRecord(
+        operation_id="op-authority",
+        operation_type="prepare_runtime_handoff_from_admission_campaign",
+        requested_by="owner",
+        requested_at_ms=1,
+        input_params={
+            "operation_id": "caller-stale-op",
+            "authorization_source": "caller",
+            "strategy_group_id": "MPG-001",
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-1",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-authority",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _operation_adapter_payload(
+        operation,
+        preflight,
+        {"execution_permission_resolution": {"permission": "intent_recording"}},
+    )
+
+    assert payload["strategy_group_id"] == "MPG-001"
+    assert payload["operation_id"] == "op-authority"
+    assert payload["preflight_id"] == "pre-authority"
+    assert payload["confirmed_by"] == "owner-1"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["execution_permission_resolution"] == {"permission": "intent_recording"}
+    assert operation.input_params["operation_id"] == "caller-stale-op"
+    assert operation.input_params["authorization_source"] == "caller"
+
+
+def test_operation_adapter_payload_metadata_is_typed_authority_boundary():
+    metadata = OperationAdapterPayloadMetadata(
+        operation_id="op-1",
+        preflight_id="pre-1",
+        confirmed_by="owner",
+    )
+
+    assert metadata.model_dump(mode="json") == {
+        "operation_id": "op-1",
+        "preflight_id": "pre-1",
+        "confirmed_by": "owner",
+        "authorization_source": "brc_operation_layer",
+    }
+
+
+def test_admission_runtime_adapter_payload_is_typed_non_live_boundary():
+    operation = OperationRecord(
+        operation_id="op-admission-runtime",
+        operation_type="prepare_runtime_handoff_from_admission_campaign",
+        requested_by="owner-typed",
+        requested_at_ms=1,
+        input_params={
+            "admission_binding_id": "binding-1",
+            "operation_id": "caller-stale-op",
+            "authorization_source": "caller",
+            "live_ready": True,
+            "orders_placed": True,
+            "execution_intent_created": True,
+            "withdrawal_executed": True,
+            "transfer_executed": True,
+            "auto_execution_enabled": True,
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-confirmed",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-admission-runtime",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _admission_runtime_adapter_payload(operation, preflight)
+
+    assert AdmissionRuntimeAdapterPayload.model_validate(payload).model_dump(
+        mode="json",
+        exclude_none=True,
+    ) == payload
+    assert payload["admission_binding_id"] == "binding-1"
+    assert payload["operation_id"] == "op-admission-runtime"
+    assert payload["preflight_id"] == "pre-admission-runtime"
+    assert payload["confirmed_by"] == "owner-confirmed"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["live_ready"] is False
+    assert payload["orders_placed"] is False
+    assert payload["execution_intent_created"] is False
+    assert payload["withdrawal_executed"] is False
+    assert payload["transfer_executed"] is False
+    assert payload["auto_execution_enabled"] is False
+    assert operation.input_params["authorization_source"] == "caller"
+
+
+def test_admission_runtime_adapter_payload_does_not_expand_absent_safety_fields():
+    operation = OperationRecord(
+        operation_id="op-admission-runtime-minimal",
+        operation_type="prepare_runtime_handoff_from_admission_campaign",
+        requested_by="owner-typed",
+        requested_at_ms=1,
+        input_params={"admission_binding_id": "binding-2"},
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-confirmed",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-admission-runtime-minimal",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _admission_runtime_adapter_payload(operation, preflight)
+
+    assert payload == {
+        "admission_binding_id": "binding-2",
+        "operation_id": "op-admission-runtime-minimal",
+        "preflight_id": "pre-admission-runtime-minimal",
+        "confirmed_by": "owner-confirmed",
+        "authorization_source": "brc_operation_layer",
+    }
+
+
+def test_signal_trade_intent_recorder_payload_is_typed_permission_boundary():
+    operation = OperationRecord(
+        operation_id="op-signal-intent",
+        operation_type="record_trial_trade_intent_from_signal_evaluation",
+        requested_by="owner-typed",
+        requested_at_ms=1,
+        input_params={
+            "admission_binding_id": "binding-3",
+            "execution_permission_resolution": {"permission": "caller-stale"},
+            "live_ready": True,
+            "order_created": True,
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-confirmed",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-signal-intent",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+        after={"execution_permission_resolution": {"permission": "intent_recording"}},
+    )
+
+    payload = _signal_trade_intent_recorder_adapter_payload(operation, preflight)
+
+    assert SignalTradeIntentRecorderAdapterPayload.model_validate(payload).model_dump(
+        mode="json",
+        exclude_none=True,
+    ) == payload
+    assert payload["operation_id"] == "op-signal-intent"
+    assert payload["preflight_id"] == "pre-signal-intent"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["execution_permission_resolution"] == {"permission": "intent_recording"}
+    assert payload["live_ready"] is False
+    assert payload["order_created"] is False
+
+
+def test_budget_revoke_adapter_payload_is_typed_safe_executor_boundary():
+    operation = OperationRecord(
+        operation_id="op-budget",
+        operation_type="revoke_budget",
+        requested_by="owner-2",
+        requested_at_ms=1,
+        input_params={
+            "reason": "owner revoke budget",
+            "operation_id": "caller-stale-op",
+            "authorization_source": "caller",
+            "places_orders": True,
+            "withdrawal_executed": True,
+            "live_ready": True,
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-2",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-budget",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="warn",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _budget_revoke_adapter_payload(operation, preflight)
+
+    assert BudgetRevokeAdapterPayload.model_validate(payload).model_dump(mode="json") == payload
+    assert payload["reason"] == "owner revoke budget"
+    assert payload["operation_id"] == "op-budget"
+    assert payload["preflight_id"] == "pre-budget"
+    assert payload["confirmed_by"] == "owner-2"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["revoked_by"] == "owner-2"
+    assert payload["places_orders"] is False
+    assert payload["closes_positions"] is False
+    assert payload["cancels_orders"] is False
+    assert payload["withdrawal_executed"] is False
+    assert payload["transfer_executed"] is False
+    assert payload["live_ready"] is False
+
+
+def test_fixed_testnet_rehearsal_adapter_payload_is_typed_safe_executor_boundary():
+    operation = OperationRecord(
+        operation_id="op-fixed-rehearsal",
+        operation_type="run_fixed_testnet_rehearsal",
+        requested_by="owner-3",
+        requested_at_ms=1,
+        input_params={
+            "source": "fixed_rehearsal_page",
+            "operation_id": "caller-stale-op",
+            "authorization_source": "caller",
+            "workflow_carrier_role": "external_carrier",
+            "allowed_symbols": ["DOGE/USDT:USDT"],
+            "live_ready": True,
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-3",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-fixed-rehearsal",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _fixed_testnet_rehearsal_adapter_payload(operation, preflight)
+
+    assert FixedTestnetRehearsalAdapterPayload.model_validate(payload).model_dump(mode="json") == payload
+    assert payload["source"] == "fixed_rehearsal_page"
+    assert payload["operation_id"] == "op-fixed-rehearsal"
+    assert payload["preflight_id"] == "pre-fixed-rehearsal"
+    assert payload["confirmed_by"] == "owner-3"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["idempotency_key"] == "idempotency-key"
+    assert payload["workflow_carrier_role"] == "internal_ref_only"
+    assert payload["allowed_symbols"] == ["ETH/USDT:USDT", "BTC/USDT:USDT"]
+    assert payload["live_ready"] is False
+
+
+def test_runtime_stop_adapter_payload_is_typed_safe_executor_boundary():
+    operation = OperationRecord(
+        operation_id="op-runtime-stop",
+        operation_type="emergency_stop_runtime",
+        requested_by="owner-4",
+        requested_at_ms=1,
+        input_params={
+            "reason": "owner emergency stop",
+            "operation_id": "caller-stale-op",
+            "authorization_source": "caller",
+            "updated_by": "caller",
+            "does_not_flatten": False,
+            "does_not_cancel_orders": False,
+            "does_not_place_orders": False,
+            "does_not_withdraw_or_transfer": False,
+            "live_ready": True,
+        },
+        risk_level="medium",
+        status="awaiting_confirmation",
+        confirmed_by="owner-4",
+    )
+    preflight = PreflightSnapshot(
+        preflight_id="pre-runtime-stop",
+        operation_id=operation.operation_id,
+        operation_type=operation.operation_type,
+        created_at_ms=1,
+        expires_at_ms=2,
+        decision="allow",
+        confirmation_requirement=ConfirmationRequirement(required=False, expires_at_ms=2),
+        snapshot_hash="snapshot-hash",
+        idempotency_key="idempotency-key",
+        summary="ready",
+    )
+
+    payload = _runtime_stop_adapter_payload(operation, preflight)
+
+    assert RuntimeStopAdapterPayload.model_validate(payload).model_dump(mode="json") == payload
+    assert payload["reason"] == "owner emergency stop"
+    assert payload["operation_id"] == "op-runtime-stop"
+    assert payload["preflight_id"] == "pre-runtime-stop"
+    assert payload["confirmed_by"] == "owner-4"
+    assert payload["authorization_source"] == "brc_operation_layer"
+    assert payload["idempotency_key"] == "idempotency-key"
+    assert payload["updated_by"] == "owner-4"
+    assert payload["does_not_flatten"] is True
+    assert payload["does_not_cancel_orders"] is True
+    assert payload["does_not_place_orders"] is True
+    assert payload["does_not_withdraw_or_transfer"] is True
+    assert payload["live_ready"] is False
 
 
 async def _operation_service(
@@ -176,7 +527,7 @@ async def _operation_service(
     async def _audit_writable():
         return audit_writable
 
-    async def _review_packet(_input):
+    async def _review_artifact(_input):
         return {"packet": "review", "mutation_executed": False, "live_ready": False}
 
     async def _runtime_transition(target_state, input_params):
@@ -261,12 +612,12 @@ async def _operation_service(
             "withdrawal_executed": False,
             "live_ready": False,
             "final_inventory": {"all_flat": True},
-            "review_packet": {"campaign_id": "brc-rehearsal", "ready": True},
+            "review_artifact": {"campaign_id": "brc-rehearsal", "ready": True},
             "evidence": {"packet": "fixed-testnet-rehearsal"},
             "readiness": {"mode": "testnet_ready", "live_ready": False},
             "steps": [
                 {"name": "campaign_created", "payload": {"campaign_id": "brc-rehearsal"}},
-                {"name": "review_decision", "payload": {"review_id": "review-rehearsal"}},
+                {"name": "review_recorded", "payload": {"review_id": "review-rehearsal"}},
                 {"name": "finalized", "payload": {"campaign_id": "brc-rehearsal"}},
             ],
         }
@@ -344,7 +695,7 @@ async def _operation_service(
             markets_orders_summary=_market_summary,
             audit_writable=_audit_writable,
             runtime_safety_readiness=runtime_safety_readiness,
-            review_packet_reader=_review_packet,
+            review_artifact_reader=_review_artifact,
             runtime_transition=_runtime_transition if runtime_adapter else None,
             budget_authorization_summary=_budget_summary if budget_adapter else None,
             budget_revoke_executor=_budget_revoke if budget_revoke_adapter else None,
@@ -1546,7 +1897,7 @@ def _signal_trade_intent_recorder(admission: BrcAdmissionService):
                 installed_constraint_snapshot_id=str(campaign.metadata_json["installed_constraint_snapshot_id"]),
                 execution_mode=str(recorded.get("execution_mode") or intent.get("execution_mode")),
                 trial_trade_intent_id=recorded.get("intent_id") or intent.get("intent_id"),
-                trial_trade_intent_decision=str(recorded.get("decision") or intent.get("decision")),
+                trial_trade_intent_result=str(recorded["trial_trade_intent_result"]),
                 not_executed_reason=str(recorded.get("not_executed_reason") or intent.get("not_executed_reason")),
                 execution_permission_resolution=dict(recorded.get("execution_permission_resolution") or {}),
                 operation_id=str(input_params["operation_id"]),
@@ -1594,7 +1945,7 @@ async def test_operation_capabilities_model_supported_and_forbidden_operations()
     assert capabilities["switch_playbook"].status == "enabled"
     assert capabilities["switch_playbook"].executable_through_operation is True
     for operation_type in [
-        "write_review_decision",
+        "write_review_outcome",
         "start_review",
         "enter_observe",
         "enter_pause",
@@ -1774,11 +2125,11 @@ async def test_create_gated_trial_preflight_allows_valid_installable_admission_r
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.confirmation_requirement.required is True
     assert preflight.constraints_summary["status"] == "installable"
     assert preflight.owner_risk_acceptance_summary["valid"] is True
-    assert preflight.admission_summary["decision"] == "admit_with_constraints"
+    _assert_admission_summary_result(preflight.admission_summary)
     assert preflight.after["binding_reservation_only"] is True
     assert preflight.after["confirm_disabled"] is False
     assert preflight.binding_summary["binding_status_on_confirm"] == "binding_reserved"
@@ -1811,7 +2162,7 @@ async def test_create_gated_trial_preflight_blocks_pending_constraints():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not installable" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -1831,7 +2182,7 @@ async def test_create_gated_trial_preflight_blocks_missing_risk_acceptance_for_f
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "owner_risk_acceptance_id required for funded_validation" in preflight.risk_summary["blockers"]
 
 
@@ -1858,7 +2209,7 @@ async def test_create_gated_trial_preflight_blocks_mismatched_risk_acceptance():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "owner risk acceptance decision mismatch" in preflight.risk_summary["blockers"]
 
 
@@ -1888,7 +2239,7 @@ async def test_create_gated_trial_preflight_blocks_expired_decision():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "admission decision expired" in preflight.risk_summary["blockers"]
 
 
@@ -1933,8 +2284,8 @@ async def test_create_gated_trial_preflight_blocks_reject_or_park_decision():
     finally:
         await engine.dispose()
 
-    assert rejected_preflight.decision == "block"
-    assert parked_preflight.decision == "block"
+    assert rejected_preflight.preflight_result == "block"
+    assert parked_preflight.preflight_result == "block"
     assert any("not admissible" in item for item in rejected_preflight.risk_summary["blockers"])
     assert any("not admissible" in item for item in parked_preflight.risk_summary["blockers"])
 
@@ -1964,7 +2315,7 @@ async def test_create_gated_trial_preflight_blocks_live_funded_unacceptable_acco
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "account facts unavailable" in preflight.risk_summary["blockers"]
 
 
@@ -2049,7 +2400,7 @@ async def test_create_gated_trial_duplicate_active_binding_blocks_preflight():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("active admission trial binding already exists" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2533,6 +2884,24 @@ async def _evaluate_trade_intent(
     return preflight, result
 
 
+def _assert_admission_summary_result(
+    summary: dict,
+    *,
+    expected: str = "admit_with_constraints",
+) -> None:
+    assert summary["admission_result"] == expected
+    assert "decision" not in summary
+
+
+def _assert_trial_trade_intent_projection(
+    projection: dict,
+    *,
+    expected: str,
+) -> None:
+    assert projection["trial_trade_intent_result"] == expected
+    assert "decision" not in projection
+
+
 @pytest.mark.asyncio
 async def test_create_campaign_from_admission_binding_capability_is_campaign_shell_only():
     service, _, _, _ = await _operation_service()
@@ -2566,7 +2935,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_missing_b
         input_params={"admission_binding_id": "missing-binding"},
     )
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "admission trial binding not found" in "; ".join(preflight.risk_summary["blockers"])
 
 
@@ -2590,7 +2959,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_non_reser
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not binding_reserved" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2635,7 +3004,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_pending_c
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not installable" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2673,7 +3042,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_missing_r
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "owner risk acceptance required for funded_validation binding" in preflight.risk_summary["blockers"]
 
 
@@ -2715,7 +3084,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_mismatche
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "owner risk acceptance decision mismatch" in preflight.risk_summary["blockers"]
 
 
@@ -2762,7 +3131,7 @@ async def test_create_campaign_from_admission_binding_preflight_blocks_live_bad_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "account facts unavailable" in preflight.risk_summary["blockers"]
 
 
@@ -2797,7 +3166,8 @@ async def test_create_campaign_from_admission_binding_confirm_creates_campaign_s
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
+    _assert_admission_summary_result(preflight.admission_summary)
     assert preflight.after["campaign_shell_creation_only"] is True
     assert preflight.campaign_shell_summary["would_create_campaign_shell"] is True
     assert result.status == "executed"
@@ -2862,7 +3232,7 @@ async def test_create_campaign_from_admission_binding_blocks_rejected_admission(
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not admissible" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2892,7 +3262,7 @@ async def test_install_runtime_constraints_preflight_blocks_non_campaign_created
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not campaign_created" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2923,7 +3293,7 @@ async def test_install_runtime_constraints_preflight_blocks_missing_campaign_id(
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "admission trial binding missing campaign_id" in preflight.risk_summary["blockers"]
 
 
@@ -2958,7 +3328,7 @@ async def test_install_runtime_constraints_preflight_blocks_pending_constraints(
         await engine.dispose()
 
     assert brc_repo.campaign is not None
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not installable" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -2991,7 +3361,7 @@ async def test_install_runtime_constraints_preflight_blocks_mismatched_campaign_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata admission_decision_id mismatch" in preflight.risk_summary["blockers"]
 
 
@@ -3017,7 +3387,7 @@ async def test_install_runtime_constraints_preflight_allows_valid_campaign_creat
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.after["runtime_constraint_installation_only"] is True
     assert preflight.constraints_summary["status"] == "installable"
     assert preflight.campaign_shell_summary["constraints_would_be_installed"] is True
@@ -3064,6 +3434,7 @@ async def test_install_runtime_constraints_confirm_installs_metadata_without_run
 
     assert result.status == "executed"
     assert second_same_operation.status == "executed"
+    _assert_admission_summary_result(preflight.admission_summary)
     assert result.result_summary["constraints_installed"] is True
     assert result.result_summary["runtime_status"] == "constraints_installed_not_started"
     assert result.result_summary["runtime_started"] is False
@@ -3128,7 +3499,7 @@ async def test_install_runtime_constraints_double_confirm_is_idempotent():
         await engine.dispose()
 
     assert first.status == "executed"
-    assert second_preflight.decision in {"allow", "warn"}
+    assert second_preflight.preflight_result in {"allow", "warn"}
     assert second_preflight.after["idempotent_install"] is True
     assert second.status == "noop"
     assert second.result_summary["idempotent"] is True
@@ -3159,7 +3530,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_non_runtime_constraints_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert any("not runtime_constraints_installed" in item for item in preflight.risk_summary["blockers"])
 
 
@@ -3192,7 +3563,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_missing_campaign_id():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "admission trial binding missing campaign_id" in preflight.risk_summary["blockers"]
 
 
@@ -3223,7 +3594,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_constraints_installed_fa
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata constraints_installed is not true" in preflight.risk_summary["blockers"]
 
 
@@ -3252,7 +3623,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_runtime_started_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_started is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3281,7 +3652,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_strategy_active_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata strategy_active is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3310,7 +3681,7 @@ async def test_prepare_runtime_carrier_preflight_blocks_orders_placed_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata orders_placed is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3337,7 +3708,7 @@ async def test_prepare_runtime_carrier_preflight_allows_valid_constraints_instal
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.after["runtime_carrier_readiness_only"] is True
     assert preflight.runtime_carrier_summary["carrier_readiness_would_be_prepared"] is True
     assert preflight.runtime_carrier_summary["runtime_will_start"] is False
@@ -3442,7 +3813,7 @@ async def test_prepare_runtime_carrier_double_confirm_is_idempotent():
         await engine.dispose()
 
     assert first.status == "executed"
-    assert second_preflight.decision in {"allow", "warn"}
+    assert second_preflight.preflight_result in {"allow", "warn"}
     assert second_preflight.after["idempotent_prepare"] is True
     assert second.status == "noop"
     assert second.result_summary["idempotent"] is True
@@ -3474,7 +3845,7 @@ async def test_prepare_runtime_start_preflight_blocks_non_carrier_ready_campaign
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata carrier_ready is not true" in preflight.risk_summary["blockers"]
 
 
@@ -3504,7 +3875,7 @@ async def test_prepare_runtime_start_preflight_blocks_runtime_started_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_started is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3534,7 +3905,7 @@ async def test_prepare_runtime_start_preflight_blocks_strategy_active_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata strategy_active is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3564,7 +3935,7 @@ async def test_prepare_runtime_start_preflight_blocks_trial_started_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata trial_started is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3594,7 +3965,7 @@ async def test_prepare_runtime_start_preflight_blocks_orders_placed_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata orders_placed is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3622,7 +3993,7 @@ async def test_prepare_runtime_start_preflight_allows_valid_carrier_ready_campai
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["runtime_start_readiness_only"] is True
     assert preflight.runtime_start_summary["runtime_start_readiness_would_be_prepared"] is True
     assert preflight.runtime_start_summary["runtime_will_start"] is False
@@ -3729,7 +4100,7 @@ async def test_prepare_runtime_start_double_confirm_is_idempotent():
         await engine.dispose()
 
     assert first.status == "executed"
-    assert second_preflight.decision in {"allow", "warn"}
+    assert second_preflight.preflight_result in {"allow", "warn"}
     assert second_preflight.after["idempotent_prepare"] is True
     assert second.status == "noop"
     assert second.result_summary["idempotent"] is True
@@ -3756,9 +4127,12 @@ async def test_observe_only_records_would_enter_intent_with_no_order():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
+    _assert_trial_trade_intent_projection(preflight.after["enforcement"], expected="recorded")
+    _assert_trial_trade_intent_projection(preflight.trade_intent_summary, expected="recorded")
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "recorded"
+    assert result.result_summary["trial_trade_intent_result"] == "recorded"
+    assert "decision" not in result.result_summary
     assert result.result_summary["intent_persisted"] is True
     assert result.result_summary["trial_trade_intent_is_order"] is False
     assert result.result_summary["order_created"] is False
@@ -3790,9 +4164,12 @@ async def test_no_entry_blocks_entry_intent_without_execution():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "warn"
+    assert preflight.preflight_result == "warn"
+    _assert_trial_trade_intent_projection(preflight.after["enforcement"], expected="blocked")
+    _assert_trial_trade_intent_projection(preflight.trade_intent_summary, expected="blocked")
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "blocked"
+    assert result.result_summary["trial_trade_intent_result"] == "blocked"
+    assert "decision" not in result.result_summary
     assert "no_entry blocks entry" in result.result_summary["not_executed_reason"]
     assert result.result_summary["order_created"] is False
     assert result.result_summary["execution_intent_created"] is False
@@ -3818,9 +4195,10 @@ async def test_no_entry_records_exit_reduce_intent_without_execution():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "recorded"
+    assert result.result_summary["trial_trade_intent_result"] == "recorded"
+    assert "decision" not in result.result_summary
     assert result.result_summary["order_created"] is False
     assert result.result_summary["execution_intent_created"] is False
     assert len(intents) == 1
@@ -3845,11 +4223,14 @@ async def test_auto_within_budget_checks_constraints_but_does_not_execute_or_per
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "warn"
+    assert preflight.preflight_result == "warn"
     assert preflight.after["constraints_check"]["complete"] is True
+    _assert_trial_trade_intent_projection(preflight.after["enforcement"], expected="unavailable")
+    _assert_trial_trade_intent_projection(preflight.trade_intent_summary, expected="unavailable")
     assert preflight.after["enforcement"]["would_require_runtime_execution"] is True
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "unavailable"
+    assert result.result_summary["trial_trade_intent_result"] == "unavailable"
+    assert "decision" not in result.result_summary
     assert result.result_summary["would_require_runtime_execution"] is True
     assert result.result_summary["intent_persisted"] is False
     assert result.result_summary["order_created"] is False
@@ -3875,7 +4256,7 @@ async def test_owner_confirm_each_entry_returns_not_implemented_unavailable():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "unavailable"
+    assert preflight.preflight_result == "unavailable"
     assert preflight.confirmation_requirement.required is False
     assert result is None
     assert "owner_confirm_each_entry execution is reserved and not implemented" in preflight.risk_summary["blockers"]
@@ -3940,7 +4321,7 @@ async def test_trial_trade_intent_preflight_blocks_missing_runtime_start_ready()
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_start_ready is not true" in preflight.risk_summary["blockers"]
 
 
@@ -3967,7 +4348,7 @@ async def test_trial_trade_intent_preflight_blocks_runtime_started_true():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_started is not false" in preflight.risk_summary["blockers"]
 
 
@@ -3996,7 +4377,7 @@ async def test_runtime_handoff_preflight_blocks_missing_runtime_start_ready():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_start_ready is not true" in preflight.risk_summary["blockers"]
 
 
@@ -4024,7 +4405,7 @@ async def test_runtime_handoff_preflight_blocks_active_or_order_flags(flag, mess
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -4043,7 +4424,7 @@ async def test_runtime_handoff_preflight_blocks_missing_execution_mode():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata execution_mode is missing or invalid" in preflight.risk_summary["blockers"]
 
 
@@ -4062,7 +4443,7 @@ async def test_runtime_handoff_preflight_blocks_missing_trade_intent_ledger_for_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "observe_only trade intent ledger support unavailable" in preflight.risk_summary["blockers"]
 
 
@@ -4078,7 +4459,7 @@ async def test_runtime_handoff_preflight_allows_valid_runtime_start_ready_campai
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["runtime_handoff_readiness_only"] is True
     assert preflight.runtime_handoff_summary["runtime_handoff_readiness_would_be_prepared"] is True
     assert preflight.runtime_handoff_summary["runtime_will_start"] is False
@@ -4164,7 +4545,7 @@ async def test_runtime_handoff_double_confirm_is_idempotent():
         await engine.dispose()
 
     assert first.status == "executed"
-    assert second_preflight.decision in {"allow", "warn"}
+    assert second_preflight.preflight_result in {"allow", "warn"}
     assert second_preflight.after["idempotent_prepare"] is True
     assert second.status == "noop"
     assert second.result_summary["idempotent"] is True
@@ -4195,7 +4576,7 @@ async def test_start_runtime_from_handoff_preflight_blocks_missing_runtime_hando
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_handoff_ready is not true" in preflight.risk_summary["blockers"]
 
 
@@ -4223,7 +4604,7 @@ async def test_start_runtime_from_handoff_preflight_blocks_active_or_order_flags
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -4242,7 +4623,7 @@ async def test_start_runtime_from_handoff_preflight_checks_execution_mode_contra
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "observe_only trade intent ledger support unavailable" in preflight.risk_summary["blockers"]
 
 
@@ -4258,7 +4639,7 @@ async def test_start_runtime_from_handoff_preflight_allows_valid_handoff_ready_c
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["runtime_start_preflight_only"] is False
     assert preflight.after["runtime_state_start_only"] is True
     assert preflight.after["confirm_disabled"] is False
@@ -4397,7 +4778,7 @@ async def test_start_runtime_from_handoff_new_operation_noops_when_already_start
         await engine.dispose()
 
     assert first.status == "executed"
-    assert second_preflight.decision in {"allow", "warn"}
+    assert second_preflight.preflight_result in {"allow", "warn"}
     assert second_preflight.after["idempotent_start"] is True
     assert second.status == "noop"
     assert second.result_summary["idempotent"] is True
@@ -4432,7 +4813,7 @@ async def test_strategy_activation_readiness_preflight_blocks_runtime_started_fa
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_started is not true" in preflight.risk_summary["blockers"]
     assert brc_repo.campaign.metadata_json["strategy_active"] is False
     assert brc_repo.campaign.metadata_json["orders_placed"] is False
@@ -4453,7 +4834,7 @@ async def test_strategy_activation_readiness_preflight_blocks_wrong_runtime_stat
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_status is not runtime_started_strategy_inactive" in preflight.risk_summary["blockers"]
 
 
@@ -4482,7 +4863,7 @@ async def test_strategy_activation_readiness_preflight_blocks_active_auto_or_ord
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -4498,7 +4879,7 @@ async def test_strategy_activation_readiness_preflight_allows_valid_runtime_star
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["strategy_activation_readiness_only"] is True
     assert preflight.after["actual_strategy_activation_available"] is False
     assert preflight.strategy_activation_summary["strategy_activation_readiness_would_be_prepared"] is True
@@ -4609,7 +4990,7 @@ async def test_strategy_activation_readiness_double_confirm_is_idempotent():
     assert first.status == "executed"
     assert second.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_prepare"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -4643,7 +5024,7 @@ async def test_strategy_state_activation_preflight_blocks_strategy_activation_re
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata strategy_activation_ready is not true" in preflight.risk_summary["blockers"]
     assert brc_repo.campaign.metadata_json["strategy_active"] is False
 
@@ -4663,7 +5044,7 @@ async def test_strategy_state_activation_preflight_blocks_wrong_runtime_status()
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_status is not strategy_activation_ready_not_active" in preflight.risk_summary["blockers"]
 
 
@@ -4693,7 +5074,7 @@ async def test_strategy_state_activation_preflight_blocks_already_order_capable_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -4712,7 +5093,7 @@ async def test_strategy_state_activation_preflight_blocks_auto_execution_enabled
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata auto_execution_enabled is not false" in preflight.risk_summary["blockers"]
 
 
@@ -4728,7 +5109,7 @@ async def test_strategy_state_activation_preflight_allows_valid_strategy_activat
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["strategy_state_activation_only"] is True
     assert preflight.after["order_capable_strategy_available"] is False
     assert preflight.strategy_activation_summary["strategy_metadata_activation_would_occur"] is True
@@ -4847,7 +5228,7 @@ async def test_strategy_state_activation_double_confirm_is_idempotent():
     assert first.status == "executed"
     assert second.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_activate"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -4881,7 +5262,7 @@ async def test_signal_loop_readiness_preflight_blocks_wrong_runtime_status():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_status is not strategy_active_no_execution" in preflight.risk_summary["blockers"]
 
 
@@ -4910,7 +5291,7 @@ async def test_signal_loop_readiness_preflight_blocks_unsafe_flags(flag, message
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -4926,7 +5307,7 @@ async def test_signal_loop_readiness_preflight_allows_valid_strategy_active_no_e
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["signal_loop_readiness_only"] is True
     assert preflight.after["actual_signal_loop_available"] is False
     assert preflight.after["actual_signal_generation_available"] is False
@@ -5037,7 +5418,7 @@ async def test_signal_loop_readiness_double_confirm_is_idempotent():
     assert first.status == "executed"
     assert second.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_prepare"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -5067,7 +5448,7 @@ async def test_signal_loop_start_preflight_blocks_wrong_runtime_status():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_status is not signal_loop_ready_not_started" in preflight.risk_summary["blockers"]
 
 
@@ -5086,7 +5467,7 @@ async def test_signal_loop_start_preflight_blocks_signal_loop_ready_false():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata signal_loop_ready is not true" in preflight.risk_summary["blockers"]
 
 
@@ -5116,7 +5497,7 @@ async def test_signal_loop_start_preflight_blocks_unsafe_flags(flag, message):
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -5132,7 +5513,7 @@ async def test_signal_loop_start_preflight_allows_valid_signal_loop_ready_campai
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["signal_loop_start_state_only"] is True
     assert preflight.after["actual_signal_generation_available"] is False
     assert preflight.after["actual_trade_intent_available"] is False
@@ -5243,7 +5624,7 @@ async def test_signal_loop_start_double_confirm_is_idempotent():
     assert first.status == "executed"
     assert second.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_start"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -5274,7 +5655,7 @@ async def test_signal_evaluation_preflight_blocks_wrong_runtime_status():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata runtime_status is not signal_loop_started_no_signal" in preflight.risk_summary["blockers"]
 
 
@@ -5293,7 +5674,7 @@ async def test_signal_evaluation_preflight_blocks_signal_loop_started_false():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert "campaign metadata signal_loop_started is not true" in preflight.risk_summary["blockers"]
 
 
@@ -5322,7 +5703,7 @@ async def test_signal_evaluation_preflight_blocks_unsafe_flags(flag, message):
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert message in preflight.risk_summary["blockers"]
 
 
@@ -5341,7 +5722,7 @@ async def test_signal_evaluation_preflight_allows_valid_signal_loop_started_camp
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["signal_evaluation_metadata_only"] is True
     assert preflight.after["actual_trade_intent_available"] is False
     assert preflight.signal_evaluation_summary["signal_evaluation_would_be_recorded"] is True
@@ -5449,7 +5830,7 @@ async def test_signal_evaluation_double_confirm_is_idempotent():
     assert first.status == "executed"
     assert second.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_evaluation"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -5495,7 +5876,7 @@ async def test_record_trial_trade_intent_preflight_blocks_when_permission_below_
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert preflight.after["execution_permission_resolution"]["final_permission"] == "signal_only"
     assert "below requested intent_recording" in "; ".join(preflight.risk_summary["blockers"])
 
@@ -5518,9 +5899,11 @@ async def test_record_trial_trade_intent_preflight_allows_when_permission_allows
     finally:
         await engine.dispose()
 
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert preflight.after["trial_trade_intent_recording_only"] is True
     assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
+    _assert_trial_trade_intent_projection(preflight.after["enforcement"], expected="recorded")
+    _assert_trial_trade_intent_projection(preflight.trade_intent_summary, expected="recorded")
     assert preflight.trade_intent_summary["intent_would_be_recorded"] is True
     assert preflight.trade_intent_summary["execution_intent_created"] is False
     assert preflight.trade_intent_summary["order_created"] is False
@@ -5563,7 +5946,7 @@ async def test_record_trial_trade_intent_runtime_safety_reader_requires_explicit
         await engine.dispose()
 
     assert calls == []
-    assert preflight.decision in {"allow", "warn"}
+    assert preflight.preflight_result in {"allow", "warn"}
     assert "runtime_safety_readiness" not in preflight.runtime_summary
     assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
 
@@ -5587,7 +5970,7 @@ async def test_record_trial_trade_intent_preflight_blocks_explicit_runtime_id_wi
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     readiness = preflight.runtime_summary["runtime_safety_readiness"]
     assert readiness["runtime_instance_id"] == "rt-missing-reader"
     assert readiness["status"] == "blocked"
@@ -5634,7 +6017,7 @@ async def test_record_trial_trade_intent_preflight_blocks_on_runtime_safety_read
         await engine.dispose()
 
     assert [call["runtime_instance_id"] for call in calls] == ["rt-blocked"]
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert preflight.runtime_summary["runtime_safety_readiness"]["blockers"] == ["max_loss_budget_present"]
     assert preflight.after["execution_permission_resolution"]["runtime_safety_permission"] == "signal_only"
     assert "runtime safety readiness blocks intent recording" in "; ".join(preflight.risk_summary["blockers"])
@@ -5688,7 +6071,7 @@ async def test_record_trial_trade_intent_confirm_rechecks_runtime_safety_reader_
                 "side": "long",
             },
         )
-        assert preflight.decision in {"allow", "warn"}
+        assert preflight.preflight_result in {"allow", "warn"}
         assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
 
         result = await service.confirm(
@@ -5729,7 +6112,7 @@ async def test_record_trial_trade_intent_confirm_rechecks_runtime_safety_readine
                 "side": "long",
             },
         )
-        assert preflight.decision in {"allow", "warn"}
+        assert preflight.preflight_result in {"allow", "warn"}
         assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
 
         market["runtime_state"]["runtime_safety_readiness"] = {
@@ -5802,7 +6185,8 @@ async def test_record_trial_trade_intent_observe_only_records_would_enter_intent
         await engine.dispose()
 
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "recorded"
+    assert result.result_summary["trial_trade_intent_result"] == "recorded"
+    assert "decision" not in result.result_summary
     assert result.result_summary["not_executed_reason"] == "observe_only"
     assert result.result_summary["trial_trade_intent_created"] is True
     assert result.result_summary["execution_intent_created"] is False
@@ -5812,6 +6196,8 @@ async def test_record_trial_trade_intent_observe_only_records_would_enter_intent
     assert intents[0].decision.value == "recorded"
     assert intents[0].not_executed_reason == "observe_only"
     assert brc_repo.campaign.metadata_json["runtime_status"] == "trial_trade_intent_recorded_no_execution"
+    assert brc_repo.campaign.metadata_json["trial_trade_intent_result"] == "recorded"
+    assert "trial_trade_intent_decision" not in brc_repo.campaign.metadata_json
     assert brc_repo.campaign.metadata_json["execution_permission"] == "intent_recording"
     assert brc_repo.campaign.metadata_json["execution_intent_created"] is False
     assert brc_repo.campaign.metadata_json["order_created"] is False
@@ -5848,7 +6234,8 @@ async def test_record_trial_trade_intent_no_entry_blocks_entry_intent_without_ex
         await engine.dispose()
 
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "blocked"
+    assert result.result_summary["trial_trade_intent_result"] == "blocked"
+    assert "decision" not in result.result_summary
     assert result.result_summary["not_executed_reason"] == "no_entry"
     assert result.result_summary["execution_intent_created"] is False
     assert result.result_summary["order_created"] is False
@@ -5886,7 +6273,8 @@ async def test_record_trial_trade_intent_auto_within_budget_records_candidate_wi
         await engine.dispose()
 
     assert result.status == "executed"
-    assert result.result_summary["decision"] == "recorded"
+    assert result.result_summary["trial_trade_intent_result"] == "recorded"
+    assert "decision" not in result.result_summary
     assert result.result_summary["not_executed_reason"] == "live_read_only_detection_no_execution"
     assert result.result_summary["auto_within_budget_enabled"] is False
     assert result.result_summary["execution_intent_created"] is False
@@ -5915,7 +6303,7 @@ async def test_record_trial_trade_intent_owner_confirm_each_entry_unavailable():
     finally:
         await engine.dispose()
 
-    assert preflight.decision == "unavailable"
+    assert preflight.preflight_result == "unavailable"
     assert "owner_confirm_each_entry execution is reserved and not implemented" in preflight.summary
 
 
@@ -5971,7 +6359,7 @@ async def test_record_trial_trade_intent_double_confirm_and_new_operation_are_id
 
     assert first.status == "executed"
     assert second.result_summary == first.result_summary
-    assert noop_preflight.decision in {"allow", "warn"}
+    assert noop_preflight.preflight_result in {"allow", "warn"}
     assert noop_preflight.after["idempotent_intent"] is True
     assert noop_result.status == "noop"
     assert noop_result.result_summary["idempotent"] is True
@@ -6023,7 +6411,7 @@ async def test_switch_playbook_preflight_confirm_executes_once_and_links_refs():
     service, op_repo, brc_repo, _ = await _operation_service()
     preflight = await _switch_preflight(service)
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.status == "awaiting_confirmation"
     assert preflight.confirmation_requirement.phrase == "CONFIRM_SWITCH_PLAYBOOK"
 
@@ -6070,7 +6458,7 @@ async def test_tf001_carrier_playbook_can_be_selected_without_trading_authority(
         source={"kind": "unit"},
     )
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.playbook_summary["known"] is True
     assert preflight.playbook_summary["target_playbook_id"] == "TF-001"
 
@@ -6118,7 +6506,7 @@ async def test_unknown_playbook_persists_blocked_operation_result():
         },
     )
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert preflight.status == "blocked"
     result = await op_repo.get_execution_result(preflight.operation_id)
     assert result is not None
@@ -6274,7 +6662,7 @@ async def test_forbidden_operation_preflight_is_not_executable():
         input_params={"asset": "USDT", "amount": "1"},
     )
 
-    assert preflight.decision == "block"
+    assert preflight.preflight_result == "block"
     assert preflight.confirmation_requirement.required is False
     result = await op_repo.get_execution_result(preflight.operation_id)
     assert result is not None
@@ -6282,13 +6670,13 @@ async def test_forbidden_operation_preflight_is_not_executable():
 
 
 @pytest.mark.asyncio
-async def test_write_review_decision_preflight_confirm_executes_once_and_links_refs():
+async def test_write_review_outcome_preflight_confirm_executes_once_and_links_refs():
     service, op_repo, brc_repo, _ = await _operation_service()
     preflight = await service.preflight(
-        operation_type="write_review_decision",
+        operation_type="write_review_outcome",
         requested_by="owner",
         input_params={
-            "decision": "accepted",
+            "review_outcome": "accepted",
             "reason_text": "owner reviewed operation layer evidence",
             "next_recommended_task": "continue bounded review",
         },
@@ -6305,7 +6693,15 @@ async def test_write_review_decision_preflight_confirm_executes_once_and_links_r
     )
 
     assert result.status == "executed"
-    assert result.review_refs[0]["type"] == "review_decision"
+    assert result.review_refs[0]["type"] == "review_outcome"
+    assert result.result_summary["review_outcome"] == "accepted"
+    assert "decision" not in result.result_summary
+    persisted = await op_repo.get_execution_result(preflight.operation_id)
+    assert persisted is not None
+    assert "review_outcome" in persisted.adapter_result
+    assert "review_decision" not in persisted.adapter_result
+    assert "review_outcome" in persisted.final_state_snapshot
+    assert "review_decision" not in persisted.final_state_snapshot
     assert result.audit_refs
     assert len(brc_repo.review_decisions) == 1
     assert brc_repo.review_decisions[0].metadata_json["operation_id"] == preflight.operation_id
@@ -6322,13 +6718,13 @@ async def test_write_review_decision_preflight_confirm_executes_once_and_links_r
 
 
 @pytest.mark.asyncio
-async def test_write_review_decision_wrong_phrase_expired_and_audit_recheck_block():
+async def test_write_review_outcome_wrong_phrase_expired_and_audit_recheck_block():
     service, _, brc_repo, _ = await _operation_service()
     preflight = await service.preflight(
-        operation_type="write_review_decision",
+        operation_type="write_review_outcome",
         requested_by="owner",
         input_params={
-            "decision": "accepted",
+            "review_outcome": "accepted",
             "reason_text": "review",
             "next_recommended_task": "next",
         },
@@ -6344,10 +6740,10 @@ async def test_write_review_decision_wrong_phrase_expired_and_audit_recheck_bloc
 
     expired_service, _, expired_repo, _ = await _operation_service(ttl_ms=-1)
     expired_preflight = await expired_service.preflight(
-        operation_type="write_review_decision",
+        operation_type="write_review_outcome",
         requested_by="owner",
         input_params={
-            "decision": "accepted",
+            "review_outcome": "accepted",
             "reason_text": "review",
             "next_recommended_task": "next",
         },
@@ -6363,10 +6759,10 @@ async def test_write_review_decision_wrong_phrase_expired_and_audit_recheck_bloc
 
     blocked_service, _, blocked_repo, _ = await _operation_service(audit_writable=False)
     blocked_preflight = await blocked_service.preflight(
-        operation_type="write_review_decision",
+        operation_type="write_review_outcome",
         requested_by="owner",
         input_params={
-            "decision": "accepted",
+            "review_outcome": "accepted",
             "reason_text": "review",
             "next_recommended_task": "next",
         },
@@ -6397,7 +6793,7 @@ async def test_start_review_reads_packet_without_mutation():
     )
 
     assert result.status == "executed"
-    assert result.review_refs[0]["type"] == "review_packet"
+    assert result.review_refs[0]["type"] == "review_artifact"
     assert result.result_summary["mutation_executed"] is False
 
 
@@ -6411,7 +6807,7 @@ async def test_run_fixed_testnet_rehearsal_is_explicitly_unavailable_without_aut
     )
 
     assert preflight.status == "blocked"
-    assert preflight.decision == "unavailable"
+    assert preflight.preflight_result == "unavailable"
     assert preflight.confirmation_requirement.required is False
     result = await op_repo.get_execution_result(preflight.operation_id)
     assert result is not None
@@ -6432,7 +6828,7 @@ async def test_run_fixed_testnet_rehearsal_preflight_confirm_executes_once_and_l
     )
 
     assert preflight.status == "awaiting_confirmation"
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.confirmation_requirement.phrase == "CONFIRM_FIXED_TESTNET_REHEARSAL"
     assert preflight.after["symbols"] == ["ETH/USDT:USDT", "BTC/USDT:USDT"]
     assert preflight.after["workflow_carrier"] == "internal_ref_only"
@@ -6449,8 +6845,9 @@ async def test_run_fixed_testnet_rehearsal_preflight_confirm_executes_once_and_l
     assert result.result_summary["campaign_id"] == "brc-rehearsal"
     assert result.result_summary["live_ready"] is False
     assert result.audit_refs[0]["type"] == "workflow_run"
-    assert any(item["type"] == "evidence_packet" for item in result.audit_refs)
-    assert any(item["type"] == "review_decision" for item in result.review_refs)
+    assert any(item["type"] == "evidence_artifact" for item in result.audit_refs)
+    assert not any(item["type"] == "evidence_packet" for item in result.audit_refs)
+    assert any(item["type"] == "review_outcome" for item in result.review_refs)
     assert any(item["type"] == "campaign" for item in result.campaign_refs)
     assert market["fixed_rehearsal_calls"][0]["authorization_source"] == "brc_operation_layer"
     assert market["fixed_rehearsal_calls"][0]["workflow_carrier_role"] == "internal_ref_only"
@@ -6755,7 +7152,7 @@ async def test_revoke_budget_preflight_and_confirmation_persist_effective_state(
     )
 
     assert preflight.status == "awaiting_confirmation"
-    assert preflight.decision == "warn"
+    assert preflight.preflight_result == "warn"
     assert preflight.confirmation_requirement.phrase == "CONFIRM_REVOKE_BUDGET"
     assert preflight.after["budget_authorization_id"] == "budget-1"
     assert preflight.after["budget_effective_state"] == "revoked"
@@ -6833,7 +7230,7 @@ async def test_emergency_flatten_dry_run_no_exposure_persists_noop_without_tradi
         input_params={"reason": "owner dry-run"},
     )
 
-    assert preflight.decision == "warn"
+    assert preflight.preflight_result == "warn"
     assert preflight.status == "awaiting_confirmation"
     assert preflight.confirmation_requirement.phrase == "CONFIRM_FLATTEN_DRY_RUN"
     assert preflight.after["dry_run_only"] is True
@@ -6882,7 +7279,7 @@ async def test_emergency_flatten_dry_run_with_clean_exposure_returns_candidates_
         input_params={},
     )
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.status == "awaiting_confirmation"
     plan = preflight.after["dry_run_plan"]
     assert plan["dry_run_only"] is True
@@ -6931,7 +7328,7 @@ async def test_emergency_flatten_diagnostic_dry_run_on_mismatch_or_unmanaged_exp
         requested_by="owner",
         input_params={},
     )
-    assert mismatch.decision == "warn"
+    assert mismatch.preflight_result == "warn"
     assert mismatch.status == "awaiting_confirmation"
     assert mismatch.after["actual_execution"] is False
     assert mismatch.after["dry_run_plan"]["exposure_summary"]["reconciliation_status"] == "mismatch"
@@ -6953,7 +7350,7 @@ async def test_emergency_flatten_diagnostic_dry_run_on_mismatch_or_unmanaged_exp
         requested_by="owner",
         input_params={},
     )
-    assert unmanaged.decision == "warn"
+    assert unmanaged.preflight_result == "warn"
     assert unmanaged.status == "awaiting_confirmation"
     assert unmanaged.after["unknown_or_unmanaged_orders"][0]["id"] == "exchange-orphan"
     assert any("unknown or unmanaged" in item for item in unmanaged.risk_summary["warnings"])
@@ -7004,7 +7401,7 @@ async def test_emergency_stop_runtime_preflight_planning_unavailable_without_exe
         input_params={"reason": "owner planning only"},
     )
 
-    assert preflight.decision == "unavailable"
+    assert preflight.preflight_result == "unavailable"
     assert preflight.status == "blocked"
     assert preflight.after["planning_only"] is True
     assert preflight.after["actual_execution_available"] is False
@@ -7032,7 +7429,7 @@ async def test_emergency_stop_runtime_preflight_confirm_executes_once_and_links_
         input_params={"reason": "owner emergency stop"},
     )
 
-    assert preflight.decision == "allow"
+    assert preflight.preflight_result == "allow"
     assert preflight.status == "awaiting_confirmation"
     assert preflight.confirmation_requirement.phrase == "CONFIRM_STOP_RUNTIME"
     assert preflight.after["actual_execution_available"] is True
@@ -7083,7 +7480,7 @@ async def test_emergency_stop_runtime_already_stopped_records_noop_without_calli
         requested_by="owner",
         input_params={},
     )
-    assert preflight.decision == "warn"
+    assert preflight.preflight_result == "warn"
     assert preflight.after["already_stopped"] is True
     assert preflight.after["planned_result_status"] == "noop"
 

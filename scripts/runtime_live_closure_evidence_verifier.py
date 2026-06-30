@@ -3,7 +3,7 @@
 
 This script is local verification only. It does not call Tokyo, FinalGate,
 Operation Layer, exchange write paths, or OrderLifecycle. It only answers
-whether a supplied live evidence packet satisfies the first-live-closure
+whether a supplied live evidence artifact satisfies the first-live-closure
 contract.
 """
 
@@ -22,6 +22,23 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_live_cutover_readiness as live_cutover  # noqa: E402
+from scripts.runtime_live_closure_evidence_contract import (  # noqa: E402
+    ACTION_TIME_FINALGATE_CHAIN_KEY,
+    EVIDENCE_ID_FIELDS,
+    LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS,
+    LIVE_SIGNAL_CHAIN_KEY,
+    LIVE_WATCHER_SIGNAL_EVIDENCE_KEY,
+    POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS,
+    POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS,
+    PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS,
+    PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY,
+    RUNTIME_BOUNDARY_FIELDS,
+    RUNTIME_BOUNDARY_MISSING_REJECT_REASONS,
+    RUNTIME_BOUNDARY_REJECT_REASONS,
+    RUNTIME_BOUNDARY_REQUIRED_EVIDENCE_KEYS,
+    SIGNAL_EVIDENCE_KEY,
+    WATCHER_SIGNAL_EVIDENCE_KEY,
+)
 
 
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/live-closure-evidence")
@@ -83,43 +100,6 @@ GLOBAL_REJECT_REASONS = {
     "notional_boundary_mismatch",
     "leverage_boundary_mismatch",
 }
-EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
-LIVE_SIGNAL_CHAIN_KEY = "live_watcher_signal_packet_id"
-LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS = (
-    "required_facts_readiness_packet_id",
-    "candidate_id",
-)
-PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY = "fresh_submit_authorization_id"
-PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS = (
-    "candidate_id",
-    "runtime_grant_id",
-    "action_time_finalgate_packet_id",
-    "operation_layer_submit_authorization_id",
-)
-POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
-    "runtime_post_submit_finalize_packet_id",
-    "post_submit_reconciliation_evidence_id",
-    "post_submit_budget_settlement_id",
-    "submit_outcome_review_id",
-)
-POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS: dict[str, tuple[str, str]] = {
-    "runtime_post_submit_finalize_packet_id": (
-        "finalize_complete",
-        "post_submit_finalize_not_complete",
-    ),
-    "post_submit_reconciliation_evidence_id": (
-        "reconciliation_matched",
-        "post_submit_reconciliation_not_matched",
-    ),
-    "post_submit_budget_settlement_id": (
-        "budget_settled",
-        "post_submit_budget_not_settled",
-    ),
-    "submit_outcome_review_id": (
-        "review_recorded",
-        "submit_outcome_review_not_recorded",
-    ),
-}
 AUTHORIZATION_CHAIN_PROOF_ID_FIELDS = (
     "fresh_submit_authorization_id",
     "submit_authorization_id",
@@ -127,9 +107,9 @@ AUTHORIZATION_CHAIN_PROOF_ID_FIELDS = (
     "chain_authorization_id",
 )
 LIVE_SIGNAL_CHAIN_PROOF_ID_FIELDS = (
-    "live_watcher_signal_packet_id",
-    "watcher_signal_packet_id",
-    "signal_packet_id",
+    LIVE_WATCHER_SIGNAL_EVIDENCE_KEY,
+    WATCHER_SIGNAL_EVIDENCE_KEY,
+    SIGNAL_EVIDENCE_KEY,
     "signal_evaluation_id",
     "evaluation_id",
 )
@@ -141,46 +121,19 @@ LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
     "result_id",
 )
 PROTECTION_PROOF_RESULT_ID_FIELDS = LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS
-RUNTIME_BOUNDARY_FIELDS = (
-    "strategy_group_id",
-    "runtime_profile_id",
-    "subaccount_id",
-    "symbol",
-    "side",
-    "notional",
-    "leverage",
-)
-RUNTIME_BOUNDARY_REJECT_REASONS = {
-    "strategy_group_id": "strategy_group_boundary_mismatch",
-    "runtime_profile_id": "runtime_profile_boundary_mismatch",
-    "subaccount_id": "subaccount_boundary_mismatch",
-    "symbol": "symbol_boundary_mismatch",
-    "side": "side_boundary_mismatch",
-    "notional": "notional_boundary_mismatch",
-    "leverage": "leverage_boundary_mismatch",
-}
-RUNTIME_BOUNDARY_MISSING_REJECT_REASONS = {
-    "strategy_group_id": "strategy_group_boundary_missing",
-    "runtime_profile_id": "runtime_profile_boundary_missing",
-    "subaccount_id": "subaccount_boundary_missing",
-    "symbol": "symbol_boundary_missing",
-    "side": "side_boundary_missing",
-    "notional": "notional_boundary_missing",
-    "leverage": "leverage_boundary_missing",
-}
 
 
 def build_live_closure_evidence_verification(
-    evidence_packet: dict[str, Any],
+    evidence_artifact: dict[str, Any],
     *,
     contract: dict[str, Any] | None = None,
     generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
     contract = contract or live_cutover.build_live_closure_cutover_contract()
-    evidence = _evidence_map(evidence_packet)
-    source_ready = _official_live_source_ready(evidence_packet)
+    evidence = _evidence_map(evidence_artifact)
+    source_ready = _official_live_source_ready(evidence_artifact)
     reject_reasons = _reject_reasons(
-        evidence_packet,
+        evidence_artifact,
         evidence=evidence,
         source_ready=source_ready,
         required_evidence_keys=_required_evidence_keys(contract),
@@ -312,19 +265,21 @@ def _stage_verifications(
                 "required_evidence_keys": required_keys,
                 "missing_evidence_keys": missing,
                 "reject_reasons": stage_reject_reasons,
-                "next_action": str(raw_stage.get("next_action") or ""),
+                "next_lifecycle_checkpoint": str(
+                    raw_stage.get("next_lifecycle_checkpoint") or ""
+                ),
             }
         )
     return verifications
 
 
-def _evidence_map(packet: dict[str, Any]) -> dict[str, Any]:
-    evidence = packet.get("evidence")
+def _evidence_map(artifact: dict[str, Any]) -> dict[str, Any]:
+    evidence = artifact.get("evidence")
     if isinstance(evidence, dict):
         return evidence
     return {
         key: value
-        for key, value in packet.items()
+        for key, value in artifact.items()
         if key
         not in {
             "scope",
@@ -342,7 +297,7 @@ def _evidence_map(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 def _reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     *,
     evidence: dict[str, Any],
     source_ready: bool,
@@ -350,13 +305,13 @@ def _reject_reasons(
 ) -> list[str]:
     reasons: set[str] = set()
     for key in ("reject_reasons", "rejected_reasons"):
-        items = packet.get(key)
+        items = artifact.get(key)
         if isinstance(items, list):
             reasons.update(str(item) for item in items if str(item))
-    flags = packet.get("flags")
+    flags = artifact.get("flags")
     if isinstance(flags, dict):
         reasons.update(str(key) for key, value in flags.items() if value is True)
-    safety = packet.get("safety_invariants")
+    safety = artifact.get("safety_invariants")
     if isinstance(safety, dict):
         if safety.get("mock_signal_treated_as_real_signal") is True:
             reasons.add("synthetic_signal")
@@ -365,24 +320,24 @@ def _reject_reasons(
     exchange_submit_execution_result_id = _required_evidence_id(
         evidence.get("exchange_submit_execution_result_id")
     )
-    live_watcher_signal_packet_id = _required_evidence_id(
+    live_signal_evidence_id = _required_evidence_id(
         evidence.get(LIVE_SIGNAL_CHAIN_KEY)
     )
-    if source_ready and live_watcher_signal_packet_id:
-        reasons.update(_live_signal_chain_reject_reasons(packet, evidence))
+    if source_ready and live_signal_evidence_id:
+        reasons.update(_live_signal_chain_reject_reasons(artifact, evidence))
     fresh_submit_authorization_id = _required_evidence_id(
         evidence.get(PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY)
     )
     if source_ready and fresh_submit_authorization_id:
-        reasons.update(_pre_submit_authorization_chain_reject_reasons(packet, evidence))
+        reasons.update(_pre_submit_authorization_chain_reject_reasons(artifact, evidence))
     if source_ready and any(
         _required_evidence_id_present(evidence.get(key))
         for key in required_evidence_keys
     ):
-        reasons.update(_runtime_boundary_reject_reasons(packet, evidence))
+        reasons.update(_runtime_boundary_reject_reasons(artifact, evidence))
     live_submit_ready = False
     if source_ready and exchange_submit_execution_result_id:
-        proof = packet.get("live_submit_proof")
+        proof = artifact.get("live_submit_proof")
         if not isinstance(proof, dict):
             reasons.add("live_submit_proof_missing")
         else:
@@ -407,8 +362,8 @@ def _reject_reasons(
             reasons.update(proof_reasons)
             live_submit_ready = not proof_reasons
     if source_ready and exchange_submit_execution_result_id and live_submit_ready:
-        reasons.update(_exchange_native_protection_reject_reasons(packet, evidence))
-        reasons.update(_post_submit_close_loop_reject_reasons(packet, evidence))
+        reasons.update(_exchange_native_protection_reject_reasons(artifact, evidence))
+        reasons.update(_post_submit_close_loop_reject_reasons(artifact, evidence))
     if _duplicate_required_evidence_ids(evidence, required_evidence_keys):
         reasons.add("duplicate_evidence_id")
     if _malformed_required_evidence_keys(evidence, required_evidence_keys):
@@ -470,13 +425,13 @@ def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
 
 
 def _live_signal_chain_reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence: dict[str, Any],
 ) -> set[str]:
-    live_watcher_signal_packet_id = _required_evidence_id(
+    live_signal_evidence_id = _required_evidence_id(
         evidence.get(LIVE_SIGNAL_CHAIN_KEY)
     )
-    if not live_watcher_signal_packet_id:
+    if not live_signal_evidence_id:
         return set()
     present_keys = [
         key
@@ -485,11 +440,11 @@ def _live_signal_chain_reject_reasons(
     ]
     if not present_keys:
         return set()
-    proof = packet.get("live_signal_chain_proof")
+    proof = artifact.get("live_signal_chain_proof")
     if not isinstance(proof, dict):
         return {"live_signal_chain_proof_missing"}
     reject_reasons: set[str] = set()
-    if _live_signal_chain_proof_id(proof) != live_watcher_signal_packet_id:
+    if _live_signal_chain_proof_id(proof) != live_signal_evidence_id:
         reject_reasons.add("live_signal_chain_id_mismatch")
     matched_keys = {
         str(item)
@@ -502,7 +457,7 @@ def _live_signal_chain_reject_reasons(
     for key in present_keys:
         if key in matched_keys and key not in missing_keys:
             continue
-        if key == "required_facts_readiness_packet_id":
+        if key == "required_facts_readiness_artifact_id":
             reject_reasons.add("required_facts_signal_source_missing")
         elif key == "candidate_id":
             reject_reasons.add("candidate_signal_source_missing")
@@ -518,7 +473,7 @@ def _live_signal_chain_proof_id(proof: dict[str, Any]) -> str | None:
 
 
 def _pre_submit_authorization_chain_reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence: dict[str, Any],
 ) -> set[str]:
     fresh_submit_authorization_id = _required_evidence_id(
@@ -533,7 +488,7 @@ def _pre_submit_authorization_chain_reject_reasons(
     ]
     if not present_keys:
         return set()
-    proof = packet.get("pre_submit_authorization_chain_proof")
+    proof = artifact.get("pre_submit_authorization_chain_proof")
     if not isinstance(proof, dict):
         return {"pre_submit_authorization_chain_proof_missing"}
     reject_reasons: set[str] = set()
@@ -555,7 +510,7 @@ def _pre_submit_authorization_chain_reject_reasons(
             continue
         if key in {"candidate_id", "runtime_grant_id"}:
             reject_reasons.add("candidate_authorization_chain_source_missing")
-        elif key == "action_time_finalgate_packet_id":
+        elif key == ACTION_TIME_FINALGATE_CHAIN_KEY:
             reject_reasons.add("finalgate_authorization_chain_source_missing")
         elif key == "operation_layer_submit_authorization_id":
             reject_reasons.add("operation_layer_authorization_chain_source_missing")
@@ -573,10 +528,10 @@ def _pre_submit_authorization_chain_proof_id(
 
 
 def _runtime_boundary_reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence: dict[str, Any],
 ) -> set[str]:
-    proof = packet.get("runtime_boundary_proof")
+    proof = artifact.get("runtime_boundary_proof")
     if not isinstance(proof, dict):
         return {"runtime_boundary_proof_missing"}
     missing_fields = {
@@ -601,19 +556,12 @@ def _runtime_boundary_reject_reasons(
 def _runtime_boundary_required(evidence: dict[str, Any]) -> bool:
     return any(
         _required_evidence_id_present(evidence.get(key))
-        for key in (
-            "candidate_id",
-            "runtime_grant_id",
-            "fresh_submit_authorization_id",
-            "action_time_finalgate_packet_id",
-            "operation_layer_submit_authorization_id",
-            "exchange_submit_execution_result_id",
-        )
+        for key in RUNTIME_BOUNDARY_REQUIRED_EVIDENCE_KEYS
     )
 
 
 def _exchange_native_protection_reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence: dict[str, Any],
 ) -> set[str]:
     exchange_submit_execution_result_id = _required_evidence_id(
@@ -623,7 +571,7 @@ def _exchange_native_protection_reject_reasons(
         return set()
     if not _required_evidence_id_present(evidence.get(PROTECTION_EVIDENCE_KEY)):
         return set()
-    proof = packet.get("exchange_native_protection_proof")
+    proof = artifact.get("exchange_native_protection_proof")
     if not isinstance(proof, dict):
         return {"exchange_native_protection_proof_missing"}
     reject_reasons: set[str] = set()
@@ -654,7 +602,7 @@ def _exchange_native_protection_proof_result_id(
 
 
 def _post_submit_close_loop_reject_reasons(
-    packet: dict[str, Any],
+    artifact: dict[str, Any],
     evidence: dict[str, Any],
 ) -> set[str]:
     present_keys = [
@@ -664,7 +612,7 @@ def _post_submit_close_loop_reject_reasons(
     ]
     if not present_keys:
         return set()
-    proof = packet.get("post_submit_close_loop_proof")
+    proof = artifact.get("post_submit_close_loop_proof")
     if not isinstance(proof, dict):
         return {"post_submit_close_loop_proof_missing"}
     matched_keys = {
@@ -678,25 +626,27 @@ def _post_submit_close_loop_reject_reasons(
     reject_reasons: set[str] = set()
     for key in present_keys:
         if key not in matched_keys or key in missing_keys:
-            if key == "runtime_post_submit_finalize_packet_id":
+            if key == "runtime_post_submit_finalize_payload_id":
                 reject_reasons.add("post_submit_finalize_result_source_missing")
             else:
                 reject_reasons.add("post_submit_close_loop_result_source_missing")
             continue
-        truth_field, reject_reason = POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS[key]
+        truth_field, _truth_aliases, reject_reason = (
+            POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS[key]
+        )
         if proof.get(truth_field) is not True:
             reject_reasons.add(reject_reason)
     return reject_reasons
 
 
-def _official_live_source_ready(packet: dict[str, Any]) -> bool:
-    if packet.get("official_live_closure_evidence") is True:
+def _official_live_source_ready(artifact: dict[str, Any]) -> bool:
+    if artifact.get("official_live_closure_evidence") is True:
         return True
-    if str(packet.get("source_kind") or "") in OFFICIAL_LIVE_SOURCE_KINDS:
+    if str(artifact.get("source_kind") or "") in OFFICIAL_LIVE_SOURCE_KINDS:
         return True
-    if str(packet.get("evidence_source") or "") in OFFICIAL_LIVE_SOURCE_KINDS:
+    if str(artifact.get("evidence_source") or "") in OFFICIAL_LIVE_SOURCE_KINDS:
         return True
-    metadata = packet.get("metadata")
+    metadata = artifact.get("metadata")
     if isinstance(metadata, dict):
         if metadata.get("official_live_closure_evidence") is True:
             return True
@@ -758,17 +708,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    packet = build_live_closure_evidence_verification(
+    artifact = build_live_closure_evidence_verification(
         _read_json(Path(args.evidence_json).expanduser())
     )
-    _write_json(Path(args.output_json).expanduser(), packet)
-    print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
+    _write_json(Path(args.output_json).expanduser(), artifact)
+    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
     success_statuses = {
         "live_closure_complete",
         "live_closure_in_progress",
         "live_closure_not_started",
     }
-    return 0 if packet["status"] in success_statuses else 2
+    return 0 if artifact["status"] in success_statuses else 2
 
 
 if __name__ == "__main__":

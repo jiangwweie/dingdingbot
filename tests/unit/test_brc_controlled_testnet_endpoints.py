@@ -777,7 +777,7 @@ async def test_strategy_trial_carrier_bnb_controlled_route_executes_when_gates_p
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["carrier_id"] == "MI-001-BNB-LONG"
-    assert payload["readiness_verdict"] == "testnet_rehearsal_completed"
+    assert payload["readiness_status"] == "testnet_rehearsal_completed"
     assert payload["entry"]["symbol"] == BNB
     assert payload["entry"]["testnet"] is True
     assert payload["protection_plan"]["plan_type"] == "single_tp_plus_sl"
@@ -818,7 +818,7 @@ async def test_strategy_trial_carrier_blocks_before_entry_when_size_unprotectabl
 
     assert resp.status_code == 409
     detail = resp.json()["detail"]
-    assert detail["readiness_verdict"] == "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size"
+    assert detail["readiness_status"] == "testnet_rehearsal_blocked_before_entry_due_to_unprotectable_size"
     assert "entry_quantity_cannot_create_valid_sl" in detail["blockers"]
     assert detail["protection_plan"]["plan_type"] == "blocked_unprotectable_size"
     orch.execute_signal.assert_not_awaited()
@@ -982,7 +982,7 @@ async def test_strategy_trial_carrier_controlled_close_uses_allowlisted_bnb_scop
     assert close_resp.status_code == 200, close_resp.text
     payload = close_resp.json()
     assert payload["carrier_id"] == "MI-001-BNB-LONG"
-    assert payload["readiness_verdict"] == "testnet_rehearsal_completed_with_valid_protection"
+    assert payload["readiness_status"] == "testnet_rehearsal_completed_with_valid_protection"
     assert payload["campaign"]["status"] == "ended"
     assert payload["close"]["symbol"] == BNB
     assert payload["close"]["amount"] == "0.01"
@@ -1085,7 +1085,7 @@ async def test_strategy_trial_carrier_failed_entry_triggers_bounded_cleanup(monk
 
     assert resp.status_code == 200, resp.text
     payload = resp.json()
-    assert payload["readiness_verdict"] == "testnet_rehearsal_blocked_with_explicit_reasons"
+    assert payload["readiness_status"] == "testnet_rehearsal_blocked_with_explicit_reasons"
     assert payload["entry"]["status"] == "failed"
     assert payload["entry"]["cleanup_result"]["attempted"] is True
     assert payload["entry"]["cleanup_result"]["status"] == "closed"
@@ -1188,7 +1188,8 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
             },
         )
         assert switch.status_code == 200
-        assert switch.json()["decision"]["decision_result"] == "allowed"
+        assert "decision" not in switch.json()
+        assert switch.json()["switch_result"]["decision_result"] == "allowed"
 
         arm_eth = client.post("/api/runtime/test/brc/eth/arm-attempt", json={"reason": "eth"})
         assert arm_eth.status_code == 200
@@ -1246,16 +1247,16 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         assert final.status_code == 200
         assert final.json()["campaign"]["outcome"] == "ended_testnet_rehearsal_complete_loss_locked"
 
-        review = client.get("/api/runtime/test/brc/review-packet")
+        review = client.get("/api/runtime/test/brc/review-artifact")
         assert review.status_code == 200
-        assert review.json()["review_packet"]["status"] == "ended"
-        assert review.json()["review_packet"]["profit_protect_triggered"] is True
-        assert review.json()["review_packet"]["loss_lock_triggered"] is True
-        assert review.json()["review_packet"]["final_inventory_flat"] is True
+        assert review.json()["review_artifact"]["status"] == "ended"
+        assert review.json()["review_artifact"]["profit_protect_triggered"] is True
+        assert review.json()["review_artifact"]["loss_lock_triggered"] is True
+        assert review.json()["review_artifact"]["final_inventory_flat"] is True
 
         eligibility = client.get("/api/runtime/test/brc/next-eligibility")
         assert eligibility.status_code == 200
-        assert eligibility.json()["eligibility"]["decision"] == "owner_review_required"
+        assert eligibility.json()["eligibility"]["eligibility_result"] == "owner_review_required"
         assert eligibility.json()["eligibility"]["next_campaign_allowed"] is False
 
         draft = client.post(
@@ -1263,7 +1264,7 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
             json={"text": "帮我看复盘报告"},
         )
         assert draft.status_code == 200
-        assert draft.json()["draft"]["action"] == "read_review_packet"
+        assert draft.json()["draft"]["action"] == "read_review_artifact"
         assert draft.json()["draft"]["mutation_intended"] is False
 
         plan = client.post(
@@ -1306,30 +1307,53 @@ async def test_brc_api_acceptance_flow_with_mock_pnl_and_loss_lock(monkeypatch):
         assert len(actions.json()["actions"]) >= 2
 
         campaign_id = final.json()["campaign"]["campaign_id"]
-        review_decision = client.post(
-            "/api/runtime/test/brc/review-decisions",
+        review_outcome = client.post(
+            "/api/runtime/test/brc/review-outcomes",
             json={
                 "campaign_id": campaign_id,
                 "source_action_id": retry_action_id,
-                "decision": "accepted",
+                "review_outcome": "accepted",
                 "reason_text": "BRC R2 reviewed",
                 "next_recommended_task": "BRC-R2-005",
                 "created_by": "owner",
                 "metadata": {"source": "endpoint-test"},
             },
         )
-        assert review_decision.status_code == 200
-        assert review_decision.json()["review_decision"]["decision"] == "accepted"
-        assert review_decision.json()["review_decision"]["real_live_authorized"] is False
-        assert review_decision.json()["review_decision"]["withdrawal_authorized"] is False
+        assert review_outcome.status_code == 200
+        assert "review_decision" not in review_outcome.json()
+        assert "review_record" not in review_outcome.json()
+        outcome_record = review_outcome.json()["review_outcome_record"]
+        assert outcome_record["review_outcome"] == "accepted"
+        assert outcome_record["result_source_role"] == "review_outcome_persistence_projection"
+        assert "decision" not in outcome_record
+        assert outcome_record["real_live_authorized"] is False
+        assert outcome_record["withdrawal_authorized"] is False
 
-        latest_review = client.get("/api/runtime/test/brc/review-decisions/latest")
+        old_payload = client.post(
+            "/api/runtime/test/brc/review-outcomes",
+            json={
+                "campaign_id": campaign_id,
+                "source_action_id": retry_action_id,
+                "decision": "accepted",
+                "reason_text": "old request payload must not be accepted",
+                "next_recommended_task": "none",
+                "created_by": "owner",
+                "metadata": {"source": "endpoint-test"},
+            },
+        )
+        assert old_payload.status_code == 422
+
+        latest_review = client.get("/api/runtime/test/brc/review-outcomes/latest")
         assert latest_review.status_code == 200
-        assert latest_review.json()["review_decision"]["campaign_id"] == campaign_id
+        assert latest_review.json()["review_outcome_record"]["campaign_id"] == campaign_id
+        assert "decision" not in latest_review.json()["review_outcome_record"]
 
-        review_list = client.get(f"/api/runtime/test/brc/review-decisions?campaign_id={campaign_id}")
+        review_list = client.get(f"/api/runtime/test/brc/review-outcomes?campaign_id={campaign_id}")
         assert review_list.status_code == 200
-        assert len(review_list.json()["review_decisions"]) == 1
+        assert "review_decisions" not in review_list.json()
+        assert "review_records" not in review_list.json()
+        assert len(review_list.json()["review_outcome_records"]) == 1
+        assert "decision" not in review_list.json()["review_outcome_records"][0]
 
 
 @pytest.mark.asyncio
@@ -1456,7 +1480,7 @@ async def test_brc_llm_workflow_api_confirmed_testnet_rehearsal_creates_campaign
         assert workflow["mutation_executed"] is True
         assert workflow["withdrawal_executed"] is False
         assert workflow["live_ready"] is False
-        assert workflow["result_json"]["review_packet"]["status"] == "ended"
+        assert workflow["result_json"]["review_artifact"]["status"] == "ended"
 
 
 @pytest.mark.asyncio
@@ -1510,6 +1534,6 @@ async def test_brc_llm_workflow_blocks_on_unlocked_entry_and_finalizes_flat_camp
     assert latest.outcome == CampaignOutcome.ENDED_MANUAL_STOP
     assert latest.last_attempt is not None
     assert latest.last_attempt.status == BrcAttemptStatus.BLOCKED
-    packet = await service.build_review_packet(final_inventory={"all_flat": True})
-    assert all(check.passed for check in packet.invariant_checks)
+    artifact = await service.build_review_artifact(final_inventory={"all_flat": True})
+    assert all(check.passed for check in artifact.invariant_checks)
     assert any(call["status"] == "closed" for call in campaign_state_service.set_state_calls)

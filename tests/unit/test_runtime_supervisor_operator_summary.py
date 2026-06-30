@@ -6,7 +6,7 @@ from scripts import build_runtime_supervisor_operator_summary as script
 
 
 def test_summary_classifies_no_signal_waiting_window(tmp_path):
-    packet = _supervisor_packet(
+    artifact = _supervisor_artifact(
         "supervisor_waiting_for_signal",
         stop_reason="max_cycles_reached",
         cycles=[
@@ -15,10 +15,12 @@ def test_summary_classifies_no_signal_waiting_window(tmp_path):
         ],
     )
 
-    summary = script.build_summary(packet)
+    summary = script.build_summary(artifact)
 
     assert summary["status"] == "operator_waiting_for_signal"
-    assert summary["operator_command_plan"]["next_step"] == (
+    assert "operator_command_plan" not in summary
+    assert summary["summary_plan"]["not_execution_authority"] is True
+    assert summary["summary_plan"]["next_step"] == (
         "continue_live_signal_operator_supervision"
     )
     assert summary["signal_state"]["no_signal_window"] is True
@@ -29,32 +31,34 @@ def test_summary_classifies_no_signal_waiting_window(tmp_path):
         "runtime_strategy_signal_not_found_in_strategy_shelf": 2,
     }
     assert summary["right_tail_objective_context"]["no_signal_is_not_failure"] is True
-    assert summary["operator_command_plan"]["places_order"] is False
+    assert summary["summary_plan"]["places_order"] is False
+    assert summary["safety_invariants"]["summary_evidence_only"] is True
+    assert "read_packet_only" not in summary["safety_invariants"]
     assert summary["safety_invariants"]["database_write"] is False
     assert summary["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_summary_classifies_profile_review_required():
-    packet = _supervisor_packet(
+    artifact = _supervisor_artifact(
         "supervisor_profile_review_required",
         stop_reason="review_required:ready_for_owner_runtime_profile_decision",
         cycles=[_cycle(1, "ready_for_owner_runtime_profile_decision", selector="profile")],
     )
 
-    summary = script.build_summary(packet)
+    summary = script.build_summary(artifact)
 
     assert summary["status"] == "operator_profile_review_required"
-    assert summary["operator_command_plan"]["next_step"] == "review_runtime_profile_proposal"
+    assert summary["summary_plan"]["next_step"] == "review_runtime_profile_proposal"
     assert (
-        summary["operator_command_plan"]["requires_owner_runtime_profile_confirmation"]
+        summary["summary_plan"]["requires_owner_runtime_profile_confirmation"]
         is True
     )
-    assert summary["operator_command_plan"]["creates_runtime"] is False
-    assert summary["operator_command_plan"]["mutates_runtime_profile"] is False
+    assert summary["summary_plan"]["creates_runtime"] is False
+    assert summary["summary_plan"]["mutates_runtime_profile"] is False
 
 
 def test_summary_classifies_prepare_review_required():
-    packet = _supervisor_packet(
+    artifact = _supervisor_artifact(
         "supervisor_prepare_review_required",
         stop_reason="review_required:ready_for_prepare",
         cycles=[
@@ -66,19 +70,19 @@ def test_summary_classifies_prepare_review_required():
         ],
     )
 
-    summary = script.build_summary(packet)
+    summary = script.build_summary(artifact)
 
     assert summary["status"] == "operator_prepare_review_required"
-    assert summary["operator_command_plan"]["requires_prepare_review"] is True
-    assert summary["operator_command_plan"]["next_step"] == (
+    assert summary["summary_plan"]["requires_prepare_review"] is True
+    assert summary["summary_plan"]["next_step"] == (
         "review_ready_signal_then_rerun_with_allow_prepare_records"
     )
-    assert summary["operator_command_plan"]["creates_shadow_candidate"] is False
-    assert summary["operator_command_plan"]["creates_submit_authorization"] is False
+    assert summary["summary_plan"]["creates_shadow_candidate"] is False
+    assert summary["summary_plan"]["creates_submit_authorization"] is False
 
 
 def test_summary_classifies_final_gate_review_required():
-    packet = _supervisor_packet(
+    artifact = _supervisor_artifact(
         "supervisor_final_gate_review_required",
         stop_reason="review_required:ready_for_final_gate_preflight",
         cycles=[
@@ -97,18 +101,18 @@ def test_summary_classifies_final_gate_review_required():
         },
     )
 
-    summary = script.build_summary(packet)
+    summary = script.build_summary(artifact)
 
     assert summary["status"] == "operator_final_gate_review_required"
-    assert summary["operator_command_plan"]["requires_final_gate_review"] is True
-    assert summary["operator_command_plan"]["next_step"] == (
+    assert summary["summary_plan"]["requires_final_gate_review"] is True
+    assert summary["summary_plan"]["next_step"] == (
         "run_official_final_gate_preview_before_any_submit"
     )
-    assert summary["operator_command_plan"]["executes_real_submit"] is False
+    assert summary["summary_plan"]["executes_real_submit"] is False
 
 
 def test_summary_blocks_when_supervisor_reports_forbidden_effect():
-    packet = _supervisor_packet(
+    artifact = _supervisor_artifact(
         "supervisor_blocked",
         stop_reason="forbidden_effect_detected",
         cycles=[
@@ -122,10 +126,10 @@ def test_summary_blocks_when_supervisor_reports_forbidden_effect():
         safety={"cycles_have_forbidden_effects": True},
     )
 
-    summary = script.build_summary(packet)
+    summary = script.build_summary(artifact)
 
     assert summary["status"] == "operator_supervisor_blocked"
-    assert summary["operator_command_plan"]["next_step"] == (
+    assert summary["summary_plan"]["next_step"] == (
         "stop_and_review_supervisor_blocker"
     )
     assert summary["safety_invariants"]["source_has_forbidden_effects"] is True
@@ -140,7 +144,7 @@ def test_cli_writes_summary_and_returns_blocked_exit_code(tmp_path, capsys):
     output_json = tmp_path / "summary.json"
     supervisor_json.write_text(
         json.dumps(
-            _supervisor_packet(
+            _supervisor_artifact(
                 "supervisor_blocked",
                 stop_reason="forbidden_effect_detected",
                 cycles=[_cycle(1, "blocked", forbidden_effects=["exchange_write_called"])],
@@ -165,7 +169,7 @@ def test_cli_writes_summary_and_returns_blocked_exit_code(tmp_path, capsys):
     assert json.loads(output_json.read_text())["status"] == "operator_supervisor_blocked"
 
 
-def _supervisor_packet(
+def _supervisor_artifact(
     status,
     *,
     stop_reason,
@@ -201,7 +205,7 @@ def _supervisor_packet(
         "cycle_summaries": cycles,
         "blockers": blockers or [],
         "warnings": [],
-        "operator_command_plan": {"next_step": "source"},
+        "summary_plan": {"next_step": "source"},
         "safety_invariants": source_safety,
     }
 

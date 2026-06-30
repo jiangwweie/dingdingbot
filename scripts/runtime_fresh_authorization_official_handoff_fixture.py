@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build a local fresh-authorization -> official handoff fixture for RTF-059.
 
-The fixture starts from a ready executable-readiness packet, then proves:
+The fixture starts from a ready executable-readiness artifact, then proves:
 
-readiness packet
+readiness artifact
 -> blocked official handoff without fresh authorization
 -> fresh authorization binding
 -> ready official handoff with the fresh authorization
@@ -65,11 +65,11 @@ def _paths(root: Path) -> dict[str, Path]:
 def _readiness_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "api_payload": {
-            "packet_id": "readiness-rtf059",
+            "artifact_id": "readiness-rtf059",
             "runtime_instance_id": args.runtime_instance_id,
-            "source_strategy_planning_packet_id": "strategy-plan-rtf059",
+            "source_strategy_planning_artifact_id": "strategy-plan-rtf059",
             "source_authorization_id": "consumed-submit-auth-rtf059",
-            "source_release_packet_id": "post-submit-rtf059",
+            "source_release_evidence_id": "post-submit-rtf059",
             "strategy_planning_status": "ready_for_final_gate_preflight",
             "signal_evaluation_id": "signal-rtf059",
             "order_candidate_id": "order-candidate-rtf059",
@@ -137,11 +137,11 @@ def _build_handoff(
 def _binding_args(
     args: argparse.Namespace,
     *,
-    handoff_json: Path,
+    handoff_artifact_json: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
-        handoff_json=str(handoff_json),
+        handoff_artifact_json=str(handoff_artifact_json),
         requested_fresh_submit_authorization_id=args.requested_fresh_submit_authorization_id,
         allow_create_from_existing_intent=True,
         allow_create_intent_from_latest_draft=True,
@@ -155,11 +155,11 @@ def _binding_args(
 def _disabled_smoke_args(
     args: argparse.Namespace,
     *,
-    handoff_json: Path,
+    handoff_artifact_json: Path,
     output: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        handoff_json=str(handoff_json),
+        handoff_artifact_json=str(handoff_artifact_json),
         output=str(output),
         env_file=None,
         api_base=args.api_base,
@@ -236,7 +236,7 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     binding_client = _BindingClient(authorization_id=args.fixture_fresh_authorization_id)
     binding = binding_flow._build_report(
-        _binding_args(args, handoff_json=paths["initial_handoff"]),
+        _binding_args(args, handoff_artifact_json=paths["initial_handoff"]),
         client=binding_client,
     )
     _write_json(paths["binding"], binding)
@@ -257,16 +257,14 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
     disabled_smoke = disabled_smoke_flow._build_report(
         _disabled_smoke_args(
             args,
-            handoff_json=paths["final_handoff"],
+            handoff_artifact_json=paths["final_handoff"],
             output=paths["disabled_smoke"],
         ),
         client=disabled_client,
     )
     _write_json(paths["disabled_smoke"], disabled_smoke)
 
-    final_handoff_packet = final_handoff.get("packet")
-    if not isinstance(final_handoff_packet, dict):
-        final_handoff_packet = {}
+    final_handoff_artifact = _handoff_artifact(final_handoff)
     status = (
         "ready_fresh_authorization_official_handoff_fixture"
         if binding.get("status")
@@ -275,7 +273,7 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
             "created_authorization",
             "created_intent_and_authorization",
         }
-        and final_handoff_packet.get("status") == "ready_for_official_submit_call"
+        and final_handoff_artifact.get("status") == "ready_for_official_submit_call"
         and disabled_smoke.get("status") == "disabled_smoke_passed"
         else "blocked_fresh_authorization_official_handoff_fixture"
     )
@@ -286,9 +284,9 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
         "artifact_dir": str(artifact_dir),
         "artifact_paths": {key: str(value) for key, value in paths.items()},
         "stage_statuses": {
-            "initial_handoff": (initial_handoff.get("packet") or {}).get("status"),
+            "initial_handoff": _handoff_artifact(initial_handoff).get("status"),
             "binding": binding.get("status"),
-            "final_handoff": final_handoff_packet.get("status"),
+            "final_handoff": final_handoff_artifact.get("status"),
             "disabled_smoke": disabled_smoke.get("status"),
         },
         "fresh_submit_authorization_id": fresh_authorization_id,
@@ -305,10 +303,10 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
             "disabled_smoke": [call["path"] for call in disabled_client.calls],
         },
         "blockers": list(binding.get("blockers") or [])
-        + list(final_handoff_packet.get("blockers") or [])
+        + list(final_handoff_artifact.get("blockers") or [])
         + list(disabled_smoke.get("blockers") or []),
         "warnings": list(binding.get("warnings") or [])
-        + list(final_handoff_packet.get("warnings") or [])
+        + list(final_handoff_artifact.get("warnings") or [])
         + list(disabled_smoke.get("warnings") or []),
         "safety_invariants": {
             "uses_fake_binding_client": True,
@@ -352,6 +350,13 @@ def _build_report(args: argparse.Namespace) -> dict[str, Any]:
     if args.output:
         _write_json(Path(args.output).expanduser(), report)
     return report
+
+
+def _handoff_artifact(report: dict[str, Any]) -> dict[str, Any]:
+    artifact = report.get("handoff_artifact")
+    if isinstance(artifact, dict):
+        return artifact
+    return {}
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

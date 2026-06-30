@@ -22,7 +22,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.domain.strategygroup_runtime_replay import (  # noqa: E402
     ReplayReviewRecommendation,
     StrategyGroupReplayReport,
-    build_mpg001_replay_lab_packet,
+    build_mpg001_replay_lab_report,
 )
 
 
@@ -62,19 +62,19 @@ def _count_revise(items: list[object]) -> int:
 
 
 def _strategygroup_replay_review_rows(
-    packet: StrategyGroupReplayReport,
+    report: StrategyGroupReplayReport,
 ) -> list[dict[str, object]]:
     groups = [
         (
             "MPG-001",
             "L4 replay baseline",
-            packet.replay_samples,
+            report.replay_samples,
             "dry-run only; live order still requires real fresh signal and official chain",
         ),
         (
             "BTPC-001",
             "L2 shadow",
-            packet.l2_shadow_replay_samples,
+            report.l2_shadow_replay_samples,
             "shadow evidence only; no Operation Layer",
         ),
         (
@@ -82,7 +82,7 @@ def _strategygroup_replay_review_rows(
             "L1 observe",
             [
                 item
-                for item in packet.l1_observe_replay_samples
+                for item in report.l1_observe_replay_samples
                 if item.strategy_group_id == "BRF-001"
             ],
             "observe-only; no prepare chain",
@@ -92,7 +92,7 @@ def _strategygroup_replay_review_rows(
             "L1 observe",
             [
                 item
-                for item in packet.l1_observe_replay_samples
+                for item in report.l1_observe_replay_samples
                 if item.strategy_group_id == "VCB-001"
             ],
             "observe-only; no prepare chain",
@@ -102,7 +102,7 @@ def _strategygroup_replay_review_rows(
             "L1 observe",
             [
                 item
-                for item in packet.l1_observe_replay_samples
+                for item in report.l1_observe_replay_samples
                 if item.strategy_group_id == "LSR-001"
             ],
             "observe-only; no prepare chain",
@@ -122,16 +122,16 @@ def _strategygroup_replay_review_rows(
     ]
 
 
-def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
+def _owner_markdown(report: StrategyGroupReplayReport) -> str:
     fixture_cases = ", ".join(
-        sorted(item.fixture_case for item in packet.synthetic_fixtures)
+        sorted(item.fixture_case for item in report.synthetic_fixtures)
     )
-    review_rows = _strategygroup_replay_review_rows(packet)
+    review_rows = _strategygroup_replay_review_rows(report)
     lines = [
         "## Runtime Replay Lab",
         "",
-        f"- 当前阶段: {packet.owner_summary.current_state}",
-        "- 当前动作: 本地 replay / synthetic 演练",
+        f"- 当前阶段: {report.owner_summary.current_state}",
+        f"- 当前检查点: {report.owner_summary.non_authority_checkpoint}",
         "- Owner 介入: 否",
         "- 服务器修改: 否",
         "- 接近真实订单: 否",
@@ -139,11 +139,11 @@ def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
         "",
         "## Coverage",
         "",
-        f"- StrategyGroup: {packet.strategy_group_id}",
-        f"- Replay samples: {len(packet.replay_samples)}",
-        f"- L2 shadow replay samples: {len(packet.l2_shadow_replay_samples)}",
-        f"- L1 observe replay samples: {len(packet.l1_observe_replay_samples)}",
-        f"- Post-submit simulator cases: {len(packet.post_submit_simulator_matrix)}",
+        f"- StrategyGroup: {report.strategy_group_id}",
+        f"- Replay samples: {len(report.replay_samples)}",
+        f"- L2 shadow replay samples: {len(report.l2_shadow_replay_samples)}",
+        f"- L1 observe replay samples: {len(report.l1_observe_replay_samples)}",
+        f"- Post-submit simulator cases: {len(report.post_submit_simulator_matrix)}",
         "- Cost review skeleton: present",
         f"- Synthetic fixtures: {fixture_cases}",
         "- Freqtrade: future sidecar research adapter only",
@@ -171,7 +171,7 @@ def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
             "",
         ]
     )
-    for name, ok in sorted(packet.checks.items()):
+    for name, ok in sorted(report.checks.items()):
         lines.append(f"- {name}: {'是' if ok else '否'}")
     lines.extend(
         [
@@ -185,8 +185,8 @@ def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_packet() -> StrategyGroupReplayReport:
-    return build_mpg001_replay_lab_packet(generated_at_ms=int(time.time() * 1000))
+def build_report() -> StrategyGroupReplayReport:
+    return build_mpg001_replay_lab_report(generated_at_ms=int(time.time() * 1000))
 
 
 def main() -> int:
@@ -197,17 +197,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    packet = build_packet()
-    payload = packet.model_dump(mode="json")
+    report = build_report()
+    payload = report.model_dump(mode="json")
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     args.output_owner_progress.parent.mkdir(parents=True, exist_ok=True)
-    args.output_owner_progress.write_text(_owner_markdown(packet), encoding="utf-8")
+    args.output_owner_progress.write_text(_owner_markdown(report), encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if packet.status == "passed" else 1
+    return 0 if report.status == "passed" else 1
 
 
 if __name__ == "__main__":

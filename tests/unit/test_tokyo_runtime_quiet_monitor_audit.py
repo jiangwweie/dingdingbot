@@ -42,7 +42,7 @@ def _prompt_text():
         "DONT_NOTIFY waiting_for_market not_complete_waiting_for_market "
         "blockers none non-market gaps none remote interaction count 0 "
         "fresh/runtime-ready signal "
-        "Do not advance frontend or historical-debt cleanup"
+        "Do not advance external-client release or historical-debt cleanup"
     )
 
 
@@ -58,6 +58,11 @@ def test_quiet_monitor_audit_passes_when_prompt_matches_baseline(tmp_path):
     assert report["status"] == "ready"
     assert report["interaction"]["level"] == "L0_local_automation_audit"
     assert report["interaction"]["remote_interaction_count"] == 0
+    assert "current_action" not in report["owner_summary"]
+    assert report["owner_summary"]["non_authority_checkpoint"] == "继续低噪音监控"
+    assert report["owner_summary"]["checkpoint_source"] == (
+        "quiet_monitor_audit_projection"
+    )
     assert report["checks"]["blockers"] == []
     assert all(check["status"] == "pass" for check in report["required_checks"])
     checks = {check["id"]: check for check in report["required_checks"]}
@@ -128,6 +133,7 @@ def test_quiet_monitor_owner_progress_is_readable(tmp_path):
 
     assert "## Tokyo Runtime Quiet Monitor Audit" in text
     assert "- 当前阶段: 自动化配置已对齐" in text
+    assert "- 当前检查点: 继续低噪音监控" in text
     assert "- 交互等级: L0_local_automation_audit" in text
     assert "- 远端交互次数: 0" in text
     assert "| local_monitor_sequence_check | pass |" in text
@@ -162,6 +168,10 @@ def test_quiet_monitor_cli_writes_json_and_owner_progress(tmp_path):
     assert exit_code == 0
     payload = json.loads(output_json.read_text(encoding="utf-8"))
     assert payload["status"] == "ready"
+    assert "current_action" not in payload["owner_summary"]
+    assert payload["owner_summary"]["non_authority_checkpoint"] == (
+        "继续低噪音监控"
+    )
     assert payload["interaction"]["remote_interaction_count"] == 0
     progress = output_md.read_text(encoding="utf-8")
     assert "## Tokyo Runtime Quiet Monitor Audit" in progress

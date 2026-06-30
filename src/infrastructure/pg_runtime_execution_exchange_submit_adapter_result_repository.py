@@ -115,7 +115,7 @@ class PgRuntimeExecutionExchangeSubmitAdapterResultRepository:
             adapter_result_id=result.adapter_result_id,
             enablement_decision_id=result.enablement_decision_id,
             gate_id=result.gate_id,
-            packet_preview_id=result.packet_preview_id,
+            submit_preview_id=result.submit_preview_id,
             binding_id=result.binding_id,
             local_registration_adapter_result_id=(
                 result.local_registration_adapter_result_id
@@ -188,7 +188,7 @@ class PgRuntimeExecutionExchangeSubmitAdapterResultRepository:
             adapter_result_id=row.adapter_result_id,
             enablement_decision_id=row.enablement_decision_id,
             gate_id=row.gate_id,
-            packet_preview_id=row.packet_preview_id,
+            submit_preview_id=row.submit_preview_id,
             binding_id=row.binding_id,
             local_registration_adapter_result_id=(
                 row.local_registration_adapter_result_id

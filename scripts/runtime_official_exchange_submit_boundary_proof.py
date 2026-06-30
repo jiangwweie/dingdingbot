@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Official exchange-submit packet and action-boundary proof.
+"""Official exchange-submit artifact and action-boundary proof.
 
 RTF-085 extends the RTF-084 scoped local CREATED-order registration proof into
-the exchange-submit boundary. It builds the exchange submit packet preview,
+the exchange-submit boundary. It builds the exchange submit preview,
 records scoped exchange-submit action authorization, verifies exchange-submit
 enablement, and acquires the exchange-submit adapter lock. It does not call
 ExchangeGateway, submit exchange orders, call OrderLifecycle.submit_order,
@@ -116,12 +116,12 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 prepare_report=prepare_report,
                 state=state,
             )
-            exchange_packet_preview = _request(
+            exchange_submit_preview = _request(
                 api_client,
                 "GET",
                 (
                     "/api/trading-console/"
-                    "runtime-execution-exchange-submit-packet-previews/"
+                    "runtime-execution-exchange-submit-previews/"
                     f"authorizations/{authorization_id}"
                 ),
             )
@@ -185,11 +185,11 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 },
             )
 
-    packet = _exchange_submit_boundary_packet(
+    exchange_boundary_artifact = _exchange_submit_boundary_artifact(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
         local_stage=local_stage,
-        exchange_packet_preview=exchange_packet_preview,
+        exchange_submit_preview=exchange_submit_preview,
         exchange_action_authorization=exchange_action_authorization,
         exchange_submit_enablement=exchange_submit_enablement,
         exchange_adapter_result=exchange_adapter_result,
@@ -216,11 +216,11 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
             "local_registration_enablement"
         ],
         "local-registration-adapter-result.json": local_stage["adapter_result"],
-        "exchange-submit-packet-preview.json": exchange_packet_preview,
+        "exchange-submit-preview.json": exchange_submit_preview,
         "exchange-submit-action-authorization.json": exchange_action_authorization,
         "exchange-submit-enablement.json": exchange_submit_enablement,
         "exchange-submit-adapter-result.json": exchange_adapter_result,
-        "exchange-submit-boundary-packet.json": packet,
+        "exchange-submit-boundary-artifact.json": exchange_boundary_artifact,
     }
     for name, payload in artifacts.items():
         _write_json(output_dir / name, payload)
@@ -229,39 +229,47 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "scope": "runtime_official_exchange_submit_boundary_proof",
         "status": (
             "official_exchange_submit_boundary_passed"
-            if _contract_passed(packet["checks"])
+            if _contract_passed(exchange_boundary_artifact["checks"])
             else "blocked"
         ),
         "runtime_instance_id": "runtime-rtf075-cpm-long",
         "order_candidate_id": "order-candidate-rtf075-contract",
-        "authorization_id": (packet["ids"] or {}).get("authorization_id"),
-        "execution_intent_id": (packet["ids"] or {}).get("execution_intent_id"),
-        "exchange_submit_packet_preview_id": (packet["ids"] or {}).get(
-            "exchange_submit_packet_preview_id"
-        ),
-        "exchange_submit_action_authorization_id": (packet["ids"] or {}).get(
-            "exchange_submit_action_authorization_id"
-        ),
-        "exchange_submit_enablement_decision_id": (packet["ids"] or {}).get(
+        "authorization_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get("authorization_id"),
+        "execution_intent_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get("execution_intent_id"),
+        "exchange_submit_preview_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get("exchange_submit_preview_id"),
+        "exchange_submit_action_authorization_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get("exchange_submit_action_authorization_id"),
+        "exchange_submit_enablement_decision_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get(
             "exchange_submit_enablement_decision_id"
         ),
-        "exchange_submit_adapter_result_id": (packet["ids"] or {}).get(
+        "exchange_submit_adapter_result_id": (
+            exchange_boundary_artifact["ids"] or {}
+        ).get(
             "exchange_submit_adapter_result_id"
         ),
-        "exchange_submit_boundary_packet": packet,
+        "exchange_submit_boundary_artifact": exchange_boundary_artifact,
         "shadow_contract": shadow_report,
         "first_real_submit_prepare_report": prepare_report,
         "local_registration_stage": local_stage,
-        "exchange_submit_packet_preview": exchange_packet_preview,
+        "exchange_submit_preview": exchange_submit_preview,
         "exchange_submit_action_authorization": exchange_action_authorization,
         "exchange_submit_enablement": exchange_submit_enablement,
         "exchange_submit_adapter_result": exchange_adapter_result,
-        "checks": packet["checks"],
-        "safety_invariants": packet["safety_invariants"],
-        "operator_command_plan": {
+        "checks": exchange_boundary_artifact["checks"],
+        "safety_invariants": exchange_boundary_artifact["safety_invariants"],
+        "exchange_submit_boundary_plan": {
             "next_step": (
                 "build_exchange_submit_execution_result_boundary"
-                if _contract_passed(packet["checks"])
+                if _contract_passed(exchange_boundary_artifact["checks"])
                 else "resolve_exchange_submit_boundary_blockers"
             ),
             "uses_official_fastapi_routes": True,
@@ -275,7 +283,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         "right_tail_objective_context": {
             "small_bounded_losses_allowed_after_runtime_gate": True,
             "attempt_budget_prefers_max_loss_reference": (
-                packet["runtime_attempt_budget_boundary"].get(
+                exchange_boundary_artifact["runtime_attempt_budget_boundary"].get(
                     "budget_reservation_basis"
                 )
                 == "max_loss_reference"
@@ -573,12 +581,12 @@ def _exchange_evidence_ids(
     }
 
 
-def _exchange_submit_boundary_packet(
+def _exchange_submit_boundary_artifact(
     *,
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
     local_stage: dict[str, Any],
-    exchange_packet_preview: dict[str, Any],
+    exchange_submit_preview: dict[str, Any],
     exchange_action_authorization: dict[str, Any],
     exchange_submit_enablement: dict[str, Any],
     exchange_adapter_result: dict[str, Any],
@@ -589,21 +597,21 @@ def _exchange_submit_boundary_packet(
         shadow_report=shadow_report,
         prepare_report=prepare_report,
         local_stage=local_stage,
-        exchange_packet_preview=exchange_packet_preview,
+        exchange_submit_preview=exchange_submit_preview,
         exchange_action_authorization=exchange_action_authorization,
         exchange_submit_enablement=exchange_submit_enablement,
         exchange_adapter_result=exchange_adapter_result,
         lifecycle=lifecycle,
         exchange_adapter_result_repo=exchange_adapter_result_repo,
     )
-    exchange_packet_body = _body(exchange_packet_preview)
+    exchange_preview_body = _body(exchange_submit_preview)
     action_body = _body(exchange_action_authorization)
     enablement_body = _body(exchange_submit_enablement)
     adapter_body = _body(exchange_adapter_result)
     local_adapter_body = _body(local_stage["adapter_result"])
     mutation_body = _body(local_stage["attempt_mutation"])
     return {
-        "scope": "runtime_official_exchange_submit_boundary_packet",
+        "scope": "runtime_official_exchange_submit_boundary_artifact",
         "status": (
             "exchange_submit_adapter_armed_boundary"
             if _contract_passed(checks)
@@ -624,8 +632,8 @@ def _exchange_submit_boundary_packet(
             "local_registration_adapter_result_id": local_adapter_body.get(
                 "adapter_result_id"
             ),
-            "exchange_submit_packet_preview_id": exchange_packet_body.get(
-                "packet_preview_id"
+            "exchange_submit_preview_id": exchange_preview_body.get(
+                "submit_preview_id"
             ),
             "exchange_submit_action_authorization_id": action_body.get(
                 "action_authorization_id"
@@ -639,26 +647,26 @@ def _exchange_submit_boundary_packet(
         },
         "statuses": {
             "local_registration_adapter_result": local_adapter_body.get("status"),
-            "exchange_submit_packet_preview": exchange_packet_body.get("status"),
+            "exchange_submit_preview": exchange_preview_body.get("status"),
             "exchange_submit_action_authorization": action_body.get("status"),
             "exchange_submit_enablement": enablement_body.get("status"),
             "exchange_submit_adapter_result": adapter_body.get("status"),
         },
-        "exchange_submit_packet": {
-            "local_order_count": exchange_packet_body.get("local_order_count"),
+        "exchange_submit_preview": {
+            "local_order_count": exchange_preview_body.get("local_order_count"),
             "submit_request_count": len(
-                exchange_packet_body.get("submit_request_previews") or []
+                exchange_preview_body.get("submit_request_previews") or []
             ),
-            "entry_submit_request_count": exchange_packet_body.get(
+            "entry_submit_request_count": exchange_preview_body.get(
                 "entry_submit_request_count"
             ),
-            "protection_submit_request_count": exchange_packet_body.get(
+            "protection_submit_request_count": exchange_preview_body.get(
                 "protection_submit_request_count"
             ),
-            "entry_order_id": exchange_packet_body.get("entry_order_id"),
-            "local_order_ids": list(exchange_packet_body.get("local_order_ids") or []),
+            "entry_order_id": exchange_preview_body.get("entry_order_id"),
+            "local_order_ids": list(exchange_preview_body.get("local_order_ids") or []),
             "protection_order_ids": list(
-                exchange_packet_body.get("protection_order_ids") or []
+                exchange_preview_body.get("protection_order_ids") or []
             ),
             "exchange_payload_created": False,
             "exchange_order_id_assigned": False,
@@ -723,7 +731,7 @@ def _checks(
     shadow_report: dict[str, Any],
     prepare_report: dict[str, Any],
     local_stage: dict[str, Any],
-    exchange_packet_preview: dict[str, Any],
+    exchange_submit_preview: dict[str, Any],
     exchange_action_authorization: dict[str, Any],
     exchange_submit_enablement: dict[str, Any],
     exchange_adapter_result: dict[str, Any],
@@ -731,7 +739,7 @@ def _checks(
     exchange_adapter_result_repo: _ExchangeSubmitAdapterResultRepo,
 ) -> dict[str, bool]:
     local_adapter_body = _body(local_stage["adapter_result"])
-    packet_body = _body(exchange_packet_preview)
+    preview_body = _body(exchange_submit_preview)
     action_body = _body(exchange_action_authorization)
     enablement_body = _body(exchange_submit_enablement)
     adapter_body = _body(exchange_adapter_result)
@@ -754,22 +762,22 @@ def _checks(
         "local_registered_two_orders": (
             local_adapter_body.get("registered_order_count") == 2
         ),
-        "local_orders_available_for_packet": len(lifecycle.orders) == 2,
+        "local_orders_available_for_exchange_preview": len(lifecycle.orders) == 2,
         "local_order_lifecycle_submit_not_called": len(lifecycle.submit_calls) == 0,
-        "exchange_packet_preview_ready": (
-            packet_body.get("status")
+        "exchange_submit_preview_ready": (
+            preview_body.get("status")
             == "ready_for_exchange_submit_adapter_design"
         ),
-        "exchange_packet_has_two_requests": (
-            len(packet_body.get("submit_request_previews") or []) == 2
+        "exchange_preview_has_two_requests": (
+            len(preview_body.get("submit_request_previews") or []) == 2
         ),
-        "exchange_packet_has_entry_request": (
-            packet_body.get("entry_submit_request_count") == 1
+        "exchange_preview_has_entry_request": (
+            preview_body.get("entry_submit_request_count") == 1
         ),
-        "exchange_packet_has_protection_request": (
-            packet_body.get("protection_submit_request_count") == 1
+        "exchange_preview_has_protection_request": (
+            preview_body.get("protection_submit_request_count") == 1
         ),
-        "exchange_packet_preview_only": packet_body.get("preview_only") is True,
+        "exchange_submit_preview_only": preview_body.get("preview_only") is True,
         "exchange_action_authorization_approved": (
             action_body.get("status") == "approved_for_exchange_submit_action"
         ),
@@ -813,13 +821,13 @@ def _contract_passed(checks: dict[str, bool]) -> bool:
         "prepare_authorization_created",
         "local_adapter_registered_created_orders",
         "local_registered_two_orders",
-        "local_orders_available_for_packet",
+        "local_orders_available_for_exchange_preview",
         "local_order_lifecycle_submit_not_called",
-        "exchange_packet_preview_ready",
-        "exchange_packet_has_two_requests",
-        "exchange_packet_has_entry_request",
-        "exchange_packet_has_protection_request",
-        "exchange_packet_preview_only",
+        "exchange_submit_preview_ready",
+        "exchange_preview_has_two_requests",
+        "exchange_preview_has_entry_request",
+        "exchange_preview_has_protection_request",
+        "exchange_submit_preview_only",
         "exchange_action_authorization_approved",
         "exchange_enablement_ready",
         "exchange_adapter_result_armed",

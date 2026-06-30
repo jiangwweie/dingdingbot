@@ -156,7 +156,7 @@ class SignalResult(BaseModel):
     pnl_ratio: Optional[Decimal] = None  # Profit/Loss ratio (positive for win e.g. Decimal("1.5"), negative for loss e.g. Decimal("-1.0"))
     kline_timestamp: int = 0     # K-line close timestamp in milliseconds (default 0 for legacy compatibility)
     strategy_name: str = "unknown"  # Strategy name that generated this signal (e.g., "pinbar", "engulfing")
-    score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for UI display and sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
+    score: float = 0.0           # Pattern quality score (0.0 ~ 1.0). **NOTE**: This is for presentation sorting only, NOT for financial calculations. Financial calculations use Decimal exclusively.
 
     # Multi-level take profit (S6-3)
     take_profit_levels: List[Dict[str, str]] = Field(
@@ -1578,7 +1578,13 @@ class ImportedOrder(FinancialModel):
     trigger_price: Optional[Decimal] = None
     reduce_only: bool = False
     imported_at: int = Field(..., description="导入时间戳（毫秒）")
-    action_taken: str = Field(..., description="处理动作：'IMPORTED_TO_DB' 或 'CANCELLED'")
+    action_taken: str = Field(
+        ...,
+        description=(
+            "处理动作：'IMPORTED_TO_DB'、'IMPORT_NOT_AVAILABLE'、"
+            "'IMPORT_FAILED' 或 'CANCELLED'"
+        ),
+    )
 
 
 class ReconciliationReport(FinancialModel):
@@ -1805,7 +1811,7 @@ class OrderTreeNode(BaseModel):
     - order: 订单详情
     - children: 子订单列表（TP1-TP5, SL）
     - level: 层级深度（0=根节点 ENTRY，1=子订单）
-    - has_children: 是否有子订单（用于 UI 展示展开图标）
+    - has_children: 是否有子订单（用于展示展开标记）
     """
     order: Dict[str, Any] = Field(..., description="订单详情（OrderResponseFull 字典）")
     children: List['OrderTreeNode'] = Field(default_factory=list, description="子订单列表")

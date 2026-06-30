@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from scripts import build_runtime_strategy_signal_input_packet
+from scripts import build_runtime_strategy_signal_input_artifact
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
     StrategyRuntimeInstance,
@@ -192,7 +192,7 @@ async def test_next_attempt_observation_api_blocks_before_signal_when_gate_block
         owner_flow_service=owner_flow_service,
     )
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_packet,
+        build_runtime_strategy_signal_input_artifact,
         "_market_source",
         lambda args: pytest.fail("signal market source must not run when gate blocks"),
     )
@@ -206,7 +206,8 @@ async def test_next_attempt_observation_api_blocks_before_signal_when_gate_block
 
     assert payload["status"] == "blocked"
     assert payload["blocked_stage"] == "next_attempt_gate"
-    assert payload["operator_command_plan"]["creates_execution_intent"] is False
+    assert "operator_command_plan" not in payload
+    assert payload["observation_cycle_plan"]["creates_execution_intent"] is False
     assert payload["safety_invariants"]["exchange_write_called"] is False
 
 
@@ -220,7 +221,7 @@ async def test_next_attempt_observation_api_waits_for_observe_only_signal(monkey
         owner_flow_service=owner_flow_service,
     )
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_packet,
+        build_runtime_strategy_signal_input_artifact,
         "_market_source",
         lambda args: _Source(),
     )
@@ -234,11 +235,12 @@ async def test_next_attempt_observation_api_waits_for_observe_only_signal(monkey
 
     assert payload["status"] == "waiting_for_signal"
     assert payload["blocked_stage"] == "strategy_signal"
-    assert payload["signal_packet"]["status"] == "observe_only"
-    assert payload["operator_command_plan"]["next_step"] == (
+    assert payload["signal_artifact"]["status"] == "observe_only"
+    assert "operator_command_plan" not in payload
+    assert payload["observation_cycle_plan"]["next_step"] == (
         "observe_only_or_wait_for_next_closed_bar"
     )
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
+    assert payload["observation_cycle_plan"]["creates_shadow_candidate"] is False
     assert payload["safety_invariants"]["execution_intent_created"] is False
 
 
@@ -254,7 +256,7 @@ async def test_next_attempt_observation_api_waits_without_entry_signal(
         owner_flow_service=owner_flow_service,
     )
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_packet,
+        build_runtime_strategy_signal_input_artifact,
         "_market_source",
         lambda args: _Source(),
     )
@@ -267,12 +269,13 @@ async def test_next_attempt_observation_api_waits_without_entry_signal(
     )
 
     assert payload["status"] == "waiting_for_signal"
-    assert payload["signal_packet"]["status"] == "observe_only"
-    assert payload["operator_command_plan"]["next_step"] == (
+    assert payload["signal_artifact"]["status"] == "observe_only"
+    assert "operator_command_plan" not in payload
+    assert payload["observation_cycle_plan"]["next_step"] == (
         "observe_only_or_wait_for_next_closed_bar"
     )
-    assert payload["operator_command_plan"]["creates_shadow_candidate"] is False
-    assert payload["operator_command_plan"]["creates_execution_intent"] is False
+    assert payload["observation_cycle_plan"]["creates_shadow_candidate"] is False
+    assert payload["observation_cycle_plan"]["creates_execution_intent"] is False
     assert payload["safety_invariants"]["order_created"] is False
     assert payload["safety_invariants"]["order_lifecycle_called"] is False
 

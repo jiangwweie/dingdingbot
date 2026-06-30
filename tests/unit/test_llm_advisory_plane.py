@@ -15,9 +15,9 @@ from src.application.llm_advisory_plane import (
 )
 from src.application.llm_advisory_cards import build_feishu_advisory_card
 from src.application.llm_advisory_safety import evaluate_llm_advisory_output_safety
-from src.application.llm_context_packet_builder import (
-    build_llm_context_packet,
-    build_trade_review_context_packet,
+from src.application.llm_advisory_context_artifact_builder import (
+    build_llm_advisory_context_artifact,
+    build_trade_review_context_artifact,
 )
 from src.domain.llm_advisory import (
     LlmAdvisoryAllowedAction,
@@ -27,7 +27,7 @@ from src.domain.llm_advisory import (
     LlmAdvisoryStatus,
     LlmConsumableEvent,
     LlmConsumableEventType,
-    LlmContextPacket,
+    LlmAdvisoryContextArtifact,
     LlmFeishuCardType,
 )
 from src.domain.right_tail_review import (
@@ -123,8 +123,8 @@ def _event(*, strategy_family_ids: list[str] | None = None) -> LlmConsumableEven
         timeframe="1h",
         strategy_family_ids=strategy_family_ids or ["BRF-001"],
         occurred_at_ms=now,
-        context_packet=LlmContextPacket(
-            packet_id="packet-1",
+        context_artifact=LlmAdvisoryContextArtifact(
+            artifact_id="artifact-1",
             produced_at_ms=now,
             market={"ema60_relation": "below"},
             strategies={"eligible": strategy_family_ids or ["BRF-001"]},
@@ -234,21 +234,43 @@ def test_llm_advisory_recommendation_rejects_execution_authority_flags():
         )
 
 
-def test_llm_context_packet_builder_marks_push_only_safety_boundary():
-    packet = build_llm_context_packet(
-        raw_packet={"market": {"state": "trend_down"}},
+def test_llm_advisory_context_artifact_builder_marks_push_only_safety_boundary():
+    artifact = build_llm_advisory_context_artifact(
+        raw_artifact={"market": {"state": "trend_down"}},
         now_ms=123,
-        fallback_packet_id="packet-builder-test",
+        default_artifact_id="artifact-builder-test",
         runtime={"budget_remaining": "12"},
         strategies={"eligible": ["BRF-001"]},
         audit={"final_gate": "pass"},
     )
 
-    assert packet.packet_id == "packet-builder-test"
-    assert packet.market == {"state": "trend_down"}
-    assert packet.runtime["budget_remaining"] == "12"
-    assert packet.safety["llm_not_execution_authority"] is True
-    assert packet.safety["feishu_push_only"] is True
+    assert artifact.artifact_id == "artifact-builder-test"
+    assert artifact.market == {"state": "trend_down"}
+    assert artifact.runtime["budget_remaining"] == "12"
+    assert artifact.safety["llm_not_execution_authority"] is True
+    assert artifact.safety["feishu_push_only"] is True
+    dumped = artifact.model_dump(mode="json")
+    assert "artifact_id" in dumped
+    assert "packet_id" not in dumped
+
+
+def test_llm_advisory_context_artifact_builder_ignores_legacy_packet_id_input():
+    artifact = build_llm_advisory_context_artifact(
+        raw_artifact={"packet_id": "legacy-packet-id"},
+        now_ms=123,
+        default_artifact_id="artifact-from-current-boundary",
+    )
+
+    assert artifact.artifact_id == "artifact-from-current-boundary"
+    assert "packet_id" not in artifact.model_dump(mode="json")
+
+
+def test_llm_advisory_context_artifact_builder_rejects_legacy_fallback_kwarg():
+    with pytest.raises(TypeError):
+        build_llm_advisory_context_artifact(
+            now_ms=123,
+            fallback_artifact_id="legacy-fallback-id",  # type: ignore[call-arg]
+        )
 
 
 def test_llm_advisory_api_records_push_only_event_without_execution_side_effects():
@@ -267,7 +289,7 @@ def test_llm_advisory_api_records_push_only_event_without_execution_side_effects
                 "event_type": "owner_requested_analysis",
                 "source_type": "unit_test",
                 "source_id": "owner-note-1",
-                "context_packet": {
+                "context_artifact": {
                     "audit": {"question": "summarize blockers"},
                 },
                 "allowed_llm_actions": ["summarize_audit"],
@@ -279,6 +301,8 @@ def test_llm_advisory_api_records_push_only_event_without_execution_side_effects
     payload = response.json()
     assert payload["live_ready"] is False
     assert payload["event"]["not_execution_authority"] is True
+    assert "context_artifact" in payload["event"]
+    assert "context_packet" not in payload["event"]
     assert payload["event"]["execution_intent_created"] is False
     assert payload["event"]["order_created"] is False
     assert payload["event"]["exchange_called"] is False
@@ -371,7 +395,7 @@ def test_feishu_card_template_is_push_only_and_review_oriented():
     assert "No ExecutionIntent" in message
 
 
-def test_trade_review_context_packet_includes_right_tail_summary():
+def test_trade_review_context_artifact_includes_right_tail_summary():
     summary = summarize_right_tail_reviews(
         [
             RightTailTradePathFacts(
@@ -405,17 +429,17 @@ def test_trade_review_context_packet_includes_right_tail_summary():
         ]
     )
 
-    packet = build_trade_review_context_packet(
+    artifact = build_trade_review_context_artifact(
         summary=summary,
         now_ms=456,
-        packet_id="trade-review-packet",
+        artifact_id="trade-review-artifact",
     )
 
-    right_tail = packet.review["right_tail_review"]
+    right_tail = artifact.review["right_tail_review"]
     assert right_tail["right_tail_win_count"] == 1
     assert right_tail["small_loss_count"] == 1
     assert right_tail["payoff_asymmetry_present"] is True
-    assert packet.review["manual_owner_withdrawal_outside_system"] is True
+    assert artifact.review["manual_owner_withdrawal_outside_system"] is True
 
 
 @pytest.mark.asyncio

@@ -74,7 +74,7 @@ async def test_live_lifecycle_review_repository_appends_and_lists(repo):
     assert listed[0].places_order is False
     assert listed[0].mutates_exchange is False
     assert listed[0].grants_trading_permission is False
-    assert listed[0].frontend_action_enabled is False
+    assert listed[0].owner_action_enabled is False
 
 
 def test_live_lifecycle_review_record_rejects_action_authority():

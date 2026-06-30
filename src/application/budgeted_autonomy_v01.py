@@ -50,7 +50,7 @@ class BudgetedAutonomyV01Evaluation(BudgetedAutonomyModel):
     retry_condition: str
     action_allowed: Literal[False] = False
     backend_actionable: Literal[False] = False
-    frontend_action_enabled: Literal[False] = False
+    owner_action_enabled: Literal[False] = False
     auto_execution_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
     creates_authorization: Literal[False] = False
@@ -139,7 +139,7 @@ def _policy_blockers(
                     f"attempts_used={daily_state.attempts_used} "
                     f"attempts_allowed={daily_state.attempts_allowed}"
                 ),
-                bridge="Keep new budgeted actions disabled for the rest of the budget day.",
+                recovery_action="Keep new budgeted actions disabled for the rest of the budget day.",
                 retry_condition="Wait for the next budget day or Owner creates a fresh scoped budget.",
             )
         )
@@ -151,7 +151,7 @@ def _policy_blockers(
                     f"realized_loss={daily_state.realized_loss} "
                     f"daily_loss_cap={authorization.daily_loss_cap}"
                 ),
-                bridge="Pause budgeted actions after daily loss cap is reached.",
+                recovery_action="Pause budgeted actions after daily loss cap is reached.",
                 retry_condition="Owner review resets or replaces the budget after loss-cap review.",
             )
         )
@@ -165,7 +165,7 @@ def _policy_blockers(
                         f"candidate_notional={selected_candidate.estimated_notional_usdt} "
                         f"remaining_notional={remaining}"
                     ),
-                    bridge="Keep candidate disabled until budget remaining can cover the action.",
+                    recovery_action="Keep candidate disabled until budget remaining can cover the action.",
                     retry_condition="Lower candidate size or wait for a fresh budget window.",
                 )
             )
@@ -248,7 +248,7 @@ def _blocker(
     *,
     blocker_id: str,
     evidence: str,
-    bridge: str,
+    recovery_action: str,
     retry_condition: str,
 ) -> BlockerRecord:
     return BlockerRecord(
@@ -257,6 +257,6 @@ def _blocker(
         path="BudgetEnvelope -> DailyPolicy -> CandidateSelector",
         evidence=evidence,
         severity="hard_blocker",
-        bridge=bridge,
+        recovery_action=recovery_action,
         retry_condition=retry_condition,
     )

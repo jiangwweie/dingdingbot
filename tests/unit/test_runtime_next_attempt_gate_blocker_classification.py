@@ -34,9 +34,9 @@ def _readiness_row(
     }
 
 
-def _readiness_packet(row: dict, *, exchange_write_called: bool = False) -> dict:
+def _readiness_artifact(row: dict, *, exchange_write_called: bool = False) -> dict:
     return {
-        "scope": "runtime_live_attempt_readiness_packet",
+        "scope": "runtime_live_attempt_readiness_artifact",
         "status": "live_attempt_blocked_by_runtime_or_signal_gate",
         "runtime_readiness": [row],
         "safety_invariants": {
@@ -58,11 +58,11 @@ def _readiness_packet(row: dict, *, exchange_write_called: bool = False) -> dict
     }
 
 
-def _live_position_packet(**overrides) -> dict:
-    packet = {
+def _live_position_artifact(**overrides) -> dict:
+    report = {
         "scope": "runtime_live_position_monitor",
         "status": "active_protection_warning",
-        "packet": {
+        "artifact": {
             "status": "active_protection_warning",
             "runtime_instance_id": "runtime-bnb",
             "symbol": "BNB/USDT:USDT",
@@ -103,37 +103,43 @@ def _live_position_packet(**overrides) -> dict:
             "withdrawal_or_transfer_created": False,
         },
     }
-    packet["packet"].update(overrides)
-    return packet
+    report["artifact"].update(overrides)
+    return report
 
 
 def test_classifies_real_active_position_slot_with_hard_stop_as_hold_monitoring():
-    packet = script.build_classification_packet(
-        readiness_packet=_readiness_packet(_readiness_row("runtime-bnb")),
+    artifact = script.build_classification_artifact(
+        readiness_artifact=_readiness_artifact(_readiness_row("runtime-bnb")),
         runtime_instance_id="runtime-bnb",
-        live_position_monitor=_live_position_packet(),
+        live_position_monitor=_live_position_artifact(),
     )
 
-    assert packet["status"] == "gate_blocked_by_active_position_slot"
-    assert packet["has_next_attempt_gate_blocker"] is True
-    assert packet["position_facts"]["active_position_present"] is True
-    assert packet["position_facts"]["hard_stop_boundary_present"] is True
-    assert packet["position_facts"]["tp_protection_present"] is False
-    assert packet["right_tail_objective_context"][
+    assert artifact["status"] == "gate_blocked_by_active_position_slot"
+    assert artifact["has_next_attempt_gate_blocker"] is True
+    assert artifact["position_facts"]["active_position_present"] is True
+    assert artifact["position_facts"]["hard_stop_boundary_present"] is True
+    assert artifact["position_facts"]["tp_protection_present"] is False
+    assert artifact["right_tail_objective_context"][
         "hard_stop_only_is_warning_not_runaway_if_boundary_present"
     ] is True
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert "operator_command_plan" not in artifact
+    assert artifact["next_attempt_gate_blocker_plan"]["next_step"] == (
         "continue_read_only_position_monitoring_until_flat_or_signal_exit"
     )
-    assert packet["operator_command_plan"]["allows_new_attempt_now"] is False
-    assert packet["safety_invariants"]["no_forbidden_live_side_effects"] is True
+    assert artifact["next_attempt_gate_blocker_plan"]["allows_new_attempt_now"] is False
+    assert (
+        artifact["safety_invariants"]["gate_blocker_classification_projection_only"]
+        is True
+    )
+    assert "packet_only" not in artifact["safety_invariants"]
+    assert artifact["safety_invariants"]["no_forbidden_live_side_effects"] is True
 
 
 def test_classifies_flat_position_with_gate_blocker_as_stale_projection():
-    packet = script.build_classification_packet(
-        readiness_packet=_readiness_packet(_readiness_row("runtime-bnb")),
+    artifact = script.build_classification_artifact(
+        readiness_artifact=_readiness_artifact(_readiness_row("runtime-bnb")),
         runtime_instance_id="runtime-bnb",
-        live_position_monitor=_live_position_packet(
+        live_position_monitor=_live_position_artifact(
             active_position_present=False,
             local_active_position_count=0,
             exchange_active_position_count=0,
@@ -146,53 +152,53 @@ def test_classifies_flat_position_with_gate_blocker_as_stale_projection():
     )
 
     assert (
-        packet["status"]
+        artifact["status"]
         == "gate_blocked_by_stale_or_unresolved_next_attempt_projection"
     )
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["next_attempt_gate_blocker_plan"]["next_step"] == (
         "refresh_reconciliation_or_finalize_closed_review_before_next_attempt"
     )
 
 
 def test_classifies_missing_position_facts_before_live_attempt():
-    packet = script.build_classification_packet(
-        readiness_packet=_readiness_packet(_readiness_row("runtime-bnb")),
+    artifact = script.build_classification_artifact(
+        readiness_artifact=_readiness_artifact(_readiness_row("runtime-bnb")),
         runtime_instance_id="runtime-bnb",
         live_position_monitor=None,
     )
 
-    assert packet["status"] == "gate_blocker_classification_missing_position_facts"
-    assert packet["operator_command_plan"]["calls_exchange"] is False
+    assert artifact["status"] == "gate_blocker_classification_missing_position_facts"
+    assert artifact["next_attempt_gate_blocker_plan"]["calls_exchange"] is False
 
 
 def test_classifies_no_next_attempt_gate_blocker_as_return_to_readiness_flow():
-    packet = script.build_classification_packet(
-        readiness_packet=_readiness_packet(
+    artifact = script.build_classification_artifact(
+        readiness_artifact=_readiness_artifact(
             _readiness_row("runtime-bnb", blockers=[], status="waiting_for_signal")
         ),
         runtime_instance_id="runtime-bnb",
-        live_position_monitor=_live_position_packet(),
+        live_position_monitor=_live_position_artifact(),
     )
 
-    assert packet["status"] == (
+    assert artifact["status"] == (
         "gate_blocker_classification_no_next_attempt_gate_blocker"
     )
-    assert packet["operator_command_plan"]["allows_new_attempt_now"] is True
+    assert artifact["next_attempt_gate_blocker_plan"]["allows_new_attempt_now"] is True
 
 
 def test_classifies_forbidden_effects_as_stop():
-    packet = script.build_classification_packet(
-        readiness_packet=_readiness_packet(
+    artifact = script.build_classification_artifact(
+        readiness_artifact=_readiness_artifact(
             _readiness_row("runtime-bnb"),
             exchange_write_called=True,
         ),
         runtime_instance_id="runtime-bnb",
-        live_position_monitor=_live_position_packet(),
+        live_position_monitor=_live_position_artifact(),
     )
 
-    assert packet["status"] == "gate_blocker_classification_forbidden_effect"
-    assert packet["safety_invariants"]["no_forbidden_live_side_effects"] is False
-    assert packet["operator_command_plan"]["next_step"] == (
+    assert artifact["status"] == "gate_blocker_classification_forbidden_effect"
+    assert artifact["safety_invariants"]["no_forbidden_live_side_effects"] is False
+    assert artifact["next_attempt_gate_blocker_plan"]["next_step"] == (
         "stop_and_review_forbidden_side_effects"
     )
 
@@ -202,10 +208,10 @@ def test_classification_cli_outputs_json(tmp_path, capsys):
     position_path = tmp_path / "position.json"
     output_path = tmp_path / "classification.json"
     readiness_path.write_text(
-        json.dumps(_readiness_packet(_readiness_row("runtime-bnb"))),
+        json.dumps(_readiness_artifact(_readiness_row("runtime-bnb"))),
         encoding="utf-8",
     )
-    position_path.write_text(json.dumps(_live_position_packet()), encoding="utf-8")
+    position_path.write_text(json.dumps(_live_position_artifact()), encoding="utf-8")
 
     assert script.main(
         [
@@ -222,7 +228,7 @@ def test_classification_cli_outputs_json(tmp_path, capsys):
         ]
     ) == 0
 
-    stdout_packet = json.loads(capsys.readouterr().out)
-    file_packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert stdout_packet["status"] == "gate_blocked_by_active_position_slot"
-    assert file_packet["deployment_context"]["deployed_head"] == "729f3ef8"
+    stdout_artifact = json.loads(capsys.readouterr().out)
+    file_artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert stdout_artifact["status"] == "gate_blocked_by_active_position_slot"
+    assert file_artifact["deployment_context"]["deployed_head"] == "729f3ef8"

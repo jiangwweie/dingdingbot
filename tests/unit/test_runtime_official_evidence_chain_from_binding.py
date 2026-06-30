@@ -59,6 +59,31 @@ def test_official_evidence_chain_from_binding_requires_fresh_authorization(tmp_p
         script._build_report(_args(tmp_path, binding_path=binding_path), client=_Client())
 
 
+def test_official_evidence_chain_ignores_legacy_packet_wrapper_authorization(
+    tmp_path,
+):
+    binding_path = tmp_path / "binding.json"
+    binding_path.write_text(
+        json.dumps(
+            {
+                "packet": {
+                    "fresh_submit_authorization_id": "auth-legacy-packet",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _Client()
+
+    with pytest.raises(
+        ValueError,
+        match="fresh_submit_authorization_id_missing_from_binding_report",
+    ):
+        script._build_report(_args(tmp_path, binding_path=binding_path), client=client)
+
+    assert client.calls == []
+
+
 class _Client:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -84,7 +109,7 @@ class _Client:
             return {
                 "http_status": 200,
                 "body": {
-                    "status": "blocked_before_packet",
+                    "status": "blocked_before_evidence",
                     "available_evidence_ids": {
                         "trusted_submit_fact_snapshot_id": "facts-rtf016",
                         "submit_idempotency_policy_id": "idem-rtf016",
@@ -96,7 +121,7 @@ class _Client:
                         ),
                     },
                     "blockers": [
-                        "first_real_submit_packet_unavailable:"
+                        "first_real_submit_evidence_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ],
                 },

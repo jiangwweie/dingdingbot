@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from src.application.readmodels.trading_console import (
     TradingConsoleDependencies,
@@ -77,8 +77,8 @@ from src.domain.runtime_execution_order_lifecycle_adapter_result import (
 from src.domain.runtime_execution_intent_local_order_binding import (
     RuntimeExecutionIntentLocalOrderBinding,
 )
-from src.domain.runtime_execution_exchange_submit_packet import (
-    RuntimeExecutionExchangeSubmitPacketPreview,
+from src.domain.runtime_execution_exchange_submit_preview import (
+    RuntimeExecutionExchangeSubmitPreview,
 )
 from src.domain.runtime_execution_exchange_submit_enablement import (
     RuntimeExecutionExchangeSubmitEnablementDecision,
@@ -110,22 +110,22 @@ from src.domain.runtime_execution_post_submit_budget_settlement import (
 from src.domain.runtime_execution_submit_rehearsal import (
     RuntimeExecutionSubmitRehearsal,
 )
-from src.domain.runtime_execution_first_real_submit_enablement_packet import (
-    RuntimeExecutionFirstRealSubmitEnablementPacket,
+from src.domain.runtime_execution_first_real_submit_enablement_evidence import (
+    RuntimeExecutionFirstRealSubmitEnablementEvidence,
 )
 from src.domain.runtime_executable_submit_readiness import (
     RuntimeExecutableSubmitReadinessEvidence,
-    RuntimeExecutableSubmitReadinessPacket,
+    RuntimeExecutableSubmitReadinessArtifact,
 )
 from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
-    RuntimeOfficialSubmitHandoffPacket,
+    RuntimeOfficialSubmitHandoffArtifact,
 )
 from src.domain.runtime_fresh_submit_authorization_resolution import (
-    RuntimeFreshSubmitAuthorizationResolutionPacket,
+    RuntimeFreshSubmitAuthorizationResolutionArtifact,
 )
 from src.domain.runtime_fresh_submit_authorization_binding import (
-    RuntimeFreshSubmitAuthorizationBindingPacket,
+    RuntimeFreshSubmitAuthorizationBindingArtifact,
 )
 from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
     RuntimeExecutionFirstRealSubmitEvidencePreparation,
@@ -150,15 +150,15 @@ from src.domain.runtime_execution_attempt_outcome_policy import (
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
-from src.domain.runtime_post_submit_finalize import RuntimePostSubmitFinalizePacket
+from src.domain.runtime_post_submit_finalize import RuntimePostSubmitFinalizePayload
 from src.application.runtime_next_attempt_strategy_planning_service import (
-    RuntimeNextAttemptStrategyPlanningPacket,
+    RuntimeNextAttemptStrategyPlanningArtifact,
 )
 from src.application.runtime_strategy_signal_scheduler_planning_service import (
     RuntimeStrategySignalSchedulerPlanningResult,
 )
 from src.application.runtime_strategy_signal_intent_draft_source_service import (
-    RuntimeStrategySignalIntentDraftSourcePacket,
+    RuntimeStrategySignalIntentDraftSourceArtifact,
 )
 from src.application.strategy_group_readonly_observation_scheduler import (
     ObservationSourceName,
@@ -174,9 +174,9 @@ from src.domain.strategy_runtime_promotion_gate import (
     StrategyRuntimePromotionScope,
     StrategySemanticsConfirmationFacts,
 )
-from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket
+from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorArtifact
 from src.domain.runtime_position_exit_plan import RuntimePositionExitPlan
-from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupPacket
+from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupArtifact
 from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.domain.strategy_runtime_live_enablement import (
@@ -331,7 +331,7 @@ class RuntimeStrategySignalIntentDraftSourceRequest(BaseModel):
 
 
 class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
-    post_submit_finalize_packet: RuntimePostSubmitFinalizePacket
+    post_submit_finalize_payload: RuntimePostSubmitFinalizePayload
     signal_input: StrategyFamilySignalInput
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
@@ -349,9 +349,17 @@ class RuntimePostSubmitFinalizeRequest(BaseModel):
 
 
 class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
-    strategy_planning_packet: RuntimeNextAttemptStrategyPlanningPacket
+    model_config = ConfigDict(populate_by_name=True)
+
+    strategy_planning_artifact: RuntimeNextAttemptStrategyPlanningArtifact = Field(
+        validation_alias=AliasChoices(
+            "strategy_planning_artifact",
+        )
+    )
     evidence: RuntimeExecutableSubmitReadinessEvidence
-    first_real_submit_packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None = None
+    first_real_submit_evidence: (
+        RuntimeExecutionFirstRealSubmitEnablementEvidence | None
+    ) = None
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -359,9 +367,13 @@ class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
 
 
 class RuntimePersistedDraftSourceReadinessPreviewRequest(BaseModel):
-    intent_draft_source_packet: RuntimeStrategySignalIntentDraftSourcePacket
+    model_config = ConfigDict(populate_by_name=True)
+
+    intent_draft_source_artifact: RuntimeStrategySignalIntentDraftSourceArtifact
     evidence: RuntimeExecutableSubmitReadinessEvidence
-    first_real_submit_packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None = None
+    first_real_submit_evidence: (
+        RuntimeExecutionFirstRealSubmitEnablementEvidence | None
+    ) = None
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -369,7 +381,7 @@ class RuntimePersistedDraftSourceReadinessPreviewRequest(BaseModel):
 
 
 class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
-    readiness_packet: RuntimeExecutableSubmitReadinessPacket
+    readiness_artifact: RuntimeExecutableSubmitReadinessArtifact
     fresh_submit_authorization_id: str | None = Field(
         default=None,
         max_length=260,
@@ -385,12 +397,11 @@ class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
 
 
 class RuntimeFreshSubmitAuthorizationResolutionRequest(BaseModel):
-    handoff_packet: RuntimeOfficialSubmitHandoffPacket
+    handoff_artifact: RuntimeOfficialSubmitHandoffArtifact
     requested_fresh_submit_authorization_id: str | None = Field(
         default=None,
         max_length=260,
     )
-    allow_order_candidate_fallback: bool = True
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -398,7 +409,7 @@ class RuntimeFreshSubmitAuthorizationResolutionRequest(BaseModel):
 
 
 class RuntimeFreshSubmitAuthorizationBindingRequest(BaseModel):
-    handoff_packet: RuntimeOfficialSubmitHandoffPacket
+    handoff_artifact: RuntimeOfficialSubmitHandoffArtifact
     requested_fresh_submit_authorization_id: str | None = Field(
         default=None,
         max_length=260,
@@ -465,7 +476,7 @@ class SignalEvaluationInspectionView(BaseModel):
     symbol: str
     side: str
     status: SignalEvaluationStatus
-    decision: str
+    signal_observation_result: str
     reason_codes: list[str] = Field(default_factory=list)
     rationale: str
     evidence_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -872,14 +883,14 @@ async def runtime_strategy_live_enablement_preview(
 
 @router.get(
     "/strategy-runtimes/{runtime_instance_id}/live-position-monitor",
-    response_model=RuntimeLivePositionMonitorPacket,
+    response_model=RuntimeLivePositionMonitorArtifact,
 )
 async def runtime_live_position_monitor(
     runtime_instance_id: str,
-) -> RuntimeLivePositionMonitorPacket:
+) -> RuntimeLivePositionMonitorArtifact:
     try:
         service = await _runtime_live_position_monitor_service()
-        return await service.build_monitor_packet(
+        return await service.build_monitor_artifact(
             runtime_instance_id=runtime_instance_id,
         )
     except HTTPException:
@@ -995,12 +1006,12 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
 
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/strategy-signal-intent-draft-sources",
-    response_model=RuntimeStrategySignalIntentDraftSourcePacket,
+    response_model=RuntimeStrategySignalIntentDraftSourceArtifact,
 )
 async def runtime_strategy_signal_intent_draft_source_for_signal_input(
     runtime_instance_id: str,
     request: RuntimeStrategySignalIntentDraftSourceRequest,
-) -> RuntimeStrategySignalIntentDraftSourcePacket:
+) -> RuntimeStrategySignalIntentDraftSourceArtifact:
     runtime_service = await _strategy_runtime_service()
     try:
         runtime = await runtime_service.get_runtime(runtime_instance_id)
@@ -1075,13 +1086,13 @@ async def apply_strategy_runtime_live_enablement_mutation(
 
 
 @router.post(
-    "/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets",
-    response_model=RuntimePostSubmitFinalizePacket,
+    "/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-payloads",
+    response_model=RuntimePostSubmitFinalizePayload,
 )
-async def runtime_post_submit_finalize_packet_for_runtime(
+async def runtime_post_submit_finalize_payload_for_runtime(
     runtime_instance_id: str,
     request: RuntimePostSubmitFinalizeRequest,
-) -> RuntimePostSubmitFinalizePacket:
+) -> RuntimePostSubmitFinalizePayload:
     service = await _runtime_post_submit_finalize_service()
     result = await _runtime_exchange_submit_execution_result_for_finalize(
         runtime_instance_id=runtime_instance_id,
@@ -1119,12 +1130,12 @@ async def runtime_post_submit_finalize_packet_for_runtime(
 
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans",
-    response_model=RuntimeNextAttemptStrategyPlanningPacket,
+    response_model=RuntimeNextAttemptStrategyPlanningArtifact,
 )
-async def runtime_next_attempt_strategy_plan_from_post_submit_packet(
+async def runtime_next_attempt_strategy_plan_from_post_submit_payload(
     runtime_instance_id: str,
     request: RuntimeNextAttemptStrategyPlanningRequest,
-) -> RuntimeNextAttemptStrategyPlanningPacket:
+) -> RuntimeNextAttemptStrategyPlanningArtifact:
     runtime_service = await _strategy_runtime_service()
     try:
         runtime = await runtime_service.get_runtime(runtime_instance_id)
@@ -1137,7 +1148,7 @@ async def runtime_next_attempt_strategy_plan_from_post_submit_packet(
     service = await _runtime_next_attempt_strategy_planning_service()
     try:
         return await service.plan_from_post_submit_gate(
-            post_submit_finalize_packet=request.post_submit_finalize_packet,
+            post_submit_finalize_payload=request.post_submit_finalize_payload,
             signal_input=request.signal_input,
             runtime=runtime,
             context_id=request.context_id,
@@ -1226,16 +1237,16 @@ async def runtime_next_attempt_observation_cycle(
 
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/executable-submit-readiness-previews",
-    response_model=RuntimeExecutableSubmitReadinessPacket,
+    response_model=RuntimeExecutableSubmitReadinessArtifact,
 )
 async def runtime_executable_submit_readiness_preview(
     runtime_instance_id: str,
     request: RuntimeExecutableSubmitReadinessPreviewRequest,
-) -> RuntimeExecutableSubmitReadinessPacket:
-    if request.strategy_planning_packet.runtime_instance_id != runtime_instance_id:
+) -> RuntimeExecutableSubmitReadinessArtifact:
+    if request.strategy_planning_artifact.runtime_instance_id != runtime_instance_id:
         raise HTTPException(
             status_code=400,
-            detail="strategy_planning_packet_runtime_mismatch",
+            detail="strategy_planning_artifact_runtime_mismatch",
         )
     from src.application.runtime_executable_submit_readiness_service import (
         RuntimeExecutableSubmitReadinessService,
@@ -1243,10 +1254,10 @@ async def runtime_executable_submit_readiness_preview(
 
     service = RuntimeExecutableSubmitReadinessService()
     try:
-        return await service.preview_from_strategy_planning_packet(
-            strategy_planning_packet=request.strategy_planning_packet,
+        return await service.preview_from_strategy_planning_artifact(
+            strategy_planning_artifact=request.strategy_planning_artifact,
             evidence=request.evidence,
-            first_real_submit_packet=request.first_real_submit_packet,
+            first_real_submit_evidence=request.first_real_submit_evidence,
             additional_blockers=request.additional_blockers,
             additional_warnings=[
                 *request.additional_warnings,
@@ -1261,27 +1272,27 @@ async def runtime_executable_submit_readiness_preview(
 
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/persisted-draft-source-readiness-previews",
-    response_model=RuntimeExecutableSubmitReadinessPacket,
+    response_model=RuntimeExecutableSubmitReadinessArtifact,
 )
 async def runtime_persisted_draft_source_readiness_preview(
     runtime_instance_id: str,
     request: RuntimePersistedDraftSourceReadinessPreviewRequest,
-) -> RuntimeExecutableSubmitReadinessPacket:
-    if request.intent_draft_source_packet.runtime_instance_id != runtime_instance_id:
+) -> RuntimeExecutableSubmitReadinessArtifact:
+    if request.intent_draft_source_artifact.runtime_instance_id != runtime_instance_id:
         raise HTTPException(
             status_code=400,
-            detail="intent_draft_source_packet_runtime_mismatch",
+            detail="intent_draft_source_artifact_runtime_mismatch",
         )
-    from src.application.runtime_persisted_draft_source_readiness_bridge_service import (
-        RuntimePersistedDraftSourceReadinessBridgeService,
+    from src.application.runtime_persisted_draft_source_readiness_adapter_service import (
+        RuntimePersistedDraftSourceReadinessAdapterService,
     )
 
-    service = RuntimePersistedDraftSourceReadinessBridgeService()
+    service = RuntimePersistedDraftSourceReadinessAdapterService()
     try:
         return await service.preview_from_intent_draft_source(
-            intent_draft_source_packet=request.intent_draft_source_packet,
+            intent_draft_source_artifact=request.intent_draft_source_artifact,
             evidence=request.evidence,
-            first_real_submit_packet=request.first_real_submit_packet,
+            first_real_submit_evidence=request.first_real_submit_evidence,
             additional_blockers=request.additional_blockers,
             additional_warnings=[
                 *request.additional_warnings,
@@ -1296,16 +1307,16 @@ async def runtime_persisted_draft_source_readiness_preview(
 
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-previews",
-    response_model=RuntimeOfficialSubmitHandoffPacket,
+    response_model=RuntimeOfficialSubmitHandoffArtifact,
 )
 async def runtime_official_submit_handoff_preview(
     runtime_instance_id: str,
     request: RuntimeOfficialSubmitHandoffPreviewRequest,
-) -> RuntimeOfficialSubmitHandoffPacket:
-    if request.readiness_packet.runtime_instance_id != runtime_instance_id:
+) -> RuntimeOfficialSubmitHandoffArtifact:
+    if request.readiness_artifact.runtime_instance_id != runtime_instance_id:
         raise HTTPException(
             status_code=400,
-            detail="readiness_packet_runtime_mismatch",
+            detail="readiness_artifact_runtime_mismatch",
         )
     from src.application.runtime_official_submit_handoff_service import (
         RuntimeOfficialSubmitHandoffService,
@@ -1313,8 +1324,8 @@ async def runtime_official_submit_handoff_preview(
 
     service = RuntimeOfficialSubmitHandoffService()
     try:
-        return await service.preview_from_readiness_packet(
-            readiness_packet=request.readiness_packet,
+        return await service.preview_from_readiness_artifact(
+            readiness_artifact=request.readiness_artifact,
             fresh_submit_authorization_id=request.fresh_submit_authorization_id,
             mode=request.mode,
             owner_confirmed_for_real_submit_action=(
@@ -1335,16 +1346,16 @@ async def runtime_official_submit_handoff_preview(
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-"
     "fresh-authorizations/resolve",
-    response_model=RuntimeFreshSubmitAuthorizationResolutionPacket,
+    response_model=RuntimeFreshSubmitAuthorizationResolutionArtifact,
 )
 async def runtime_official_submit_handoff_fresh_authorization_resolution(
     runtime_instance_id: str,
     request: RuntimeFreshSubmitAuthorizationResolutionRequest,
-) -> RuntimeFreshSubmitAuthorizationResolutionPacket:
-    if request.handoff_packet.runtime_instance_id != runtime_instance_id:
+) -> RuntimeFreshSubmitAuthorizationResolutionArtifact:
+    if request.handoff_artifact.runtime_instance_id != runtime_instance_id:
         raise HTTPException(
             status_code=400,
-            detail="handoff_packet_runtime_mismatch",
+            detail="handoff_artifact_runtime_mismatch",
         )
     from src.application.runtime_fresh_submit_authorization_resolution_service import (
         RuntimeFreshSubmitAuthorizationResolutionService,
@@ -1355,11 +1366,10 @@ async def runtime_official_submit_handoff_fresh_authorization_resolution(
     )
     try:
         return await service.resolve_for_handoff(
-            handoff=request.handoff_packet,
+            handoff=request.handoff_artifact,
             requested_fresh_submit_authorization_id=(
                 request.requested_fresh_submit_authorization_id
             ),
-            allow_order_candidate_fallback=request.allow_order_candidate_fallback,
             additional_blockers=request.additional_blockers,
             additional_warnings=[
                 *request.additional_warnings,
@@ -1375,16 +1385,16 @@ async def runtime_official_submit_handoff_fresh_authorization_resolution(
 @router.post(
     "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-"
     "fresh-authorizations/bind",
-    response_model=RuntimeFreshSubmitAuthorizationBindingPacket,
+    response_model=RuntimeFreshSubmitAuthorizationBindingArtifact,
 )
 async def runtime_official_submit_handoff_fresh_authorization_binding(
     runtime_instance_id: str,
     request: RuntimeFreshSubmitAuthorizationBindingRequest,
-) -> RuntimeFreshSubmitAuthorizationBindingPacket:
-    if request.handoff_packet.runtime_instance_id != runtime_instance_id:
+) -> RuntimeFreshSubmitAuthorizationBindingArtifact:
+    if request.handoff_artifact.runtime_instance_id != runtime_instance_id:
         raise HTTPException(
             status_code=400,
-            detail="handoff_packet_runtime_mismatch",
+            detail="handoff_artifact_runtime_mismatch",
         )
     from src.application.runtime_fresh_submit_authorization_binding_service import (
         RuntimeFreshSubmitAuthorizationBindingService,
@@ -1411,7 +1421,7 @@ async def runtime_official_submit_handoff_fresh_authorization_binding(
     )
     try:
         return await service.bind_for_handoff(
-            handoff=request.handoff_packet,
+            handoff=request.handoff_artifact,
             requested_fresh_submit_authorization_id=(
                 request.requested_fresh_submit_authorization_id
             ),
@@ -2429,15 +2439,15 @@ async def runtime_execution_intent_local_order_binding_for_authorization(
 
 
 @router.get(
-    "/runtime-execution-exchange-submit-packet-previews/authorizations/{authorization_id}",
-    response_model=RuntimeExecutionExchangeSubmitPacketPreview,
+    "/runtime-execution-exchange-submit-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitPreview,
 )
-async def runtime_execution_exchange_submit_packet_preview_for_authorization(
+async def runtime_execution_exchange_submit_preview_for_authorization(
     authorization_id: str,
-) -> RuntimeExecutionExchangeSubmitPacketPreview:
+) -> RuntimeExecutionExchangeSubmitPreview:
     service = await _runtime_execution_intent_adapter_service()
     try:
-        return await service.exchange_submit_packet_preview_for_authorization(
+        return await service.exchange_submit_preview_for_authorization(
             authorization_id
         )
     except RuntimeError as exc:
@@ -2558,11 +2568,11 @@ async def runtime_execution_submit_rehearsal_for_authorization(
 
 
 @router.get(
-    "/runtime-execution-first-real-submit-enablement-packets/authorizations/"
+    "/runtime-execution-first-real-submit-enablement-evidence/authorizations/"
     "{authorization_id}",
-    response_model=RuntimeExecutionFirstRealSubmitEnablementPacket,
+    response_model=RuntimeExecutionFirstRealSubmitEnablementEvidence,
 )
-async def runtime_execution_first_real_submit_enablement_packet_for_authorization(
+async def runtime_execution_first_real_submit_enablement_evidence_for_authorization(
     authorization_id: str,
     strategy_family_confirmed: bool = False,
     implementation_source_confirmed: bool = False,
@@ -2606,13 +2616,13 @@ async def runtime_execution_first_real_submit_enablement_packet_for_authorizatio
     deployment_readiness_evidence_id: Optional[str] = None,
     deployment_readiness_confirmed: bool = False,
     explicit_owner_real_submit_authorization: bool = False,
-) -> RuntimeExecutionFirstRealSubmitEnablementPacket:
-    from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
-        RuntimeExecutionFirstRealSubmitEnablementPacketService,
+) -> RuntimeExecutionFirstRealSubmitEnablementEvidence:
+    from src.application.runtime_execution_first_real_submit_enablement_evidence_service import (
+        RuntimeExecutionFirstRealSubmitEnablementEvidenceService,
     )
 
     try:
-        service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+        service = RuntimeExecutionFirstRealSubmitEnablementEvidenceService(
             runtime_execution_intent_adapter_service=(
                 await _runtime_execution_intent_adapter_service()
             ),
@@ -3111,13 +3121,13 @@ async def runtime_execution_first_real_submit_evidence_preparation_for_authoriza
     from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
         RuntimeExecutionFirstRealSubmitEvidencePreparationService,
     )
-    from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
-        RuntimeExecutionFirstRealSubmitEnablementPacketService,
+    from src.application.runtime_execution_first_real_submit_enablement_evidence_service import (
+        RuntimeExecutionFirstRealSubmitEnablementEvidenceService,
     )
 
     try:
         adapter_service = await _runtime_execution_intent_adapter_service()
-        packet_service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+        evidence_service = RuntimeExecutionFirstRealSubmitEnablementEvidenceService(
             runtime_execution_intent_adapter_service=adapter_service,
             promotion_gate_service=(
                 await _strategy_runtime_promotion_gate_service()
@@ -3128,7 +3138,7 @@ async def runtime_execution_first_real_submit_evidence_preparation_for_authoriza
             trusted_submit_facts_assembly_service=(
                 _runtime_execution_trusted_submit_facts_assembly_service()
             ),
-            enablement_packet_service=packet_service,
+            enablement_evidence_service=evidence_service,
         )
         return await service.prepare_for_authorization(
             authorization_id,
@@ -3983,27 +3993,27 @@ async def _runtime_post_close_followup_payload(
     env_file: str | None,
 ) -> dict[str, Any]:
     from src.domain.runtime_post_close_followup import (
-        build_runtime_post_close_followup_packet,
+        build_runtime_post_close_followup_artifact,
     )
     from src.domain.runtime_reduce_only_close_authorization import (
-        build_runtime_reduce_only_close_owner_packet,
+        build_runtime_reduce_only_close_owner_evidence,
     )
 
     monitor_service = await _runtime_live_position_monitor_service()
-    monitor = await monitor_service.build_monitor_packet(
+    monitor = await monitor_service.build_monitor_artifact(
         runtime_instance_id=runtime_instance_id,
     )
     review_facts_service = await _runtime_closed_trade_review_facts_service()
-    closed_review_facts_packet = await review_facts_service.build_packet(
+    closed_review_facts_evidence = await review_facts_service.build_artifact(
         runtime_instance_id=runtime_instance_id,
     )
-    owner_close_packet = None
+    owner_close_evidence = None
     if monitor.active_position_present:
         exit_plan_service = await _runtime_position_exit_plan_service()
         exit_plan = await exit_plan_service.build_exit_plan(
             runtime_instance_id=runtime_instance_id,
         )
-        owner_close_packet = build_runtime_reduce_only_close_owner_packet(
+        owner_close_evidence = build_runtime_reduce_only_close_owner_evidence(
             exit_plan=exit_plan,
             now_ms=int(time.time() * 1000),
         )
@@ -4018,10 +4028,10 @@ async def _runtime_post_close_followup_payload(
     closed_review_recorded = _runtime_lifecycle_review_is_closed_reviewed(
         closed_review
     )
-    packet = build_runtime_post_close_followup_packet(
+    followup_evidence = build_runtime_post_close_followup_artifact(
         monitor=monitor,
-        owner_close_packet=owner_close_packet,
-        closed_review_facts_packet=closed_review_facts_packet,
+        owner_close_artifact=owner_close_evidence,
+        closed_review_facts_artifact=closed_review_facts_evidence,
         closed_review_recorded=closed_review_recorded,
         closed_review_id=(
             getattr(closed_review, "review_id", None)
@@ -4031,16 +4041,16 @@ async def _runtime_post_close_followup_payload(
         now_ms=int(time.time() * 1000),
     )
     return {
-        "scope": "runtime_post_close_followup_packet",
-        "status": packet.status.value,
-        "packet": packet.model_dump(mode="json"),
+        "scope": "runtime_post_close_followup_evidence",
+        "status": followup_evidence.status.value,
+        "followup_evidence": followup_evidence.model_dump(mode="json"),
         "source_monitor": monitor.model_dump(mode="json"),
-        "owner_close_packet": (
-            owner_close_packet.model_dump(mode="json")
-            if owner_close_packet is not None
+        "owner_close_evidence": (
+            owner_close_evidence.model_dump(mode="json")
+            if owner_close_evidence is not None
             else None
         ),
-        "closed_review_facts_packet": closed_review_facts_packet.model_dump(mode="json"),
+        "closed_review_facts_evidence": closed_review_facts_evidence.model_dump(mode="json"),
         "closed_lifecycle_review": (
             closed_review.model_dump(mode="json")
             if closed_review is not None and hasattr(closed_review, "model_dump")
@@ -4050,13 +4060,13 @@ async def _runtime_post_close_followup_payload(
                 else None
             )
         ),
-        "operator_command_plan": _runtime_post_close_operator_command_plan(
+        "post_close_followup_plan": _runtime_post_close_followup_plan(
             runtime_instance_id=runtime_instance_id,
             env_file=env_file,
-            packet=packet,
+            followup_evidence=followup_evidence,
         ),
         "safety_invariants": {
-            "packet_only": True,
+            "evidence_only": True,
             "api_read_only": True,
             "exchange_write_called": False,
             "review_record_created": False,
@@ -4109,18 +4119,20 @@ def _runtime_lifecycle_review_is_closed_reviewed(review: Any | None) -> bool:
     )
 
 
-def _runtime_post_close_operator_command_plan(
+def _runtime_post_close_followup_plan(
     *,
     runtime_instance_id: str,
     env_file: str | None,
-    packet: RuntimePostCloseFollowupPacket,
+    followup_evidence: RuntimePostCloseFollowupArtifact,
 ) -> dict[str, Any]:
     def with_env_file(args: list[str]) -> list[str]:
         return [*args, "--env-file", env_file] if env_file else args
 
-    packet_status = str(packet.status.value)
-    post_close_complete = packet_status == "post_close_complete"
-    standing_recovery_ready = packet_status == "ready_for_standing_reduce_only_recovery"
+    followup_status = str(followup_evidence.status.value)
+    post_close_complete = followup_status == "post_close_complete"
+    standing_recovery_ready = (
+        followup_status == "ready_for_standing_reduce_only_recovery"
+    )
     close_args = with_env_file(
         [
             "scripts/runtime_owner_reduce_only_close_flow.py",
@@ -4129,32 +4141,32 @@ def _runtime_post_close_operator_command_plan(
         ]
     )
     return {
-        "scope": "runtime_post_close_operator_command_plan",
+        "scope": "runtime_post_close_followup_plan",
         "not_executed": True,
         "requires_explicit_owner_approval_before_execute": bool(
-            packet.owner_close_approval_value
+            followup_evidence.owner_close_approval_value
         ),
         "requires_official_operation_layer": standing_recovery_ready,
         "standing_recovery_authorization_scope": (
-            packet.standing_recovery_authorization_scope
+            followup_evidence.standing_recovery_authorization_scope
         ),
-        "owner_close_approval_env": packet.owner_close_approval_env,
-        "owner_close_approval_value": packet.owner_close_approval_value,
+        "owner_close_approval_env": followup_evidence.owner_close_approval_env,
+        "owner_close_approval_value": followup_evidence.owner_close_approval_value,
         "refresh_followup_command_args": with_env_file(
             [
-                "scripts/build_runtime_post_close_followup_packet.py",
+                "scripts/build_runtime_post_close_followup_artifact.py",
                 "--runtime-instance-id",
                 runtime_instance_id,
             ]
         ),
         "owner_close_dry_run_command_args": (
-            close_args if packet.owner_close_approval_value else []
+            close_args if followup_evidence.owner_close_approval_value else []
         ),
         "owner_close_execute_command_args": (
             []
             if standing_recovery_ready
             else [*close_args, "--execute-real-close"]
-            if packet.owner_close_approval_value
+            if followup_evidence.owner_close_approval_value
             else []
         ),
         "operation_layer_reduce_only_recovery_args": (
@@ -4164,23 +4176,23 @@ def _runtime_post_close_operator_command_plan(
                 "--runtime-instance-id",
                 runtime_instance_id,
                 "--standing-authorization-scope",
-                str(packet.standing_recovery_authorization_scope),
+                str(followup_evidence.standing_recovery_authorization_scope),
             ]
             if standing_recovery_ready
             else []
         ),
         "closed_review_facts_refresh_command_args": with_env_file(
             [
-                "scripts/build_runtime_closed_trade_review_facts_packet.py",
+                "scripts/build_runtime_closed_trade_review_facts_artifact.py",
                 "--runtime-instance-id",
                 runtime_instance_id,
             ]
         ),
         "closed_review_command_args": (
-            [] if post_close_complete else list(packet.closed_review_command_args)
+            [] if post_close_complete else list(followup_evidence.closed_review_command_args)
         ),
         "post_close_required_sequence": (
-            list(packet.required_steps)
+            list(followup_evidence.required_steps)
             if post_close_complete
             else [
                 "refresh_followup",
@@ -4203,7 +4215,7 @@ def _runtime_post_close_operator_command_plan(
             ]
         ),
         "safety_invariants": {
-            "packet_only": True,
+            "evidence_only": True,
             "command_plan_only": True,
             "exchange_write_called": False,
             "review_record_created": False,
@@ -4220,7 +4232,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
     runtime_instance_id: str,
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
-    from scripts import build_runtime_strategy_signal_input_packet as signal_builder
+    from scripts import build_runtime_strategy_signal_input_artifact as signal_builder
     from src.application.runtime_strategy_signal_evaluation_service import (
         RuntimeStrategySignalEvaluationService,
         RuntimeStrategySignalEvaluationStatus,
@@ -4260,11 +4272,11 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "include_exchange": request.include_exchange,
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
-            "signal_packet": None,
-            "prepare_packet": None,
+            "signal_artifact": None,
+            "prepare_artifact": None,
             "blockers": list(next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]),
             "warnings": list(next_attempt_gate.get("warnings") or []),
-            "operator_command_plan": {
+            "observation_cycle_plan": {
                 "next_step": next_attempt_gate.get("required_next_step")
                 or "resolve_next_attempt_gate_blocker",
                 "not_executed": True,
@@ -4304,8 +4316,8 @@ async def _runtime_next_attempt_observation_cycle_payload(
         now_ms=now_ms,
     )
     evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
-    signal_packet = {
-        "scope": "runtime_next_attempt_observation_cycle_signal_packet",
+    signal_artifact = {
+        "scope": "runtime_next_attempt_observation_cycle_signal_artifact",
         "status": (
             "ready_for_shadow_candidate_prepare"
             if evaluation.status
@@ -4347,11 +4359,11 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "include_exchange": request.include_exchange,
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
-            "signal_packet": signal_packet,
-            "prepare_packet": None,
+            "signal_artifact": signal_artifact,
+            "prepare_artifact": None,
             "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
             "warnings": list(evaluation.warnings),
-            "operator_command_plan": {
+            "observation_cycle_plan": {
                 "next_step": "observe_only_or_wait_for_next_closed_bar",
                 "not_executed": True,
                 "creates_shadow_candidate": False,
@@ -4370,11 +4382,11 @@ async def _runtime_next_attempt_observation_cycle_payload(
         "include_exchange": request.include_exchange,
         "next_attempt_gate": next_attempt_gate,
         "just_in_time_lifecycle_audit": jit_audit,
-        "signal_packet": signal_packet,
-        "prepare_packet": None,
+        "signal_artifact": signal_artifact,
+        "prepare_artifact": None,
         "blockers": [],
         "warnings": list(evaluation.warnings),
-        "operator_command_plan": {
+        "observation_cycle_plan": {
             "next_step": "run_official_runtime_next_attempt_prepare_api_flow",
             "api_prepare_endpoint": (
                 f"/api/trading-console/strategy-runtimes/{runtime_instance_id}"
@@ -4385,7 +4397,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
                 "--runtime-instance-id",
                 runtime_instance_id,
                 "--signal-input-json",
-                "<write signal_packet.signal_input to a local json file first>",
+                "<write signal_artifact.signal_input to a local json file first>",
             ],
             "signal_input_embedded": True,
             "not_executed": True,
@@ -5536,7 +5548,7 @@ def _signal_evaluation_view(evaluation: SignalEvaluation) -> SignalEvaluationIns
         symbol=evaluation.symbol,
         side=evaluation.side,
         status=evaluation.status,
-        decision=evaluation.decision.value,
+        signal_observation_result=evaluation.decision.value,
         reason_codes=list(evaluation.reason_codes),
         rationale=evaluation.rationale,
         evidence_snapshot=dict(evaluation.evidence_snapshot),

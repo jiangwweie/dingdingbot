@@ -24,6 +24,7 @@ P0-003: 完善重启对账流程
 - 并发锁机制：防止多个对账任务同时运行
 """
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
@@ -774,17 +775,53 @@ class ReconciliationService:
 
     async def _create_missing_signal(self, order: OrderResponse) -> None:
         """
-        为孤儿入场订单创建关联 Signal
+        Record that an orphan entry order still needs Signal linkage.
+
+        Reconciliation must not synthesize a trading Signal from an exchange
+        order without a dedicated Signal repository contract. The orphan order
+        remains review-required evidence until that contract exists.
 
         Args:
             order: 订单对象
         """
-        # TODO: 实现 Signal 创建逻辑
-        # 这里需要根据订单信息反推 Signal
-        logger.info(
-            f"Creating missing signal for orphan order {order.order_id}: "
-            f"symbol={order.symbol}, direction={order.direction}"
+        logger.warning(
+            f"Signal synthesis is unavailable for orphan order {order.order_id}: "
+            f"symbol={order.symbol}, direction={order.direction}; "
+            "order remains reconciliation evidence and must not create runtime authority"
         )
+
+    async def _import_orphan_entry_order(self, order: OrderResponse) -> str:
+        """Import an orphan entry order only when the repository supports it.
+
+        Returns a machine-readable action for the reconciliation report. This
+        prevents reports from claiming `IMPORTED_TO_DB` when no import actually
+        happened.
+        """
+        order_id = order.exchange_order_id or order.order_id
+        if self._order_repository is None:
+            logger.warning(
+                f"Order repository unavailable; orphan entry order {order_id} "
+                "remains import-pending"
+            )
+            return "IMPORT_NOT_AVAILABLE"
+
+        import_order = getattr(self._order_repository, "import_order", None)
+        if import_order is None:
+            logger.warning(
+                f"order_repository.import_order() unavailable for orphan entry "
+                f"order {order_id}; order remains import-pending"
+            )
+            return "IMPORT_NOT_AVAILABLE"
+
+        try:
+            result = import_order(order)
+            if inspect.isawaitable(result):
+                await result
+            logger.info(f"Imported orphan entry order {order_id} into local repository")
+            return "IMPORTED_TO_DB"
+        except Exception as e:
+            logger.error(f"Failed to import orphan order {order_id}: {e}")
+            return "IMPORT_FAILED"
 
     # ============================================================
     # P0-003: 幽灵订单和孤儿订单处理
@@ -921,14 +958,7 @@ class ReconciliationService:
                         f"Importing orphan entry order {order_id} to DB"
                     )
 
-                    # 如果有 order_repository，导入订单
-                    if self._order_repository:
-                        try:
-                            # TODO: 实现 order_repository.import_order() 方法
-                            # await self._order_repository.import_order(order)
-                            logger.warning(f"order_repository.import_order() not implemented yet")
-                        except Exception as e:
-                            logger.error(f"Failed to import orphan order {order_id}: {e}")
+                    action_taken = await self._import_orphan_entry_order(order)
 
                     imported_orders.append(ImportedOrder(
                         order_id=order_id,
@@ -943,11 +973,11 @@ class ReconciliationService:
                         trigger_price=order.trigger_price,
                         reduce_only=order.reduce_only,
                         imported_at=current_time,
-                        action_taken="IMPORTED_TO_DB",
+                        action_taken=action_taken,
                     ))
 
-                    # 创建关联 Signal
-                    await self._create_missing_signal(order)
+                    if action_taken == "IMPORTED_TO_DB":
+                        await self._create_missing_signal(order)
 
             except Exception as e:
                 logger.error(f"Error processing orphan order {order_id}: {e}")

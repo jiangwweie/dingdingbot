@@ -41,3 +41,9 @@ Prefer current tracked code, `docs/current/*`, and accepted Owner decisions over
 - Do not change live profiles or real-funds permissions without explicit user
   approval. Testnet/dev/profile-scoped readiness or cleanup is governed by the
   current agent baseline.
+- Treat new packet, bridge, adapter, readiness, evidence, compatibility, or
+  other glue layers as architecture smell. Before accepting one, state whether
+  the core abstraction should instead be extended, replaced, or deleted; whether
+  the requirement or project goal has changed; and which old path is removed or
+  demoted. Glue is acceptable only with a bounded removal/demotion condition and
+  without becoming a second source of truth.

@@ -235,7 +235,7 @@ def _execution_result() -> RuntimeExecutionExchangeSubmitExecutionResult:
     return RuntimeExecutionExchangeSubmitExecutionResult(
         execution_result_id="exchange-submit-result-rtf048",
         enablement_decision_id="exchange-submit-enable-rtf048",
-        packet_preview_id="packet-preview-rtf048",
+        submit_preview_id="submit-preview-rtf048",
         binding_id="binding-rtf048",
         authorization_id="auth-rtf048-consumed",
         execution_intent_id="intent-rtf048",
@@ -399,7 +399,7 @@ async def _scenario(
         post_submit_budget_settlement_repository=_SettlementRepo(settlement),
         runtime_service=_RuntimeReader(runtime),
     )
-    packet = await service.finalize_latest_for_runtime(
+    finalize_artifact = await service.finalize_latest_for_runtime(
         "runtime-rtf048",
         reservation_id="runtime-attempt-reservation-rtf048",
         active_positions_count=active_positions_count,
@@ -407,50 +407,51 @@ async def _scenario(
     )
     expected_ok = (
         expected_status is None
-        or packet.status == expected_status
+        or finalize_artifact.status == expected_status
     )
     checks = {
         "latest_result_resolved_without_manual_authorization": (
             result_repo.latest_calls == ["runtime-rtf048"]
         ),
         "old_authorization_replay_only": (
-            packet.consumed_authorization_replay_only is True
-            and packet.old_authorization_submit_retry_allowed is False
+            finalize_artifact.consumed_authorization_replay_only is True
+            and finalize_artifact.old_authorization_submit_retry_allowed is False
         ),
         "pre_submit_rehearsal_retry_disallowed": (
-            packet.pre_submit_rehearsal_retry_allowed is False
-            and packet.next_attempt_gate.pre_submit_rehearsal_retry_allowed is False
+            finalize_artifact.pre_submit_rehearsal_retry_allowed is False
+            and finalize_artifact.next_attempt_gate.pre_submit_rehearsal_retry_allowed
+            is False
         ),
         "local_created_order_requirement_retired": (
-            packet.local_created_order_requirement_retired is True
+            finalize_artifact.local_created_order_requirement_retired is True
         ),
         "requires_fresh_signal_and_authorization": (
-            packet.next_attempt_gate.requires_fresh_strategy_signal is True
-            and packet.next_attempt_gate.requires_fresh_authorization is True
+            finalize_artifact.next_attempt_gate.requires_fresh_strategy_signal is True
+            and finalize_artifact.next_attempt_gate.requires_fresh_authorization is True
         ),
         "adapter_not_used_to_create_missing_facts": (
             adapter.review_record_calls == 0
             and adapter.settlement_record_calls == 0
         ),
         "no_execution_side_effects": (
-            packet.execution_intent_created is False
-            and packet.order_created is False
-            and packet.order_lifecycle_called is False
-            and packet.exchange_called is False
-            and packet.withdrawal_or_transfer_created is False
+            finalize_artifact.execution_intent_created is False
+            and finalize_artifact.order_created is False
+            and finalize_artifact.order_lifecycle_called is False
+            and finalize_artifact.exchange_called is False
+            and finalize_artifact.withdrawal_or_transfer_created is False
         ),
         "expected_status": expected_ok,
     }
     return {
         "scenario_id": scenario_id,
         "status": "passed" if all(checks.values()) else "failed",
-        "packet_status": packet.status.value,
-        "next_attempt_gate_status": packet.next_attempt_gate.status.value,
-        "blockers": list(packet.blockers),
-        "next_attempt_blockers": list(packet.next_attempt_gate.blockers),
-        "warnings": list(packet.warnings),
+        "finalize_status": finalize_artifact.status.value,
+        "next_attempt_gate_status": finalize_artifact.next_attempt_gate.status.value,
+        "blockers": list(finalize_artifact.blockers),
+        "next_attempt_blockers": list(finalize_artifact.next_attempt_gate.blockers),
+        "warnings": list(finalize_artifact.warnings),
         "checks": checks,
-        "packet": _json_value(packet),
+        "finalize_artifact": _json_value(finalize_artifact),
     }
 
 

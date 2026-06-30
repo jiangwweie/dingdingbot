@@ -122,7 +122,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 ),
             )
 
-    packet = _preflight_packet(
+    preflight_artifact = _preflight_artifact(
         shadow_report=shadow_report,
         final_gate_preview=final_gate_preview,
         prepare_report=prepare_report,
@@ -137,7 +137,7 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         output_dir / "controlled-submit-preflight.json",
         controlled_submit_preflight,
     )
-    _write_json(output_dir / "preflight-packet.json", packet)
+    _write_json(output_dir / "preflight-artifact.json", preflight_artifact)
 
     report = _report(
         shadow_report=shadow_report,
@@ -145,14 +145,14 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
         final_gate_preview=final_gate_preview,
         controlled_submit_plan=controlled_submit_plan,
         controlled_submit_preflight=controlled_submit_preflight,
-        preflight_packet=packet,
+        preflight_artifact=preflight_artifact,
         state=state,
     )
     _write_json(output_dir / "contract-report.json", report)
     return report
 
 
-def _preflight_packet(
+def _preflight_artifact(
     *,
     shadow_report: dict[str, Any],
     final_gate_preview: dict[str, Any],
@@ -175,7 +175,7 @@ def _preflight_packet(
         safety=safety,
     )
     return {
-        "scope": "runtime_official_final_gate_preflight_packet",
+        "scope": "runtime_official_final_gate_preflight_artifact",
         "status": (
             "ready_for_controlled_submit_adapter"
             if _contract_passed(checks)
@@ -225,11 +225,11 @@ def _report(
     final_gate_preview: dict[str, Any],
     controlled_submit_plan: dict[str, Any],
     controlled_submit_preflight: dict[str, Any],
-    preflight_packet: dict[str, Any],
+    preflight_artifact: dict[str, Any],
     state: _ServerProofState,
 ) -> dict[str, Any]:
-    checks = dict(preflight_packet["checks"])
-    ids = preflight_packet["ids"]
+    checks = dict(preflight_artifact["checks"])
+    ids = preflight_artifact["ids"]
     return {
         "scope": "runtime_official_final_gate_preflight_proof",
         "status": (
@@ -249,14 +249,14 @@ def _report(
         "controlled_submit_preflight_id": ids.get(
             "controlled_submit_preflight_id"
         ),
-        "preflight_packet": preflight_packet,
+        "preflight_artifact": preflight_artifact,
         "shadow_contract": shadow_report,
         "first_real_submit_prepare_report": prepare_report,
         "final_gate_preview": final_gate_preview,
         "controlled_submit_plan": controlled_submit_plan,
         "controlled_submit_preflight": controlled_submit_preflight,
         "checks": checks,
-        "operator_command_plan": {
+        "final_gate_preflight_plan": {
             "next_step": (
                 "build_non_executing_submit_adapter_preview"
                 if _contract_passed(checks)
@@ -276,7 +276,7 @@ def _report(
             "automatic_withdrawal_assumed": False,
             "not_proven_alpha": True,
         },
-        "safety_invariants": preflight_packet["safety_invariants"],
+        "safety_invariants": preflight_artifact["safety_invariants"],
     }
 
 
