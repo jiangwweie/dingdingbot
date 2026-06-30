@@ -1,0 +1,103 @@
+{
+  "checks": {
+    "candidate_authorization_created": false,
+    "detector_source_is_real_candles": true,
+    "exchange_write_called": false,
+    "finalgate_called": false,
+    "fresh_session_signal_present": false,
+    "live_profile_changed": false,
+    "live_submit_allowed": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "primary_live_submit_scope_changed": false
+  },
+  "detector_source_mode": "binance_usdm_public_closed_candles",
+  "generated_at_utc": "2026-06-30T15:19:05.416219+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_sor_session_detector_facts",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "output_file_names": {
+    "json": "latest-sor-session-detector-facts.json",
+    "md": "latest-sor-session-detector-facts.md"
+  },
+  "path_id": "SOR-SESSION-BREAKOUT",
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.sor_session_detector_facts.v1",
+  "scope": "sor_session_breakout_detector_facts_non_authority",
+  "status": "sor_session_detector_facts_ready",
+  "strategy_group_id": "SOR-001",
+  "summary": {
+    "first_blocker": "fresh_sor_session_range_signal_absent",
+    "fresh_session_signal_count": 0
+  },
+  "symbol_detector_rows": [
+    {
+      "breakout_level": 75.19,
+      "follow_through": false,
+      "fresh_session_range_signal": false,
+      "invalidation": {
+        "held": false,
+        "level": 74.15
+      },
+      "latest_candle_close_time_utc": "2026-06-30T15:14:59.999000+00:00",
+      "latest_close": 72.97,
+      "missing_required_trigger_facts": [
+        "breakout_level_crossed",
+        "follow_through_confirmed",
+        "invalidation_level_held"
+      ],
+      "opening_range": {
+        "high": 75.19,
+        "low": 74.15,
+        "source": "utc_session_first_four_15m_closed_candles"
+      },
+      "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
+      "primary_trial_scope_rejection_reason": "requires_session_detector_forward_observation_and_private_action_time_facts",
+      "public_facts_ready": true,
+      "symbol": "SOLUSDT",
+      "timeframe": "15m_closed"
+    },
+    {
+      "breakout_level": 6.677,
+      "follow_through": false,
+      "fresh_session_range_signal": false,
+      "invalidation": {
+        "held": false,
+        "level": 6.608
+      },
+      "latest_candle_close_time_utc": "2026-06-30T15:14:59.999000+00:00",
+      "latest_close": 6.462,
+      "missing_required_trigger_facts": [
+        "breakout_level_crossed",
+        "follow_through_confirmed",
+        "invalidation_level_held"
+      ],
+      "opening_range": {
+        "high": 6.677,
+        "low": 6.608,
+        "source": "utc_session_first_four_15m_closed_candles"
+      },
+      "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
+      "primary_trial_scope_rejection_reason": "requires_session_detector_forward_observation_and_private_action_time_facts",
+      "public_facts_ready": true,
+      "symbol": "AVAXUSDT",
+      "timeframe": "15m_closed"
+    }
+  ]
+}

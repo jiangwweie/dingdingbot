@@ -1,0 +1,108 @@
+{
+  "checks": {
+    "candidate_authorization_created": false,
+    "exchange_write_called": false,
+    "finalgate_called": false,
+    "live_profile_changed": false,
+    "live_submit_allowed": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "primary_live_submit_scope_changed": false
+  },
+  "expanded_readonly_watcher_symbols": [
+    "SOLUSDT",
+    "AVAXUSDT"
+  ],
+  "generated_at_utc": "2026-06-30T15:19:05.416219+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_sor_expanded_scope",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "output_file_names": {
+    "json": "latest-sor-expanded-scope.json",
+    "md": "latest-sor-expanded-scope.md"
+  },
+  "primary_live_submit_scope_changed": false,
+  "primary_live_submit_symbol_scope": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "reviewed_symbols": [
+    "SOLUSDT",
+    "AVAXUSDT"
+  ],
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.sor_expanded_scope.v1",
+  "scope": "sor_sol_avax_readonly_scope_non_authority",
+  "status": "sor_expanded_scope_ready",
+  "strategy_group_id": "SOR-001",
+  "symbol_evidence": [
+    {
+      "breakout_level": 75.19,
+      "follow_through": false,
+      "fresh_session_range_signal": false,
+      "invalidation": {
+        "held": false,
+        "level": 74.15
+      },
+      "latest_candle_close_time_utc": "2026-06-30T15:14:59.999000+00:00",
+      "latest_close": 72.97,
+      "missing_required_trigger_facts": [
+        "breakout_level_crossed",
+        "follow_through_confirmed",
+        "invalidation_level_held"
+      ],
+      "opening_range": {
+        "high": 75.19,
+        "low": 74.15,
+        "source": "utc_session_first_four_15m_closed_candles"
+      },
+      "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
+      "primary_trial_scope_rejection_reason": "requires_session_detector_forward_observation_and_private_action_time_facts",
+      "public_facts_ready": true,
+      "symbol": "SOLUSDT",
+      "timeframe": "15m_closed"
+    },
+    {
+      "breakout_level": 6.677,
+      "follow_through": false,
+      "fresh_session_range_signal": false,
+      "invalidation": {
+        "held": false,
+        "level": 6.608
+      },
+      "latest_candle_close_time_utc": "2026-06-30T15:14:59.999000+00:00",
+      "latest_close": 6.462,
+      "missing_required_trigger_facts": [
+        "breakout_level_crossed",
+        "follow_through_confirmed",
+        "invalidation_level_held"
+      ],
+      "opening_range": {
+        "high": 6.677,
+        "low": 6.608,
+        "source": "utc_session_first_four_15m_closed_candles"
+      },
+      "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
+      "primary_trial_scope_rejection_reason": "requires_session_detector_forward_observation_and_private_action_time_facts",
+      "public_facts_ready": true,
+      "symbol": "AVAXUSDT",
+      "timeframe": "15m_closed"
+    }
+  ]
+}
