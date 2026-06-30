@@ -1,22 +1,22 @@
 {
-  "generated_at_utc": "2026-06-30T01:54:25.708492+00:00",
+  "generated_at_utc": "2026-06-30T03:27:33.071188+00:00",
   "goal_complete": false,
   "input_source_gaps": [],
   "input_sources": {
     "daily_check": {
       "exists": true,
       "generated_at_ms": null,
-      "generated_at_utc": "2026-06-24T14:36:25.635464+00:00",
+      "generated_at_utc": "2026-06-30T02:40:21.374601+00:00",
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
       "schema": 13,
       "scope": "strategygroup_runtime_daily_check",
-      "source_expected_runtime_head": "runtime-head-1",
-      "source_runtime_head": "runtime-head-1",
-      "status": "waiting_for_market_monitor_refresh_needed"
+      "source_expected_runtime_head": "cc1107f7a95e859762fea2b5eb15203c7a26125c",
+      "source_runtime_head": "2a897234fa4e274c24c505ea1ba2c54a7538efdb",
+      "status": "temporarily_unavailable_monitor_refresh_needed"
     },
     "dry_run_audit": {
       "exists": true,
-      "generated_at_ms": 1782784463250,
+      "generated_at_ms": 1782790050453,
       "generated_at_utc": null,
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
       "schema": "brc.runtime_dry_run_audit_chain.v1",
@@ -28,17 +28,17 @@
     "goal_progress": {
       "exists": true,
       "generated_at_ms": null,
-      "generated_at_utc": "2026-06-30T01:54:25.598499+00:00",
+      "generated_at_utc": "2026-06-30T03:27:32.962383+00:00",
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
       "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
       "scope": "strategygroup_runtime_goal_progress_audit",
       "source_expected_runtime_head": null,
       "source_runtime_head": null,
-      "status": "waiting_for_market_monitor_refresh_needed"
+      "status": "ready"
     },
     "live_cutover": {
       "exists": true,
-      "generated_at_ms": 1782784463642,
+      "generated_at_ms": 1782790050835,
       "generated_at_utc": null,
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
       "schema": "brc.runtime_live_cutover_readiness.v1",
@@ -209,7 +209,7 @@
       "proof": {
         "current_read_interaction_level": "L0_local_cache_read",
         "current_read_remote_interaction_count": 0,
-        "daily_status": "waiting_for_market_monitor_refresh_needed",
+        "daily_status": "temporarily_unavailable_monitor_refresh_needed",
         "fresh_signal_notification_policy_checked": true,
         "goal_interaction_remote_interaction_count": 0,
         "notification_result": "NOTIFY"
@@ -228,8 +228,8 @@
   "monitor_status": "needs_refresh",
   "non_market_gaps": [],
   "owner_intervention_required": false,
-  "owner_status": "waiting_for_opportunity",
-  "runtime_status": "waiting_for_market",
+  "owner_status": "temporarily_unavailable",
+  "runtime_status": "running",
   "safety_invariants": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

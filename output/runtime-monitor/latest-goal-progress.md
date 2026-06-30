@@ -1,8 +1,8 @@
 ## StrategyGroup Runtime Goal Progress
 
-- 报告时间: 2026-06-30T01:54:25.598499+00:00
-- 当前阶段: 等待机会
-- 当前检查点: 刷新本地 runtime monitor 缓存
+- 报告时间: 2026-06-30T03:27:32.962383+00:00
+- 当前阶段: 暂不可用
+- 当前检查点: 刷新或修复 runtime monitor 权威状态
 - 风险等级: L0 local audit
 - Owner 介入: 否
 - 交互等级: L0_local_goal_progress_audit
@@ -13,12 +13,12 @@
 ## Completion Boundary
 
 - Goal complete: 否
-- Status: not_complete_waiting_for_market
-- Reason: waiting_for_real_fresh_selected_strategygroup_signal
-- Completion blocker class: waiting_for_market
+- Status: not_complete_runtime_processing
+- Reason: runtime_chain_not_settled
+- Completion blocker class: runtime_processing
 - First bounded real order complete: 否
 - Real order closure proven: 否
-- Waiting for real fresh signal: 是
+- Waiting for real fresh signal: 否
 - Dry-run readiness proven: 是
 
 ## P0 Completion Audit Boundary
@@ -72,8 +72,8 @@
 ## Live Closure Evidence Boundary
 
 - Status: not_generated
-- Source status: not_generated
-- Raw source status: not_generated
+- Source status: live_closure_not_started
+- Raw source status: live_closure_not_started
 - Normalization reason: none
 - Completed stages: 0/9
 - Expected stages: 9
@@ -140,7 +140,7 @@
 
 | Track | Status | Owner state | Progress checkpoint | Blockers |
 | --- | --- | --- | --- | --- |
-| P0 第一笔边界内真实订单闭环 | waiting_for_market | 等待市场机会 | 等待 fresh signal 后推进官方链路 | none |
+| P0 第一笔边界内真实订单闭环 | ready | 监控状态需刷新 | fresh signal 已出现时推进官方链路 | none |
 | Runtime Interaction Projection | ready | 已就绪 | 使用 L0 本地缓存进度，必要时才刷新一次 L1 快照 | none |
 | Engineering Rehearsal Projection | ready | 已就绪 | 保持 dry-run / mock signal / source readiness 日检 | none |
 | Owner Visibility Projection | ready | 已就绪 | 保持 Owner 进度层输出，不要求阅读原始证据包 | none |
@@ -154,9 +154,9 @@
 
 | Track | Evidence |
 | --- | --- |
-| P0 第一笔边界内真实订单闭环 | daily_check_status=waiting_for_market_monitor_refresh_needed, derived_waiting_for_market=True |
+| P0 第一笔边界内真实订单闭环 | daily_check_status=temporarily_unavailable_monitor_refresh_needed, derived_waiting_for_market=False |
 | Runtime Interaction Projection | interaction=L0_local_cache_read, remote_interaction_count=0, collected_interaction=L0_local_cache_read, collected_remote_interaction_count=0, baseline_low_noise_commands=present |
-| Engineering Rehearsal Projection | dry_run_audit=审计演练正常, scenario_count=14, chain_ready_segments=22, missing_chain_segments=0, goal_chain_ready_segments=7, missing_goal_chain_segments=0 |
+| Engineering Rehearsal Projection | dry_run_audit=审计演练正常, scenario_count=14, chain_ready_segments=25, missing_chain_segments=0, goal_chain_ready_segments=7, missing_goal_chain_segments=0 |
 | Owner Visibility Projection | category=monitor_refresh, notification=None, owner_intervention_required=False |
 | Strategy Review Evidence Projection | status=review_only_evidence_closure_wave_ready, phase_1=ready, phase_2=ready, phase_3=ready_for_owner_policy, evidence_artifact_count=6, next_owner_policy_item_count=6, owner_policy_confirmation_required_now=True, runtime_owner_intervention_required=False |
 | Strategy Review Deep Dive Projection | status=review_only_deep_dive_ready_for_owner_policy, phase_1=ready, phase_2=ready, phase_3=ready_for_owner_policy_review, deep_dive_artifact_count=6, next_owner_policy_item_count=6, owner_policy_confirmation_required_now=True, runtime_owner_intervention_required=False |
@@ -166,7 +166,7 @@
 
 ## Owner Runtime State
 
-- Waiting for market: 是
+- Waiting for market: 否
 - Signal Observation grade: signal-observation-grade-review / ready
 - Signal Observation ready: 是
 

@@ -2082,6 +2082,10 @@ def build_local_monitor_sequence_report(
     tradeability_summary = _sequence_tradeability_decision_summary(
         artifacts.get("strategygroup_tradeability_decision", {})
     )
+    armed_trade_candidate_summary = _sequence_armed_trade_candidate_summary(
+        three_strategy_portfolio_summary=three_strategy_portfolio_summary,
+        tradeability_summary=tradeability_summary,
+    )
 
     return {
         "schema": "brc.strategygroup_runtime_local_monitor_sequence.v1",
@@ -2128,6 +2132,7 @@ def build_local_monitor_sequence_report(
             ),
             "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
+            "armed_trade_candidates": armed_trade_candidate_summary,
             "tradeability_decision": tradeability_summary,
             "trial_grade_signal_gate_audit": (
                 trial_grade_signal_gate_audit_summary
@@ -2158,6 +2163,7 @@ def build_local_monitor_sequence_report(
         "cpm_shadow_candidate_evidence": cpm_shadow_candidate_evidence_summary,
         "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
+        "armed_trade_candidates": armed_trade_candidate_summary,
         "tradeability_decision": tradeability_summary,
         "strategy_trial_grade_signal_gate_audit": (
             trial_grade_signal_gate_audit_summary
@@ -3511,13 +3517,28 @@ def _sequence_cpm_dry_run_submit_rehearsal_summary(
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
     checks = _as_dict(artifact.get("checks"))
+    status = _status(artifact) or "missing"
     return {
-        "status": _status(artifact) or "missing",
-        "active": _status(artifact) == "cpm_dry_run_submit_rehearsal_passed",
+        "status": status,
+        "active": status
+        in {
+            "cpm_dry_run_submit_rehearsal_passed",
+            "cpm_dry_run_submit_rehearsal_shape_ready",
+        },
         "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
         "path_id": str(artifact.get("path_id") or ""),
         "dry_run_submit_rehearsal": str(
             artifact.get("dry_run_submit_rehearsal") or ""
+        ),
+        "armed_observation_ready": checks.get("armed_observation_ready") is True
+        or artifact.get("armed_observation_ready") is True,
+        "submit_rehearsal_shape_ready": (
+            checks.get("submit_rehearsal_shape_ready") is True
+            or artifact.get("submit_rehearsal_shape_ready") is True
+        ),
+        "fresh_signal_submit_rehearsal_passed": (
+            checks.get("fresh_signal_submit_rehearsal_passed") is True
+            or artifact.get("fresh_signal_submit_rehearsal_passed") is True
         ),
         "candidate_authorization_evidence_ready": checks.get(
             "candidate_authorization_evidence_ready"
@@ -3638,6 +3659,39 @@ def _sequence_three_strategy_portfolio_summary(
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
     return _ThreeStrategyPortfolioSummaryProjection.from_artifact(artifact).as_dict()
+
+
+def _sequence_armed_trade_candidate_summary(
+    *,
+    three_strategy_portfolio_summary: dict[str, Any],
+    tradeability_summary: dict[str, Any],
+) -> dict[str, Any]:
+    legacy = [
+        str(item)
+        for item in three_strategy_portfolio_summary.get("selected_strategy_groups")
+        or []
+    ]
+    armed_candidates = list(legacy)
+    cpm = _as_dict(tradeability_summary.get("cpm_armed_observation"))
+    if (
+        cpm.get("strategy_group_id") == "CPM-RO-001"
+        and cpm.get("stage") == "armed_observation"
+        and "CPM-RO-001" not in armed_candidates
+    ):
+        armed_candidates.append("CPM-RO-001")
+    return {
+        "status": "armed_trade_candidates_ready" if armed_candidates else "missing",
+        "candidate_count": len(armed_candidates),
+        "strategy_group_ids": armed_candidates,
+        "legacy_three_strategy_portfolio": legacy,
+        "legacy_three_strategy_portfolio_count": len(legacy),
+        "cpm_armed_observation_lane_present": "CPM-RO-001" in armed_candidates,
+        "projection_role": "owner_candidate_summary_projection",
+        "state_source": "tradeability_decision_plus_legacy_three_strategy_portfolio",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
 
 
 def _portfolio_readiness_stage_evidence(
@@ -4022,6 +4076,16 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     )
     tradeability = report.get("tradeability_decision") or {}
     cpm_tradeability = _as_dict(tradeability.get("cpm_armed_observation"))
+    legacy_three_strategy_groups = [
+        str(item) for item in three_strategy_portfolio.get("selected_strategy_groups") or []
+    ]
+    armed_trade_candidates = list(legacy_three_strategy_groups)
+    if (
+        cpm_tradeability.get("strategy_group_id") == "CPM-RO-001"
+        and cpm_tradeability.get("stage") == "armed_observation"
+        and "CPM-RO-001" not in armed_trade_candidates
+    ):
+        armed_trade_candidates.append("CPM-RO-001")
     trial_grade_audit = (
         report.get("strategy_trial_grade_signal_gate_audit") or {}
     )
@@ -4084,10 +4148,14 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM shadow candidate evidence: `{cpm_shadow_candidate_evidence.get('status', 'missing')}`",
         f"- CPM shadow evidence first blocker: `{cpm_shadow_candidate_evidence.get('first_blocker_class', 'missing')}` / `{cpm_shadow_candidate_evidence.get('first_blocker_owner', 'unknown')}`",
         f"- CPM dry-run submit rehearsal: `{cpm_dry_run_submit_rehearsal.get('dry_run_submit_rehearsal') or 'missing'}`",
+        f"- CPM armed observation ready: `{_yes_no(cpm_dry_run_submit_rehearsal.get('armed_observation_ready') is True)}`",
+        f"- CPM submit rehearsal shape ready: `{_yes_no(cpm_dry_run_submit_rehearsal.get('submit_rehearsal_shape_ready') is True)}`",
+        f"- CPM fresh-signal submit rehearsal passed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('fresh_signal_submit_rehearsal_passed') is True)}`",
         f"- CPM rehearsal FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('operation_layer_paper_passed') is True)}`",
-        f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
-        f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
-        f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
+        f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",
+        f"- Armed trade candidate count: `{len(armed_trade_candidates)}`",
+        f"- Legacy three-strategy portfolio: `{', '.join(legacy_three_strategy_groups) or 'none'}`",
+        f"- Legacy three-strategy portfolio status/count: `{three_strategy_portfolio.get('status', 'missing')}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 第五阶段状态: `{three_strategy_portfolio.get('stage_5_status', 'missing')}`",
         f"- 受控实盘 standby 席位: `{three_strategy_portfolio.get('controlled_live_standby_count', 0)}` / `{three_strategy_portfolio.get('seat_count', 0)}`",
         f"- 组合第一阻断统计 market/owner/engineering: `{three_strategy_portfolio.get('market_wait_count', 0)}` / `{three_strategy_portfolio.get('owner_policy_gap_count', 0)}` / `{three_strategy_portfolio.get('engineering_gap_count', 0)}`",

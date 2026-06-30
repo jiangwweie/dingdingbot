@@ -195,15 +195,15 @@
       "blocker_owner": "market",
       "brf2_shadow_candidate_evidence_provenance": {
         "active": true,
-        "first_blocker_class": "fresh_brf2_short_signal_absent",
+        "first_blocker_class": "short_squeeze_risk_state_disable_active",
         "first_blocker_owner": "market",
-        "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
+        "next_runtime_step": "continue_brf2_armed_observation_until_disable_clears",
         "non_executing_evidence": true,
         "primary_judgment_source": false,
         "projection_role": "shadow_candidate_evidence_provenance",
         "shadow_candidate_evidence_id": "",
         "shadow_candidate_evidence_ready": false,
-        "signal_state": "fresh_signal_absent",
+        "signal_state": "blocked_by_disable_fact",
         "state_source": "brf2_shadow_candidate_evidence",
         "status": "brf2_shadow_candidate_evidence_waiting_for_fresh_signal",
         "strategy_group_id": "BRF2-001"
@@ -220,9 +220,9 @@
         "trial_recommendation": "experiment_candidate_prepare_pending_owner_policy",
         "would_enter_forward_positive_count": 8
       },
-      "first_blocker_class": "fresh_brf2_short_signal_absent",
+      "first_blocker_class": "short_squeeze_risk_state_disable_active",
       "first_blocker_detail": "BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
-      "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+      "next_action": "continue_brf2_armed_observation_until_disable_clears",
       "observe_only_exit": {},
       "policy_scope": {
         "attempt_cap": 3,
@@ -283,7 +283,7 @@
         "strategy_group_id": "BRF2-001"
       },
       "runtime_scope_status": {
-        "brf2_current_signal_state": "fresh_signal_absent",
+        "brf2_current_signal_state": "blocked_by_disable_fact",
         "brf2_runtime_signal_capture_status": "brf2_runtime_signal_capture_ready",
         "brf2_trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
         "cpm_current_signal_state": "",
@@ -374,8 +374,8 @@
               "squeeze_risk_state_clear"
             ]
           },
-          "first_blocker": "fresh_brf2_short_signal_absent",
-          "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+          "first_blocker": "short_squeeze_risk_state_disable_active",
+          "next_action": "continue_brf2_armed_observation_until_disable_clears",
           "path_id": "BRF2-SHORT",
           "post_action_expected_state": "live_submit_ready",
           "priority": "P2",
@@ -1743,7 +1743,7 @@
       "trade_paths": []
     }
   ],
-  "generated_at_utc": "2026-06-30T02:35:56.730727+00:00",
+  "generated_at_utc": "2026-06-30T03:27:36.405078+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -1894,8 +1894,8 @@
             "squeeze_risk_state_clear"
           ]
         },
-        "first_blocker": "fresh_brf2_short_signal_absent",
-        "next_action": "continue_brf2_armed_observation_until_fresh_signal",
+        "first_blocker": "short_squeeze_risk_state_disable_active",
+        "next_action": "continue_brf2_armed_observation_until_disable_clears",
         "path_id": "BRF2-SHORT",
         "post_action_expected_state": "live_submit_ready",
         "priority": "P2",
@@ -2196,7 +2196,7 @@
     "owner_policy_blocker_present": false,
     "state": "交易资格已判定",
     "top_decision": "not_tradable_market_wait",
-    "top_first_blocker": "fresh_brf2_short_signal_absent",
+    "top_first_blocker": "short_squeeze_risk_state_disable_active",
     "top_strategy_group_id": "BRF2-001"
   },
   "safety_invariants": {
@@ -2229,15 +2229,15 @@
     "row_count": 13,
     "runtime_first_blocker_count": 0,
     "selected_candidate_decision": "not_tradable_market_wait",
-    "selected_candidate_first_blocker_class": "fresh_brf2_short_signal_absent",
-    "selected_candidate_next_action": "continue_brf2_armed_observation_until_fresh_signal",
+    "selected_candidate_first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "selected_candidate_next_action": "continue_brf2_armed_observation_until_disable_clears",
     "selected_candidate_strategy_group_id": "BRF2-001",
     "selected_strategy_group_id": "BRF2-001",
     "stage_5_waiting_live_opportunity_ready_count": 3,
     "strategy_review_first_blocker_count": 5,
     "top_decision": "not_tradable_market_wait",
-    "top_first_blocker_class": "fresh_brf2_short_signal_absent",
-    "top_next_action": "continue_brf2_armed_observation_until_fresh_signal",
+    "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "top_next_action": "continue_brf2_armed_observation_until_disable_clears",
     "top_strategy_group_id": "BRF2-001",
     "tradable_now_count": 0
   }

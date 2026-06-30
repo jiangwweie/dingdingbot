@@ -1,9 +1,9 @@
 ## StrategyGroup Runtime Progress
 
-- 报告时间: 2026-06-24T14:36:25.635464+00:00
-- 缓存年龄: 131h17m
+- 报告时间: 2026-06-30T02:40:21.374601+00:00
+- 缓存年龄: 47m
 - 缓存状态: stale
-- 当前阶段: 等待机会
+- 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0 local cache only
 - Owner 介入: 否
@@ -22,15 +22,15 @@
 
 ## Progress
 
-- Runtime: 正常
+- Runtime: 暂不可用
 - Watcher: 运行中
 - Source readiness: 正常
 - Dry-run audit: 审计演练正常
 - 演练场景: 14
 - Execution chain: 非市场链路已收口
-- 链路段: 22 ready / 0 missing
+- 链路段: 25 ready / 0 missing
 - 目标链路段: 7 ready / 0 missing
 - 入场快链: ready
 - 出场硬化: ready
 - 策略组分层: ready
-- 实盘矩阵: 1 pass / 1 waiting / 0 blocked
+- 实盘矩阵: 10 pass / 4 waiting / 0 blocked

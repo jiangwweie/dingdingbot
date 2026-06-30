@@ -18,7 +18,7 @@
 | `BRF-001` | `L1` | `would_enter` | `promote` | `trial_admission` | `BRF-001_forward_outcome_and_requiredfacts_review` |
 | `BRF2-001` | `unknown` | `research_intake` | `promote` | `intake_only` | `BRF2-001_paper_observation_admission_evidence` |
 | `BTPC-001` | `L2` | `no_action` | `revise` | `not_applicable` | `BTPC-001_classifier_fact_source_revision_review` |
-| `CPM-RO-001` | `unknown` | `would_enter` | `revise` | `not_applicable` | `CPM-RO-001_registry_identity_review` |
+| `CPM-RO-001` | `L3` | `would_enter` | `revise` | `not_applicable` | `CPM-RO-001_registry_identity_review` |
 | `FBS-001` | `L3` | `no_action` | `keep_observing` | `not_applicable` | `FBS-001_no_action_visibility_and_routing_audit` |
 | `LSR-001` | `L1` | `would_enter` | `revise` | `not_applicable` | `LSR-001_classifier_fact_source_revision_review` |
 | `MI-001` | `unknown` | `would_enter` | `revise` | `not_applicable` | `MI-001_registry_identity_review` |

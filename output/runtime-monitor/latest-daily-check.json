@@ -33,12 +33,15 @@
     "real_order_closure_proven": false,
     "real_order_readiness_summary": {
       "blocked": 0,
-      "pass": 1,
+      "pass": 10,
       "submit_blocker_keys": [],
-      "total": 2,
-      "waiting": 1,
+      "total": 14,
+      "waiting": 4,
       "waiting_keys": [
-        "fresh_signal"
+        "fresh_signal",
+        "candidate_authorization",
+        "action_time_finalgate",
+        "official_operation_layer"
       ]
     },
     "runtime_dry_run_audit_passed": true,
@@ -47,30 +50,33 @@
     "runtime_dry_run_scenario_count": 14,
     "runtime_execution_chain_closure_status_ready": true,
     "runtime_execution_chain_missing_or_failed_segments": [],
-    "runtime_execution_chain_ready_segment_count": 22,
+    "runtime_execution_chain_ready_segment_count": 25,
     "runtime_execution_chain_ready_segments": [
       "fresh_signal_fast_auto_chain_checked",
       "required_facts_readiness_checked",
       "execution_attempt_rehearsal_prepare_checked",
-      "selected_strategygroup_dispatch_guard_checked",
-      "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+      "disabled_smoke_not_real_execution_proof",
       "operation_layer_evidence_relay_checked",
       "scoped_pipeline_operation_layer_submit_projection_checked",
+      "mock_operation_layer_closed_loop_checked",
+      "operation_layer_hard_safety_blocker_matrix_checked",
+      "operation_layer_blocker_review_policy_checked",
       "operation_layer_authorization_chain_guard_checked",
       "operation_layer_standing_authorization_relay_checked",
-      "operation_layer_blocker_review_policy_checked",
+      "selected_strategygroup_dispatch_guard_checked",
+      "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+      "shared_runtime_pipeline_checked",
+      "common_execution_chain_reuse_checked",
+      "strategygroup_adapter_boundary_checked",
+      "strategy_intake_no_execution_pipeline_fields_checked",
+      "runtime_tier_policy_checked",
+      "only_mpg_tiny_real_order_eligible_checked",
+      "new_strategygroups_default_observe_only_checked",
+      "post_submit_closed_loop_evidence_guard_checked",
       "post_submit_exit_outcome_matrix_checked",
       "reduce_only_recovery_standing_authorization_checked",
-      "strategygroup_adapter_boundary_checked",
-      "runtime_tier_policy_checked",
-      "new_strategygroups_default_observe_only_checked",
-      "tp1_policy_checked",
-      "runner_exit_policy_checked",
-      "reduce_only_recovery_checked",
-      "entry_filled_protection_ok_checked",
-      "partial_fill_policy_checked",
-      "exchange_submit_failed_before_acceptance_policy_checked",
-      "active_position_remains_open_policy_checked"
+      "operation_layer_submit_result_identity_guard_checked",
+      "post_submit_finalize_result_identity_guard_checked"
     ],
     "runtime_execution_goal_chain_missing_or_failed_segments": [],
     "runtime_execution_goal_chain_ready_segment_count": 7,
@@ -84,11 +90,11 @@
       "post_submit_exit_outcome_matrix"
     ],
     "runtime_live_closure_evidence_reject_reasons": [],
-    "runtime_live_closure_evidence_status": "not_generated",
+    "runtime_live_closure_evidence_status": "live_closure_not_started",
     "runtime_ready": true,
     "source_readiness_ready": true,
     "strategygroup_tier_boundary_ready": true,
-    "waiting_for_market": true,
+    "waiting_for_market": false,
     "warnings": [],
     "watcher_ready": true
   },
@@ -114,7 +120,7 @@
     "remote_interaction_count": 0,
     "uses_snapshot_level": "L1_readonly_snapshot"
   },
-  "generated_at_utc": "2026-06-24T14:36:25.635464+00:00",
+  "generated_at_utc": "2026-06-30T02:40:21.374601+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -158,11 +164,11 @@
     ],
     "monitor_status": "needs_refresh",
     "owner_intervention_required": false,
-    "owner_status": "waiting_for_opportunity",
-    "runtime_status": "waiting_for_market",
-    "waiting_for_market": true
+    "owner_status": "temporarily_unavailable",
+    "runtime_status": "temporarily_unavailable",
+    "waiting_for_market": false
   },
-  "owner_status": "waiting_for_opportunity",
+  "owner_status": "temporarily_unavailable",
   "owner_summary": {
     "checkpoint_source": "daily_check_cache_gate_projection",
     "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
@@ -170,40 +176,43 @@
     "progress": {
       "chain_closure": "非市场链路已收口",
       "chain_closure_missing_or_failed_segments": [],
-      "chain_closure_ready_segments": 22,
+      "chain_closure_ready_segments": 25,
       "dry_run_audit": "审计演练正常",
       "dry_run_audit_scenarios": 14,
       "entry_fast_chain_boundary": "ready",
       "exit_hardening_boundary": "ready",
       "goal_chain_missing_or_failed_segments": [],
       "goal_chain_ready_segments": 7,
-      "live_closure": "not_generated",
+      "live_closure": "live_closure_not_started",
       "real_order_readiness": {
         "blocked": 0,
-        "pass": 1,
+        "pass": 10,
         "submit_blocker_keys": [],
-        "total": 2,
-        "waiting": 1,
+        "total": 14,
+        "waiting": 4,
         "waiting_keys": [
-          "fresh_signal"
+          "fresh_signal",
+          "candidate_authorization",
+          "action_time_finalgate",
+          "official_operation_layer"
         ]
       },
-      "runtime": "正常",
+      "runtime": "暂不可用",
       "source_readiness": "正常",
       "strategygroup_tier_boundary": "ready",
       "watcher": "运行中"
     },
     "risk_level": "L0 local cache only",
-    "state": "等待机会",
+    "state": "监控状态需刷新",
     "visibility": {
       "category": "monitor_refresh",
       "detail": "本地 runtime monitor 缓存已过期，等待自动化刷新",
-      "label": "等待机会",
+      "label": "监控状态需刷新",
       "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
       "owner_intervention_required": false
     }
   },
-  "runtime_status": "waiting_for_market",
+  "runtime_status": "temporarily_unavailable",
   "safety_invariants": {
     "env_files_read": false,
     "exchange_write_called": false,
@@ -218,9 +227,9 @@
   "schema_version": 13,
   "scope": "strategygroup_runtime_daily_check",
   "source": {
-    "expected_runtime_head": "runtime-head-1",
-    "runtime_head": "runtime-head-1",
-    "runtime_release_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-runtime-head-1"
+    "expected_runtime_head": "cc1107f7a95e859762fea2b5eb15203c7a26125c",
+    "runtime_head": "2a897234fa4e274c24c505ea1ba2c54a7538efdb",
+    "runtime_release_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2a897234-brf2-monitor-consistency"
   },
-  "status": "waiting_for_market_monitor_refresh_needed"
+  "status": "temporarily_unavailable_monitor_refresh_needed"
 }

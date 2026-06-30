@@ -369,15 +369,18 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
         _write_output(
             command,
             {
-                "status": "cpm_dry_run_submit_rehearsal_passed",
+                "status": "cpm_dry_run_submit_rehearsal_shape_ready",
                 "strategy_group_id": "CPM-RO-001",
                 "path_id": "CPM-LONG",
-                "dry_run_submit_rehearsal": "passed",
+                "dry_run_submit_rehearsal": "shape_ready",
                 "checks": {
-                    "candidate_authorization_evidence_ready": True,
-                    "finalgate_dry_run_passed": True,
-                    "operation_layer_paper_passed": True,
-                    "execution_attempt_rehearsal_ready": True,
+                    "armed_observation_ready": True,
+                    "submit_rehearsal_shape_ready": True,
+                    "fresh_signal_submit_rehearsal_passed": False,
+                    "candidate_authorization_evidence_ready": False,
+                    "finalgate_dry_run_passed": False,
+                    "operation_layer_paper_passed": False,
+                    "execution_attempt_rehearsal_ready": False,
                     "exchange_write": False,
                     "order_created": False,
                 },
@@ -1225,7 +1228,7 @@ def _write_ready_brf2_required_facts_mapping(command: list[str]) -> None:
             "disable_fact_observation_specs": [
                 {
                     "fact_key": "short_squeeze_risk_state",
-                    "active_statuses": ["red", "unbounded", "unknown"],
+                    "active_statuses": ["bounded", "red", "unbounded", "unknown"],
                     "blocker": "squeeze_risk_not_clear",
                 },
                 {
@@ -4977,15 +4980,18 @@ def test_local_monitor_sequence_cpm_projection_preserves_armed_observation_chain
     )
     rehearsal = module._sequence_cpm_dry_run_submit_rehearsal_summary(
         {
-            "status": "cpm_dry_run_submit_rehearsal_passed",
+            "status": "cpm_dry_run_submit_rehearsal_shape_ready",
             "strategy_group_id": "CPM-RO-001",
             "path_id": "CPM-LONG",
-            "dry_run_submit_rehearsal": "passed",
+            "dry_run_submit_rehearsal": "shape_ready",
             "checks": {
-                "candidate_authorization_evidence_ready": True,
-                "finalgate_dry_run_passed": True,
-                "operation_layer_paper_passed": True,
-                "execution_attempt_rehearsal_ready": True,
+                "armed_observation_ready": True,
+                "submit_rehearsal_shape_ready": True,
+                "fresh_signal_submit_rehearsal_passed": False,
+                "candidate_authorization_evidence_ready": False,
+                "finalgate_dry_run_passed": False,
+                "operation_layer_paper_passed": False,
+                "execution_attempt_rehearsal_ready": False,
                 "exchange_write": False,
                 "order_created": False,
             },
@@ -5004,9 +5010,12 @@ def test_local_monitor_sequence_cpm_projection_preserves_armed_observation_chain
     assert capture["shadow_candidate_shape_ready"] is False
     assert shadow["signal_state"] == "fresh_signal_absent"
     assert shadow["first_blocker_class"] == "fresh_cpm_long_signal_absent"
-    assert rehearsal["dry_run_submit_rehearsal"] == "passed"
-    assert rehearsal["finalgate_dry_run_passed"] is True
-    assert rehearsal["operation_layer_paper_passed"] is True
+    assert rehearsal["dry_run_submit_rehearsal"] == "shape_ready"
+    assert rehearsal["armed_observation_ready"] is True
+    assert rehearsal["submit_rehearsal_shape_ready"] is True
+    assert rehearsal["fresh_signal_submit_rehearsal_passed"] is False
+    assert rehearsal["finalgate_dry_run_passed"] is False
+    assert rehearsal["operation_layer_paper_passed"] is False
     assert rehearsal["exchange_write"] is False
     assert rehearsal["order_created"] is False
     for projection in (identity, policy, mapping, capture, shadow, rehearsal):

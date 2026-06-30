@@ -831,15 +831,18 @@ def _cpm_shadow_candidate_evidence() -> dict:
 
 def _cpm_dry_run_submit_rehearsal() -> dict:
     return {
-        "status": "cpm_dry_run_submit_rehearsal_passed",
+        "status": "cpm_dry_run_submit_rehearsal_shape_ready",
         "strategy_group_id": "CPM-RO-001",
         "path_id": "CPM-LONG",
-        "dry_run_submit_rehearsal": "passed",
+        "dry_run_submit_rehearsal": "shape_ready",
         "checks": {
-            "candidate_authorization_evidence_ready": True,
-            "finalgate_dry_run_passed": True,
-            "operation_layer_paper_passed": True,
-            "execution_attempt_rehearsal_ready": True,
+            "armed_observation_ready": True,
+            "submit_rehearsal_shape_ready": True,
+            "fresh_signal_submit_rehearsal_passed": False,
+            "candidate_authorization_evidence_ready": False,
+            "finalgate_dry_run_passed": False,
+            "operation_layer_paper_passed": False,
+            "execution_attempt_rehearsal_ready": False,
             "exchange_write": False,
             "order_created": False,
         },

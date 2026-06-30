@@ -1,6 +1,6 @@
 {
   "completion_boundary": {
-    "completion_blocker_class": "waiting_for_market",
+    "completion_blocker_class": "runtime_processing",
     "disabled_smoke_treated_as_real_execution_proof": false,
     "dry_run_readiness_proven": true,
     "first_bounded_real_order_complete": false,
@@ -8,9 +8,9 @@
     "live_closure_evidence_status": "not_generated",
     "mock_signal_treated_as_real_signal": false,
     "real_order_closure_proven": false,
-    "reason": "waiting_for_real_fresh_selected_strategygroup_signal",
-    "status": "not_complete_waiting_for_market",
-    "waiting_for_real_fresh_signal": true
+    "reason": "runtime_chain_not_settled",
+    "status": "not_complete_runtime_processing",
+    "waiting_for_real_fresh_signal": false
   },
   "entry_fast_chain_boundary": {
     "candidate_authorization_to_finalgate_covered": true,
@@ -49,7 +49,7 @@
     "reduce_only_recovery_standing_authorization_checked": true,
     "status": "ready"
   },
-  "generated_at_utc": "2026-06-30T01:54:25.598499+00:00",
+  "generated_at_utc": "2026-06-30T03:27:32.962383+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -91,10 +91,10 @@
     "missing_evidence_keys": [],
     "normalization_reason": null,
     "owner_state": "未生成",
-    "raw_source_status": "not_generated",
+    "raw_source_status": "live_closure_not_started",
     "real_order_closure_proven": false,
     "reject_reasons": [],
-    "source_status": "not_generated",
+    "source_status": "live_closure_not_started",
     "stage_count": 9,
     "status": "not_generated"
   },
@@ -156,20 +156,20 @@
     ],
     "monitor_status": "needs_refresh",
     "owner_intervention_required": false,
-    "owner_status": "waiting_for_opportunity",
-    "runtime_status": "waiting_for_market",
-    "waiting_for_market": true
+    "owner_status": "running",
+    "runtime_status": "running",
+    "waiting_for_market": false
   },
-  "owner_status": "waiting_for_opportunity",
+  "owner_status": "running",
   "owner_summary": {
     "capital_trial": "short_experiment_evidence_pending_owner_policy",
     "checkpoint_source": "goal_progress_status_projection",
-    "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
+    "non_authority_checkpoint": "刷新或修复 runtime monitor 权威状态",
     "owner_intervention_required": false,
-    "p0": "waiting_for_market",
+    "p0": "ready",
     "risk_level": "L0 local audit",
     "signal_observation_state": "ready",
-    "state": "等待机会",
+    "state": "暂不可用",
     "strategy_portfolio": "portfolio_screening_active"
   },
   "p0_completion_audit_boundary": {
@@ -187,7 +187,7 @@
     "source_status": "live_cutover_waiting_for_fresh_signal",
     "status": "not_complete_waiting_for_market"
   },
-  "runtime_status": "waiting_for_market",
+  "runtime_status": "running",
   "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
   "scope": "strategygroup_runtime_goal_progress_audit",
   "signal_observation": {
@@ -210,7 +210,7 @@
     "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
     "tier_policy_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
   },
-  "status": "waiting_for_market_monitor_refresh_needed",
+  "status": "ready",
   "strategy_review_deep_dive_boundary": {
     "deep_dive_artifact_count": 6,
     "next_owner_policy_item_count": 6,
@@ -279,6 +279,7 @@
     },
     "current_strategy_group_tiers": {
       "BTPC-001": "L2",
+      "CPM-RO-001": "L3",
       "FBS-001": "L3",
       "MPG-001": "L4",
       "PMR-001": "L1",
@@ -298,6 +299,7 @@
     "new_strategy_groups_default_non_l4": true,
     "non_l4_strategy_groups": [
       "FBS-001",
+      "CPM-RO-001",
       "PMR-001",
       "SOR-001",
       "TEQ-001",
@@ -313,14 +315,14 @@
     {
       "blockers": [],
       "evidence": [
-        "daily_check_status=waiting_for_market_monitor_refresh_needed",
-        "derived_waiting_for_market=True"
+        "daily_check_status=temporarily_unavailable_monitor_refresh_needed",
+        "derived_waiting_for_market=False"
       ],
       "id": "p0_live_closure",
       "label": "P0 第一笔边界内真实订单闭环",
-      "owner_state": "等待市场机会",
-      "progress_checkpoint": "等待 fresh signal 后推进官方链路",
-      "status": "waiting_for_market"
+      "owner_state": "监控状态需刷新",
+      "progress_checkpoint": "fresh signal 已出现时推进官方链路",
+      "status": "ready"
     },
     {
       "blockers": [],
@@ -342,7 +344,7 @@
       "evidence": [
         "dry_run_audit=审计演练正常",
         "scenario_count=14",
-        "chain_ready_segments=22",
+        "chain_ready_segments=25",
         "missing_chain_segments=0",
         "goal_chain_ready_segments=7",
         "missing_goal_chain_segments=0"

@@ -1,17 +1,24 @@
 {
+  "armed_observation_ready": true,
   "checks": {
-    "candidate_authorization_evidence_ready": true,
+    "armed_observation_ready": true,
+    "candidate_authorization_evidence_ready": false,
     "exchange_write": false,
-    "execution_attempt_rehearsal_ready": true,
-    "finalgate_dry_run_passed": true,
-    "operation_layer_paper_passed": true,
+    "execution_attempt_rehearsal_ready": false,
+    "finalgate_dry_run_passed": false,
+    "fresh_signal_present": false,
+    "fresh_signal_submit_rehearsal_passed": false,
+    "operation_layer_paper_passed": false,
     "order_created": false,
     "required_facts_mapping_ready": true,
     "runtime_signal_capture_ready": true,
-    "shadow_candidate_shape_ready": true
+    "shadow_candidate_evidence_ready": false,
+    "shadow_candidate_shape_ready": true,
+    "submit_rehearsal_shape_ready": true
   },
-  "dry_run_submit_rehearsal": "passed",
-  "generated_at_utc": "2026-06-30T02:35:51.754850+00:00",
+  "dry_run_submit_rehearsal": "shape_ready",
+  "fresh_signal_submit_rehearsal_passed": false,
+  "generated_at_utc": "2026-06-30T03:27:32.617245+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -36,13 +43,14 @@
   },
   "schema": "brc.cpm_dry_run_submit_rehearsal.v1",
   "scope": "cpm_non_executing_submit_rehearsal",
-  "status": "cpm_dry_run_submit_rehearsal_passed",
+  "status": "cpm_dry_run_submit_rehearsal_shape_ready",
   "strategy_group_id": "CPM-RO-001",
+  "submit_rehearsal_shape_ready": true,
   "synthetic_fresh_signal_rehearsal": {
-    "candidate_authorization_evidence_ready": true,
-    "execution_attempt_rehearsal_ready": true,
-    "finalgate_dry_run_passed": true,
-    "operation_layer_paper_passed": true,
+    "candidate_authorization_evidence_ready": false,
+    "execution_attempt_rehearsal_ready": false,
+    "finalgate_dry_run_passed": false,
+    "operation_layer_paper_passed": false,
     "review_outcome_shape_ready": true
   }
 }

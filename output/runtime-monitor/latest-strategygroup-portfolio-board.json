@@ -61,8 +61,6 @@
       "blocked_until": "engineering_evidence_closure",
       "does_not_authorize_live_execution": true,
       "evidence_gaps": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:24h"
       ],
       "evidence_stage": "revise",
@@ -115,7 +113,7 @@
       "strategy_review_checkpoint": "keep_parked_until_material_new_edge_evidence"
     }
   ],
-  "generated_at_utc": "2026-06-30T01:54:23.757502+00:00",
+  "generated_at_utc": "2026-06-30T03:27:30.943270+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -692,8 +690,6 @@
       ],
       "engineering_continue": true,
       "evidence_gaps": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:24h"
       ],
       "evidence_stage": "revise",
@@ -701,8 +697,8 @@
         "strategy_asset_current_decision=revise"
       ],
       "evidence_strength": "strong_observe_only_evidence",
-      "execution_tier": "unknown",
-      "execution_tier_source": "no_tier_policy_or_registry_evidence",
+      "execution_tier": "L3",
+      "execution_tier_source": "tier_policy.current_strategy_groups",
       "forward_outcome_summary": {
         "by_window": {
           "12h": {
@@ -738,7 +734,7 @@
       "live_permission_change_recommended_now": false,
       "missed_no_action_forward_positive_count": 0,
       "no_action_count": 151,
-      "owner_label": "CPM 回补观察",
+      "owner_label": "CPM 回踩收复",
       "owner_policy_required": false,
       "owner_policy_required_now": false,
       "owner_policy_source": "none",
@@ -746,8 +742,8 @@
       "registry_decision_ref": "",
       "strategy_group_id": "CPM-RO-001",
       "strategy_review_checkpoint": "open_cpm_ro_semantic_source_merge_quality_review",
-      "trial_eligible": false,
-      "trial_eligible_source": "not_registry_trial_eligible",
+      "trial_eligible": true,
+      "trial_eligible_source": "registry_baseline",
       "would_enter_forward_positive_count": 13
     },
     {
@@ -1141,9 +1137,9 @@
     "execution_tier_counts": {
       "L1": 4,
       "L2": 1,
-      "L3": 2,
+      "L3": 3,
       "L4": 1,
-      "unknown": 2
+      "unknown": 1
     },
     "owner_policy_queue_count": 2,
     "portfolio_row_count": 10,
@@ -1171,7 +1167,7 @@
         "trial_eligible": false
       }
     ],
-    "registry_row_count": 10
+    "registry_row_count": 11
   },
   "runtime_posture": {
     "no_live_permission": true,

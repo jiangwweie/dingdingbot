@@ -1070,16 +1070,26 @@ def _cpm_first_blocker(
             "armed_observation",
         )
 
-    dry_run_passed = (
+    dry_run_shape_ready = (
         dry_run_submit_rehearsal.get("status")
-        == "cpm_dry_run_submit_rehearsal_passed"
-        and dry_run_submit_rehearsal.get("dry_run_submit_rehearsal") == "passed"
+        in {
+            "cpm_dry_run_submit_rehearsal_passed",
+            "cpm_dry_run_submit_rehearsal_shape_ready",
+        }
+        and (
+            dry_run_submit_rehearsal.get("dry_run_submit_rehearsal")
+            in {"passed", "fresh_signal_passed", "shape_ready"}
+            or _as_dict(dry_run_submit_rehearsal.get("checks")).get(
+                "submit_rehearsal_shape_ready"
+            )
+            is True
+        )
     )
-    if not dry_run_passed:
+    if not dry_run_shape_ready:
         return _classifier(
             "not_tradable_facts",
             "cpm_dry_run_submit_rehearsal_gap",
-            "CPM RequiredFacts and watcher scope are attached, but submit lifecycle rehearsal is not yet passed",
+            "CPM RequiredFacts and watcher scope are attached, but the submit rehearsal shape is not yet closed",
             "engineering",
             "run_cpm_non_executing_submit_rehearsal",
             "armed_observation",

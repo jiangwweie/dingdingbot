@@ -439,7 +439,7 @@
       "dominant_sampled_candidate_id": "CPM-RO-001",
       "engineering_continue": true,
       "evidence_stage": "revise",
-      "execution_tier": "unknown",
+      "execution_tier": "L3",
       "forward_pending_count": 1,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
@@ -473,8 +473,6 @@
       "tiny_live_ready": false,
       "tradable_forward_count": 13,
       "trial_blockers": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:24h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
@@ -647,8 +645,6 @@
       "next_engineering_bottleneck": "defer_until_identity_or_merge_review_closed",
       "strategy_group_id": "CPM-RO-001",
       "trial_blockers": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:24h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
@@ -674,7 +670,7 @@
       ]
     }
   ],
-  "generated_at_utc": "2026-06-30T01:54:23.863033+00:00",
+  "generated_at_utc": "2026-06-30T03:27:31.045536+00:00",
   "goal_progress_projection": {
     "no_live_permission": true,
     "owner_intervention_required": false,
@@ -1023,7 +1019,7 @@
       "dominant_sampled_candidate_id": "CPM-RO-001",
       "engineering_continue": true,
       "evidence_stage": "revise",
-      "execution_tier": "unknown",
+      "execution_tier": "L3",
       "forward_pending_count": 1,
       "identity_status": "identity_review_required",
       "live_permission_change": false,
@@ -1057,8 +1053,6 @@
       "tiny_live_ready": false,
       "tradable_forward_count": 13,
       "trial_blockers": [
-        "registry_identity_or_registry_row_missing",
-        "execution_tier_not_in_policy_or_registry",
         "would_enter_forward_outcome_pending:24h",
         "registry_identity_unresolved",
         "owner_capital_scope_not_confirmed",
@@ -1460,7 +1454,7 @@
       "tradable_forward_count": 8,
       "would_enter_forward_positive_count": 8
     },
-    "generated_at_utc": "2026-06-30T01:54:23.863033+00:00",
+    "generated_at_utc": "2026-06-30T03:27:31.045536+00:00",
     "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as non-executing candidate-trade evidence, pending Owner policy scope and future official live gates.",
     "kill_conditions": [
       "owner_policy_not_accepted",

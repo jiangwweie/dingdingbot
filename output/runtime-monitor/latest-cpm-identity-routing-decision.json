@@ -25,7 +25,7 @@
     "time_stop_difference": "CPM-LONG has reclaim follow-through staleness; MPG has continuation persistence decay.",
     "trigger_difference": "CPM-LONG waits for trend-intact pullback depth plus reclaim; MPG-LONG waits for momentum continuation and persistence."
   },
-  "generated_at_utc": "2026-06-30T02:35:51.352607+00:00",
+  "generated_at_utc": "2026-06-30T03:27:32.334734+00:00",
   "identity_decision": "standalone_trial_asset",
   "interaction": {
     "approaches_real_order": false,

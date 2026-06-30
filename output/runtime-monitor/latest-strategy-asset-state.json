@@ -242,7 +242,7 @@
       {
         "authority_boundary": "local_decision_support_only; source=capture_gap_audit; promotion_scope=not_applicable; no_official_live_order_authority; no_tier_policy_change; no_finalgate_no_operation_layer_no_exchange_write",
         "current_decision": "revise",
-        "current_tier": "unknown",
+        "current_tier": "L3",
         "next_checkpoint": "CPM-RO-001_registry_identity_review",
         "opportunity_type": "would_enter",
         "promotion_scope": "not_applicable",

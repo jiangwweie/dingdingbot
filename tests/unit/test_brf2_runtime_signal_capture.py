@@ -77,7 +77,7 @@ def _mapping() -> dict:
         "disable_fact_observation_specs": [
             {
                 "fact_key": "short_squeeze_risk_state",
-                "active_statuses": ["red", "unbounded", "unknown"],
+                "active_statuses": ["bounded", "red", "unbounded", "unknown"],
                 "blocker": "squeeze_risk_not_clear",
             },
             {
@@ -290,8 +290,10 @@ def test_brf2_runtime_signal_capture_preserves_source_signal_context():
     candidate = artifact["shadow_candidate_shape"]
     assert artifact["fact_input_present"] is True
     assert artifact["watcher_tick_present"] is True
-    assert preview["current_signal_state"] == "fresh_signal_absent"
-    assert preview["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert preview["current_signal_state"] == "blocked_by_disable_fact"
+    assert preview["first_blocker_class"] == (
+        "short_squeeze_risk_state_disable_active"
+    )
     assert context["symbol"] == "BTC/USDT:USDT"
     assert context["exchange_symbol"] == "BTC/USDT:USDT"
     assert context["signal_observation_id"] == (

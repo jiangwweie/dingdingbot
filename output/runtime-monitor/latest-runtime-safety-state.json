@@ -272,8 +272,8 @@
   "scope": "p0_runtime_safety_state",
   "source_status": {
     "completion_audit": "not_complete_waiting_for_market",
-    "daily_check": "waiting_for_market_monitor_refresh_needed",
-    "goal_progress": "waiting_for_market_monitor_refresh_needed",
+    "daily_check": "temporarily_unavailable_monitor_refresh_needed",
+    "goal_progress": "ready",
     "live_cutover": "live_cutover_waiting_for_fresh_signal",
     "pre_live_rehearsal_readiness": "pre_live_rehearsal_ready"
   },

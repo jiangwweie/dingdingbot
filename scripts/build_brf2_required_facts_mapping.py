@@ -152,7 +152,7 @@ ACCEPTED_REQUIRED_FACT_STATES = {
 DISABLE_FACTS = [
     {
         "fact_key": "short_squeeze_risk_state",
-        "blocks_when": ["red", "unbounded", "unknown"],
+        "blocks_when": ["bounded", "red", "unbounded", "unknown"],
         "blocker": "squeeze_risk_not_clear",
     },
     {

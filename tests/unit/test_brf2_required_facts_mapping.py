@@ -106,6 +106,7 @@ def test_brf2_required_facts_mapping_ready_case():
         "spread_liquidity_state",
     }.issubset(set(disable_specs))
     assert disable_specs["short_squeeze_risk_state"]["active_statuses"] == [
+        "bounded",
         "red",
         "unbounded",
         "unknown",

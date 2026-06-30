@@ -120,7 +120,7 @@
   "current_real_submit_allowed": false,
   "current_real_submit_blocker": "no_live_fresh_signal_in_this_local_artifact",
   "first_live_lane": "selected_strategygroup_allocated_subaccount",
-  "generated_at_ms": 1782784463642,
+  "generated_at_ms": 1782790050835,
   "legacy_confirmation_regression_checks": {
     "disabled_smoke_not_real_execution_proof": true,
     "legacy_local_registration_probe_tolerated_without_blocking_cutover": true,

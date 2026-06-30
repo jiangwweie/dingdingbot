@@ -2,7 +2,7 @@
 
 - Status: trial_envelope_projection_ready
 - Projection status: trial_envelope_projection_ready
-- Generated: 2026-06-30T01:54:23.863033+00:00
+- Generated: 2026-06-30T03:27:31.045536+00:00
 - Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json
 - Trial Envelope v0 JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
 - Selected non-MPG candidate: BRF2-001
@@ -35,7 +35,7 @@
 | 1 | BRF2-001 | experiment_candidate_prepare_pending_owner_policy | 597 | 3_of_11_cap4_events_hit_5m_stop, strong_reclaim_proxy_catches_stop_hits_but_may_overfilter_positive_events, symbol/date filters that fully remove stop hits are high overfit risk, source_non_executing_trial_readiness_not_closed, owner_capital_scope_not_confirmed, owner_trial_identity_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
 | 2 | RBR2-001 | role_only_short_experiment_candidate_watchlist | 390 | 5m_stop_hit_rate_is_high, time_stop_only_overstates_realistic_structural_stop_behavior, best role is filler not main right-tail engine, source_non_executing_trial_readiness_not_closed, owner_capital_scope_not_confirmed, owner_trial_identity_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
 | 3 | MI-001 | trial_prepare_after_owner_identity_and_capital_policy | 191 | registry_identity_or_registry_row_missing, execution_tier_not_in_policy_or_registry, would_enter_forward_outcome_pending:12h, would_enter_forward_outcome_pending:24h, would_enter_forward_outcome_pending:4h, registry_identity_unresolved, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
-| 4 | CPM-RO-001 | defer_until_identity_or_merge_review_closed | 161 | registry_identity_or_registry_row_missing, execution_tier_not_in_policy_or_registry, would_enter_forward_outcome_pending:24h, registry_identity_unresolved, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
+| 4 | CPM-RO-001 | defer_until_identity_or_merge_review_closed | 161 | would_enter_forward_outcome_pending:24h, registry_identity_unresolved, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
 | 5 | BRF-001 | defer_until_squeeze_requiredfacts_forward_completed | 68 | would_enter_forward_outcome_pending:12h, would_enter_forward_outcome_pending:24h, would_enter_forward_outcome_pending:4h, owner_policy_scope_not_confirmed, squeeze_classifier_required, requiredfacts_review_required, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
 | 6 | LSR-001 | defer_until_rewrite_and_range_facts_closed | 44 | no_action_or_classifier_attribution_needs_closure, side_specific_rewrite_not_closed, range_context_required, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |
 | 7 | BTPC-001 | defer_until_fact_source_classifier_closed | -90 | no_action_or_classifier_attribution_needs_closure, stale_fact_source_classifier_blocker_unclosed, no_recent_would_enter, owner_capital_scope_not_confirmed, fresh_signal_absent, action_time_finalgate_not_reached, official_operation_layer_not_reached |

@@ -38,6 +38,10 @@ DEFAULT_OUTPUT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.md"
 )
 
+PASSED_STATUS = "cpm_dry_run_submit_rehearsal_passed"
+SHAPE_READY_STATUS = "cpm_dry_run_submit_rehearsal_shape_ready"
+BLOCKED_STATUS = "cpm_dry_run_submit_rehearsal_blocked"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -75,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if artifact["status"] == "cpm_dry_run_submit_rehearsal_passed" else 2
+    return 0 if artifact["status"] in {PASSED_STATUS, SHAPE_READY_STATUS} else 2
 
 
 def build_cpm_dry_run_submit_rehearsal(
@@ -87,39 +91,80 @@ def build_cpm_dry_run_submit_rehearsal(
 ) -> dict[str, Any]:
     mapping_ready = required_facts_mapping.get("required_facts_mapping_ready") is True
     capture_ready = runtime_signal_capture.get("status") == "cpm_runtime_signal_capture_ready"
+    capture_preview = _as_dict(runtime_signal_capture.get("signal_detector_preview"))
+    fresh_signal_present = (
+        capture_preview.get("fresh_signal_present") is True
+        or capture_preview.get("current_signal_state") == "fresh_signal_present"
+    )
     shadow_shape_ready = shadow_candidate_evidence.get("status") in {
         "cpm_shadow_candidate_evidence_ready",
         "cpm_shadow_candidate_evidence_waiting_for_fresh_signal",
     }
-    passed = mapping_ready and capture_ready and shadow_shape_ready
+    shadow_candidate_ready = (
+        shadow_candidate_evidence.get("shadow_candidate_evidence_ready") is True
+    )
+    armed_observation_ready = mapping_ready and capture_ready and shadow_shape_ready
+    submit_rehearsal_shape_ready = armed_observation_ready
+    fresh_signal_submit_rehearsal_passed = (
+        submit_rehearsal_shape_ready
+        and fresh_signal_present
+        and shadow_candidate_ready
+    )
+    status = (
+        PASSED_STATUS
+        if fresh_signal_submit_rehearsal_passed
+        else SHAPE_READY_STATUS
+        if submit_rehearsal_shape_ready
+        else BLOCKED_STATUS
+    )
     return {
         "schema": "brc.cpm_dry_run_submit_rehearsal.v1",
         "scope": "cpm_non_executing_submit_rehearsal",
-        "status": (
-            "cpm_dry_run_submit_rehearsal_passed"
-            if passed
-            else "cpm_dry_run_submit_rehearsal_blocked"
-        ),
+        "status": status,
         "generated_at_utc": generated_at_utc
         or datetime.now(timezone.utc).isoformat(),
         "strategy_group_id": "CPM-RO-001",
         "path_id": "CPM-LONG",
-        "dry_run_submit_rehearsal": "passed" if passed else "blocked",
+        "armed_observation_ready": armed_observation_ready,
+        "submit_rehearsal_shape_ready": submit_rehearsal_shape_ready,
+        "fresh_signal_submit_rehearsal_passed": fresh_signal_submit_rehearsal_passed,
+        "dry_run_submit_rehearsal": (
+            "fresh_signal_passed"
+            if fresh_signal_submit_rehearsal_passed
+            else "shape_ready"
+            if submit_rehearsal_shape_ready
+            else "blocked"
+        ),
         "synthetic_fresh_signal_rehearsal": {
-            "candidate_authorization_evidence_ready": passed,
-            "finalgate_dry_run_passed": passed,
-            "operation_layer_paper_passed": passed,
-            "execution_attempt_rehearsal_ready": passed,
-            "review_outcome_shape_ready": passed,
+            "candidate_authorization_evidence_ready": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "finalgate_dry_run_passed": fresh_signal_submit_rehearsal_passed,
+            "operation_layer_paper_passed": fresh_signal_submit_rehearsal_passed,
+            "execution_attempt_rehearsal_ready": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "review_outcome_shape_ready": submit_rehearsal_shape_ready,
         },
         "checks": {
             "required_facts_mapping_ready": mapping_ready,
             "runtime_signal_capture_ready": capture_ready,
+            "fresh_signal_present": fresh_signal_present,
             "shadow_candidate_shape_ready": shadow_shape_ready,
-            "candidate_authorization_evidence_ready": passed,
-            "finalgate_dry_run_passed": passed,
-            "operation_layer_paper_passed": passed,
-            "execution_attempt_rehearsal_ready": passed,
+            "shadow_candidate_evidence_ready": shadow_candidate_ready,
+            "armed_observation_ready": armed_observation_ready,
+            "submit_rehearsal_shape_ready": submit_rehearsal_shape_ready,
+            "fresh_signal_submit_rehearsal_passed": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "candidate_authorization_evidence_ready": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "finalgate_dry_run_passed": fresh_signal_submit_rehearsal_passed,
+            "operation_layer_paper_passed": fresh_signal_submit_rehearsal_passed,
+            "execution_attempt_rehearsal_ready": (
+                fresh_signal_submit_rehearsal_passed
+            ),
             "exchange_write": False,
             "order_created": False,
         },
@@ -146,6 +191,9 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             "",
             f"- Status: `{artifact['status']}`",
             f"- Rehearsal: `{artifact['dry_run_submit_rehearsal']}`",
+            f"- Armed observation ready: `{_yes_no(checks['armed_observation_ready'])}`",
+            f"- Submit rehearsal shape ready: `{_yes_no(checks['submit_rehearsal_shape_ready'])}`",
+            f"- Fresh-signal submit rehearsal passed: `{_yes_no(checks['fresh_signal_submit_rehearsal_passed'])}`",
             f"- Candidate authorization evidence ready: `{_yes_no(checks['candidate_authorization_evidence_ready'])}`",
             f"- FinalGate dry-run passed: `{_yes_no(checks['finalgate_dry_run_passed'])}`",
             f"- Operation Layer paper passed: `{_yes_no(checks['operation_layer_paper_passed'])}`",
@@ -161,6 +209,10 @@ def _read_optional_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
