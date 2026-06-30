@@ -244,7 +244,7 @@
     "first_blocker_owner": "market",
     "fresh_signal_present": false,
     "live_submit_readiness_source": "runtime_safety_state",
-    "missing_required_fact_count": 3,
+    "missing_required_fact_count": 2,
     "path_id": "CPM-LONG",
     "primary_judgment_source": false,
     "projection_role": "runtime_readiness_signal_capture_projection",
@@ -262,10 +262,10 @@
   "cpm_runtime_signal_facts": {
     "action_time_refresh_required": true,
     "active": true,
-    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "fact_authority": "binance_usdm_public_candles_not_action_time_private_facts",
     "fact_input_present": true,
-    "first_blocker_class": "none",
-    "first_blocker_owner": "runtime",
+    "first_blocker_class": "fresh_cpm_long_signal_absent",
+    "first_blocker_owner": "market",
     "live_required_facts_authority": false,
     "path_id": "CPM-LONG",
     "primary_judgment_source": false,
@@ -334,7 +334,7 @@
     "status": "four_candidate_scope_review_decision_ready",
     "tradeability_decision_source": false
   },
-  "generated_at_utc": "2026-06-30T14:09:09.114380+00:00",
+  "generated_at_utc": "2026-06-30T15:14:55.590579+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -609,7 +609,7 @@
       "first_blocker_owner": "market",
       "fresh_signal_present": false,
       "live_submit_readiness_source": "runtime_safety_state",
-      "missing_required_fact_count": 3,
+      "missing_required_fact_count": 2,
       "path_id": "CPM-LONG",
       "primary_judgment_source": false,
       "projection_role": "runtime_readiness_signal_capture_projection",
@@ -627,10 +627,10 @@
     "cpm_runtime_signal_facts": {
       "action_time_refresh_required": true,
       "active": true,
-      "fact_authority": "readonly_proxy_not_action_time_required_fact",
+      "fact_authority": "binance_usdm_public_candles_not_action_time_private_facts",
       "fact_input_present": true,
-      "first_blocker_class": "none",
-      "first_blocker_owner": "runtime",
+      "first_blocker_class": "fresh_cpm_long_signal_absent",
+      "first_blocker_owner": "market",
       "live_required_facts_authority": false,
       "path_id": "CPM-LONG",
       "primary_judgment_source": false,
@@ -759,6 +759,22 @@
       "strategygroup_lifecycle_owner": false,
       "tradeability_decision_source": false,
       "trial_envelope_generated": true
+    },
+    "strategy_fresh_signal_action_time_boundary": {
+      "active": true,
+      "exchange_write_called": false,
+      "finalgate_called": false,
+      "fresh_signal_present_count": 0,
+      "live_submit_allowed_count": 0,
+      "operation_layer_called": false,
+      "order_created": false,
+      "primary_judgment_source": false,
+      "projection_role": "fresh_signal_action_time_boundary_projection",
+      "runtime_truth_source": false,
+      "state_source": "strategy_fresh_signal_action_time_boundary",
+      "status": "strategy_fresh_signal_action_time_boundary_ready",
+      "tradeability_decision_source": false,
+      "would_enter_finalgate_if_private_facts_ready_count": 3
     },
     "strategy_research_intake": {
       "active": true,
@@ -1229,6 +1245,22 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
+        "level": "L0_local_binance_usdm_public_facts",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "binance_usdm_public_facts",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-binance-usdm-public-facts.json",
+      "returncode": 0,
+      "status": "binance_usdm_public_facts_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
         "level": "L0_local_cpm_runtime_signal_facts",
         "mutates_remote_files": false,
         "places_order": false,
@@ -1293,22 +1325,6 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "level": "L0_local_binance_usdm_public_facts",
-        "mutates_remote_files": false,
-        "places_order": false,
-        "remote_interaction_count": 0
-      },
-      "name": "binance_usdm_public_facts",
-      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-binance-usdm-public-facts.json",
-      "returncode": 0,
-      "status": "binance_usdm_public_facts_ready"
-    },
-    {
-      "interaction": {
-        "approaches_real_order": false,
-        "calls_exchange_write": false,
-        "calls_finalgate": false,
-        "calls_operation_layer": false,
         "level": "L0_local_mpg_001_runtime_activation_evidence",
         "mutates_remote_files": false,
         "places_order": false,
@@ -1318,6 +1334,38 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-mpg-runtime-activation-evidence.json",
       "returncode": 0,
       "status": "runtime_activation_evidence_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_mpg_action_time_facts_readiness",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "mpg_high_beta_scope_readiness",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-mpg-action-time-facts-readiness.json",
+      "returncode": 0,
+      "status": "mpg_action_time_facts_readiness_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_strategy_fresh_signal_action_time_boundary",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "strategy_fresh_signal_action_time_boundary",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json",
+      "returncode": 0,
+      "status": "strategy_fresh_signal_action_time_boundary_ready"
     },
     {
       "interaction": {
@@ -1787,6 +1835,22 @@
     "strategygroup_lifecycle_owner": false,
     "tradeability_decision_source": false,
     "trial_envelope_generated": true
+  },
+  "strategy_fresh_signal_action_time_boundary": {
+    "active": true,
+    "exchange_write_called": false,
+    "finalgate_called": false,
+    "fresh_signal_present_count": 0,
+    "live_submit_allowed_count": 0,
+    "operation_layer_called": false,
+    "order_created": false,
+    "primary_judgment_source": false,
+    "projection_role": "fresh_signal_action_time_boundary_projection",
+    "runtime_truth_source": false,
+    "state_source": "strategy_fresh_signal_action_time_boundary",
+    "status": "strategy_fresh_signal_action_time_boundary_ready",
+    "tradeability_decision_source": false,
+    "would_enter_finalgate_if_private_facts_ready_count": 3
   },
   "strategy_research_intake": {
     "active": true,

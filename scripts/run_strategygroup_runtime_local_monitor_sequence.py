@@ -398,6 +398,18 @@ DEFAULT_CPM_FRESH_SIGNAL_LIVE_PATH_READINESS_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-cpm-fresh-signal-live-path-readiness.json"
 )
+DEFAULT_MPG_ACTION_TIME_FACTS_READINESS_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-mpg-action-time-facts-readiness.json"
+)
+DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
+)
+DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md"
+)
 DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.json"
@@ -1438,6 +1450,55 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    mpg_high_beta_scope_readiness_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_mpg_high_beta_scope_readiness.py"),
+        "--public-facts-json",
+        str(binance_usdm_public_facts_json),
+        "--replay-json",
+        str(four_candidate_recent_live_submit_replay_json),
+        "--output-dir",
+        str(four_candidate_runtime_activation_closure_json.parent),
+    ]
+    steps.append(
+        _run_step(
+            "mpg_high_beta_scope_readiness",
+            mpg_high_beta_scope_readiness_command,
+            DEFAULT_MPG_ACTION_TIME_FACTS_READINESS_JSON,
+            runner,
+        )
+    )
+
+    strategy_fresh_signal_action_time_boundary_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategy_fresh_signal_action_time_boundary.py"
+        ),
+        "--cpm-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--cpm-rehearsal-json",
+        str(cpm_dry_run_submit_rehearsal_json),
+        "--mpg-readiness-json",
+        str(DEFAULT_MPG_ACTION_TIME_FACTS_READINESS_JSON),
+        "--mpg-evidence-json",
+        str(mpg_runtime_activation_evidence_json),
+        "--sor-evidence-json",
+        str(sor_runtime_activation_evidence_json),
+        "--output-json",
+        str(DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON),
+        "--output-owner-progress",
+        str(DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD),
+    ]
+    steps.append(
+        _run_step(
+            "strategy_fresh_signal_action_time_boundary",
+            strategy_fresh_signal_action_time_boundary_command,
+            DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON,
+            runner,
+        )
+    )
+
     four_candidate_runtime_activation_closure_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_four_candidate_runtime_activation_closure.py"),
@@ -2246,6 +2307,11 @@ def build_local_monitor_sequence_report(
             artifacts.get("cpm_fresh_signal_live_path_readiness", {})
         )
     )
+    strategy_fresh_signal_action_time_boundary_summary = (
+        _sequence_strategy_fresh_signal_action_time_boundary_summary(
+            artifacts.get("strategy_fresh_signal_action_time_boundary", {})
+        )
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         artifacts.get("three_strategy_live_trial_portfolio", {})
     )
@@ -2321,6 +2387,9 @@ def build_local_monitor_sequence_report(
             "cpm_fresh_signal_live_path_readiness": (
                 cpm_fresh_signal_live_path_readiness_summary
             ),
+            "strategy_fresh_signal_action_time_boundary": (
+                strategy_fresh_signal_action_time_boundary_summary
+            ),
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "armed_trade_candidates": armed_trade_candidate_summary,
             "tradeability_decision": tradeability_summary,
@@ -2360,6 +2429,9 @@ def build_local_monitor_sequence_report(
         ),
         "cpm_fresh_signal_live_path_readiness": (
             cpm_fresh_signal_live_path_readiness_summary
+        ),
+        "strategy_fresh_signal_action_time_boundary": (
+            strategy_fresh_signal_action_time_boundary_summary
         ),
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "armed_trade_candidates": armed_trade_candidate_summary,
@@ -3947,6 +4019,34 @@ def _sequence_cpm_fresh_signal_live_path_readiness_summary(
     }
 
 
+def _sequence_strategy_fresh_signal_action_time_boundary_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    summary = _as_dict(artifact.get("summary"))
+    checks = _as_dict(artifact.get("checks"))
+    return {
+        "status": status,
+        "active": status == "strategy_fresh_signal_action_time_boundary_ready",
+        "fresh_signal_present_count": int(
+            summary.get("fresh_signal_present_count") or 0
+        ),
+        "would_enter_finalgate_if_private_facts_ready_count": int(
+            summary.get("would_enter_finalgate_if_private_facts_ready_count") or 0
+        ),
+        "live_submit_allowed_count": int(summary.get("live_submit_allowed_count") or 0),
+        "finalgate_called": checks.get("calls_finalgate") is True,
+        "operation_layer_called": checks.get("calls_operation_layer") is True,
+        "exchange_write_called": checks.get("calls_exchange_write") is True,
+        "order_created": checks.get("order_created") is True,
+        "projection_role": "fresh_signal_action_time_boundary_projection",
+        "state_source": "strategy_fresh_signal_action_time_boundary",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
 @dataclass(frozen=True)
 class _ThreeStrategyPortfolioSummaryProjection:
     status: str
@@ -4466,6 +4566,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     cpm_fresh_signal_live_path_readiness = (
         report.get("cpm_fresh_signal_live_path_readiness") or {}
     )
+    strategy_fresh_signal_action_time_boundary = (
+        report.get("strategy_fresh_signal_action_time_boundary") or {}
+    )
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -4558,6 +4661,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- MI formal replay review opened: `{four_candidate_runtime_activation_closure.get('formal_replay_review_opened_count', 0)}`",
         f"- Scope review decision: `{four_candidate_scope_review_decision.get('status', 'missing')}` / readonly expansions `{four_candidate_scope_review_decision.get('readonly_watcher_scope_expansion_count', 0)}` / live-scope changes `{four_candidate_scope_review_decision.get('primary_live_submit_scope_changed_count', 0)}`",
         f"- CPM fresh-path public facts / fresh signal / next blocker: `{_yes_no(cpm_fresh_signal_live_path_readiness.get('public_fact_path_ready') is True)}` / `{_yes_no(cpm_fresh_signal_live_path_readiness.get('fresh_signal_present') is True)}` / `{cpm_fresh_signal_live_path_readiness.get('next_blocker') or 'missing'}`",
+        f"- Fresh-signal action-time boundary: `{strategy_fresh_signal_action_time_boundary.get('status', 'missing')}` / fresh `{strategy_fresh_signal_action_time_boundary.get('fresh_signal_present_count', 0)}` / finalgate-if-private-facts `{strategy_fresh_signal_action_time_boundary.get('would_enter_finalgate_if_private_facts_ready_count', 0)}` / live-submit `{strategy_fresh_signal_action_time_boundary.get('live_submit_allowed_count', 0)}`",
         f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",
         f"- Activation next checkpoint: `{four_candidate_runtime_activation_closure.get('next_checkpoint') or 'missing'}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",
