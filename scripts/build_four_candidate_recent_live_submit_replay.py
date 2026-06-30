@@ -144,27 +144,47 @@ def build_recent_live_submit_replay(
         for strategy_group_id in FOUR_CANDIDATES
     ]
     mi_review = _mi_candidate_review(candles)
-    review_signal_count = sum(
+    source_metadata = _source_metadata(market_data)
+    window_cumulative_signal_count = sum(
         window["counterfactual_fresh_signal_count"]
         for row in strategy_rows
         for window in row["window_results"]
     )
-    missed_review_count = sum(
-        len(window["missed_opportunity_review_events"])
+    window_cumulative_missed_count = sum(
+        window["missed_opportunity_review_count"]
         for row in strategy_rows
         for window in row["window_results"]
+    )
+    unique_review_signal_count = sum(
+        window["counterfactual_fresh_signal_count"]
+        for row in strategy_rows
+        for window in row["window_results"]
+        if window["window_days"] == max(WINDOW_DAYS)
+    )
+    unique_missed_count = sum(
+        window["missed_opportunity_review_count"]
+        for row in strategy_rows
+        for window in row["window_results"]
+        if window["window_days"] == max(WINDOW_DAYS)
+    )
+    action_time_boundary_count = sum(
+        window["would_reach_action_time_boundary_count"]
+        for row in strategy_rows
+        for window in row["window_results"]
+        if window["window_days"] == max(WINDOW_DAYS)
     )
     scope_review_ids = sorted(
         {
             row["strategy_group_id"]
             for row in strategy_rows
             if any(
-                event["symbol_scope_review_required"]
+                symbol_result["symbol_scope_review_required"]
                 for window in row["window_results"]
-                for event in window["counterfactual_events"]
+                for symbol_result in window["per_symbol_results"]
             )
         }
     )
+    top_missed_events = _top_missed_events(strategy_rows)
     return {
         "schema": SCHEMA,
         "scope": SCOPE,
@@ -177,6 +197,7 @@ def build_recent_live_submit_replay(
         "data_sources": {
             "public_market_candles": {
                 "provider": source_name,
+                **source_metadata,
                 "binance_endpoint": BINANCE_KLINES_ENDPOINT,
                 "coinbase_endpoint": COINBASE_CANDLES_ENDPOINT,
                 "intervals": list(INTERVALS),
@@ -192,10 +213,19 @@ def build_recent_live_submit_replay(
             "window_days": list(WINDOW_DAYS),
             "strategy_count": len(strategy_rows),
             "symbol_count": len(SYMBOLS),
-            "counterfactual_review_signal_count": review_signal_count,
-            "missed_opportunity_review_count": missed_review_count,
+            "counterfactual_review_signal_count": unique_review_signal_count,
+            "missed_opportunity_review_count": unique_missed_count,
+            "unique_review_signal_count": unique_review_signal_count,
+            "unique_missed_opportunity_count": unique_missed_count,
+            "window_cumulative_signal_count": window_cumulative_signal_count,
+            "window_cumulative_missed_opportunity_count": window_cumulative_missed_count,
+            "would_reach_action_time_boundary_count": action_time_boundary_count,
             "symbol_scope_review_strategy_ids": scope_review_ids,
             "counterfactual_live_submit_allowed_count": 0,
+            "top_missed_events": top_missed_events,
+            "should_promote_scope_change": _scope_change_recommendations(
+                strategy_rows, mi_review
+            ),
             "default_next_step": (
                 "review_recent_counterfactual_signals_then_tune_symbol_scope_or_facts_without_granting_live_authority"
             ),
@@ -273,6 +303,89 @@ def _strategy_row(
     }
 
 
+def _source_metadata(market_data: dict[str, Any]) -> dict[str, Any]:
+    source = str(market_data.get("source") or "unknown_public_market_data")
+    primary_error = str(market_data.get("primary_source_error") or "")
+    if source == "coinbase_exchange_public_candles_fallback":
+        venue_basis = "coinbase_spot_proxy"
+        absorbability_grade = "review_only_proxy"
+    elif source == "binance_spot_public_klines":
+        venue_basis = "binance_spot_proxy"
+        absorbability_grade = "review_only_proxy"
+    else:
+        venue_basis = "unknown_public_market_proxy"
+        absorbability_grade = "fixture_or_unknown_review_only_proxy"
+    return {
+        "venue_basis": venue_basis,
+        "execution_venue_basis": "binance_usdm_usdt_perps",
+        "execution_venue_match": False,
+        "absorbability_grade": absorbability_grade,
+        "primary_source_error": primary_error,
+        "symbol_notation_role": "strategy_compatibility_labels_not_execution_venue_products",
+        "venue_gap_note": (
+            "Replay uses public spot/proxy candles and cannot be treated as Binance USD-M executable replay."
+        ),
+    }
+
+
+def _top_missed_events(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events = [
+        event
+        for row in strategy_rows
+        for window in row["window_results"]
+        if window["window_days"] == max(WINDOW_DAYS)
+        for event in window["top_missed_opportunity_events"]
+    ]
+    return sorted(
+        events,
+        key=lambda event: (
+            -float(event.get("signal_strength") or 0.0),
+            event["event_time_utc"],
+        ),
+    )[:20]
+
+
+def _scope_change_recommendations(
+    strategy_rows: list[dict[str, Any]],
+    mi_review: dict[str, Any],
+) -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    for row in strategy_rows:
+        if row["strategy_group_id"] == "BRF2-001":
+            continue
+        longest_window = next(
+            window
+            for window in row["window_results"]
+            if window["window_days"] == max(WINDOW_DAYS)
+        )
+        symbols = [
+            item["symbol"]
+            for item in longest_window["per_symbol_results"]
+            if item["symbol_scope_review_required"]
+            and item["counterfactual_fresh_signal_count"] >= 2
+        ]
+        if symbols:
+            recommendations.append(
+                {
+                    "strategy_group_id": row["strategy_group_id"],
+                    "recommendation": "review_primary_symbol_scope_expansion",
+                    "candidate_symbols": symbols,
+                    "authority_boundary": "review_only_no_policy_or_live_scope_change",
+                }
+            )
+    recommendations.append(
+        {
+            "strategy_group_id": "MI-001",
+            "recommendation": mi_review["review_recommendation"],
+            "candidate_symbols": sorted(
+                {event["symbol"] for event in mi_review.get("events", [])}
+            ),
+            "authority_boundary": "review_only_no_registry_admission_or_live_authority",
+        }
+    )
+    return recommendations
+
+
 def _window_result(
     strategy_group_id: str,
     config: dict[str, Any],
@@ -303,6 +416,18 @@ def _window_result(
         for event in events
         if event["missed_opportunity_review_required"]
     ]
+    action_time_boundary_events = [
+        event
+        for event in events
+        if event["would_reach_action_time_boundary"]
+    ]
+    top_review_events = sorted(
+        review_events,
+        key=lambda event: (
+            -float(event.get("signal_strength") or 0.0),
+            event["event_time_utc"],
+        ),
+    )
     blocker_counts: dict[str, int] = {}
     for event in events:
         blocker_counts[event["first_blocker_class"]] = (
@@ -312,9 +437,11 @@ def _window_result(
         "window_days": window_days,
         "counterfactual_fresh_signal_count": len(events),
         "missed_opportunity_review_count": len(review_events),
+        "would_reach_action_time_boundary_count": len(action_time_boundary_events),
         "per_symbol_results": per_symbol_results,
         "counterfactual_events": events[:20],
         "missed_opportunity_review_events": review_events[:10],
+        "top_missed_opportunity_events": top_review_events[:10],
         "first_blocker_counts": blocker_counts,
         "window_answer": _window_answer(strategy_group_id, events, review_events),
     }
@@ -336,11 +463,17 @@ def _symbol_window_result(
         for event in symbol_events
         if event["missed_opportunity_review_required"]
     ]
+    action_time_boundary_events = [
+        event
+        for event in symbol_events
+        if event["would_reach_action_time_boundary"]
+    ]
     return {
         "symbol": symbol,
         "symbol_in_primary_scope": symbol in primary_scope,
         "counterfactual_fresh_signal_count": len(symbol_events),
         "missed_opportunity_review_count": len(missed_events),
+        "would_reach_action_time_boundary_count": len(action_time_boundary_events),
         "symbol_scope_review_required": any(
             event["symbol_scope_review_required"] for event in symbol_events
         ),
@@ -378,6 +511,7 @@ def _strategy_events(
                         "event_time_ms": candle.open_time_ms,
                         "signal_strength": _signal_strength(hourly, index),
                         "reason": _signal_reason(strategy_group_id),
+                        "market_context": _market_context(hourly, index),
                     }
                 )
     return [
@@ -402,38 +536,60 @@ def _counterfactual_event(
     symbol_scope_review_required = (
         not in_primary_scope and strategy_group_id != "BRF2-001"
     )
+    squeeze_proxy = (
+        _brf2_squeeze_proxy(event.get("market_context") or {})
+        if strategy_group_id == "BRF2-001"
+        else {}
+    )
     if not in_primary_scope and strategy_group_id in {"MPG-001", "CPM-RO-001", "SOR-001"}:
         first_blocker = "symbol_scope_review_required"
         blocker_owner = "engineering"
         review_reason = "fresh_like_signal_on_non_primary_replay_symbol"
     elif strategy_group_id == "BRF2-001":
-        first_blocker = "short_squeeze_risk_state_disable_active"
-        blocker_owner = "market"
-        review_reason = "short_signal_blocked_by_squeeze_disable_context"
+        if squeeze_proxy["squeeze_disable_active"]:
+            first_blocker = "short_squeeze_risk_state_disable_active"
+            blocker_owner = "market"
+            review_reason = "short_signal_blocked_by_event_time_squeeze_proxy"
+        else:
+            first_blocker = "action_time_required_facts_not_replayed"
+            blocker_owner = "runtime"
+            review_reason = "short_like_signal_reaches_action_time_fact_boundary_proxy"
     else:
         first_blocker = "action_time_required_facts_not_replayed"
         blocker_owner = "runtime"
         review_reason = "fresh_like_signal_requires_live_action_time_facts"
+    would_reach_action_time_boundary = (
+        first_blocker == "action_time_required_facts_not_replayed"
+    )
     return {
         "event_time_utc": _iso(event["event_time_ms"]),
         "strategy_group_id": strategy_group_id,
         "symbol": symbol,
+        "fresh_like_signal_seen": True,
         "counterfactual_fresh_signal_present": True,
         "signal_strength": round(float(event.get("signal_strength") or 0.0), 4),
         "signal_reason": event["reason"],
+        "market_context": event.get("market_context") or {},
+        "event_time_squeeze_proxy": squeeze_proxy,
         "symbol_in_primary_scope": in_primary_scope,
         "symbol_scope_review_required": symbol_scope_review_required,
+        "would_reach_action_time_boundary": would_reach_action_time_boundary,
+        "live_submit_allowed": False,
         "counterfactual_live_submit_allowed": False,
         "first_blocker_class": first_blocker,
         "first_blocker_owner": blocker_owner,
         "missed_opportunity_review_required": (
             strategy_group_id != "BRF2-001"
+            or not squeeze_proxy.get("squeeze_disable_active", False)
         ),
         "review_reason": review_reason,
+        "exact_next_blocker": first_blocker,
         "gate_breakdown": {
+            "fresh_like_signal_seen": True,
             "fresh_signal_present_in_replay": True,
             "required_facts_replay_shape_present": True,
             "candidate_authorization_shape_can_be_prepared": True,
+            "would_reach_action_time_boundary": would_reach_action_time_boundary,
             "live_action_time_required_facts_present": False,
             "finalgate_called": False,
             "operation_layer_called": False,
@@ -466,6 +622,45 @@ def _signal_present(
     if strategy_group_id == "BRF2-001":
         return close < sma20 < sma50 and ret24 <= -1.6 and ret6 <= -0.3
     return False
+
+
+def _market_context(hourly: list[Candle], index: int) -> dict[str, Any]:
+    close = hourly[index].close
+    sma20 = _sma(hourly, index, 20)
+    sma50 = _sma(hourly, index, 50)
+    ret6 = _return_pct(hourly, index, 6)
+    ret24 = _return_pct(hourly, index, 24)
+    return {
+        "ret6_pct": round(ret6, 3),
+        "ret24_pct": round(ret24, 3),
+        "close_vs_sma20_pct": round((close - sma20) / sma20 * 100, 3) if sma20 else 0,
+        "close_vs_sma50_pct": round((close - sma50) / sma50 * 100, 3) if sma50 else 0,
+        "volume_ratio_20": round(_volume_ratio(hourly, index, 20), 3),
+    }
+
+
+def _brf2_squeeze_proxy(market_context: dict[str, Any]) -> dict[str, Any]:
+    ret6 = float(market_context.get("ret6_pct") or 0.0)
+    ret24 = float(market_context.get("ret24_pct") or 0.0)
+    close_vs_sma20 = float(market_context.get("close_vs_sma20_pct") or 0.0)
+    rally_extension_proxy = ret24 > -3.5
+    strong_reclaim_proxy = ret6 > -0.2 or close_vs_sma20 > -0.8
+    squeeze_disable_active = rally_extension_proxy or strong_reclaim_proxy
+    reasons = []
+    if rally_extension_proxy:
+        reasons.append("downside_extension_insufficient_for_short_proxy")
+    if strong_reclaim_proxy:
+        reasons.append("recent_reclaim_or_shallow_pullback_proxy")
+    if not reasons:
+        reasons.append("no_squeeze_disable_proxy_detected")
+    return {
+        "funding_proxy": "unavailable_cross_venue_spot_proxy",
+        "rally_extension_proxy": rally_extension_proxy,
+        "strong_reclaim_proxy": strong_reclaim_proxy,
+        "squeeze_disable_active": squeeze_disable_active,
+        "disable_reason_by_event": reasons,
+        "proxy_boundary": "heuristic_event_time_proxy_not_live_derivatives_fact",
+    }
 
 
 def _sor_events(symbol: str, candles: list[Candle], cutoff_ms: int) -> list[dict[str, Any]]:
@@ -761,15 +956,33 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
+    source = artifact["data_sources"]["public_market_candles"]
     lines = [
         "## Four-Candidate Recent Counterfactual Live-Submit Replay",
         "",
         f"- Status: `{artifact['status']}`",
         f"- Scope: `{artifact['scope']}`",
-        f"- Review signals: `{artifact['summary']['counterfactual_review_signal_count']}`",
-        f"- Missed-opportunity review count: `{artifact['summary']['missed_opportunity_review_count']}`",
+        f"- Unique review signals: `{artifact['summary']['unique_review_signal_count']}`",
+        f"- Unique missed-opportunity review count: `{artifact['summary']['unique_missed_opportunity_count']}`",
+        f"- Window-cumulative signals: `{artifact['summary']['window_cumulative_signal_count']}`",
+        f"- Window-cumulative missed opportunities: `{artifact['summary']['window_cumulative_missed_opportunity_count']}`",
+        f"- Would reach action-time boundary: `{artifact['summary']['would_reach_action_time_boundary_count']}`",
         f"- Counterfactual live-submit allowed: `{artifact['summary']['counterfactual_live_submit_allowed_count']}`",
+        f"- Venue basis: `{source['venue_basis']}`",
+        f"- Execution venue match: `{str(source['execution_venue_match']).lower()}`",
+        f"- Absorbability grade: `{source['absorbability_grade']}`",
         f"- Output JSON: `{output_json}`",
+        "",
+        "## Data Source Boundary",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Provider | `{source['provider']}` |",
+        f"| Venue basis | `{source['venue_basis']}` |",
+        f"| Execution venue basis | `{source['execution_venue_basis']}` |",
+        f"| Execution venue match | `{str(source['execution_venue_match']).lower()}` |",
+        f"| Absorbability grade | `{source['absorbability_grade']}` |",
+        f"| Primary source error | `{source['primary_source_error'] or 'none'}` |",
         "",
         "## Current Tradeability",
         "",
@@ -785,7 +998,7 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             "",
             "## Replay Summary",
             "",
-            "| Strategy | 3d signals/review | 7d signals/review | 14d signals/review | Next action |",
+            "| Strategy | 3d signals/review/boundary | 7d signals/review/boundary | 14d signals/review/boundary | Next action |",
             "| --- | ---: | ---: | ---: | --- |",
         ]
     )
@@ -793,7 +1006,7 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
         cells = []
         for window in row["window_results"]:
             cells.append(
-                f"`{window['counterfactual_fresh_signal_count']}/{window['missed_opportunity_review_count']}`"
+                f"`{window['counterfactual_fresh_signal_count']}/{window['missed_opportunity_review_count']}/{window['would_reach_action_time_boundary_count']}`"
             )
         lines.append(
             f"| `{row['strategy_group_id']}` | {cells[0]} | {cells[1]} | {cells[2]} | `{row['next_action']}` |"
@@ -803,7 +1016,7 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             "",
             "## Per-Symbol Replay",
             "",
-            "| Strategy | Symbol | Primary scope | 3d signals/review | 7d signals/review | 14d signals/review |",
+            "| Strategy | Symbol | Primary scope | 3d signals/review/boundary | 7d signals/review/boundary | 14d signals/review/boundary |",
             "| --- | --- | ---: | ---: | ---: | ---: |",
         ]
     )
@@ -820,11 +1033,38 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
                 )
                 primary_scope = bool(symbol_result["symbol_in_primary_scope"])
                 cells.append(
-                    f"`{symbol_result['counterfactual_fresh_signal_count']}/{symbol_result['missed_opportunity_review_count']}`"
+                    f"`{symbol_result['counterfactual_fresh_signal_count']}/{symbol_result['missed_opportunity_review_count']}/{symbol_result['would_reach_action_time_boundary_count']}`"
                 )
             lines.append(
                 f"| `{row['strategy_group_id']}` | `{symbol}` | `{str(primary_scope).lower()}` | {cells[0]} | {cells[1]} | {cells[2]} |"
             )
+    lines.extend(
+        [
+            "",
+            "## Top Missed Events",
+            "",
+            "| Strategy | Symbol | Time | Strength | Next blocker | Review reason |",
+            "| --- | --- | --- | ---: | --- | --- |",
+        ]
+    )
+    for event in artifact["summary"]["top_missed_events"][:10]:
+        lines.append(
+            f"| `{event['strategy_group_id']}` | `{event['symbol']}` | `{event['event_time_utc']}` | `{event['signal_strength']}` | `{event['exact_next_blocker']}` | `{event['review_reason']}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Scope Change Review",
+            "",
+            "| Strategy | Recommendation | Candidate symbols | Boundary |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for item in artifact["summary"]["should_promote_scope_change"]:
+        symbols = ", ".join(f"`{symbol}`" for symbol in item["candidate_symbols"])
+        lines.append(
+            f"| `{item['strategy_group_id']}` | `{item['recommendation']}` | {symbols or '`none`'} | `{item['authority_boundary']}` |"
+        )
     fifth = artifact["fifth_candidate_review"]
     lines.extend(
         [

@@ -115,6 +115,8 @@ def _market_data() -> dict:
     flat = _hourly_rows(start_ms=start_ms, count=400, base=50, step=0.01)
     sor = _sor_15m_rows(start_ms=start_ms, count=14 * 24 * 4, base=100)
     return {
+        "source": "coinbase_exchange_public_candles_fallback",
+        "primary_source_error": "HTTPError:451 unavailable",
         "symbols": {
             "BTCUSDT": {"1h": falling, "15m": sor},
             "ETHUSDT": {"1h": rising, "15m": sor},
@@ -138,7 +140,16 @@ def test_recent_counterfactual_replay_is_non_authority_and_finds_review_signals(
     assert artifact["status"] == "recent_counterfactual_replay_ready"
     assert artifact["summary"]["counterfactual_review_signal_count"] > 0
     assert artifact["summary"]["missed_opportunity_review_count"] > 0
+    assert artifact["summary"]["unique_review_signal_count"] > 0
+    assert artifact["summary"]["window_cumulative_signal_count"] >= artifact["summary"]["unique_review_signal_count"]
+    assert artifact["summary"]["window_cumulative_missed_opportunity_count"] >= artifact["summary"]["unique_missed_opportunity_count"]
+    assert artifact["summary"]["would_reach_action_time_boundary_count"] > 0
     assert artifact["summary"]["counterfactual_live_submit_allowed_count"] == 0
+    source = artifact["data_sources"]["public_market_candles"]
+    assert source["venue_basis"] == "coinbase_spot_proxy"
+    assert source["execution_venue_match"] is False
+    assert source["absorbability_grade"] == "review_only_proxy"
+    assert source["primary_source_error"] == "HTTPError:451 unavailable"
     assert artifact["authority_boundary"]["tradeability_decision_source"] is False
     assert artifact["authority_boundary"]["runtime_safety_state_source"] is False
     assert artifact["authority_boundary"]["candidate_authorization_created"] is False
@@ -155,9 +166,12 @@ def test_recent_counterfactual_replay_is_non_authority_and_finds_review_signals(
     assert {
         item["symbol"] for item in mpg["window_results"][0]["per_symbol_results"]
     } == set(mpg["replay_symbol_universe"])
+    top_event = artifact["summary"]["top_missed_events"][0]
+    assert top_event["exact_next_blocker"]
+    assert top_event["live_submit_allowed"] is False
 
 
-def test_brf2_counterfactual_short_does_not_override_squeeze_disable():
+def test_brf2_counterfactual_short_uses_event_time_squeeze_proxy():
     module = _load_module()
 
     artifact = module.build_recent_live_submit_replay(
@@ -176,11 +190,22 @@ def test_brf2_counterfactual_short_does_not_override_squeeze_disable():
 
     assert events
     assert all(
+        event["event_time_squeeze_proxy"]["funding_proxy"]
+        == "unavailable_cross_venue_spot_proxy"
+        for event in events
+    )
+    assert all(
         event["first_blocker_class"] == "short_squeeze_risk_state_disable_active"
+        for event in events
+        if event["event_time_squeeze_proxy"]["squeeze_disable_active"]
+    )
+    assert all(
+        event["would_reach_action_time_boundary"]
+        == (not event["event_time_squeeze_proxy"]["squeeze_disable_active"])
         for event in events
     )
     assert all(event["symbol_scope_review_required"] is False for event in events)
-    assert all(event["counterfactual_live_submit_allowed"] is False for event in events)
+    assert all(event["live_submit_allowed"] is False for event in events)
     assert "BRF2-001" not in artifact["summary"]["symbol_scope_review_strategy_ids"]
     assert all(
         item["symbol_scope_review_required"] is False
