@@ -1,0 +1,82 @@
+{
+  "actionable_now": false,
+  "candidate_id": "BRF2-QUALITY-BASKET-SHORT-001",
+  "cooldown": "6h per symbol",
+  "disable_facts": [
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "cooldown_active",
+    "stale_market_facts",
+    "mark_last_divergence_abnormal",
+    "strong_reclaim_detected",
+    "short_squeeze_risk_spike"
+  ],
+  "entry_rule": "BRF2 failed rebound short on historically cleaner symbols, excluding Europe session.",
+  "exchange_write": false,
+  "execution_authority": false,
+  "exit_rule": "1.7R target capped near 5%.; 6h time stop.",
+  "finalgate_input": false,
+  "known_failure_modes": [
+    "stale_or_clustered_signal",
+    "fee_slippage_sensitivity",
+    "false_breakout_or_reclaim",
+    "squeeze_or_reclaim_risk"
+  ],
+  "live_profile_change": false,
+  "main_control_absorbability": "Draft handoff pack generated; suitable for Tradeability Decision intake, not live authority.",
+  "operation_layer_input": false,
+  "order_created": false,
+  "real_order_authority": false,
+  "replay_summary": {
+    "after_cost_median": 0.6709,
+    "after_cost_p75": 1.8534,
+    "after_cost_p90": 3.271,
+    "event_count": 81,
+    "max_drawdown_proxy": -9.6442
+  },
+  "required_facts_draft": [
+    "fresh_closed_1h_candle",
+    "latest_5m_path_candles",
+    "latest_price",
+    "mark_price",
+    "available_balance",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "min_notional",
+    "qty_step",
+    "price_tick",
+    "cooldown_state",
+    "funding_rate",
+    "squeeze_disable_state"
+  ],
+  "research_only": true,
+  "risk_envelope": {
+    "attempt_cap": "3 attempts/day/symbol, 6 attempts/7d/symbol",
+    "capital_scope": "30U bounded trial candidate unless main control assigns lower scope",
+    "leverage_scenarios": [
+      "1x",
+      "2x",
+      "3x",
+      "5x"
+    ],
+    "loss_unit": "0.5U-1.5U research unit depending on leverage scenario",
+    "max_consecutive_losses": "2 per symbol before pause"
+  },
+  "side": "short",
+  "stop_rule": "Above rebound high capped at 2.5%.",
+  "strategy_family": "bear_rebound_failure_short_filtered",
+  "symbol_scope": [
+    "SUI/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+    "ETH/USDT:USDT"
+  ],
+  "tier_policy_change": false,
+  "time_stop": "6h time stop.",
+  "timeframes": [
+    "1h failed rebound",
+    "5m path"
+  ],
+  "tp_rule": "1.7R target capped near 5%."
+}

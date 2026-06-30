@@ -1,0 +1,81 @@
+{
+  "actionable_now": false,
+  "candidate_id": "MI-ASIA-RS-IMPULSE-001",
+  "cooldown": "6h per symbol",
+  "disable_facts": [
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "cooldown_active",
+    "stale_market_facts",
+    "mark_last_divergence_abnormal"
+  ],
+  "entry_rule": "Relative-strength impulse restricted to Asia session where replay shows cleaner continuation.",
+  "exchange_write": false,
+  "execution_authority": false,
+  "exit_rule": "1.8R target capped near 6%.; 8h time stop.",
+  "finalgate_input": false,
+  "known_failure_modes": [
+    "stale_or_clustered_signal",
+    "fee_slippage_sensitivity",
+    "false_breakout_or_reclaim"
+  ],
+  "live_profile_change": false,
+  "main_control_absorbability": "Draft handoff pack generated; suitable for Tradeability Decision intake, not live authority.",
+  "operation_layer_input": false,
+  "order_created": false,
+  "real_order_authority": false,
+  "replay_summary": {
+    "after_cost_median": 0.5283,
+    "after_cost_p75": 0.9463,
+    "after_cost_p90": 2.3911,
+    "event_count": 8,
+    "max_drawdown_proxy": -3.0545
+  },
+  "required_facts_draft": [
+    "fresh_closed_1h_candle",
+    "latest_5m_path_candles",
+    "latest_price",
+    "mark_price",
+    "available_balance",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "min_notional",
+    "qty_step",
+    "price_tick",
+    "cooldown_state",
+    "btc_reference_return_6h",
+    "btc_reference_return_24h",
+    "symbol_volume_ratio"
+  ],
+  "research_only": true,
+  "risk_envelope": {
+    "attempt_cap": "3 attempts/day/symbol, 6 attempts/7d/symbol",
+    "capital_scope": "30U bounded trial candidate unless main control assigns lower scope",
+    "leverage_scenarios": [
+      "1x",
+      "2x",
+      "3x",
+      "5x"
+    ],
+    "loss_unit": "0.5U-1.5U research unit depending on leverage scenario",
+    "max_consecutive_losses": "2 per symbol before pause"
+  },
+  "side": "long",
+  "stop_rule": "Below impulse base capped at 2.8%.",
+  "strategy_family": "relative_strength_impulse_filtered",
+  "symbol_scope": [
+    "SOL/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "OP/USDT:USDT",
+    "ETH/USDT:USDT"
+  ],
+  "tier_policy_change": false,
+  "time_stop": "8h time stop.",
+  "timeframes": [
+    "1h signal",
+    "6h/24h relative strength",
+    "Asia session",
+    "5m path"
+  ],
+  "tp_rule": "1.8R target capped near 6%."
+}

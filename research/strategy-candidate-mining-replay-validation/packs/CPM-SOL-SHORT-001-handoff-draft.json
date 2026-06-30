@@ -1,0 +1,79 @@
+{
+  "actionable_now": false,
+  "candidate_id": "CPM-SOL-SHORT-001",
+  "cooldown": "4h per symbol",
+  "disable_facts": [
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "cooldown_active",
+    "stale_market_facts",
+    "mark_last_divergence_abnormal",
+    "strong_reclaim_detected",
+    "short_squeeze_risk_spike"
+  ],
+  "entry_rule": "SOL-only CPM short continuation with original CPM short rule and execution cooldown.",
+  "exchange_write": false,
+  "execution_authority": false,
+  "exit_rule": "1.5R target capped near 3.8%.; 4h time stop.",
+  "finalgate_input": false,
+  "known_failure_modes": [
+    "stale_or_clustered_signal",
+    "fee_slippage_sensitivity",
+    "false_breakout_or_reclaim",
+    "symbol_concentration",
+    "squeeze_or_reclaim_risk"
+  ],
+  "live_profile_change": false,
+  "main_control_absorbability": "Draft handoff pack generated; suitable for Tradeability Decision intake, not live authority.",
+  "operation_layer_input": false,
+  "order_created": false,
+  "real_order_authority": false,
+  "replay_summary": {
+    "after_cost_median": 0.3829,
+    "after_cost_p75": 1.8755,
+    "after_cost_p90": 3.2926,
+    "event_count": 39,
+    "max_drawdown_proxy": -3.0481
+  },
+  "required_facts_draft": [
+    "fresh_closed_1h_candle",
+    "latest_5m_path_candles",
+    "latest_price",
+    "mark_price",
+    "available_balance",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "min_notional",
+    "qty_step",
+    "price_tick",
+    "cooldown_state",
+    "funding_rate",
+    "squeeze_disable_state"
+  ],
+  "research_only": true,
+  "risk_envelope": {
+    "attempt_cap": "3 attempts/day/symbol, 6 attempts/7d/symbol",
+    "capital_scope": "30U bounded trial candidate unless main control assigns lower scope",
+    "leverage_scenarios": [
+      "1x",
+      "2x",
+      "3x",
+      "5x"
+    ],
+    "loss_unit": "0.5U-1.5U research unit depending on leverage scenario",
+    "max_consecutive_losses": "2 per symbol before pause"
+  },
+  "side": "short",
+  "stop_rule": "Above recent 4h high capped at 2.2%.",
+  "strategy_family": "cpm_multi_symbol_pullback_continuation_filtered",
+  "symbol_scope": [
+    "SOL/USDT:USDT"
+  ],
+  "tier_policy_change": false,
+  "time_stop": "4h time stop.",
+  "timeframes": [
+    "1h signal",
+    "5m path"
+  ],
+  "tp_rule": "1.5R target capped near 3.8%."
+}
