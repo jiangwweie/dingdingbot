@@ -9,7 +9,7 @@
     "owner": "market",
     "repair_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
   },
-  "generated_at_utc": "2026-06-30T03:27:32.287689+00:00",
+  "generated_at_utc": "2026-06-30T06:41:28.393331+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

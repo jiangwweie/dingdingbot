@@ -1,0 +1,52 @@
+{
+  "api_payload": {
+    "blockers": [],
+    "mode": "disabled_smoke",
+    "official_endpoint_method": "POST",
+    "official_endpoint_path": "/api/trading-console/runtime-execution-first-real-submit-actions/authorizations/dry-run-fresh-auth-1",
+    "official_query": {
+      "owner_confirmed_for_first_real_submit_action": false
+    },
+    "ready_for_official_submit_call": true,
+    "status": "ready_for_official_submit_call",
+    "warnings": [
+      "dry-run-scoped-handoff"
+    ]
+  },
+  "blockers": [],
+  "http_status": 200,
+  "operator_action_preview": {
+    "method": "POST",
+    "mode": "disabled_smoke",
+    "path": "/api/trading-console/runtime-execution-first-real-submit-actions/authorizations/dry-run-fresh-auth-1",
+    "query": {
+      "owner_confirmed_for_first_real_submit_action": false
+    },
+    "ready_for_call": true
+  },
+  "runtime_instance_id": "dry-run-runtime-mpg-001",
+  "safety_invariants": {
+    "attempt_counter_mutated": false,
+    "calls_official_submit_endpoint": false,
+    "exchange_submit_armed": false,
+    "exchange_write_called": false,
+    "executable_execution_intent_created": false,
+    "execute_real_submit": false,
+    "execution_intent_created": false,
+    "local_registration_armed": false,
+    "non_executing": true,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "pg_write": false,
+    "position_closed": false,
+    "position_opened": false,
+    "runtime_budget_mutated": false,
+    "uses_official_trading_console_api": true,
+    "withdrawal_or_transfer_created": false
+  },
+  "scope": "runtime_official_submit_handoff_api_flow",
+  "status": "ready_for_official_submit_call",
+  "warnings": [
+    "dry-run-scoped-handoff"
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-30T03:27:33.071188+00:00",
+  "generated_at_utc": "2026-06-30T06:41:29.219854+00:00",
   "goal_complete": false,
   "input_source_gaps": [],
   "input_sources": {
@@ -16,7 +16,7 @@
     },
     "dry_run_audit": {
       "exists": true,
-      "generated_at_ms": 1782790050453,
+      "generated_at_ms": 1782801686215,
       "generated_at_utc": null,
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
       "schema": "brc.runtime_dry_run_audit_chain.v1",
@@ -28,7 +28,7 @@
     "goal_progress": {
       "exists": true,
       "generated_at_ms": null,
-      "generated_at_utc": "2026-06-30T03:27:32.962383+00:00",
+      "generated_at_utc": "2026-06-30T06:41:29.108603+00:00",
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
       "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
       "scope": "strategygroup_runtime_goal_progress_audit",
@@ -38,7 +38,7 @@
     },
     "live_cutover": {
       "exists": true,
-      "generated_at_ms": 1782790050835,
+      "generated_at_ms": 1782801686644,
       "generated_at_utc": null,
       "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
       "schema": "brc.runtime_live_cutover_readiness.v1",

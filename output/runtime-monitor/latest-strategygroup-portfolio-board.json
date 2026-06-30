@@ -113,7 +113,7 @@
       "strategy_review_checkpoint": "keep_parked_until_material_new_edge_evidence"
     }
   ],
-  "generated_at_utc": "2026-06-30T03:27:30.943270+00:00",
+  "generated_at_utc": "2026-06-30T06:41:26.772553+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

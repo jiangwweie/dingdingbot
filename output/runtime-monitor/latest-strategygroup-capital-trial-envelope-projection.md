@@ -2,7 +2,7 @@
 
 - Status: trial_envelope_projection_ready
 - Projection status: trial_envelope_projection_ready
-- Generated: 2026-06-30T03:27:31.045536+00:00
+- Generated: 2026-06-30T06:41:26.879573+00:00
 - Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json
 - Trial Envelope v0 JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
 - Selected non-MPG candidate: BRF2-001

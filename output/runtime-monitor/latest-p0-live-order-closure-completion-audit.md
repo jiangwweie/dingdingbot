@@ -23,9 +23,9 @@
 ## Input Sources
 
 - daily_check: status=temporarily_unavailable_monitor_refresh_needed, schema=13, generated=2026-06-30T02:40:21.374601+00:00, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json
-- dry_run_audit: status=passed, schema=brc.runtime_dry_run_audit_chain.v1, generated=1782790050453, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json
-- goal_progress: status=ready, schema=brc.strategygroup_runtime_goal_progress_audit.v1, generated=2026-06-30T03:27:32.962383+00:00, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json
-- live_cutover: status=live_cutover_waiting_for_fresh_signal, schema=brc.runtime_live_cutover_readiness.v1, generated=1782790050835, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json
+- dry_run_audit: status=passed, schema=brc.runtime_dry_run_audit_chain.v1, generated=1782801686215, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json
+- goal_progress: status=ready, schema=brc.strategygroup_runtime_goal_progress_audit.v1, generated=2026-06-30T06:41:29.108603+00:00, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json
+- live_cutover: status=live_cutover_waiting_for_fresh_signal, schema=brc.runtime_live_cutover_readiness.v1, generated=1782801686644, path=/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json
 
 ## Input Source Gaps
 

@@ -21,7 +21,7 @@
   },
   "fact_input_present": true,
   "fact_input_status": "brf2_runtime_signal_facts_ready",
-  "generated_at_utc": "2026-06-30T03:27:32.216660+00:00",
+  "generated_at_utc": "2026-06-30T06:41:28.318124+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

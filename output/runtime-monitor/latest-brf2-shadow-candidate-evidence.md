@@ -1,7 +1,7 @@
 ## BRF2 Shadow Candidate Evidence
 
 - Status: `brf2_shadow_candidate_evidence_waiting_for_fresh_signal`
-- Generated: `2026-06-30T03:27:32.287689+00:00`
+- Generated: `2026-06-30T06:41:28.393331+00:00`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-shadow-candidate-evidence.json`
 - StrategyGroup: `BRF2-001`
 - Shadow candidate evidence ready: `否`

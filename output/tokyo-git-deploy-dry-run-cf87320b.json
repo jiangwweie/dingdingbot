@@ -1,0 +1,130 @@
+{
+  "apply_requested": false,
+  "checks": {
+    "blockers": [],
+    "commands_executed": 0,
+    "commands_planned": 11,
+    "confirmation_phrase_matches": false,
+    "remote_mutation_authorized_by": "owner-standing-authorization:strategygroup-runtime-pilot:2026-06-14",
+    "remote_mutation_confirmation_phrase_required": false,
+    "remote_mutation_requires_confirmation_phrase": "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+  },
+  "command_results": [],
+  "effects": {
+    "apply_requested": false,
+    "database_backup_created": false,
+    "exchange_called": false,
+    "execution_intent_created": false,
+    "migrations_run": false,
+    "order_created": false,
+    "order_lifecycle_called": false,
+    "remote_files_modified": false,
+    "remote_interaction_count": 0,
+    "secrets_read_by_codex": false,
+    "services_restarted": false
+  },
+  "generated_at_utc": "2026-06-30T06:03:34.759719+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L1_deploy_plan_only",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0,
+    "requires_owner_chat_confirmation": false
+  },
+  "owner_summary": {
+    "blockers": [],
+    "changed": {
+      "database_backup": false,
+      "migrations": false,
+      "remote_files": false,
+      "services_restarted": false
+    },
+    "interaction_level": "L1_deploy_plan_only",
+    "not_changed": {
+      "credentials": true,
+      "exchange_orders": true,
+      "live_profile": true,
+      "order_sizing_defaults": true,
+      "secrets": true,
+      "withdrawals_or_transfers": true
+    },
+    "owner_intervention_required": false,
+    "postdeploy_snapshot_recommended": false,
+    "result": "dry_run_ready",
+    "safety": {
+      "exchange_write_called": false,
+      "finalgate_bypassed": false,
+      "operation_layer_bypassed": false,
+      "order_created": false,
+      "order_lifecycle_called": false
+    },
+    "state": "\u90e8\u7f72\u89c4\u5212\u5b8c\u6210"
+  },
+  "planned_commands": [
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/prepare_tokyo_runtime_governance_release.py --json --deployed-head b080b720d8145da0f7c9f19fd646942503aea914 --expected-min-migrations 85 --expected-latest-migration 2026-06-23-085_rename_live_lifecycle_owner_action_flag.py --allow-tracked-dirty-for-remote-git-export",
+      "phase": "0_local_preflight"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/audit_tokyo_runtime_governance_migration_gap.py --json --base-revision 085 --head-revision 085 --expected-revision-count 0",
+      "phase": "0_local_preflight"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
+      "phase": "0_local_preflight"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/verify_runtime_submit_rehearsal_pre_live_evidence.py --json --skip-current-head-deployed-check",
+      "phase": "0_local_preflight"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/probe_tokyo_runtime_governance_readonly.py --json --expected-current-head b080b720d8145da0f7c9f19fd646942503aea914 --expected-migration-count 85 --expected-latest-migration 2026-06-23-085_rename_live_lifecycle_owner_action_flag.py",
+      "phase": "1_remote_preflight_readonly"
+    },
+    {
+      "command": "ssh tokyo 'set -eu; REMOTE_HEAD=$(timeout 45 git ls-remote https://github.com/jiangwweie/dingdingbot.git refs/heads/dev | awk '\"'\"'{print $1; exit}'\"'\"'); test -n \"$REMOTE_HEAD\"; test \"$REMOTE_HEAD\" = cf87320b2c9581c86bb734ba2e7cd783efda67b9'",
+      "phase": "1_remote_preflight_readonly"
+    },
+    {
+      "command": "ssh tokyo 'set -eu; mkdir -p /home/ubuntu/brc-deploy/source /home/ubuntu/brc-deploy/reports/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed /home/ubuntu/brc-deploy/backups; if [ ! -d /home/ubuntu/brc-deploy/source/dingdingbot/.git ]; then git clone --no-checkout https://github.com/jiangwweie/dingdingbot.git /home/ubuntu/brc-deploy/source/dingdingbot; fi; cd /home/ubuntu/brc-deploy/source/dingdingbot; git remote set-url origin https://github.com/jiangwweie/dingdingbot.git; git fetch --prune origin refs/heads/dev:refs/remotes/origin/dev; test $(git rev-parse refs/remotes/origin/dev) = cf87320b2c9581c86bb734ba2e7cd783efda67b9; git cat-file -e '\"'\"'cf87320b2c9581c86bb734ba2e7cd783efda67b9^{commit}'\"'\"'; test ! -e /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed; rm -rf /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp; mkdir -p /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp; git archive cf87320b2c9581c86bb734ba2e7cd783efda67b9 | tar -x -C /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp; cat > /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp/.brc-release-manifest.json <<'\"'\"'JSON'\"'\"'\n{\n  \"generated_at_utc\": \"2026-06-30T06:03:34.758139+00:00\",\n  \"git_deploy\": {\n    \"archive_uploaded\": false,\n    \"git_ref\": \"dev\",\n    \"repo_url\": \"https://github.com/jiangwweie/dingdingbot.git\",\n    \"source\": \"remote_git_fetch_export\"\n  },\n  \"local_git\": {\n    \"branch\": \"dev\",\n    \"head\": \"cf87320b2c9581c86bb734ba2e7cd783efda67b9\",\n    \"short_head\": \"cf87320b\"\n  },\n  \"scope\": \"tokyo_runtime_governance_git_release\"\n}\nJSON\nmv /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed; test $(readlink -f /home/ubuntu/brc-deploy/app/current) = /home/ubuntu/brc-deploy/releases/brc-runtime-governance-b080b720-cpm-rehearsal-readiness'",
+      "phase": "2_owner_authorized_git_fetch_and_export"
+    },
+    {
+      "command": "ssh tokyo 'set -eu; sudo -n systemctl stop brc-owner-console-backend.service; umask 077; set -a; . /home/ubuntu/brc-deploy/env/live-readonly.env; set +a; DB_URL=\"${PG_DATABASE_URL:-${DATABASE_URL:-}}\"; test -n \"$DB_URL\" || { echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; if command -v pg_dump >/dev/null 2>&1; then pg_dump \"$DB_URL\" -Fc -f /home/ubuntu/brc-deploy/backups/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.pgdump; else DB_USER=$(/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python -c '\"'\"'import os; from urllib.parse import urlparse; print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'\"'\"'); DB_NAME=$(/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python -c '\"'\"'import os; from urllib.parse import urlparse; print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'\"'\"'); test -n \"$DB_USER\"; test -n \"$DB_NAME\"; sudo -n docker exec brc_prelive_pg_20260601 pg_dump -U \"$DB_USER\" -d \"$DB_NAME\" -Fc > /home/ubuntu/brc-deploy/backups/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.pgdump; fi; cd /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed; set -a; . /home/ubuntu/brc-deploy/env/live-readonly.env; set +a; PYTHONPATH=$PWD /home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python -m compileall -q src; PYTHONPATH=$PWD /home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python -m alembic heads; PYTHONPATH=$PWD /home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python -m alembic upgrade head'",
+      "phase": "3_quiesce_backup_and_migrate"
+    },
+    {
+      "command": "ssh tokyo 'set -eu; ln -sfn /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed /home/ubuntu/brc-deploy/app/current; sudo -n systemctl start brc-owner-console-backend.service; sudo -n systemctl is-active brc-owner-console-backend.service; set -eu; HEALTH_URL=http://127.0.0.1:18080/api/health; HEALTH_READY=0; for attempt in $(seq 1 30); do if curl -fsS \"$HEALTH_URL\" 2>/dev/null; then HEALTH_READY=1; break; fi; sleep 1; done; test \"$HEALTH_READY\" = 1 || curl -fsS \"$HEALTH_URL\"; set -eu; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.timer; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf; test -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service /etc/systemd/system/brc-runtime-signal-watcher.service; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.timer /etc/systemd/system/brc-runtime-signal-watcher.timer; sudo -n chmod 0644 /etc/systemd/system/brc-runtime-signal-watcher.service /etc/systemd/system/brc-runtime-signal-watcher.timer; sudo -n mkdir -p /etc/systemd/system/brc-runtime-signal-watcher.service.d; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/70-goal-status.conf; sudo -n cp /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf; sudo -n chmod 0644 /etc/systemd/system/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/70-goal-status.conf /etc/systemd/system/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf; sudo -n rm -f /etc/systemd/system/brc-runtime-signal-watcher.service.d/30-strategygroup-runtime-pilot-scope.conf; sudo -n rm -f /etc/systemd/system/brc-runtime-signal-watcher.service.d/30-operation-layer-followup-flags.conf; sudo -n rm -f /etc/systemd/system/brc-runtime-signal-watcher.service.d/50-product-state-refresh.conf; sudo -n systemctl daemon-reload; sudo -n systemctl enable --now brc-runtime-signal-watcher.timer; sudo -n systemctl restart brc-runtime-signal-watcher.timer; sudo -n systemctl is-enabled brc-runtime-signal-watcher.timer; sudo -n systemctl is-active brc-runtime-signal-watcher.timer; mkdir -p /home/ubuntu/brc-deploy/reports/runtime-signal-watcher; cat > /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/tokyo-deploy-channel-status.json <<'\"'\"'JSON'\"'\"'\n{\n  \"checks\": {\n    \"blockers\": [],\n    \"postdeploy_acceptance_passed\": true,\n    \"tokyo_connectivity_blockers\": [],\n    \"tokyo_connectivity_probe_ready\": true,\n    \"tokyo_probe_blockers\": []\n  },\n  \"deployed_head\": \"cf87320b2c9581c86bb734ba2e7cd783efda67b9\",\n  \"release_path\": \"/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed\",\n  \"safety_invariants\": {\n    \"calls_order_lifecycle\": false,\n    \"deploy_channel_status_only\": true,\n    \"exchange_write_called\": false,\n    \"mutates_live_profile\": false,\n    \"mutates_order_sizing\": false,\n    \"mutates_secrets\": false,\n    \"places_order\": false,\n    \"withdrawal_or_transfer_created\": false\n  },\n  \"scope\": \"tokyo_runtime_governance_deploy_channel_status\",\n  \"status\": \"postdeploy_accepted\"\n}\nJSON\ntest -f /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/.brc-release-manifest.json; test $(readlink -f /home/ubuntu/brc-deploy/app/current) = /home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed'",
+      "phase": "4_switch_start_and_smoke"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/probe_tokyo_runtime_governance_readonly.py --json --expected-current-head cf87320b2c9581c86bb734ba2e7cd783efda67b9 --expected-migration-count 85 --expected-latest-migration 2026-06-23-085_rename_live_lifecycle_owner_action_flag.py",
+      "phase": "4_switch_start_and_smoke"
+    },
+    {
+      "command": "cd /Users/jiangwei/Documents/final && /opt/homebrew/bin/python3 scripts/verify_tokyo_runtime_governance_postdeploy.py --json --expected-current-head cf87320b2c9581c86bb734ba2e7cd783efda67b9 --expected-migration-count 85 --expected-latest-migration 2026-06-23-085_rename_live_lifecycle_owner_action_flag.py",
+      "phase": "4_switch_start_and_smoke"
+    }
+  ],
+  "release": {
+    "backup_path": "/home/ubuntu/brc-deploy/backups/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.pgdump",
+    "head": "cf87320b2c9581c86bb734ba2e7cd783efda67b9",
+    "latest_migration": "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py",
+    "local_branch": "dev",
+    "local_head": "cf87320b2c9581c86bb734ba2e7cd783efda67b9",
+    "release_name": "brc-runtime-governance-cf87320b-cpm-synthetic-failclosed",
+    "remote_ref_head": "cf87320b2c9581c86bb734ba2e7cd783efda67b9",
+    "remote_release_manifest_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed/.brc-release-manifest.json",
+    "remote_release_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed",
+    "remote_tmp_release_path": "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cf87320b-cpm-synthetic-failclosed.tmp",
+    "short_head": "cf87320b",
+    "source_repo_path": "/home/ubuntu/brc-deploy/source/dingdingbot",
+    "target_migration_count": 85
+  },
+  "scope": "tokyo_runtime_governance_git_deploy_execution",
+  "status": "dry_run_ready"
+}
