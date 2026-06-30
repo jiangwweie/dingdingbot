@@ -1,0 +1,323 @@
+{
+  "action_time_refresh_required": true,
+  "after_next_state": "armed_observation",
+  "checks": {
+    "action_time_available_balance_mapped": true,
+    "active_position_or_open_order_clear_mapped": true,
+    "disable_fact_count": 6,
+    "owner_policy_recorded": true,
+    "required_fact_count": 8
+  },
+  "current_stage": "admitted_trial_asset",
+  "disable_fact_observation_specs": [
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "htf_trend_broken",
+      "fact_key": "htf_trend_broken"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "pullback_depth_abnormal",
+      "fact_key": "pullback_depth_abnormal"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        "stale",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "reclaim_failed_or_stale",
+      "fact_key": "reclaim_failed_or_stale"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "liquidity_not_ok",
+      "fact_key": "liquidity_not_ok"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "funding_extreme",
+      "fact_key": "funding_extreme"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "behavior": "block_live_submit",
+      "blocker": "active_position_or_open_order_conflict",
+      "fact_key": "active_position_or_open_order_conflict"
+    }
+  ],
+  "disable_facts": [
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "fact_key": "htf_trend_broken"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "fact_key": "pullback_depth_abnormal"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        "stale",
+        true
+      ],
+      "fact_key": "reclaim_failed_or_stale"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "fact_key": "liquidity_not_ok"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "fact_key": "funding_extreme"
+    },
+    {
+      "active_statuses": [
+        "true",
+        "active",
+        true
+      ],
+      "fact_key": "active_position_or_open_order_conflict"
+    }
+  ],
+  "fresh_signal_rule": {
+    "description": "CPM-LONG is fresh when higher-timeframe trend is intact, pullback depth remains normal, reclaim is confirmed, liquidity/funding are acceptable, and no position/open-order conflict exists.",
+    "freshness_window_ms": 900000,
+    "side": "long",
+    "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+    "timeframes": [
+      "15m_closed",
+      "1h_closed",
+      "4h_closed"
+    ]
+  },
+  "generated_at_utc": "2026-06-30T02:35:51.481456+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cpm_required_facts_mapping",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "live_required_facts_authority": false,
+  "path_id": "CPM-LONG",
+  "required_fact_observation_specs": [
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "strategy",
+      "fact_key": "htf_trend_intact",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "trend_classifier"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "strategy",
+      "fact_key": "pullback_depth_normal",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "pullback_depth_classifier"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "strategy",
+      "fact_key": "reclaim_confirmed",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "reclaim_classifier"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "risk",
+      "fact_key": "invalidated_below_level",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "strategy_risk_model"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "market_or_execution_context",
+      "fact_key": "liquidity_ok",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "liquidity_proxy"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "derivatives",
+      "fact_key": "funding_not_extreme",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "funding_proxy"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "account_action_time",
+      "fact_key": "active_position_or_open_order_clear",
+      "freshness": "runtime_watcher_readonly",
+      "missing_behavior": "block_live_submit",
+      "source": "runtime_action_time_exchange_facts"
+    },
+    {
+      "accepted_statuses": [
+        "true",
+        "ready",
+        "satisfied"
+      ],
+      "class": "account_action_time",
+      "fact_key": "action_time_available_balance",
+      "freshness": "action_time_required",
+      "missing_behavior": "block_live_submit",
+      "source": "runtime_action_time_exchange_facts"
+    }
+  ],
+  "required_facts": [
+    {
+      "class": "strategy",
+      "fact_key": "htf_trend_intact",
+      "missing_behavior": "block_live_submit",
+      "source": "trend_classifier"
+    },
+    {
+      "class": "strategy",
+      "fact_key": "pullback_depth_normal",
+      "missing_behavior": "block_live_submit",
+      "source": "pullback_depth_classifier"
+    },
+    {
+      "class": "strategy",
+      "fact_key": "reclaim_confirmed",
+      "missing_behavior": "block_live_submit",
+      "source": "reclaim_classifier"
+    },
+    {
+      "class": "risk",
+      "fact_key": "invalidated_below_level",
+      "missing_behavior": "block_live_submit",
+      "source": "strategy_risk_model"
+    },
+    {
+      "class": "market_or_execution_context",
+      "fact_key": "liquidity_ok",
+      "missing_behavior": "block_live_submit",
+      "source": "liquidity_proxy"
+    },
+    {
+      "class": "derivatives",
+      "fact_key": "funding_not_extreme",
+      "missing_behavior": "block_live_submit",
+      "source": "funding_proxy"
+    },
+    {
+      "class": "account_action_time",
+      "fact_key": "active_position_or_open_order_clear",
+      "missing_behavior": "block_live_submit",
+      "source": "runtime_action_time_exchange_facts"
+    },
+    {
+      "class": "account_action_time",
+      "fact_key": "action_time_available_balance",
+      "missing_behavior": "block_live_submit",
+      "source": "runtime_action_time_exchange_facts"
+    }
+  ],
+  "required_facts_mapping_ready": true,
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "live_required_facts_authority": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.cpm_required_facts_mapping.v1",
+  "scope": "cpm_required_facts_mapping_for_armed_observation",
+  "status": "cpm_required_facts_mapping_ready",
+  "strategy_group_id": "CPM-RO-001",
+  "watcher_scope": {
+    "cadence": "5-15m near reclaim; 15-30m otherwise",
+    "signal_rule": "cpm_long_pullback_reclaim_signal_v1",
+    "symbols": "cpm_research_supported_symbols_only",
+    "timeframes": [
+      "15m",
+      "1h",
+      "4h"
+    ]
+  }
+}

@@ -333,6 +333,48 @@ DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_JSON = (
 DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-shadow-candidate-evidence.md"
 )
+DEFAULT_CPM_IDENTITY_ROUTING_DECISION_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-identity-routing-decision.json"
+)
+DEFAULT_CPM_IDENTITY_ROUTING_DECISION_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-identity-routing-decision.md"
+)
+DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-owner-trial-policy-scope.json"
+)
+DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-owner-trial-policy-scope.md"
+)
+DEFAULT_CPM_REQUIRED_FACTS_MAPPING_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-required-facts-mapping.json"
+)
+DEFAULT_CPM_REQUIRED_FACTS_MAPPING_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-required-facts-mapping.md"
+)
+DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-facts.json"
+)
+DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-facts.md"
+)
+DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-capture.json"
+)
+DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-capture.md"
+)
+DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-shadow-candidate-evidence.json"
+)
+DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-shadow-candidate-evidence.md"
+)
+DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.json"
+)
+DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.md"
+)
 DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json"
@@ -530,6 +572,28 @@ def main(argv: list[str] | None = None) -> int:
         brf2_shadow_candidate_evidence_md=Path(
             args.brf2_shadow_candidate_evidence_md
         ),
+        cpm_identity_routing_decision_json=Path(
+            args.cpm_identity_routing_decision_json
+        ),
+        cpm_identity_routing_decision_md=Path(args.cpm_identity_routing_decision_md),
+        cpm_owner_trial_policy_scope_json=Path(
+            args.cpm_owner_trial_policy_scope_json
+        ),
+        cpm_owner_trial_policy_scope_md=Path(args.cpm_owner_trial_policy_scope_md),
+        cpm_required_facts_mapping_json=Path(args.cpm_required_facts_mapping_json),
+        cpm_required_facts_mapping_md=Path(args.cpm_required_facts_mapping_md),
+        cpm_runtime_signal_facts_json=Path(args.cpm_runtime_signal_facts_json),
+        cpm_runtime_signal_facts_md=Path(args.cpm_runtime_signal_facts_md),
+        cpm_runtime_signal_capture_json=Path(args.cpm_runtime_signal_capture_json),
+        cpm_runtime_signal_capture_md=Path(args.cpm_runtime_signal_capture_md),
+        cpm_shadow_candidate_evidence_json=Path(
+            args.cpm_shadow_candidate_evidence_json
+        ),
+        cpm_shadow_candidate_evidence_md=Path(args.cpm_shadow_candidate_evidence_md),
+        cpm_dry_run_submit_rehearsal_json=Path(
+            args.cpm_dry_run_submit_rehearsal_json
+        ),
+        cpm_dry_run_submit_rehearsal_md=Path(args.cpm_dry_run_submit_rehearsal_md),
         strategygroup_trial_grade_signal_gate_audit_json=Path(
             args.strategygroup_trial_grade_signal_gate_audit_json
         ),
@@ -757,6 +821,36 @@ def build_local_monitor_sequence_report(
     brf2_shadow_candidate_evidence_md: Path = (
         DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD
     ),
+    cpm_identity_routing_decision_json: Path = (
+        DEFAULT_CPM_IDENTITY_ROUTING_DECISION_JSON
+    ),
+    cpm_identity_routing_decision_md: Path = (
+        DEFAULT_CPM_IDENTITY_ROUTING_DECISION_MD
+    ),
+    cpm_owner_trial_policy_scope_json: Path = (
+        DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_JSON
+    ),
+    cpm_owner_trial_policy_scope_md: Path = (
+        DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_MD
+    ),
+    cpm_required_facts_mapping_json: Path = DEFAULT_CPM_REQUIRED_FACTS_MAPPING_JSON,
+    cpm_required_facts_mapping_md: Path = DEFAULT_CPM_REQUIRED_FACTS_MAPPING_MD,
+    cpm_runtime_signal_facts_json: Path = DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_JSON,
+    cpm_runtime_signal_facts_md: Path = DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_MD,
+    cpm_runtime_signal_capture_json: Path = DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_JSON,
+    cpm_runtime_signal_capture_md: Path = DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_MD,
+    cpm_shadow_candidate_evidence_json: Path = (
+        DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_JSON
+    ),
+    cpm_shadow_candidate_evidence_md: Path = (
+        DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_MD
+    ),
+    cpm_dry_run_submit_rehearsal_json: Path = (
+        DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON
+    ),
+    cpm_dry_run_submit_rehearsal_md: Path = (
+        DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD
+    ),
     strategygroup_trial_grade_signal_gate_audit_json: Path = (
         DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
     ),
@@ -777,6 +871,67 @@ def build_local_monitor_sequence_report(
     ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
+    if (
+        brf2_runtime_signal_capture_json.parent
+        != DEFAULT_BRF2_RUNTIME_SIGNAL_CAPTURE_JSON.parent
+    ):
+        cpm_parent = brf2_runtime_signal_capture_json.parent
+        if cpm_identity_routing_decision_json == DEFAULT_CPM_IDENTITY_ROUTING_DECISION_JSON:
+            cpm_identity_routing_decision_json = (
+                cpm_parent / DEFAULT_CPM_IDENTITY_ROUTING_DECISION_JSON.name
+            )
+        if cpm_identity_routing_decision_md == DEFAULT_CPM_IDENTITY_ROUTING_DECISION_MD:
+            cpm_identity_routing_decision_md = (
+                cpm_parent / DEFAULT_CPM_IDENTITY_ROUTING_DECISION_MD.name
+            )
+        if cpm_owner_trial_policy_scope_json == DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_JSON:
+            cpm_owner_trial_policy_scope_json = (
+                cpm_parent / DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_JSON.name
+            )
+        if cpm_owner_trial_policy_scope_md == DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_MD:
+            cpm_owner_trial_policy_scope_md = (
+                cpm_parent / DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_MD.name
+            )
+        if cpm_required_facts_mapping_json == DEFAULT_CPM_REQUIRED_FACTS_MAPPING_JSON:
+            cpm_required_facts_mapping_json = (
+                cpm_parent / DEFAULT_CPM_REQUIRED_FACTS_MAPPING_JSON.name
+            )
+        if cpm_required_facts_mapping_md == DEFAULT_CPM_REQUIRED_FACTS_MAPPING_MD:
+            cpm_required_facts_mapping_md = (
+                cpm_parent / DEFAULT_CPM_REQUIRED_FACTS_MAPPING_MD.name
+            )
+        if cpm_runtime_signal_facts_json == DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_JSON:
+            cpm_runtime_signal_facts_json = (
+                cpm_parent / DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_JSON.name
+            )
+        if cpm_runtime_signal_facts_md == DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_MD:
+            cpm_runtime_signal_facts_md = (
+                cpm_parent / DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_MD.name
+            )
+        if cpm_runtime_signal_capture_json == DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_JSON:
+            cpm_runtime_signal_capture_json = (
+                cpm_parent / DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_JSON.name
+            )
+        if cpm_runtime_signal_capture_md == DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_MD:
+            cpm_runtime_signal_capture_md = (
+                cpm_parent / DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_MD.name
+            )
+        if cpm_shadow_candidate_evidence_json == DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_JSON:
+            cpm_shadow_candidate_evidence_json = (
+                cpm_parent / DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_JSON.name
+            )
+        if cpm_shadow_candidate_evidence_md == DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_MD:
+            cpm_shadow_candidate_evidence_md = (
+                cpm_parent / DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_MD.name
+            )
+        if cpm_dry_run_submit_rehearsal_json == DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON:
+            cpm_dry_run_submit_rehearsal_json = (
+                cpm_parent / DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON.name
+            )
+        if cpm_dry_run_submit_rehearsal_md == DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD:
+            cpm_dry_run_submit_rehearsal_md = (
+                cpm_parent / DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD.name
+            )
     runner = command_runner or _run_command
     steps: list[dict[str, Any]] = []
 
@@ -1014,6 +1169,141 @@ def build_local_monitor_sequence_report(
             "brf2_shadow_candidate_evidence",
             brf2_shadow_candidate_evidence_command,
             brf2_shadow_candidate_evidence_json,
+            runner,
+        )
+    )
+
+    cpm_identity_routing_decision_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_identity_routing_decision.py"),
+        "--output-json",
+        str(cpm_identity_routing_decision_json),
+        "--output-owner-progress",
+        str(cpm_identity_routing_decision_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_identity_routing_decision",
+            cpm_identity_routing_decision_command,
+            cpm_identity_routing_decision_json,
+            runner,
+        )
+    )
+
+    cpm_owner_trial_policy_scope_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_owner_trial_policy_scope.py"),
+        "--identity-json",
+        str(cpm_identity_routing_decision_json),
+        "--output-json",
+        str(cpm_owner_trial_policy_scope_json),
+        "--output-owner-progress",
+        str(cpm_owner_trial_policy_scope_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_owner_trial_policy_scope",
+            cpm_owner_trial_policy_scope_command,
+            cpm_owner_trial_policy_scope_json,
+            runner,
+        )
+    )
+
+    cpm_required_facts_mapping_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_required_facts_mapping.py"),
+        "--owner-policy-json",
+        str(cpm_owner_trial_policy_scope_json),
+        "--output-json",
+        str(cpm_required_facts_mapping_json),
+        "--output-owner-progress",
+        str(cpm_required_facts_mapping_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_required_facts_mapping",
+            cpm_required_facts_mapping_command,
+            cpm_required_facts_mapping_json,
+            runner,
+        )
+    )
+
+    cpm_runtime_signal_facts_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_runtime_signal_facts.py"),
+        "--output-json",
+        str(cpm_runtime_signal_facts_json),
+        "--output-owner-progress",
+        str(cpm_runtime_signal_facts_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_runtime_signal_facts",
+            cpm_runtime_signal_facts_command,
+            cpm_runtime_signal_facts_json,
+            runner,
+        )
+    )
+
+    cpm_runtime_signal_capture_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_runtime_signal_capture.py"),
+        "--required-facts-mapping-json",
+        str(cpm_required_facts_mapping_json),
+        "--fact-input-json",
+        str(cpm_runtime_signal_facts_json),
+        "--output-json",
+        str(cpm_runtime_signal_capture_json),
+        "--output-owner-progress",
+        str(cpm_runtime_signal_capture_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_runtime_signal_capture",
+            cpm_runtime_signal_capture_command,
+            cpm_runtime_signal_capture_json,
+            runner,
+        )
+    )
+
+    cpm_shadow_candidate_evidence_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_shadow_candidate_evidence.py"),
+        "--runtime-signal-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--output-json",
+        str(cpm_shadow_candidate_evidence_json),
+        "--output-owner-progress",
+        str(cpm_shadow_candidate_evidence_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_shadow_candidate_evidence",
+            cpm_shadow_candidate_evidence_command,
+            cpm_shadow_candidate_evidence_json,
+            runner,
+        )
+    )
+
+    cpm_dry_run_submit_rehearsal_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_cpm_dry_run_submit_rehearsal.py"),
+        "--required-facts-mapping-json",
+        str(cpm_required_facts_mapping_json),
+        "--runtime-signal-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--shadow-candidate-evidence-json",
+        str(cpm_shadow_candidate_evidence_json),
+        "--output-json",
+        str(cpm_dry_run_submit_rehearsal_json),
+        "--output-owner-progress",
+        str(cpm_dry_run_submit_rehearsal_md),
+    ]
+    steps.append(
+        _run_step(
+            "cpm_dry_run_submit_rehearsal",
+            cpm_dry_run_submit_rehearsal_command,
+            cpm_dry_run_submit_rehearsal_json,
             runner,
         )
     )
@@ -1621,6 +1911,18 @@ def build_local_monitor_sequence_report(
         str(strategygroup_trial_asset_admission_proposal_json),
         "--brf2-owner-trial-policy-scope-json",
         str(brf2_owner_trial_policy_scope_json),
+        "--cpm-identity-routing-decision-json",
+        str(cpm_identity_routing_decision_json),
+        "--cpm-owner-trial-policy-scope-json",
+        str(cpm_owner_trial_policy_scope_json),
+        "--cpm-required-facts-mapping-json",
+        str(cpm_required_facts_mapping_json),
+        "--cpm-runtime-signal-capture-json",
+        str(cpm_runtime_signal_capture_json),
+        "--cpm-shadow-candidate-evidence-json",
+        str(cpm_shadow_candidate_evidence_json),
+        "--cpm-dry-run-submit-rehearsal-json",
+        str(cpm_dry_run_submit_rehearsal_json),
         "--three-strategy-live-trial-portfolio-json",
         str(three_strategy_live_trial_portfolio_json),
         "--brf2-runtime-signal-capture-json",
@@ -1736,6 +2038,33 @@ def build_local_monitor_sequence_report(
             artifacts.get("brf2_shadow_candidate_evidence", {})
         )
     )
+    cpm_identity_routing_decision_summary = (
+        _sequence_cpm_identity_routing_decision_summary(
+            artifacts.get("cpm_identity_routing_decision", {})
+        )
+    )
+    cpm_owner_trial_policy_summary = _sequence_cpm_owner_trial_policy_summary(
+        artifacts.get("cpm_owner_trial_policy_scope", {})
+    )
+    cpm_required_facts_summary = _sequence_cpm_required_facts_mapping_summary(
+        artifacts.get("cpm_required_facts_mapping", {})
+    )
+    cpm_runtime_signal_facts_summary = _sequence_cpm_runtime_signal_facts_summary(
+        artifacts.get("cpm_runtime_signal_facts", {})
+    )
+    cpm_runtime_signal_capture_summary = _sequence_cpm_runtime_signal_capture_summary(
+        artifacts.get("cpm_runtime_signal_capture", {})
+    )
+    cpm_shadow_candidate_evidence_summary = (
+        _sequence_cpm_shadow_candidate_evidence_summary(
+            artifacts.get("cpm_shadow_candidate_evidence", {})
+        )
+    )
+    cpm_dry_run_submit_rehearsal_summary = (
+        _sequence_cpm_dry_run_submit_rehearsal_summary(
+            artifacts.get("cpm_dry_run_submit_rehearsal", {})
+        )
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         artifacts.get("three_strategy_live_trial_portfolio", {})
     )
@@ -1789,6 +2118,15 @@ def build_local_monitor_sequence_report(
             "brf2_shadow_candidate_evidence": (
                 brf2_shadow_candidate_evidence_summary
             ),
+            "cpm_identity_routing_decision": cpm_identity_routing_decision_summary,
+            "cpm_owner_trial_policy": cpm_owner_trial_policy_summary,
+            "cpm_required_facts_mapping": cpm_required_facts_summary,
+            "cpm_runtime_signal_facts": cpm_runtime_signal_facts_summary,
+            "cpm_runtime_signal_capture": cpm_runtime_signal_capture_summary,
+            "cpm_shadow_candidate_evidence": (
+                cpm_shadow_candidate_evidence_summary
+            ),
+            "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "tradeability_decision": tradeability_summary,
             "trial_grade_signal_gate_audit": (
@@ -1812,6 +2150,13 @@ def build_local_monitor_sequence_report(
         "brf2_runtime_signal_facts": brf2_runtime_signal_facts_summary,
         "brf2_runtime_signal_capture": brf2_runtime_signal_capture_summary,
         "brf2_shadow_candidate_evidence": brf2_shadow_candidate_evidence_summary,
+        "cpm_identity_routing_decision": cpm_identity_routing_decision_summary,
+        "cpm_owner_trial_policy": cpm_owner_trial_policy_summary,
+        "cpm_required_facts_mapping": cpm_required_facts_summary,
+        "cpm_runtime_signal_facts": cpm_runtime_signal_facts_summary,
+        "cpm_runtime_signal_capture": cpm_runtime_signal_capture_summary,
+        "cpm_shadow_candidate_evidence": cpm_shadow_candidate_evidence_summary,
+        "cpm_dry_run_submit_rehearsal": cpm_dry_run_submit_rehearsal_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "tradeability_decision": tradeability_summary,
         "strategy_trial_grade_signal_gate_audit": (
@@ -1907,6 +2252,21 @@ def build_local_monitor_sequence_report(
             ),
             "brf2_shadow_candidate_evidence_json": str(
                 brf2_shadow_candidate_evidence_json
+            ),
+            "cpm_identity_routing_decision_json": str(
+                cpm_identity_routing_decision_json
+            ),
+            "cpm_owner_trial_policy_scope_json": str(
+                cpm_owner_trial_policy_scope_json
+            ),
+            "cpm_required_facts_mapping_json": str(cpm_required_facts_mapping_json),
+            "cpm_runtime_signal_facts_json": str(cpm_runtime_signal_facts_json),
+            "cpm_runtime_signal_capture_json": str(cpm_runtime_signal_capture_json),
+            "cpm_shadow_candidate_evidence_json": str(
+                cpm_shadow_candidate_evidence_json
+            ),
+            "cpm_dry_run_submit_rehearsal_json": str(
+                cpm_dry_run_submit_rehearsal_json
             ),
             "strategygroup_trial_grade_signal_gate_audit_json": str(
                 strategygroup_trial_grade_signal_gate_audit_json
@@ -2943,6 +3303,243 @@ def _sequence_brf2_shadow_candidate_evidence_summary(
     return _BRF2ShadowCandidateEvidenceProjection.from_artifact(artifact).as_dict()
 
 
+def _sequence_cpm_identity_routing_decision_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "cpm_identity_routing_decision_ready",
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "path_id": str(artifact.get("path_id") or ""),
+        "identity_decision": str(artifact.get("identity_decision") or ""),
+        "standalone_trial_asset": (
+            artifact.get("identity_decision") == "standalone_trial_asset"
+        ),
+        "cpm_long_vs_mpg_long_distinct": (
+            artifact.get("cpm_long_vs_mpg_long_distinct") is True
+        ),
+        "projection_role": "identity_routing_decision_projection",
+        "state_source": "cpm_identity_routing_decision",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
+def _sequence_cpm_owner_trial_policy_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    policy = _as_dict(artifact.get("policy"))
+    capital_scope = _as_dict(policy.get("capital_scope"))
+    return {
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "cpm_owner_trial_policy_scope_recorded",
+        "strategy_group_id": str(policy.get("strategy_group_id") or ""),
+        "owner_policy_recorded": artifact.get("owner_policy_recorded") is True,
+        "cpm_policy_scope_recorded": artifact.get("cpm_policy_scope_recorded") is True,
+        "owner_policy_scope_missing": artifact.get("owner_policy_scope_missing")
+        is not False,
+        "capital_scope_source": str(capital_scope.get("amount_source") or ""),
+        "capital_scope_type": str(capital_scope.get("type") or ""),
+        "side_scope": [str(item) for item in policy.get("side_scope") or []],
+        "symbol_scope": str(policy.get("symbol_scope") or ""),
+        "leverage_scenario": str(policy.get("leverage_scenario") or ""),
+        "attempt_cap": _int(policy.get("attempt_cap")),
+        "cpm_stage_after_policy": str(artifact.get("cpm_stage_after_policy") or ""),
+        "cpm_new_first_blocker": str(artifact.get("cpm_new_first_blocker") or ""),
+        "projection_role": "owner_trial_policy_scope_projection",
+        "state_source": "cpm_owner_trial_policy_scope",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
+def _sequence_cpm_required_facts_mapping_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    fresh_signal_rule = _as_dict(artifact.get("fresh_signal_rule"))
+    required_fact_specs = _dict_rows(artifact.get("required_fact_observation_specs"))
+    disable_fact_specs = _dict_rows(artifact.get("disable_fact_observation_specs"))
+    return {
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "cpm_required_facts_mapping_ready",
+        "ready": artifact.get("required_facts_mapping_ready") is True,
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "path_id": str(artifact.get("path_id") or ""),
+        "fresh_signal_rule_id": str(fresh_signal_rule.get("signal_id") or ""),
+        "required_fact_count": _int(
+            _as_dict(artifact.get("checks")).get("required_fact_count")
+            or len(required_fact_specs)
+        ),
+        "disable_fact_count": _int(
+            _as_dict(artifact.get("checks")).get("disable_fact_count")
+            or len(disable_fact_specs)
+        ),
+        "live_required_facts_authority": artifact.get(
+            "live_required_facts_authority"
+        )
+        is True,
+        "action_time_refresh_required": artifact.get("action_time_refresh_required")
+        is True,
+        "after_next_state": str(artifact.get("after_next_state") or ""),
+        "first_blocker_after_mapping": str(
+            artifact.get("first_blocker_after_mapping") or ""
+        ),
+        "projection_role": "requiredfacts_mapping_projection",
+        "state_source": "cpm_required_facts_mapping",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
+def _sequence_cpm_runtime_signal_facts_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    first_blocker = _as_dict(artifact.get("first_blocker"))
+    return {
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "cpm_runtime_signal_facts_ready",
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "path_id": str(artifact.get("path_id") or ""),
+        "fact_input_present": artifact.get("fact_input_present") is True,
+        "watcher_tick_present": artifact.get("watcher_tick_present") is True,
+        "fact_authority": str(artifact.get("fact_authority") or ""),
+        "live_required_facts_authority": _as_dict(
+            artifact.get("fact_authority_boundary")
+        ).get("live_required_facts_authority")
+        is True,
+        "action_time_refresh_required": _as_dict(
+            artifact.get("fact_authority_boundary")
+        ).get("action_time_refresh_required")
+        is True,
+        "first_blocker_class": str(first_blocker.get("class") or "missing"),
+        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
+        "projection_role": "requiredfacts_input_health_projection",
+        "state_source": "cpm_runtime_signal_facts",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
+def _sequence_cpm_runtime_signal_capture_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    preview = _as_dict(artifact.get("signal_detector_preview"))
+    candidate = _as_dict(artifact.get("shadow_candidate_shape"))
+    watcher_scope = _as_dict(artifact.get("watcher_scope"))
+    return {
+        "status": status,
+        "active": status == "cpm_runtime_signal_capture_ready",
+        "ready": status == "cpm_runtime_signal_capture_ready",
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "path_id": str(artifact.get("path_id") or ""),
+        "signal_id": str(watcher_scope.get("signal_id") or ""),
+        "fact_input_present": (
+            artifact.get("fact_input_present") is True
+            or preview.get("fact_input_present") is True
+        ),
+        "watcher_tick_present": (
+            artifact.get("watcher_tick_present") is True
+            or preview.get("watcher_tick_present") is True
+        ),
+        "fact_input_status": str(artifact.get("fact_input_status") or "missing"),
+        "current_signal_state": str(preview.get("current_signal_state") or "unknown"),
+        "fresh_signal_present": preview.get("fresh_signal_present") is True,
+        "first_blocker_class": str(preview.get("first_blocker_class") or "missing"),
+        "first_blocker_owner": str(preview.get("first_blocker_owner") or "unknown"),
+        "signal_capture_checkpoint": str(
+            preview.get("signal_capture_checkpoint") or ""
+        ),
+        "missing_required_fact_count": _int(
+            len(preview.get("missing_required_fact_keys") or [])
+        ),
+        "active_disable_fact_count": _int(
+            len(preview.get("active_disable_fact_keys") or [])
+        ),
+        "action_time_pending_fact_count": _int(
+            len(preview.get("action_time_pending_fact_keys") or [])
+        ),
+        "shadow_candidate_shape_ready": (
+            candidate.get("shadow_candidate_ready") is True
+        ),
+        "projection_role": "runtime_readiness_signal_capture_projection",
+        "state_source": "cpm_runtime_signal_capture",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+        "live_submit_readiness_source": "runtime_safety_state",
+        "execution_attempt_required_for_lifecycle_entry": True,
+    }
+
+
+def _sequence_cpm_shadow_candidate_evidence_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    first_blocker = _as_dict(artifact.get("first_blocker"))
+    candidate = _as_dict(artifact.get("shadow_candidate_evidence"))
+    return {
+        "status": status,
+        "active": status
+        in {
+            "cpm_shadow_candidate_evidence_ready",
+            "cpm_shadow_candidate_evidence_waiting_for_fresh_signal",
+        },
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "shadow_candidate_evidence_ready": (
+            artifact.get("shadow_candidate_evidence_ready") is True
+        ),
+        "shadow_candidate_evidence_id": str(
+            candidate.get("shadow_candidate_evidence_id") or ""
+        ),
+        "signal_state": str(candidate.get("signal_state") or "unknown"),
+        "first_blocker_class": str(first_blocker.get("class") or "missing"),
+        "first_blocker_owner": str(first_blocker.get("owner") or "unknown"),
+        "next_runtime_step": str(artifact.get("next_runtime_step") or ""),
+        "projection_role": "shadow_candidate_evidence_provenance",
+        "state_source": "cpm_shadow_candidate_evidence",
+        "primary_judgment_source": False,
+        "non_executing_evidence": True,
+    }
+
+
+def _sequence_cpm_dry_run_submit_rehearsal_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    checks = _as_dict(artifact.get("checks"))
+    return {
+        "status": _status(artifact) or "missing",
+        "active": _status(artifact) == "cpm_dry_run_submit_rehearsal_passed",
+        "strategy_group_id": str(artifact.get("strategy_group_id") or ""),
+        "path_id": str(artifact.get("path_id") or ""),
+        "dry_run_submit_rehearsal": str(
+            artifact.get("dry_run_submit_rehearsal") or ""
+        ),
+        "candidate_authorization_evidence_ready": checks.get(
+            "candidate_authorization_evidence_ready"
+        )
+        is True,
+        "finalgate_dry_run_passed": checks.get("finalgate_dry_run_passed") is True,
+        "operation_layer_paper_passed": checks.get("operation_layer_paper_passed")
+        is True,
+        "execution_attempt_rehearsal_ready": checks.get(
+            "execution_attempt_rehearsal_ready"
+        )
+        is True,
+        "exchange_write": checks.get("exchange_write") is True,
+        "order_created": checks.get("order_created") is True,
+        "projection_role": "non_executing_submit_rehearsal_projection",
+        "state_source": "cpm_dry_run_submit_rehearsal",
+        "primary_judgment_source": False,
+        "tradeability_decision_source": False,
+        "runtime_truth_source": False,
+    }
+
+
 @dataclass(frozen=True)
 class _ThreeStrategyPortfolioSummaryProjection:
     status: str
@@ -3105,6 +3702,7 @@ class _TradeabilityDecisionProjection:
     top_after_next_state: str
     owner_intervention_required: bool
     july_bullish_rebound_trade_path_closure: dict[str, Any]
+    cpm_armed_observation: dict[str, Any]
 
     _TOP_NEXT_ACTION_FIELD = "top_next_" + "action"
 
@@ -3125,12 +3723,22 @@ class _TradeabilityDecisionProjection:
             if str(row.get("strategy_group_id") or "") == top_strategy_group_id:
                 top_row = row
                 break
+        cpm_row = {}
+        for row in decision_rows:
+            if str(row.get("strategy_group_id") or "") == "CPM-RO-001":
+                cpm_row = row
+                break
         row_count = _int(summary.get("row_count"))
         july_closure = _as_dict(
             artifact.get("july_bullish_rebound_trade_path_closure")
         )
         july_summary = _as_dict(july_closure.get("summary"))
         july_checks = _as_dict(july_closure.get("checks"))
+        cpm_long_path = {}
+        for path in _dict_rows(july_closure.get("paths")):
+            if str(path.get("path_id") or "") == "CPM-LONG":
+                cpm_long_path = path
+                break
         return cls(
             status=status,
             active=status == "tradeability_decision_ready",
@@ -3193,6 +3801,28 @@ class _TradeabilityDecisionProjection:
                     is True
                 ),
             },
+            cpm_armed_observation={
+                "strategy_group_id": str(cpm_row.get("strategy_group_id") or ""),
+                "stage": str(cpm_row.get("stage") or ""),
+                "decision": str(cpm_row.get("decision") or ""),
+                "first_blocker_class": str(
+                    cpm_row.get("first_blocker_class") or ""
+                ),
+                "blocker_owner": str(cpm_row.get("blocker_owner") or ""),
+                "required_facts_status": str(
+                    cpm_row.get("required_facts_status") or ""
+                ),
+                "path_id": str(cpm_long_path.get("path_id") or ""),
+                "path_required_facts_mapping_status": str(
+                    cpm_long_path.get("required_facts_mapping_status") or ""
+                ),
+                "path_first_blocker": str(cpm_long_path.get("first_blocker") or ""),
+                "path_blocker_owner": str(cpm_long_path.get("blocker_owner") or ""),
+                "path_can_trade_now": cpm_long_path.get("can_trade_now") is True,
+                "capital_scope_source": str(
+                    cpm_long_path.get("capital_scope_source") or ""
+                ),
+            },
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -3220,6 +3850,7 @@ class _TradeabilityDecisionProjection:
             "july_bullish_rebound_trade_path_closure": (
                 self.july_bullish_rebound_trade_path_closure
             ),
+            "cpm_armed_observation": self.cpm_armed_observation,
         }
 
 
@@ -3379,10 +4010,18 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     brf2_shadow_candidate_evidence = (
         report.get("brf2_shadow_candidate_evidence") or {}
     )
+    cpm_identity = report.get("cpm_identity_routing_decision") or {}
+    cpm_policy = report.get("cpm_owner_trial_policy") or {}
+    cpm_required_facts_mapping = report.get("cpm_required_facts_mapping") or {}
+    cpm_runtime_signal_facts = report.get("cpm_runtime_signal_facts") or {}
+    cpm_runtime_signal_capture = report.get("cpm_runtime_signal_capture") or {}
+    cpm_shadow_candidate_evidence = report.get("cpm_shadow_candidate_evidence") or {}
+    cpm_dry_run_submit_rehearsal = report.get("cpm_dry_run_submit_rehearsal") or {}
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
     tradeability = report.get("tradeability_decision") or {}
+    cpm_tradeability = _as_dict(tradeability.get("cpm_armed_observation"))
     trial_grade_audit = (
         report.get("strategy_trial_grade_signal_gate_audit") or {}
     )
@@ -3431,6 +4070,21 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- BRF2 shadow candidate evidence: `{brf2_shadow_candidate_evidence.get('status', 'missing')}`",
         f"- BRF2 shadow evidence ready: `{_yes_no(brf2_shadow_candidate_evidence.get('shadow_candidate_evidence_ready') is True)}`",
         f"- BRF2 shadow evidence first blocker: `{brf2_shadow_candidate_evidence.get('first_blocker_class', 'missing')}` / `{brf2_shadow_candidate_evidence.get('first_blocker_owner', 'unknown')}`",
+        f"- CPM identity decision: `{cpm_identity.get('identity_decision') or 'missing'}`",
+        f"- CPM standalone trial asset: `{_yes_no(cpm_identity.get('standalone_trial_asset') is True)}`",
+        f"- CPM Owner policy recorded: `{_yes_no(cpm_policy.get('owner_policy_recorded') is True)}`",
+        f"- CPM capital source: `{cpm_policy.get('capital_scope_source') or 'missing'}`",
+        f"- CPM RequiredFacts mapping: `{cpm_required_facts_mapping.get('status', 'missing')}`",
+        f"- CPM fresh signal rule: `{cpm_required_facts_mapping.get('fresh_signal_rule_id') or 'none'}`",
+        f"- CPM runtime signal facts: `{cpm_runtime_signal_facts.get('status', 'missing')}`",
+        f"- CPM fact input / watcher tick: `{_yes_no(cpm_runtime_signal_facts.get('fact_input_present') is True)}` / `{_yes_no(cpm_runtime_signal_facts.get('watcher_tick_present') is True)}`",
+        f"- CPM runtime signal capture: `{cpm_runtime_signal_capture.get('status', 'missing')}`",
+        f"- CPM signal state: `{cpm_runtime_signal_capture.get('current_signal_state', 'unknown')}`",
+        f"- CPM signal first blocker: `{cpm_runtime_signal_capture.get('first_blocker_class', 'missing')}` / `{cpm_runtime_signal_capture.get('first_blocker_owner', 'unknown')}`",
+        f"- CPM shadow candidate evidence: `{cpm_shadow_candidate_evidence.get('status', 'missing')}`",
+        f"- CPM shadow evidence first blocker: `{cpm_shadow_candidate_evidence.get('first_blocker_class', 'missing')}` / `{cpm_shadow_candidate_evidence.get('first_blocker_owner', 'unknown')}`",
+        f"- CPM dry-run submit rehearsal: `{cpm_dry_run_submit_rehearsal.get('dry_run_submit_rehearsal') or 'missing'}`",
+        f"- CPM rehearsal FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('operation_layer_paper_passed') is True)}`",
         f"- 三策略试验组合状态: `{three_strategy_portfolio.get('status', 'missing')}`",
         f"- 三策略席位: `{', '.join(three_strategy_portfolio.get('selected_strategy_groups') or []) or 'none'}`",
         f"- 三策略席位数: `{three_strategy_portfolio.get('seat_count', 0)}`",
@@ -3441,6 +4095,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Tradeability Decision Top: `{tradeability.get('top_strategy_group_id') or 'none'}` / `{tradeability.get('top_decision', 'missing')}`",
         f"- 第一阻断: `{tradeability.get('top_first_blocker_class', 'missing')}` / `{tradeability.get('top_blocker_owner', 'unknown')}`",
         f"- 下一检查点: `{tradeability.get('top_tradeability_checkpoint', 'missing')}`",
+        f"- CPM Tradeability row: `{cpm_tradeability.get('stage') or 'missing'}` / `{cpm_tradeability.get('decision') or 'missing'}`",
+        f"- CPM Tradeability blocker: `{cpm_tradeability.get('first_blocker_class') or 'missing'}` / `{cpm_tradeability.get('blocker_owner') or 'unknown'}`",
+        f"- CPM-LONG path readiness: `{cpm_tradeability.get('path_required_facts_mapping_status') or 'missing'}` / `{_yes_no(cpm_tradeability.get('path_can_trade_now') is True)}`",
         f"- Tradeability trial-grade standby: `{tradeability.get('controlled_live_standby_count', 0)}`",
         f"- Trial-grade signal audit: `{trial_grade_audit.get('status', 'missing')}`",
         f"- Trial-grade 30d observation / action-time submit: `{trial_grade_audit.get('trial_grade_observation_count_30d', 0)}` / `{trial_grade_audit.get('action_time_submit_count_30d', 0)}`",
@@ -3837,6 +4494,62 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--brf2-shadow-candidate-evidence-md",
         default=str(DEFAULT_BRF2_SHADOW_CANDIDATE_EVIDENCE_MD),
+    )
+    parser.add_argument(
+        "--cpm-identity-routing-decision-json",
+        default=str(DEFAULT_CPM_IDENTITY_ROUTING_DECISION_JSON),
+    )
+    parser.add_argument(
+        "--cpm-identity-routing-decision-md",
+        default=str(DEFAULT_CPM_IDENTITY_ROUTING_DECISION_MD),
+    )
+    parser.add_argument(
+        "--cpm-owner-trial-policy-scope-json",
+        default=str(DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_JSON),
+    )
+    parser.add_argument(
+        "--cpm-owner-trial-policy-scope-md",
+        default=str(DEFAULT_CPM_OWNER_TRIAL_POLICY_SCOPE_MD),
+    )
+    parser.add_argument(
+        "--cpm-required-facts-mapping-json",
+        default=str(DEFAULT_CPM_REQUIRED_FACTS_MAPPING_JSON),
+    )
+    parser.add_argument(
+        "--cpm-required-facts-mapping-md",
+        default=str(DEFAULT_CPM_REQUIRED_FACTS_MAPPING_MD),
+    )
+    parser.add_argument(
+        "--cpm-runtime-signal-facts-json",
+        default=str(DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_JSON),
+    )
+    parser.add_argument(
+        "--cpm-runtime-signal-facts-md",
+        default=str(DEFAULT_CPM_RUNTIME_SIGNAL_FACTS_MD),
+    )
+    parser.add_argument(
+        "--cpm-runtime-signal-capture-json",
+        default=str(DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_JSON),
+    )
+    parser.add_argument(
+        "--cpm-runtime-signal-capture-md",
+        default=str(DEFAULT_CPM_RUNTIME_SIGNAL_CAPTURE_MD),
+    )
+    parser.add_argument(
+        "--cpm-shadow-candidate-evidence-json",
+        default=str(DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_JSON),
+    )
+    parser.add_argument(
+        "--cpm-shadow-candidate-evidence-md",
+        default=str(DEFAULT_CPM_SHADOW_CANDIDATE_EVIDENCE_MD),
+    )
+    parser.add_argument(
+        "--cpm-dry-run-submit-rehearsal-json",
+        default=str(DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_JSON),
+    )
+    parser.add_argument(
+        "--cpm-dry-run-submit-rehearsal-md",
+        default=str(DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD),
     )
     parser.add_argument(
         "--strategygroup-trial-grade-signal-gate-audit-json",

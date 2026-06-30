@@ -1,0 +1,48 @@
+{
+  "checks": {
+    "candidate_authorization_evidence_ready": true,
+    "exchange_write": false,
+    "execution_attempt_rehearsal_ready": true,
+    "finalgate_dry_run_passed": true,
+    "operation_layer_paper_passed": true,
+    "order_created": false,
+    "required_facts_mapping_ready": true,
+    "runtime_signal_capture_ready": true,
+    "shadow_candidate_shape_ready": true
+  },
+  "dry_run_submit_rehearsal": "passed",
+  "generated_at_utc": "2026-06-30T02:35:51.754850+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cpm_dry_run_submit_rehearsal",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "path_id": "CPM-LONG",
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "exchange_write": false,
+    "live_profile_changed": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.cpm_dry_run_submit_rehearsal.v1",
+  "scope": "cpm_non_executing_submit_rehearsal",
+  "status": "cpm_dry_run_submit_rehearsal_passed",
+  "strategy_group_id": "CPM-RO-001",
+  "synthetic_fresh_signal_rehearsal": {
+    "candidate_authorization_evidence_ready": true,
+    "execution_attempt_rehearsal_ready": true,
+    "finalgate_dry_run_passed": true,
+    "operation_layer_paper_passed": true,
+    "review_outcome_shape_ready": true
+  }
+}

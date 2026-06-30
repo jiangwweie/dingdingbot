@@ -707,6 +707,151 @@ def _brf2_shadow_candidate_evidence() -> dict:
     }
 
 
+def _registry_with_cpm_trial_asset() -> dict:
+    registry = _registry()
+    registry["rows"].append(
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "display_name": "CPM Long Pullback Reclaim",
+            "default_tier": "L3",
+            "trial_eligible": True,
+            "supported_sides": ["long"],
+            "required_facts_summary": {"market": "pullback reclaim facts"},
+            "actionable_now": False,
+            "real_order_authority": False,
+        }
+    )
+    return registry
+
+
+def _tier_policy_with_cpm_armed_observation() -> dict:
+    policy = _tier_policy()
+    policy["current_strategy_groups"]["CPM-RO-001"] = {
+        "tier": "L3",
+        "mode": "armed_observation",
+    }
+    return policy
+
+
+def _cpm_identity_routing_decision() -> dict:
+    return {
+        "status": "cpm_identity_routing_decision_ready",
+        "strategy_group_id": "CPM-RO-001",
+        "path_id": "CPM-LONG",
+        "identity_decision": "standalone_trial_asset",
+        "cpm_long_vs_mpg_long_distinct": True,
+        "checks": {
+            "registry_identity_closed": True,
+            "standalone_trial_asset": True,
+        },
+    }
+
+
+def _cpm_owner_trial_policy_scope() -> dict:
+    return {
+        "status": "cpm_owner_trial_policy_scope_recorded",
+        "strategy_group_id": "CPM-RO-001",
+        "owner_policy_recorded": True,
+        "cpm_policy_scope_recorded": True,
+        "owner_policy_scope_missing": False,
+        "policy": {
+            "strategy_group_id": "CPM-RO-001",
+            "trial_identity": "CPM_LONG_PULLBACK_RECLAIM_TRIAL_V0",
+            "capital_scope": {
+                "type": "isolated_subaccount_full_allocation",
+                "amount_source": "action_time_exchange_available_balance",
+            },
+            "side_scope": ["long"],
+            "symbol_scope": "cpm_research_supported_symbols_only",
+            "leverage_scenario": "5x_scenario_not_authority",
+            "max_notional": {
+                "calculation": (
+                    "action_time_exchange_available_balance * leverage_scenario"
+                )
+            },
+            "attempt_cap": 3,
+            "loss_unit": {
+                "calculation": "action_time_exchange_available_balance / attempt_cap"
+            },
+        },
+    }
+
+
+def _cpm_required_facts_mapping() -> dict:
+    return {
+        "status": "cpm_required_facts_mapping_ready",
+        "strategy_group_id": "CPM-RO-001",
+        "path_id": "CPM-LONG",
+        "required_facts_mapping_ready": True,
+        "live_required_facts_authority": False,
+        "action_time_refresh_required": True,
+        "fresh_signal_rule": {
+            "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+        },
+    }
+
+
+def _cpm_runtime_signal_capture() -> dict:
+    return {
+        "status": "cpm_runtime_signal_capture_ready",
+        "strategy_group_id": "CPM-RO-001",
+        "path_id": "CPM-LONG",
+        "checks": {
+            "watcher_scope_ready": True,
+        },
+        "signal_detector_preview": {
+            "current_signal_state": "fresh_signal_absent",
+            "fresh_signal_present": False,
+            "first_blocker_class": "fresh_cpm_long_signal_absent",
+            "first_blocker_owner": "market",
+            "signal_capture_checkpoint": (
+                "continue_cpm_long_armed_observation_until_reclaim_signal"
+            ),
+        },
+        "shadow_candidate_shape": {
+            "shadow_candidate_ready": False,
+        },
+    }
+
+
+def _cpm_shadow_candidate_evidence() -> dict:
+    return {
+        "status": "cpm_shadow_candidate_evidence_waiting_for_fresh_signal",
+        "strategy_group_id": "CPM-RO-001",
+        "shadow_candidate_evidence_ready": False,
+        "shadow_candidate_evidence": {
+            "signal_state": "fresh_signal_absent",
+        },
+        "first_blocker": {
+            "class": "fresh_cpm_long_signal_absent",
+            "owner": "market",
+        },
+    }
+
+
+def _cpm_dry_run_submit_rehearsal() -> dict:
+    return {
+        "status": "cpm_dry_run_submit_rehearsal_passed",
+        "strategy_group_id": "CPM-RO-001",
+        "path_id": "CPM-LONG",
+        "dry_run_submit_rehearsal": "passed",
+        "checks": {
+            "candidate_authorization_evidence_ready": True,
+            "finalgate_dry_run_passed": True,
+            "operation_layer_paper_passed": True,
+            "execution_attempt_rehearsal_ready": True,
+            "exchange_write": False,
+            "order_created": False,
+        },
+        "safety_invariants": {
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
 def test_tradeability_decision_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -1055,6 +1200,68 @@ def test_cpm_path_schema_does_not_promote_identity_review_to_market_wait():
     assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
     assert paths["CPM-LONG"]["required_facts_mapping_status"] == "not_applicable"
     assert paths["CPM-SHORT"]["required_facts_mapping_status"] == "not_applicable"
+
+
+def test_cpm_fact_chain_promotes_to_armed_market_wait_only_after_closure():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry_with_cpm_trial_asset(),
+        tier_policy=_tier_policy_with_cpm_armed_observation(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        cpm_identity_routing_decision=_cpm_identity_routing_decision(),
+        cpm_owner_trial_policy_scope=_cpm_owner_trial_policy_scope(),
+        cpm_required_facts_mapping=_cpm_required_facts_mapping(),
+        cpm_runtime_signal_capture=_cpm_runtime_signal_capture(),
+        cpm_shadow_candidate_evidence=_cpm_shadow_candidate_evidence(),
+        cpm_dry_run_submit_rehearsal=_cpm_dry_run_submit_rehearsal(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    paths = {
+        path["path_id"]: path
+        for path in packet["july_bullish_rebound_trade_path_closure"]["paths"]
+    }
+    cpm = rows["CPM-RO-001"]
+    cpm_long = paths["CPM-LONG"]
+
+    assert cpm["stage"] == "armed_observation"
+    assert cpm["decision"] == "not_tradable_market_wait"
+    assert cpm["first_blocker_class"] == "fresh_cpm_long_signal_absent"
+    assert cpm["blocker_owner"] == "market"
+    assert cpm["next_action"] == (
+        "continue_cpm_long_armed_observation_until_reclaim_signal"
+    )
+    assert cpm["required_facts_status"] == "ready"
+    assert cpm["runtime_scope_status"]["owner_policy_recorded"] is True
+    assert cpm["runtime_scope_status"]["cpm_identity_decision"] == (
+        "standalone_trial_asset"
+    )
+    assert cpm["runtime_scope_status"]["cpm_current_signal_state"] == (
+        "fresh_signal_absent"
+    )
+    assert cpm_long["side"] == "long"
+    assert cpm_long["required_facts_mapping_status"] == "ready"
+    assert cpm_long["capital_scope_source"] == (
+        "action_time_exchange_available_balance"
+    )
+    assert cpm_long["can_trade_now"] is False
+    assert cpm_long["first_blocker"] == "fresh_cpm_long_signal_absent"
+    assert cpm_long["blocker_owner"] == "market"
+    assert "actionable_now" not in cpm
+    assert "real_order_authority" not in cpm
+    assert "actionable_now" not in cpm_long
+    assert "real_order_authority" not in cpm_long
+    assert packet["summary"]["tradable_now_count"] == 0
 
 
 def test_july_closure_does_not_pass_rbr_exit_check_when_rows_are_absent():

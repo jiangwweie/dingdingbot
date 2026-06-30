@@ -1,0 +1,55 @@
+{
+  "after_next_state": "armed_observation",
+  "checks": {
+    "fresh_signal_present": false,
+    "non_executing_evidence": true,
+    "shadow_candidate_evidence_ready": false
+  },
+  "first_blocker": {
+    "class": "fresh_cpm_long_signal_absent",
+    "owner": "market",
+    "repair_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal"
+  },
+  "generated_at_utc": "2026-06-30T02:35:51.686411+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cpm_shadow_candidate_evidence",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "next_runtime_step": "continue_cpm_long_armed_observation_until_reclaim_signal",
+  "safety_invariants": {
+    "authorization_evidence_created": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "execution_attempt_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.cpm_shadow_candidate_evidence.v1",
+  "scope": "cpm_shadow_candidate_evidence_read_model",
+  "shadow_candidate_evidence": {
+    "fact_authority": "readonly_proxy_not_action_time_required_fact",
+    "fact_authority_boundary": {
+      "action_time_refresh_required": true,
+      "live_required_facts_authority": false
+    },
+    "fresh_signal_present": false,
+    "shadow_candidate_evidence_id": "",
+    "shadow_candidate_evidence_type": "cpm_non_executing_long_signal_candidate_evidence",
+    "side": "long",
+    "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+    "signal_state": "fresh_signal_absent",
+    "strategy_group_id": "CPM-RO-001"
+  },
+  "shadow_candidate_evidence_ready": false,
+  "status": "cpm_shadow_candidate_evidence_waiting_for_fresh_signal",
+  "strategy_group_id": "CPM-RO-001"
+}

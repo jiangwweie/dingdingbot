@@ -71,6 +71,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation",
         "observe_only_would_enter": false,
@@ -283,6 +286,9 @@
         "brf2_current_signal_state": "fresh_signal_absent",
         "brf2_runtime_signal_capture_status": "brf2_runtime_signal_capture_ready",
         "brf2_trial_identity": "BRF2_CONTROLLED_SHORT_TRIAL_V0",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation",
         "observe_only_would_enter": false,
@@ -454,6 +460,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": true,
@@ -544,6 +553,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -658,6 +670,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -768,6 +783,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -878,6 +896,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -1001,6 +1022,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -1069,11 +1093,11 @@
       "trade_paths": []
     },
     {
-      "after_next_state": "trial_asset_admission_candidate",
+      "after_next_state": "live_submit_ready",
       "authority_boundary": "tradeability_decision_is_read_model; runtime_safety_state_controls_live_submit_readiness; no_finalgate_no_operation_layer",
-      "blocker_owner": "engineering",
+      "blocker_owner": "market",
       "can_trade_now": false,
-      "decision": "not_tradable_asset_admission",
+      "decision": "not_tradable_market_wait",
       "evidence_snapshot": {
         "candidate_status": "identity_review_before_trial_prepare",
         "latest_observe_only_side": "",
@@ -1084,32 +1108,46 @@
         "trial_recommendation": "defer_until_identity_or_merge_review_closed",
         "would_enter_forward_positive_count": 13
       },
-      "first_blocker_class": "cpm_registry_identity_gap",
-      "first_blocker_detail": "CPM is visible as an observation/review asset, but registry identity or tier scope is not closed",
-      "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+      "first_blocker_class": "fresh_cpm_long_signal_absent",
+      "first_blocker_detail": "CPM identity, policy, RequiredFacts mapping, and watcher scope are closed; no fresh CPM long rebound signal exists",
+      "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
       "observe_only_exit": {},
       "policy_scope": {
-        "attempt_cap": "owner_policy_required",
-        "capital_scope": "owner_policy_required",
-        "leverage_scenario": "owner_policy_required",
-        "loss_unit": "owner_policy_required",
-        "missing_policy_fields": [
-          "capital_scope",
-          "max_notional",
-          "valid_until",
-          "slippage_limit",
-          "trial_identity"
-        ],
-        "profile": "owner_policy_required",
+        "attempt_cap": 3,
+        "capital_scope": {
+          "allocation_mode": "full_available_isolated_subaccount",
+          "amount_source": "action_time_exchange_available_balance",
+          "currency": "USDT",
+          "loss_capable": true,
+          "type": "isolated_subaccount_full_allocation"
+        },
+        "daily_loss_cap_units": 1,
+        "leverage_scenario": "5x_scenario_not_authority",
+        "loss_unit": {
+          "balance_source": "action_time_exchange_available_balance",
+          "calculation": "action_time_exchange_available_balance / attempt_cap",
+          "currency": "USDT"
+        },
+        "max_consecutive_losses": 2,
+        "max_notional": {
+          "balance_source": "action_time_exchange_available_balance",
+          "calculation": "action_time_exchange_available_balance * leverage_scenario",
+          "currency": "USDT",
+          "final_authority": "runtime_profile_and_action_time_exchange_facts"
+        },
+        "missing_policy_fields": [],
+        "profile": "runtime_profile_and_action_time_exchange_facts",
         "side_scope": [
-          "short"
+          "long"
         ],
-        "source": "capital_trial_candidate",
+        "source": "cpm_owner_trial_policy_scope",
         "symbol_scope": [
-          "ETH/USDT:USDT"
-        ]
+          "cpm_research_supported_symbols_only"
+        ],
+        "trial_identity": "CPM_LONG_PULLBACK_RECLAIM_TRIAL_V0",
+        "valid_until": "one_review_cycle"
       },
-      "required_facts_status": "missing",
+      "required_facts_status": "ready",
       "resolved_blockers": [],
       "runtime_safety_reference": {
         "execution_attempt_required_for_lifecycle_entry": true,
@@ -1122,31 +1160,26 @@
       "runtime_scope_status": {
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
-        "brf2_trial_identity": "",
+        "brf2_trial_identity": "CPM_LONG_PULLBACK_RECLAIM_TRIAL_V0",
+        "cpm_current_signal_state": "fresh_signal_absent",
+        "cpm_identity_decision": "standalone_trial_asset",
+        "cpm_runtime_signal_capture_status": "cpm_runtime_signal_capture_ready",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
-        "owner_policy_recorded": false,
+        "owner_policy_recorded": true,
         "owner_policy_scope_missing": false,
-        "registry_admitted": false,
-        "registry_default_tier": "unknown",
-        "tier_policy_mode": "unknown",
-        "tier_policy_present": false,
-        "tier_policy_tier": "unknown",
+        "registry_admitted": true,
+        "registry_default_tier": "L3",
+        "tier_policy_mode": "armed_observation",
+        "tier_policy_present": true,
+        "tier_policy_tier": "L3",
         "trial_asset_admission_proposal_ready": false,
-        "trial_eligible": false,
+        "trial_eligible": true,
         "trial_envelope_id": "three_strategy_live_trial_envelope_v1",
         "trial_envelope_primary": false
       },
       "secondary_blockers": [
-        {
-          "blocker": "registry_identity_or_registry_row_missing",
-          "class": "asset_admission"
-        },
-        {
-          "blocker": "execution_tier_not_in_policy_or_registry",
-          "class": "asset_admission"
-        },
         {
           "blocker": "would_enter_forward_outcome_pending:24h",
           "class": "facts"
@@ -1178,13 +1211,13 @@
         "strategy_group_id": "CPM-RO-001",
         "trial_grade_audit_ready": false
       },
-      "stage": "trial_asset_admission_candidate",
+      "stage": "armed_observation",
       "strategy_group_id": "CPM-RO-001",
       "trade_paths": [
         {
           "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
           "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-          "blocker_owner": "engineering",
+          "blocker_owner": "market",
           "can_trade_now": false,
           "capital_scope_source": "action_time_exchange_available_balance",
           "disable_facts": [
@@ -1205,13 +1238,13 @@
               "reclaim_confirmed"
             ]
           },
-          "first_blocker": "cpm_registry_identity_gap",
-          "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+          "first_blocker": "fresh_cpm_long_signal_absent",
+          "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
           "path_id": "CPM-LONG",
-          "post_action_expected_state": "trial_asset_admission_candidate",
+          "post_action_expected_state": "live_submit_ready",
           "priority": "P0",
           "production_vs_trial_trigger_diff": {},
-          "required_facts_mapping_status": "missing",
+          "required_facts_mapping_status": "ready",
           "role": "bullish rebound / pullback-reclaim / trend continuation primary candidate",
           "side": "long",
           "stop_or_invalidation": "invalidated_below_level",
@@ -1239,7 +1272,7 @@
         {
           "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
           "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-          "blocker_owner": "engineering",
+          "blocker_owner": "market",
           "can_trade_now": false,
           "capital_scope_source": "action_time_exchange_available_balance",
           "disable_facts": [
@@ -1260,13 +1293,13 @@
               "bounce_loss_confirmed"
             ]
           },
-          "first_blocker": "cpm_registry_identity_gap",
-          "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+          "first_blocker": "fresh_cpm_short_signal_absent",
+          "next_action": "continue_cpm_short_guard_observation_until_bounce_loss_signal",
           "path_id": "CPM-SHORT",
-          "post_action_expected_state": "trial_asset_admission_candidate",
+          "post_action_expected_state": "live_submit_ready",
           "priority": "P2",
           "production_vs_trial_trigger_diff": {},
-          "required_facts_mapping_status": "missing",
+          "required_facts_mapping_status": "ready",
           "role": "bounce-loss / rebound failure guard",
           "side": "short",
           "stop_or_invalidation": "invalidated_above_level",
@@ -1338,6 +1371,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -1409,6 +1445,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -1507,6 +1546,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": true,
         "live_trial_portfolio_stage": "armed_observation",
         "observe_only_would_enter": false,
@@ -1671,6 +1713,9 @@
         "brf2_current_signal_state": "",
         "brf2_runtime_signal_capture_status": "",
         "brf2_trial_identity": "",
+        "cpm_current_signal_state": "",
+        "cpm_identity_decision": "",
+        "cpm_runtime_signal_capture_status": "",
         "live_trial_portfolio_seat": false,
         "live_trial_portfolio_stage": "",
         "observe_only_would_enter": false,
@@ -1698,7 +1743,7 @@
       "trade_paths": []
     }
   ],
-  "generated_at_utc": "2026-06-30T01:54:29.116866+00:00",
+  "generated_at_utc": "2026-06-30T02:35:56.730727+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -1882,7 +1927,7 @@
       {
         "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
         "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-        "blocker_owner": "engineering",
+        "blocker_owner": "market",
         "can_trade_now": false,
         "capital_scope_source": "action_time_exchange_available_balance",
         "disable_facts": [
@@ -1903,13 +1948,13 @@
             "reclaim_confirmed"
           ]
         },
-        "first_blocker": "cpm_registry_identity_gap",
-        "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "continue_cpm_long_armed_observation_until_reclaim_signal",
         "path_id": "CPM-LONG",
-        "post_action_expected_state": "trial_asset_admission_candidate",
+        "post_action_expected_state": "live_submit_ready",
         "priority": "P0",
         "production_vs_trial_trigger_diff": {},
-        "required_facts_mapping_status": "missing",
+        "required_facts_mapping_status": "ready",
         "role": "bullish rebound / pullback-reclaim / trend continuation primary candidate",
         "side": "long",
         "stop_or_invalidation": "invalidated_below_level",
@@ -1937,7 +1982,7 @@
       {
         "attempt_cap": "runtime_profile_or_owner_scoped_attempt_cap",
         "authority_boundary": "path_state_only; not FinalGate input; not Operation Layer input; not real-order authority",
-        "blocker_owner": "engineering",
+        "blocker_owner": "market",
         "can_trade_now": false,
         "capital_scope_source": "action_time_exchange_available_balance",
         "disable_facts": [
@@ -1958,13 +2003,13 @@
             "bounce_loss_confirmed"
           ]
         },
-        "first_blocker": "cpm_registry_identity_gap",
-        "next_action": "close_cpm_registry_identity_and_tier_scope_before_armed_observation",
+        "first_blocker": "fresh_cpm_short_signal_absent",
+        "next_action": "continue_cpm_short_guard_observation_until_bounce_loss_signal",
         "path_id": "CPM-SHORT",
-        "post_action_expected_state": "trial_asset_admission_candidate",
+        "post_action_expected_state": "live_submit_ready",
         "priority": "P2",
         "production_vs_trial_trigger_diff": {},
-        "required_facts_mapping_status": "missing",
+        "required_facts_mapping_status": "ready",
         "role": "bounce-loss / rebound failure guard",
         "side": "short",
         "stop_or_invalidation": "invalidated_above_level",
@@ -2167,19 +2212,19 @@
   "status": "tradeability_decision_ready",
   "summary": {
     "by_blocker_owner": {
-      "engineering": 5,
-      "market": 3,
+      "engineering": 4,
+      "market": 4,
       "strategy_review": 5
     },
     "by_decision": {
-      "not_tradable_asset_admission": 2,
+      "not_tradable_asset_admission": 1,
       "not_tradable_facts": 3,
-      "not_tradable_market_wait": 3,
+      "not_tradable_market_wait": 4,
       "not_tradable_strategy_quality": 5
     },
     "controlled_live_standby_count": 3,
-    "engineering_first_blocker_count": 5,
-    "market_first_blocker_count": 3,
+    "engineering_first_blocker_count": 4,
+    "market_first_blocker_count": 4,
     "owner_first_blocker_count": 0,
     "row_count": 13,
     "runtime_first_blocker_count": 0,

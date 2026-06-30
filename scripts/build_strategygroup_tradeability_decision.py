@@ -132,6 +132,30 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cpm-identity-routing-decision-json",
+        help="Explicit CPM identity routing decision input.",
+    )
+    parser.add_argument(
+        "--cpm-owner-trial-policy-scope-json",
+        help="Explicit CPM Owner trial policy scope input.",
+    )
+    parser.add_argument(
+        "--cpm-required-facts-mapping-json",
+        help="Explicit CPM RequiredFacts mapping input.",
+    )
+    parser.add_argument(
+        "--cpm-runtime-signal-capture-json",
+        help="Explicit CPM runtime signal capture input.",
+    )
+    parser.add_argument(
+        "--cpm-shadow-candidate-evidence-json",
+        help="Explicit CPM shadow candidate evidence input.",
+    )
+    parser.add_argument(
+        "--cpm-dry-run-submit-rehearsal-json",
+        help="Explicit CPM dry-run submit rehearsal input.",
+    )
+    parser.add_argument(
         "--three-strategy-live-trial-portfolio-json",
         help=(
             "Explicit Strategy Asset / Trial Envelope portfolio input. Runtime "
@@ -195,6 +219,36 @@ def main(argv: list[str] | None = None) -> int:
             if args.brf2_owner_trial_policy_scope_json
             else {}
         ),
+        cpm_identity_routing_decision=(
+            _read_optional_json(Path(args.cpm_identity_routing_decision_json))
+            if args.cpm_identity_routing_decision_json
+            else {}
+        ),
+        cpm_owner_trial_policy_scope=(
+            _read_optional_json(Path(args.cpm_owner_trial_policy_scope_json))
+            if args.cpm_owner_trial_policy_scope_json
+            else {}
+        ),
+        cpm_required_facts_mapping=(
+            _read_optional_json(Path(args.cpm_required_facts_mapping_json))
+            if args.cpm_required_facts_mapping_json
+            else {}
+        ),
+        cpm_runtime_signal_capture=(
+            _read_optional_json(Path(args.cpm_runtime_signal_capture_json))
+            if args.cpm_runtime_signal_capture_json
+            else {}
+        ),
+        cpm_shadow_candidate_evidence=(
+            _read_optional_json(Path(args.cpm_shadow_candidate_evidence_json))
+            if args.cpm_shadow_candidate_evidence_json
+            else {}
+        ),
+        cpm_dry_run_submit_rehearsal=(
+            _read_optional_json(Path(args.cpm_dry_run_submit_rehearsal_json))
+            if args.cpm_dry_run_submit_rehearsal_json
+            else {}
+        ),
         three_strategy_live_trial_portfolio=(
             _read_optional_json(Path(args.three_strategy_live_trial_portfolio_json))
             if args.three_strategy_live_trial_portfolio_json
@@ -246,6 +300,12 @@ def build_tradeability_decision(
     runtime_safety_state: dict[str, Any],
     trial_asset_admission_proposal: dict[str, Any] | None = None,
     brf2_owner_trial_policy_scope: dict[str, Any] | None = None,
+    cpm_identity_routing_decision: dict[str, Any] | None = None,
+    cpm_owner_trial_policy_scope: dict[str, Any] | None = None,
+    cpm_required_facts_mapping: dict[str, Any] | None = None,
+    cpm_runtime_signal_capture: dict[str, Any] | None = None,
+    cpm_shadow_candidate_evidence: dict[str, Any] | None = None,
+    cpm_dry_run_submit_rehearsal: dict[str, Any] | None = None,
     three_strategy_live_trial_portfolio: dict[str, Any] | None = None,
     brf2_runtime_signal_capture: dict[str, Any] | None = None,
     brf2_shadow_candidate_evidence: dict[str, Any] | None = None,
@@ -259,6 +319,12 @@ def build_tradeability_decision(
         signal_coverage,
         trial_asset_admission_proposal or {},
         brf2_owner_trial_policy_scope or {},
+        cpm_identity_routing_decision or {},
+        cpm_owner_trial_policy_scope or {},
+        cpm_required_facts_mapping or {},
+        cpm_runtime_signal_capture or {},
+        cpm_shadow_candidate_evidence or {},
+        cpm_dry_run_submit_rehearsal or {},
         three_strategy_live_trial_portfolio or {},
         brf2_runtime_signal_capture or {},
         brf2_shadow_candidate_evidence or {},
@@ -273,6 +339,9 @@ def build_tradeability_decision(
     )
     owner_policy_scopes = _owner_policy_scopes_by_id(
         brf2_owner_trial_policy_scope or {}
+    )
+    owner_policy_scopes.update(
+        _owner_policy_scopes_by_id(cpm_owner_trial_policy_scope or {})
     )
     portfolio = three_strategy_live_trial_portfolio or {}
     portfolio_seats = _portfolio_seats_by_id(portfolio)
@@ -311,6 +380,31 @@ def build_tradeability_decision(
             brf2_shadow_candidate_evidence=(
                 brf2_shadow_candidate_evidence or {}
                 if strategy_group_id == "BRF2-001"
+                else {}
+            ),
+            cpm_identity_routing_decision=(
+                cpm_identity_routing_decision or {}
+                if strategy_group_id == "CPM-RO-001"
+                else {}
+            ),
+            cpm_required_facts_mapping=(
+                cpm_required_facts_mapping or {}
+                if strategy_group_id == "CPM-RO-001"
+                else {}
+            ),
+            cpm_runtime_signal_capture=(
+                cpm_runtime_signal_capture or {}
+                if strategy_group_id == "CPM-RO-001"
+                else {}
+            ),
+            cpm_shadow_candidate_evidence=(
+                cpm_shadow_candidate_evidence or {}
+                if strategy_group_id == "CPM-RO-001"
+                else {}
+            ),
+            cpm_dry_run_submit_rehearsal=(
+                cpm_dry_run_submit_rehearsal or {}
+                if strategy_group_id == "CPM-RO-001"
                 else {}
             ),
             trial_grade_row=trial_grade_rows.get(strategy_group_id, {}),
@@ -396,6 +490,11 @@ def _decision_row(
     trial_envelope: dict[str, Any],
     brf2_runtime_signal_capture: dict[str, Any],
     brf2_shadow_candidate_evidence: dict[str, Any],
+    cpm_identity_routing_decision: dict[str, Any],
+    cpm_required_facts_mapping: dict[str, Any],
+    cpm_runtime_signal_capture: dict[str, Any],
+    cpm_shadow_candidate_evidence: dict[str, Any],
+    cpm_dry_run_submit_rehearsal: dict[str, Any],
     trial_grade_row: dict[str, Any],
     runtime_safety_state: dict[str, Any],
     forbidden_effects: list[str],
@@ -439,6 +538,11 @@ def _decision_row(
         portfolio_seat=portfolio_seat,
         brf2_runtime_signal_capture=brf2_runtime_signal_capture,
         brf2_candidate_authorization_state=brf2_candidate_authorization_state,
+        cpm_identity_routing_decision=cpm_identity_routing_decision,
+        cpm_required_facts_mapping=cpm_required_facts_mapping,
+        cpm_runtime_signal_capture=cpm_runtime_signal_capture,
+        cpm_shadow_candidate_evidence=cpm_shadow_candidate_evidence,
+        cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
         blockers=blockers,
         runtime_safety_state=runtime_safety_state,
         forbidden_effects=forbidden_effects,
@@ -483,6 +587,13 @@ def _decision_row(
             registry_row.get("required_facts_summary")
         ),
     )
+    if (
+        strategy_group_id == "CPM-RO-001"
+        and cpm_required_facts_mapping.get("status")
+        == "cpm_required_facts_mapping_ready"
+        and cpm_required_facts_mapping.get("required_facts_mapping_ready") is True
+    ):
+        required_facts_status = "ready"
     trade_paths = _trade_paths_for_strategy(
         strategy_group_id=strategy_group_id,
         row_classifier=classifier,
@@ -546,6 +657,18 @@ def _decision_row(
                 ).get("current_signal_state")
                 or ""
             ),
+            "cpm_identity_decision": str(
+                cpm_identity_routing_decision.get("identity_decision") or ""
+            ),
+            "cpm_runtime_signal_capture_status": str(
+                cpm_runtime_signal_capture.get("status") or ""
+            ),
+            "cpm_current_signal_state": str(
+                _as_dict(
+                    cpm_runtime_signal_capture.get("signal_detector_preview")
+                ).get("current_signal_state")
+                or ""
+            ),
         },
         "signal_grade_status": signal_grade_status,
         "evidence_snapshot": {
@@ -589,6 +712,11 @@ def _first_blocker(
     portfolio_seat: dict[str, Any],
     brf2_runtime_signal_capture: dict[str, Any],
     brf2_candidate_authorization_state: dict[str, Any],
+    cpm_identity_routing_decision: dict[str, Any],
+    cpm_required_facts_mapping: dict[str, Any],
+    cpm_runtime_signal_capture: dict[str, Any],
+    cpm_shadow_candidate_evidence: dict[str, Any],
+    cpm_dry_run_submit_rehearsal: dict[str, Any],
     blockers: list[str],
     runtime_safety_state: dict[str, Any],
     forbidden_effects: list[str],
@@ -623,6 +751,11 @@ def _first_blocker(
             admission_proposal=admission_proposal,
             owner_policy_scope=owner_policy_scope,
             portfolio_seat=portfolio_seat,
+            identity_routing_decision=cpm_identity_routing_decision,
+            required_facts_mapping=cpm_required_facts_mapping,
+            runtime_signal_capture=cpm_runtime_signal_capture,
+            shadow_candidate_evidence=cpm_shadow_candidate_evidence,
+            dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
             blockers=blockers,
         )
         if cpm:
@@ -833,6 +966,11 @@ def _cpm_first_blocker(
     admission_proposal: dict[str, Any],
     owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
+    identity_routing_decision: dict[str, Any],
+    required_facts_mapping: dict[str, Any],
+    runtime_signal_capture: dict[str, Any],
+    shadow_candidate_evidence: dict[str, Any],
+    dry_run_submit_rehearsal: dict[str, Any],
     blockers: list[str],
 ) -> dict[str, str]:
     text = " ".join(
@@ -847,13 +985,19 @@ def _cpm_first_blocker(
             str(portfolio_seat.get("first_tradeability_blocker") or ""),
         ]
     ).lower()
+    identity_closed = (
+        identity_routing_decision.get("identity_decision")
+        == "standalone_trial_asset"
+        and identity_routing_decision.get("cpm_long_vs_mpg_long_distinct") is True
+    )
     if (
         not registry_present
         or not tier_present
-        or "registry_identity" in text
-        or "identity_review" in text
-        or "identity incomplete" in text
-        or "scope_unclear" in text
+        or not identity_closed
+        or (not identity_closed and "registry_identity" in text)
+        or (not identity_closed and "identity_review" in text)
+        or (not identity_closed and "identity incomplete" in text)
+        or (not identity_closed and "scope_unclear" in text)
     ):
         return _classifier(
             "not_tradable_asset_admission",
@@ -867,6 +1011,7 @@ def _cpm_first_blocker(
     runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
     owner_policy_recorded = (
         owner_policy_scope.get("owner_policy_recorded") is True
+        or owner_policy_scope.get("cpm_policy_scope_recorded") is True
         or admission_proposal.get("owner_policy_recorded") is True
         or portfolio_seat.get("owner_policy_recorded") is True
         or _as_dict(portfolio_seat.get("policy_scope")).get("owner_policy_recorded")
@@ -891,10 +1036,17 @@ def _cpm_first_blocker(
         )
 
     required_facts_mapping_ready = (
+        required_facts_mapping.get("status") == "cpm_required_facts_mapping_ready"
+        and required_facts_mapping.get("required_facts_mapping_ready") is True
+    ) or (
         portfolio_seat.get("required_facts_mapping_ready") is True
         or runtime_readiness.get("required_facts_mapping_ready") is True
     )
     watcher_scope_ready = (
+        runtime_signal_capture.get("status") == "cpm_runtime_signal_capture_ready"
+        and _as_dict(runtime_signal_capture.get("checks")).get("watcher_scope_ready")
+        is True
+    ) or (
         portfolio_seat.get("watcher_scope_ready") is True
         or runtime_readiness.get("watcher_scope_ready") is True
         or runtime_readiness.get("armed_observation_ready") is True
@@ -918,12 +1070,51 @@ def _cpm_first_blocker(
             "armed_observation",
         )
 
+    dry_run_passed = (
+        dry_run_submit_rehearsal.get("status")
+        == "cpm_dry_run_submit_rehearsal_passed"
+        and dry_run_submit_rehearsal.get("dry_run_submit_rehearsal") == "passed"
+    )
+    if not dry_run_passed:
+        return _classifier(
+            "not_tradable_facts",
+            "cpm_dry_run_submit_rehearsal_gap",
+            "CPM RequiredFacts and watcher scope are attached, but submit lifecycle rehearsal is not yet passed",
+            "engineering",
+            "run_cpm_non_executing_submit_rehearsal",
+            "armed_observation",
+        )
+
+    preview = _as_dict(runtime_signal_capture.get("signal_detector_preview"))
+    signal_state = str(preview.get("current_signal_state") or "")
+    if signal_state == "fresh_signal_present":
+        return _classifier(
+            "not_tradable_execution_gate",
+            "cpm_candidate_authorization_evidence_not_created",
+            "CPM fresh signal is present in the non-executing detector; official candidate authorization evidence is still required",
+            "runtime",
+            "prepare_cpm_candidate_authorization_evidence",
+            "shadow_candidate_evidence_ready",
+        )
+    if signal_state == "blocked_by_disable_fact":
+        return _classifier(
+            "not_tradable_market_wait",
+            str(preview.get("first_blocker_class") or "cpm_disable_fact_active"),
+            "CPM watcher scope is attached, but a disable fact is active",
+            str(preview.get("first_blocker_owner") or "market"),
+            str(
+                preview.get("signal_capture_checkpoint")
+                or "continue_cpm_armed_observation_until_disable_clears"
+            ),
+            "live_submit_ready",
+        )
+
     return _classifier(
         "not_tradable_market_wait",
         "fresh_cpm_long_signal_absent",
         "CPM identity, policy, RequiredFacts mapping, and watcher scope are closed; no fresh CPM long rebound signal exists",
         "market",
-        "continue_cpm_long_short_armed_observation_until_fresh_signal",
+        "continue_cpm_long_armed_observation_until_reclaim_signal",
         "live_submit_ready",
     )
 
@@ -1051,6 +1242,13 @@ def _stage(
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
     )
+    if (
+        strategy_group_id == "CPM-RO-001"
+        and registry_row.get("trial_eligible") is True
+        and tier_row.get("mode") == "armed_observation"
+        and owner_policy_recorded
+    ):
+        return "armed_observation"
     portfolio_stage = str(portfolio_seat.get("stage") or "")
     if portfolio_stage == "armed_observation":
         return "armed_observation"
@@ -1284,7 +1482,11 @@ def _policy_scope(
     if _policy_recorded(owner_policy_scope):
         policy = _as_dict(owner_policy_scope.get("policy"))
         return {
-            "source": "brf2_owner_trial_policy_scope",
+            "source": (
+                "cpm_owner_trial_policy_scope"
+                if policy.get("strategy_group_id") == "CPM-RO-001"
+                else "brf2_owner_trial_policy_scope"
+            ),
             "capital_scope": _as_dict(policy.get("capital_scope")),
             "profile": "runtime_profile_and_action_time_exchange_facts",
             "symbol_scope": [str(policy.get("symbol_scope") or "")],
@@ -1967,12 +2169,19 @@ def _policy_value(candidate: dict[str, Any], field: str, missing: list[str]) -> 
 
 def _policy_recorded(artifact: dict[str, Any]) -> bool:
     policy = _as_dict(artifact.get("policy"))
-    return (
+    brf2_recorded = (
         artifact.get("status") == "brf2_owner_trial_policy_scope_recorded"
         and artifact.get("brf2_policy_scope_recorded") is True
         and artifact.get("owner_policy_scope_missing") is False
         and policy.get("strategy_group_id") == "BRF2-001"
     )
+    cpm_recorded = (
+        artifact.get("status") == "cpm_owner_trial_policy_scope_recorded"
+        and artifact.get("cpm_policy_scope_recorded") is True
+        and artifact.get("owner_policy_scope_missing") is False
+        and policy.get("strategy_group_id") == "CPM-RO-001"
+    )
+    return brf2_recorded or cpm_recorded
 
 
 def _portfolio_first_blocker(portfolio_seat: dict[str, Any]) -> dict[str, str]:

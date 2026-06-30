@@ -1,0 +1,122 @@
+{
+  "checks": {
+    "action_time_facts_are_authority": false,
+    "fact_input_present": true,
+    "watcher_tick_present": true
+  },
+  "fact_authority": "readonly_proxy_not_action_time_required_fact",
+  "fact_authority_boundary": {
+    "action_time_refresh_required": true,
+    "live_required_facts_authority": false
+  },
+  "fact_input_present": true,
+  "facts": {
+    "action_time_available_balance": {
+      "fresh": false,
+      "source": "runtime_action_time_exchange_facts",
+      "status": "action_time_required"
+    },
+    "active_position_or_open_order_clear": {
+      "fresh": false,
+      "source": "runtime_action_time_exchange_facts",
+      "status": "action_time_required"
+    },
+    "active_position_or_open_order_conflict": {
+      "fresh": false,
+      "source": "runtime_action_time_exchange_facts",
+      "status": "action_time_required"
+    },
+    "funding_extreme": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "false"
+    },
+    "funding_not_extreme": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "ready"
+    },
+    "htf_trend_broken": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "false"
+    },
+    "htf_trend_intact": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "not_satisfied"
+    },
+    "invalidated_below_level": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "ready"
+    },
+    "liquidity_not_ok": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "false"
+    },
+    "liquidity_ok": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "ready"
+    },
+    "pullback_depth_abnormal": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "false"
+    },
+    "pullback_depth_normal": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "not_satisfied"
+    },
+    "reclaim_confirmed": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "not_confirmed"
+    },
+    "reclaim_failed_or_stale": {
+      "fresh": true,
+      "source": "readonly_cpm_proxy",
+      "status": "false"
+    }
+  },
+  "first_blocker": {
+    "class": "none",
+    "owner": "runtime",
+    "repair_checkpoint": "run_cpm_runtime_signal_capture"
+  },
+  "generated_at_utc": "2026-06-30T02:35:51.543852+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cpm_runtime_signal_facts",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "path_id": "CPM-LONG",
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.cpm_runtime_signal_facts.v1",
+  "scope": "cpm_runtime_signal_facts_read_model",
+  "source_signal_context": {
+    "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+    "source": "cpm_runtime_readonly_proxy",
+    "source_signal_type": "no_action",
+    "symbol": ""
+  },
+  "status": "cpm_runtime_signal_facts_ready",
+  "strategy_group_id": "CPM-RO-001",
+  "watcher_tick_present": true
+}

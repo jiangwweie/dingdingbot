@@ -1,0 +1,58 @@
+{
+  "accepted_alternatives": [
+    "merge_into_MPG_member_role",
+    "observe_only_keep"
+  ],
+  "checks": {
+    "merge_into_mpg_member_role": false,
+    "observe_only_keep": false,
+    "registry_identity_closed": true,
+    "standalone_trial_asset": true
+  },
+  "cpm_long_vs_mpg_long_distinct": true,
+  "decision_evidence": {
+    "independent_required_facts": [
+      "htf_trend_intact",
+      "pullback_depth_normal",
+      "reclaim_confirmed",
+      "invalidated_below_level",
+      "liquidity_ok",
+      "funding_not_extreme",
+      "active_position_or_open_order_clear",
+      "action_time_available_balance"
+    ],
+    "invalidation_difference": "CPM-LONG invalidates below pullback/reclaim structure; MPG invalidates on momentum exhaustion or continuation failure.",
+    "time_stop_difference": "CPM-LONG has reclaim follow-through staleness; MPG has continuation persistence decay.",
+    "trigger_difference": "CPM-LONG waits for trend-intact pullback depth plus reclaim; MPG-LONG waits for momentum continuation and persistence."
+  },
+  "generated_at_utc": "2026-06-30T02:35:51.352607+00:00",
+  "identity_decision": "standalone_trial_asset",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_cpm_identity_routing",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "path_id": "CPM-LONG",
+  "safety_invariants": {
+    "authorization_evidence_created": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "execution_attempt_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "registry_authority_changed": false,
+    "tier_policy_changed": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.cpm_identity_routing_decision.v1",
+  "scope": "cpm_identity_routing_decision_non_executing",
+  "status": "cpm_identity_routing_decision_ready",
+  "strategy_group_id": "CPM-RO-001"
+}

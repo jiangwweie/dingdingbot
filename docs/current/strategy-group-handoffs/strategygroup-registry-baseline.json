@@ -119,6 +119,93 @@
     },
     {
       "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L3",
+      "downshift_rule": "Downshift if pullback/reclaim facts, action-time account facts, liquidity, or funding context become unavailable.",
+      "edge_thesis": "Capture trend-intact pullback followed by reclaim, distinct from MPG momentum continuation.",
+      "evidence_refs": [
+        {
+          "kind": "identity_decision",
+          "path": "output/runtime-monitor/latest-cpm-identity-routing-decision.json"
+        },
+        {
+          "kind": "required_facts_mapping",
+          "path": "output/runtime-monitor/latest-cpm-required-facts-mapping.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "standalone_trial_asset_identity_closed",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live review shows pullback-reclaim has persistent false continuation after costs and protection.",
+      "owner_label": "CPM 回踩收复",
+      "park_rule": "Park if identity evidence regresses or CPM becomes redundant with MPG after review.",
+      "promotion_gate": "Armed observation only; real submit still depends on fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "regime_fit": "Bullish rebound or trend-continuation regime where pullback depth remains normal and reclaim confirms.",
+      "required_facts_summary": {
+        "account_exchange": "action-time available balance, active position, open orders, symbol availability, min notional, step, tick, leverage limit",
+        "market": "15m/1h/4h closed structure, liquidity, mark, funding",
+        "risk": "invalidated below level, protection plan, exit plan, time stop",
+        "strategy": "htf trend intact, pullback depth normal, reclaim confirmed"
+      },
+      "required_next_evidence": "fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L3 armed observation is not real submit authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "fee, funding, fill-gap slippage, and pullback continuation failure"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "missing protection, stale account facts, open-order or active-position conflict"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "trend, pullback depth, reclaim, liquidity, funding, and action-time account facts"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "failed reclaim",
+            "trend break after pullback",
+            "choppy rebound regime"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Long-only pullback-reclaim lane with trend break, failed reclaim, liquidity, funding, and action-time account disables.",
+      "trial_eligible": true
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
       "default_tier": "L2",
       "downshift_rule": "Downshift if product eligibility, breadth, or session gap facts are unavailable.",
       "edge_thesis": "Capture theme or basket momentum in equity-like perpetual products.",

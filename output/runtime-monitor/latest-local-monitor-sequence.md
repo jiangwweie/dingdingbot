@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T01:54:29.153741+00:00
+- 报告时间: 2026-06-30T02:35:56.769130+00:00
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -38,6 +38,21 @@
 - BRF2 shadow candidate evidence: `brf2_shadow_candidate_evidence_waiting_for_fresh_signal`
 - BRF2 shadow evidence ready: `否`
 - BRF2 shadow evidence first blocker: `fresh_brf2_short_signal_absent` / `market`
+- CPM identity decision: `standalone_trial_asset`
+- CPM standalone trial asset: `是`
+- CPM Owner policy recorded: `是`
+- CPM capital source: `action_time_exchange_available_balance`
+- CPM RequiredFacts mapping: `cpm_required_facts_mapping_ready`
+- CPM fresh signal rule: `cpm_long_pullback_reclaim_signal_v1`
+- CPM runtime signal facts: `cpm_runtime_signal_facts_ready`
+- CPM fact input / watcher tick: `是` / `是`
+- CPM runtime signal capture: `cpm_runtime_signal_capture_ready`
+- CPM signal state: `fresh_signal_absent`
+- CPM signal first blocker: `fresh_cpm_long_signal_absent` / `market`
+- CPM shadow candidate evidence: `cpm_shadow_candidate_evidence_waiting_for_fresh_signal`
+- CPM shadow evidence first blocker: `fresh_cpm_long_signal_absent` / `market`
+- CPM dry-run submit rehearsal: `passed`
+- CPM rehearsal FinalGate/Operation Layer paper: `是` / `是`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
@@ -48,6 +63,9 @@
 - Tradeability Decision Top: `BRF2-001` / `not_tradable_market_wait`
 - 第一阻断: `fresh_brf2_short_signal_absent` / `market`
 - 下一检查点: `continue_brf2_armed_observation_until_fresh_signal`
+- CPM Tradeability row: `armed_observation` / `not_tradable_market_wait`
+- CPM Tradeability blocker: `fresh_cpm_long_signal_absent` / `market`
+- CPM-LONG path readiness: `ready` / `否`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
 - Trial-grade 30d observation / action-time submit: `0` / `0`
@@ -70,6 +88,13 @@
 | brf2_runtime_signal_facts | brf2_runtime_signal_facts_ready | 0 |
 | brf2_runtime_signal_capture | brf2_runtime_signal_capture_ready | 0 |
 | brf2_shadow_candidate_evidence | brf2_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
+| cpm_identity_routing_decision | cpm_identity_routing_decision_ready | 0 |
+| cpm_owner_trial_policy_scope | cpm_owner_trial_policy_scope_recorded | 0 |
+| cpm_required_facts_mapping | cpm_required_facts_mapping_ready | 0 |
+| cpm_runtime_signal_facts | cpm_runtime_signal_facts_ready | 0 |
+| cpm_runtime_signal_capture | cpm_runtime_signal_capture_ready | 0 |
+| cpm_shadow_candidate_evidence | cpm_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
+| cpm_dry_run_submit_rehearsal | cpm_dry_run_submit_rehearsal_passed | 0 |
 | goal_progress | waiting_for_market_monitor_refresh_needed | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |

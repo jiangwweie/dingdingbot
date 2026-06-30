@@ -10,6 +10,11 @@
       "reason": "First bounded-aggressive live-order pilot lane; use Owner-allocated subaccount profile; no expansion of symbol, side, notional, leverage, or max exposure beyond the selected profile.",
       "tier": "L4"
     },
+    "CPM-RO-001": {
+      "mode": "armed_observation",
+      "reason": "Standalone CPM-LONG pullback-reclaim trial StrategyGroup; may observe and run non-executing rehearsal, but real submit still requires fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "tier": "L3"
+    },
     "PMR-001": {
       "mode": "observe_only",
       "reason": "Precious-metal overlay remains observe-only until role/session/mark facts are consistently ready.",
