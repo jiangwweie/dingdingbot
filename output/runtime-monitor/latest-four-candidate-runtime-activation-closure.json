@@ -86,7 +86,7 @@
     },
     {
       "action_time_boundary": {
-        "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
+        "exact_next_blocker": "fresh_mpg_signal_or_private_action_time_facts",
         "live_submit_allowed": false,
         "ready": true
       },
@@ -99,7 +99,7 @@
       },
       "candidate_evidence_shape_ready": true,
       "contract_declared": true,
-      "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
+      "exact_next_blocker": "fresh_mpg_signal_or_private_action_time_facts",
       "expanded_readonly_watcher_symbols": [
         "SOLUSDT",
         "AVAXUSDT",
@@ -172,7 +172,7 @@
     },
     {
       "action_time_boundary": {
-        "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
+        "exact_next_blocker": "fresh_sor_signal_or_private_action_time_facts",
         "live_submit_allowed": false,
         "ready": true
       },
@@ -185,7 +185,7 @@
       },
       "candidate_evidence_shape_ready": true,
       "contract_declared": true,
-      "exact_next_blocker": "binance_usdm_runtime_artifact_ready",
+      "exact_next_blocker": "fresh_sor_signal_or_private_action_time_facts",
       "expanded_readonly_watcher_symbols": [
         "SOLUSDT",
         "AVAXUSDT"
@@ -364,7 +364,7 @@
     "sor_runtime_artifact_ready": true,
     "venue_is_proxy_not_execution": true
   },
-  "generated_at_utc": "2026-06-30T11:56:26.894208+00:00",
+  "generated_at_utc": "2026-06-30T13:54:26.774121+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

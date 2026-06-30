@@ -49,6 +49,7 @@ PUBLIC_FACT_KEYS = (
     "qty_step_ok",
     "leverage_available",
 )
+PUBLIC_FACT_MAX_AGE_SECONDS = 300
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,7 +89,12 @@ def main(argv: list[str] | None = None) -> int:
 def build_public_facts(
     *, symbols: list[str], generated_at_utc: str | None = None
 ) -> dict[str, Any]:
-    generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
+    generated_dt = (
+        _parse_utc(generated_at_utc)
+        if generated_at_utc
+        else datetime.now(timezone.utc)
+    )
+    generated = generated_dt.isoformat()
     errors: list[str] = []
     exchange_info = _fetch_json("/fapi/v1/exchangeInfo", errors)
     symbol_rows = {
@@ -98,7 +104,7 @@ def build_public_facts(
     }
     rows: list[dict[str, Any]] = []
     for symbol in symbols:
-        rows.append(_symbol_row(symbol, symbol_rows.get(symbol, {}), errors))
+        rows.append(_symbol_row(symbol, symbol_rows.get(symbol, {}), errors, generated_dt))
     ready_count = sum(row["public_facts_ready"] is True for row in rows)
     status = (
         "binance_usdm_public_facts_ready"
@@ -121,6 +127,7 @@ def build_public_facts(
             "symbol_count": len(symbols),
             "ready_symbol_count": ready_count,
             "public_fact_keys": list(PUBLIC_FACT_KEYS),
+            "public_fact_max_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
             "private_action_time_facts_included": False,
             "errors": errors,
         },
@@ -147,7 +154,10 @@ def build_public_facts(
 
 
 def _symbol_row(
-    symbol: str, exchange_symbol: dict[str, Any], errors: list[str]
+    symbol: str,
+    exchange_symbol: dict[str, Any],
+    errors: list[str],
+    observed_at: datetime,
 ) -> dict[str, Any]:
     premium = _fetch_json(f"/fapi/v1/premiumIndex?symbol={symbol}", errors)
     book = _fetch_json(f"/fapi/v1/ticker/bookTicker?symbol={symbol}", errors)
@@ -162,10 +172,17 @@ def _symbol_row(
     bid = _to_float(book.get("bidPrice"))
     ask = _to_float(book.get("askPrice"))
     mark = _to_float(premium.get("markPrice"))
+    mark_observed_at = _timestamp_ms_to_utc(premium.get("time"))
+    mark_age_seconds = _age_seconds(mark_observed_at, observed_at)
     funding = _to_float(premium.get("lastFundingRate"))
     spread_bps = ((ask - bid) / mark * 10000) if bid and ask and mark else None
     contract_exists = exchange_symbol.get("status") == "TRADING"
-    mark_ready = mark is not None and mark > 0
+    mark_ready = (
+        mark is not None
+        and mark > 0
+        and mark_age_seconds is not None
+        and mark_age_seconds <= PUBLIC_FACT_MAX_AGE_SECONDS
+    )
     funding_ok = funding is not None and abs(funding) <= 0.003
     spread_ok = spread_bps is not None and spread_bps <= 10
     min_notional_value = _to_float(min_notional.get("notional"))
@@ -184,6 +201,11 @@ def _symbol_row(
         ),
         "exchange_contract_exists": contract_exists,
         "mark_price_fresh": mark_ready,
+        "mark_price_observed_at_utc": (
+            mark_observed_at.isoformat() if mark_observed_at else None
+        ),
+        "mark_price_age_seconds": mark_age_seconds,
+        "max_mark_price_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
         "funding_not_extreme": funding_ok,
         "spread_ok": spread_ok,
         "min_notional_ok": min_notional_value is not None,
@@ -191,6 +213,9 @@ def _symbol_row(
         "leverage_available": contract_exists,
         "facts": {
             "mark_price": premium.get("markPrice"),
+            "mark_price_observed_at_utc": (
+                mark_observed_at.isoformat() if mark_observed_at else None
+            ),
             "last_funding_rate": premium.get("lastFundingRate"),
             "bid_price": book.get("bidPrice"),
             "ask_price": book.get("askPrice"),
@@ -256,6 +281,9 @@ def _unavailable_artifact(symbols: list[str], error: str) -> dict[str, Any]:
             "public_facts_ready": False,
             "exchange_contract_exists": False,
             "mark_price_fresh": False,
+            "mark_price_observed_at_utc": None,
+            "mark_price_age_seconds": None,
+            "max_mark_price_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
             "funding_not_extreme": False,
             "spread_ok": False,
             "min_notional_ok": False,
@@ -281,6 +309,7 @@ def _unavailable_artifact(symbols: list[str], error: str) -> dict[str, Any]:
             "symbol_count": len(symbols),
             "ready_symbol_count": 0,
             "public_fact_keys": list(PUBLIC_FACT_KEYS),
+            "public_fact_max_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
             "private_action_time_facts_included": False,
             "errors": [error],
         },
@@ -322,6 +351,7 @@ def _build_from_prefetched(symbols: list[str], raw: dict[str, Any]) -> dict[str,
             symbol_rows.get(symbol, {}),
             premiums.get(symbol, {}),
             books.get(symbol, {}),
+            datetime.now(timezone.utc),
         )
         for symbol in symbols
     ]
@@ -346,6 +376,7 @@ def _build_from_prefetched(symbols: list[str], raw: dict[str, Any]) -> dict[str,
             "symbol_count": len(symbols),
             "ready_symbol_count": ready_count,
             "public_fact_keys": list(PUBLIC_FACT_KEYS),
+            "public_fact_max_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
             "private_action_time_facts_included": False,
             "errors": errors,
         },
@@ -376,6 +407,7 @@ def _symbol_row_from_payload(
     exchange_symbol: dict[str, Any],
     premium: dict[str, Any],
     book: dict[str, Any],
+    observed_at: datetime,
 ) -> dict[str, Any]:
     filters = {
         str(item.get("filterType") or ""): item
@@ -388,10 +420,17 @@ def _symbol_row_from_payload(
     bid = _to_float(book.get("bidPrice"))
     ask = _to_float(book.get("askPrice"))
     mark = _to_float(premium.get("markPrice"))
+    mark_observed_at = _timestamp_ms_to_utc(premium.get("time"))
+    mark_age_seconds = _age_seconds(mark_observed_at, observed_at)
     funding = _to_float(premium.get("lastFundingRate"))
     spread_bps = ((ask - bid) / mark * 10000) if bid and ask and mark else None
     contract_exists = exchange_symbol.get("status") == "TRADING"
-    mark_ready = mark is not None and mark > 0
+    mark_ready = (
+        mark is not None
+        and mark > 0
+        and mark_age_seconds is not None
+        and mark_age_seconds <= PUBLIC_FACT_MAX_AGE_SECONDS
+    )
     funding_ok = funding is not None and abs(funding) <= 0.003
     spread_ok = spread_bps is not None and spread_bps <= 10
     min_notional_value = _to_float(min_notional.get("notional"))
@@ -410,6 +449,11 @@ def _symbol_row_from_payload(
         ),
         "exchange_contract_exists": contract_exists,
         "mark_price_fresh": mark_ready,
+        "mark_price_observed_at_utc": (
+            mark_observed_at.isoformat() if mark_observed_at else None
+        ),
+        "mark_price_age_seconds": mark_age_seconds,
+        "max_mark_price_age_seconds": PUBLIC_FACT_MAX_AGE_SECONDS,
         "funding_not_extreme": funding_ok,
         "spread_ok": spread_ok,
         "min_notional_ok": min_notional_value is not None,
@@ -417,6 +461,9 @@ def _symbol_row_from_payload(
         "leverage_available": contract_exists,
         "facts": {
             "mark_price": premium.get("markPrice"),
+            "mark_price_observed_at_utc": (
+                mark_observed_at.isoformat() if mark_observed_at else None
+            ),
             "last_funding_rate": premium.get("lastFundingRate"),
             "bid_price": book.get("bidPrice"),
             "ask_price": book.get("askPrice"),
@@ -448,6 +495,25 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_utc(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(timezone.utc)
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _timestamp_ms_to_utc(value: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _age_seconds(observed_at: datetime | None, now: datetime) -> int | None:
+    if observed_at is None:
+        return None
+    return max(0, int((now - observed_at).total_seconds()))
 
 
 def _interaction_with_remote_count(level: str, count: int) -> dict[str, Any]:

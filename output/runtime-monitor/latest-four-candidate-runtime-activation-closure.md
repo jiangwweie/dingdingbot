@@ -15,8 +15,8 @@
 | Priority | Strategy | Watcher symbols | Expanded read-only symbols | Runtime artifact ready | Boundary ready | Next blocker |
 | --- | --- | --- | --- | ---: | ---: | --- |
 | `P0` | `CPM-RO-001` | `ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `true` | `fresh_cpm_long_signal_absent_or_action_time_facts` |
-| `P0` | `MPG-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `true` | `binance_usdm_runtime_artifact_ready` |
-| `P1` | `SOR-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT` | `SOLUSDT, AVAXUSDT` | `true` | `true` | `binance_usdm_runtime_artifact_ready` |
+| `P0` | `MPG-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `true` | `fresh_mpg_signal_or_private_action_time_facts` |
+| `P1` | `SOR-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT` | `SOLUSDT, AVAXUSDT` | `true` | `true` | `fresh_sor_signal_or_private_action_time_facts` |
 | `P1` | `MI-001` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `false` | `false` | `formal_registry_admission_not_requested_for_mi` |
 
 ## Boundary

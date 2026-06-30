@@ -55,6 +55,7 @@ ACTION_TIME_FACT_KEYS = (
 )
 PUBLIC_FACT_KEYS = ACTION_TIME_FACT_KEYS[:7]
 PRIVATE_ACTION_TIME_FACT_KEYS = ACTION_TIME_FACT_KEYS[7:]
+PUBLIC_FACT_ARTIFACT_MAX_AGE_SECONDS = 300
 
 STRATEGY_CONFIG = {
     "MPG-001": {
@@ -126,6 +127,15 @@ def build_four_candidate_runtime_activation_evidence(
     generated_at_utc: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
+    generated_dt = _parse_utc(generated)
+    public_facts_generated_at = _parse_utc_or_none(
+        str(public_facts.get("generated_at_utc") or "")
+    )
+    public_facts_age_seconds = _age_seconds(public_facts_generated_at, generated_dt)
+    public_facts_artifact_fresh = (
+        public_facts_age_seconds is not None
+        and public_facts_age_seconds <= PUBLIC_FACT_ARTIFACT_MAX_AGE_SECONDS
+    )
     public_fact_by_symbol = {
         str(row.get("symbol") or ""): row
         for row in public_facts.get("symbols") or []
@@ -136,6 +146,8 @@ def build_four_candidate_runtime_activation_evidence(
         config=STRATEGY_CONFIG["MPG-001"],
         replay=replay,
         public_fact_by_symbol=public_fact_by_symbol,
+        public_facts_artifact_fresh=public_facts_artifact_fresh,
+        public_facts_age_seconds=public_facts_age_seconds,
         generated_at_utc=generated,
     )
     sor = _strategy_artifact(
@@ -143,6 +155,8 @@ def build_four_candidate_runtime_activation_evidence(
         config=STRATEGY_CONFIG["SOR-001"],
         replay=replay,
         public_fact_by_symbol=public_fact_by_symbol,
+        public_facts_artifact_fresh=public_facts_artifact_fresh,
+        public_facts_age_seconds=public_facts_age_seconds,
         generated_at_utc=generated,
     )
     scope_decision = _scope_decision_artifact(
@@ -151,6 +165,8 @@ def build_four_candidate_runtime_activation_evidence(
     )
     cpm_fresh_path = _cpm_fresh_path_artifact(
         public_fact_by_symbol=public_fact_by_symbol,
+        public_facts_artifact_fresh=public_facts_artifact_fresh,
+        public_facts_age_seconds=public_facts_age_seconds,
         cpm_capture=cpm_capture,
         generated_at_utc=generated,
     )
@@ -168,12 +184,21 @@ def _strategy_artifact(
     config: dict[str, Any],
     replay: dict[str, Any],
     public_fact_by_symbol: dict[str, dict[str, Any]],
+    public_facts_artifact_fresh: bool,
+    public_facts_age_seconds: int | None,
     generated_at_utc: str,
 ) -> dict[str, Any]:
     primary = list(config["primary_live_submit_symbol_scope"])
     expanded = list(config["expanded_readonly_watcher_symbols"])
     symbols = [*primary, *expanded]
-    symbol_rows = [_symbol_fact_projection(symbol, public_fact_by_symbol) for symbol in symbols]
+    symbol_rows = [
+        _symbol_fact_projection(
+            symbol,
+            public_fact_by_symbol,
+            public_facts_artifact_fresh=public_facts_artifact_fresh,
+        )
+        for symbol in symbols
+    ]
     public_ready = all(row["public_facts_ready"] is True for row in symbol_rows)
     replay_row = _replay_row(replay, strategy_group_id)
     review_signals = _longest_window_value(replay_row, "counterfactual_fresh_signal_count")
@@ -232,12 +257,22 @@ def _strategy_artifact(
             "would_reach_action_time_boundary_count": boundary,
         },
         "symbol_public_facts": symbol_rows,
+        "public_facts_freshness": {
+            "artifact_fresh": public_facts_artifact_fresh,
+            "artifact_age_seconds": public_facts_age_seconds,
+            "max_artifact_age_seconds": PUBLIC_FACT_ARTIFACT_MAX_AGE_SECONDS,
+        },
         "next_blocker": (
             config["next_blocker"]
             if runtime_ready
-            else "binance_usdm_public_facts_or_replay_scope_missing"
+            else (
+                "binance_usdm_public_facts_stale_or_unavailable"
+                if not public_facts_artifact_fresh
+                else "binance_usdm_public_facts_or_replay_scope_missing"
+            )
         ),
         "checks": {
+            "public_facts_artifact_fresh": public_facts_artifact_fresh,
             "public_symbol_facts_ready": public_ready,
             "replay_scope_review_present": review_signals > 0 and missed > 0,
             "watcher_scope_contract_ready": runtime_ready,
@@ -332,11 +367,20 @@ def _scope_decision_artifact(
 def _cpm_fresh_path_artifact(
     *,
     public_fact_by_symbol: dict[str, dict[str, Any]],
+    public_facts_artifact_fresh: bool,
+    public_facts_age_seconds: int | None,
     cpm_capture: dict[str, Any],
     generated_at_utc: str,
 ) -> dict[str, Any]:
     symbols = ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"]
-    symbol_rows = [_symbol_fact_projection(symbol, public_fact_by_symbol) for symbol in symbols]
+    symbol_rows = [
+        _symbol_fact_projection(
+            symbol,
+            public_fact_by_symbol,
+            public_facts_artifact_fresh=public_facts_artifact_fresh,
+        )
+        for symbol in symbols
+    ]
     public_ready = all(row["public_facts_ready"] is True for row in symbol_rows)
     signal_state = str(cpm_capture.get("current_signal_state") or "")
     fresh_signal_present = signal_state == "fresh_signal_present"
@@ -349,6 +393,11 @@ def _cpm_fresh_path_artifact(
         "path_id": "CPM-LONG",
         "watcher_scope_symbols": symbols,
         "public_fact_path_ready": public_ready,
+        "public_facts_freshness": {
+            "artifact_fresh": public_facts_artifact_fresh,
+            "artifact_age_seconds": public_facts_age_seconds,
+            "max_artifact_age_seconds": PUBLIC_FACT_ARTIFACT_MAX_AGE_SECONDS,
+        },
         "fresh_signal_present": fresh_signal_present,
         "current_signal_state": signal_state or "unknown",
         "private_action_time_facts_ready": False,
@@ -358,11 +407,16 @@ def _cpm_fresh_path_artifact(
         "live_submit_allowed": False,
         "symbol_public_facts": symbol_rows,
         "next_blocker": (
-            "fresh_cpm_long_signal_absent"
-            if not fresh_signal_present
-            else "private_action_time_facts_required"
+            "binance_usdm_public_facts_stale_or_unavailable"
+            if not public_ready
+            else (
+                "fresh_cpm_long_signal_absent"
+                if not fresh_signal_present
+                else "private_action_time_facts_required"
+            )
         ),
         "checks": {
+            "public_facts_artifact_fresh": public_facts_artifact_fresh,
             "public_fact_path_ready": public_ready,
             "fresh_signal_present": fresh_signal_present,
             "private_action_time_facts_ready": False,
@@ -388,14 +442,24 @@ def _cpm_fresh_path_artifact(
 
 
 def _symbol_fact_projection(
-    symbol: str, public_fact_by_symbol: dict[str, dict[str, Any]]
+    symbol: str,
+    public_fact_by_symbol: dict[str, dict[str, Any]],
+    *,
+    public_facts_artifact_fresh: bool,
 ) -> dict[str, Any]:
     source = public_fact_by_symbol.get(symbol, {})
+    source_ready = source.get("public_facts_ready") is True
+    mark_fresh = source.get("mark_price_fresh") is True
     return {
         "symbol": symbol,
-        "public_facts_ready": source.get("public_facts_ready") is True,
+        "public_facts_ready": public_facts_artifact_fresh and source_ready and mark_fresh,
+        "source_public_facts_ready": source_ready,
+        "public_facts_artifact_fresh": public_facts_artifact_fresh,
         "exchange_contract_exists": source.get("exchange_contract_exists") is True,
-        "mark_price_fresh": source.get("mark_price_fresh") is True,
+        "mark_price_fresh": mark_fresh,
+        "mark_price_observed_at_utc": source.get("mark_price_observed_at_utc"),
+        "mark_price_age_seconds": source.get("mark_price_age_seconds"),
+        "max_mark_price_age_seconds": source.get("max_mark_price_age_seconds"),
         "funding_not_extreme": source.get("funding_not_extreme") is True,
         "spread_ok": source.get("spread_ok") is True,
         "min_notional_ok": source.get("min_notional_ok") is True,
@@ -403,6 +467,27 @@ def _symbol_fact_projection(
         "leverage_available": source.get("leverage_available") is True,
         "facts": source.get("facts") or {},
     }
+
+
+def _parse_utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+        timezone.utc
+    )
+
+
+def _parse_utc_or_none(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return _parse_utc(value)
+    except ValueError:
+        return None
+
+
+def _age_seconds(observed_at: datetime | None, now: datetime) -> int | None:
+    if observed_at is None:
+        return None
+    return max(0, int((now - observed_at).total_seconds()))
 
 
 def _artifact_passed(artifact: dict[str, Any]) -> bool:
