@@ -1294,6 +1294,11 @@ def build_local_monitor_sequence_report(
         str(cpm_runtime_signal_capture_json),
         "--shadow-candidate-evidence-json",
         str(cpm_shadow_candidate_evidence_json),
+        "--synthetic-fresh-signal-fixture-json",
+        str(
+            REPO_ROOT
+            / "docs/current/strategy-group-handoffs/CPM-RO-001/replay/cpm-long-synthetic-fresh-signal-fixture.json"
+        ),
         "--output-json",
         str(cpm_dry_run_submit_rehearsal_json),
         "--output-owner-progress",
@@ -3517,6 +3522,7 @@ def _sequence_cpm_dry_run_submit_rehearsal_summary(
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
     checks = _as_dict(artifact.get("checks"))
+    synthetic = _as_dict(artifact.get("synthetic_fresh_signal_rehearsal"))
     status = _status(artifact) or "missing"
     return {
         "status": status,
@@ -3549,6 +3555,50 @@ def _sequence_cpm_dry_run_submit_rehearsal_summary(
         is True,
         "execution_attempt_rehearsal_ready": checks.get(
             "execution_attempt_rehearsal_ready"
+        )
+        is True,
+        "synthetic_fresh_signal_fixture_ready": checks.get(
+            "synthetic_fresh_signal_fixture_ready"
+        )
+        is True
+        or synthetic.get("fixture_ready") is True,
+        "synthetic_fresh_signal_present": checks.get(
+            "synthetic_fresh_signal_present"
+        )
+        is True
+        or synthetic.get("fresh_signal_present") is True,
+        "synthetic_shadow_candidate_evidence_ready": checks.get(
+            "synthetic_shadow_candidate_evidence_ready"
+        )
+        is True
+        or synthetic.get("shadow_candidate_evidence_ready") is True,
+        "synthetic_candidate_authorization_evidence_shape_ready": checks.get(
+            "synthetic_candidate_authorization_evidence_shape_ready"
+        )
+        is True
+        or synthetic.get("candidate_authorization_evidence_shape_ready") is True,
+        "synthetic_action_time_required_facts_declared": checks.get(
+            "synthetic_action_time_required_facts_declared"
+        )
+        is True
+        or synthetic.get("action_time_required_facts_declared") is True,
+        "synthetic_finalgate_dry_run_passed": checks.get(
+            "synthetic_finalgate_dry_run_passed"
+        )
+        is True
+        or synthetic.get("finalgate_dry_run_passed") is True,
+        "synthetic_operation_layer_paper_passed": checks.get(
+            "synthetic_operation_layer_paper_passed"
+        )
+        is True
+        or synthetic.get("operation_layer_paper_passed") is True,
+        "synthetic_execution_attempt_rehearsal_ready": checks.get(
+            "synthetic_execution_attempt_rehearsal_ready"
+        )
+        is True
+        or synthetic.get("execution_attempt_rehearsal_ready") is True,
+        "synthetic_fresh_signal_submit_rehearsal_passed": synthetic.get(
+            "fresh_signal_submit_rehearsal_passed"
         )
         is True,
         "exchange_write": checks.get("exchange_write") is True,
@@ -4152,6 +4202,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM submit rehearsal shape ready: `{_yes_no(cpm_dry_run_submit_rehearsal.get('submit_rehearsal_shape_ready') is True)}`",
         f"- CPM fresh-signal submit rehearsal passed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('fresh_signal_submit_rehearsal_passed') is True)}`",
         f"- CPM rehearsal FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('operation_layer_paper_passed') is True)}`",
+        f"- CPM synthetic fresh-signal rehearsal passed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_fresh_signal_submit_rehearsal_passed') is True)}`",
+        f"- CPM synthetic candidate/action-time shape: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_candidate_authorization_evidence_shape_ready') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_action_time_required_facts_declared') is True)}`",
+        f"- CPM synthetic FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_operation_layer_paper_passed') is True)}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",
         f"- Armed trade candidate count: `{len(armed_trade_candidates)}`",
         f"- Legacy three-strategy portfolio: `{', '.join(legacy_three_strategy_groups) or 'none'}`",

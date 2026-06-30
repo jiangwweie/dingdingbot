@@ -1,0 +1,55 @@
+{
+  "schema": "brc.cpm.synthetic_fresh_signal_fixture.v1",
+  "status": "cpm_synthetic_fresh_signal_fixture_ready",
+  "fixture_id": "cpm-long-synthetic-fresh-signal-v1",
+  "strategy_group_id": "CPM-RO-001",
+  "path_id": "CPM-LONG",
+  "source_signal": {
+    "signal_id": "cpm_long_pullback_reclaim_signal_v1",
+    "source_type": "synthetic_replay_fresh_signal",
+    "fresh_signal_present": true,
+    "not_live_market_signal": true,
+    "not_execution_authority": true
+  },
+  "shadow_candidate_evidence": {
+    "shadow_candidate_evidence_ready": true,
+    "candidate_authorization_evidence_shape_ready": true,
+    "candidate_authorization_evidence_type": "cpm_non_executing_long_signal_candidate_evidence"
+  },
+  "action_time_required_facts": {
+    "declared": true,
+    "fact_keys": [
+      "active_position_or_open_order_clear",
+      "action_time_available_balance"
+    ],
+    "refresh_boundary": "must_be_refreshed_from_live_exchange_facts_before_real_submit"
+  },
+  "finalgate_dry_run": {
+    "input_shape_complete": true,
+    "passed": true,
+    "boundary": "shape_only; does_not_call_action_time_finalgate"
+  },
+  "operation_layer_paper": {
+    "input_shape_complete": true,
+    "passed": true,
+    "boundary": "paper_shape_only; does_not_call_operation_layer"
+  },
+  "execution_attempt_rehearsal": {
+    "shape_ready": true,
+    "boundary": "non_executing_attempt_shape_only"
+  },
+  "review_outcome_shape": {
+    "shape_ready": true,
+    "boundary": "review_capture_shape_only"
+  },
+  "authority_boundary": {
+    "not_live_market_signal": true,
+    "not_execution_authority": true,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "calls_exchange_write": false,
+    "places_order": false,
+    "exchange_write": false,
+    "order_created": false
+  }
+}

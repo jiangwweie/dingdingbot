@@ -31,6 +31,10 @@ DEFAULT_CAPTURE_JSON = (
 DEFAULT_SHADOW_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-shadow-candidate-evidence.json"
 )
+DEFAULT_SYNTHETIC_FRESH_SIGNAL_FIXTURE_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/CPM-RO-001/replay/cpm-long-synthetic-fresh-signal-fixture.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.json"
 )
@@ -51,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--runtime-signal-capture-json", default=str(DEFAULT_CAPTURE_JSON))
     parser.add_argument("--shadow-candidate-evidence-json", default=str(DEFAULT_SHADOW_JSON))
+    parser.add_argument(
+        "--synthetic-fresh-signal-fixture-json",
+        default=str(DEFAULT_SYNTHETIC_FRESH_SIGNAL_FIXTURE_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -62,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
         runtime_signal_capture=_read_optional_json(Path(args.runtime_signal_capture_json)),
         shadow_candidate_evidence=_read_optional_json(
             Path(args.shadow_candidate_evidence_json)
+        ),
+        synthetic_fresh_signal_fixture=_read_optional_json(
+            Path(args.synthetic_fresh_signal_fixture_json)
         ),
     )
     output_json = Path(args.output_json)
@@ -87,6 +98,7 @@ def build_cpm_dry_run_submit_rehearsal(
     required_facts_mapping: dict[str, Any],
     runtime_signal_capture: dict[str, Any],
     shadow_candidate_evidence: dict[str, Any],
+    synthetic_fresh_signal_fixture: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     mapping_ready = required_facts_mapping.get("required_facts_mapping_ready") is True
@@ -109,6 +121,13 @@ def build_cpm_dry_run_submit_rehearsal(
         submit_rehearsal_shape_ready
         and fresh_signal_present
         and shadow_candidate_ready
+    )
+    synthetic_rehearsal = _synthetic_fresh_signal_rehearsal(
+        fixture=synthetic_fresh_signal_fixture or {},
+        submit_rehearsal_shape_ready=submit_rehearsal_shape_ready,
+        action_time_pending_fact_keys=_string_list(
+            capture_preview.get("action_time_pending_fact_keys")
+        ),
     )
     status = (
         PASSED_STATUS
@@ -136,13 +155,30 @@ def build_cpm_dry_run_submit_rehearsal(
             else "blocked"
         ),
         "synthetic_fresh_signal_rehearsal": {
-            "candidate_authorization_evidence_ready": (
+            **synthetic_rehearsal,
+            "current_runtime_candidate_authorization_evidence_ready": (
                 fresh_signal_submit_rehearsal_passed
             ),
-            "finalgate_dry_run_passed": fresh_signal_submit_rehearsal_passed,
-            "operation_layer_paper_passed": fresh_signal_submit_rehearsal_passed,
-            "execution_attempt_rehearsal_ready": (
+            "current_runtime_finalgate_dry_run_passed": (
                 fresh_signal_submit_rehearsal_passed
+            ),
+            "current_runtime_operation_layer_paper_passed": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "current_runtime_execution_attempt_rehearsal_ready": (
+                fresh_signal_submit_rehearsal_passed
+            ),
+            "candidate_authorization_evidence_ready": (
+                synthetic_rehearsal["candidate_authorization_evidence_shape_ready"]
+            ),
+            "finalgate_dry_run_passed": synthetic_rehearsal[
+                "finalgate_dry_run_passed"
+            ],
+            "operation_layer_paper_passed": synthetic_rehearsal[
+                "operation_layer_paper_passed"
+            ],
+            "execution_attempt_rehearsal_ready": (
+                synthetic_rehearsal["execution_attempt_rehearsal_ready"]
             ),
             "review_outcome_shape_ready": submit_rehearsal_shape_ready,
         },
@@ -165,6 +201,39 @@ def build_cpm_dry_run_submit_rehearsal(
             "execution_attempt_rehearsal_ready": (
                 fresh_signal_submit_rehearsal_passed
             ),
+            "synthetic_fresh_signal_fixture_ready": synthetic_rehearsal[
+                "fixture_ready"
+            ],
+            "synthetic_fresh_signal_present": synthetic_rehearsal[
+                "fresh_signal_present"
+            ],
+            "synthetic_shadow_candidate_evidence_ready": synthetic_rehearsal[
+                "shadow_candidate_evidence_ready"
+            ],
+            "synthetic_candidate_authorization_evidence_shape_ready": (
+                synthetic_rehearsal["candidate_authorization_evidence_shape_ready"]
+            ),
+            "synthetic_action_time_required_facts_declared": synthetic_rehearsal[
+                "action_time_required_facts_declared"
+            ],
+            "synthetic_finalgate_dry_run_passed": synthetic_rehearsal[
+                "finalgate_dry_run_passed"
+            ],
+            "synthetic_operation_layer_paper_passed": synthetic_rehearsal[
+                "operation_layer_paper_passed"
+            ],
+            "synthetic_execution_attempt_rehearsal_ready": synthetic_rehearsal[
+                "execution_attempt_rehearsal_ready"
+            ],
+            "synthetic_review_outcome_shape_ready": synthetic_rehearsal[
+                "review_outcome_shape_ready"
+            ],
+            "synthetic_fixture_not_live_market_signal": synthetic_rehearsal[
+                "not_live_market_signal"
+            ],
+            "synthetic_fixture_not_execution_authority": synthetic_rehearsal[
+                "not_execution_authority"
+            ],
             "exchange_write": False,
             "order_created": False,
         },
@@ -185,6 +254,7 @@ def build_cpm_dry_run_submit_rehearsal(
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     checks = artifact["checks"]
+    synthetic = artifact["synthetic_fresh_signal_rehearsal"]
     return "\n".join(
         [
             "## CPM Dry-Run Submit Rehearsal",
@@ -197,6 +267,11 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             f"- Candidate authorization evidence ready: `{_yes_no(checks['candidate_authorization_evidence_ready'])}`",
             f"- FinalGate dry-run passed: `{_yes_no(checks['finalgate_dry_run_passed'])}`",
             f"- Operation Layer paper passed: `{_yes_no(checks['operation_layer_paper_passed'])}`",
+            f"- Synthetic fresh-signal fixture ready: `{_yes_no(synthetic['fixture_ready'])}`",
+            f"- Synthetic fresh-signal submit rehearsal passed: `{_yes_no(synthetic['fresh_signal_submit_rehearsal_passed'])}`",
+            f"- Synthetic candidate authorization shape ready: `{_yes_no(synthetic['candidate_authorization_evidence_shape_ready'])}`",
+            f"- Synthetic action-time facts declared: `{_yes_no(synthetic['action_time_required_facts_declared'])}`",
+            f"- Synthetic FinalGate/Operation Layer paper: `{_yes_no(synthetic['finalgate_dry_run_passed'])}` / `{_yes_no(synthetic['operation_layer_paper_passed'])}`",
             f"- Exchange write: `{_yes_no(checks['exchange_write'])}`",
             f"- Order created: `{_yes_no(checks['order_created'])}`",
             f"- Output JSON: `{output_json}`",
@@ -213,6 +288,94 @@ def _read_optional_json(path: Path) -> dict[str, Any]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    return [str(item) for item in value or [] if str(item)]
+
+
+def _synthetic_fresh_signal_rehearsal(
+    *,
+    fixture: dict[str, Any],
+    submit_rehearsal_shape_ready: bool,
+    action_time_pending_fact_keys: list[str],
+) -> dict[str, Any]:
+    source_signal = _as_dict(fixture.get("source_signal"))
+    shadow = _as_dict(fixture.get("shadow_candidate_evidence"))
+    action_time = _as_dict(fixture.get("action_time_required_facts"))
+    finalgate = _as_dict(fixture.get("finalgate_dry_run"))
+    operation_layer = _as_dict(fixture.get("operation_layer_paper"))
+    execution_attempt = _as_dict(fixture.get("execution_attempt_rehearsal"))
+    review = _as_dict(fixture.get("review_outcome_shape"))
+    authority_boundary = _as_dict(fixture.get("authority_boundary"))
+
+    fixture_ready = fixture.get("status") == "cpm_synthetic_fresh_signal_fixture_ready"
+    fresh_signal_present = source_signal.get("fresh_signal_present") is True
+    shadow_ready = shadow.get("shadow_candidate_evidence_ready") is True
+    candidate_shape_ready = (
+        shadow_ready and shadow.get("candidate_authorization_evidence_shape_ready") is True
+    )
+    declared_fact_keys = _string_list(action_time.get("fact_keys"))
+    action_time_declared = (
+        action_time.get("declared") is True
+        and bool(declared_fact_keys)
+        and all(key in declared_fact_keys for key in action_time_pending_fact_keys)
+    )
+    finalgate_passed = (
+        fixture_ready
+        and submit_rehearsal_shape_ready
+        and fresh_signal_present
+        and candidate_shape_ready
+        and action_time_declared
+        and finalgate.get("input_shape_complete") is True
+        and finalgate.get("passed") is True
+    )
+    operation_layer_passed = (
+        finalgate_passed
+        and operation_layer.get("input_shape_complete") is True
+        and operation_layer.get("passed") is True
+    )
+    execution_ready = (
+        operation_layer_passed and execution_attempt.get("shape_ready") is True
+    )
+    review_ready = submit_rehearsal_shape_ready and review.get("shape_ready") is True
+    fresh_signal_submit_rehearsal_passed = (
+        finalgate_passed and operation_layer_passed and execution_ready and review_ready
+    )
+
+    return {
+        "fixture_id": str(fixture.get("fixture_id") or ""),
+        "fixture_ready": fixture_ready,
+        "fresh_signal_present": fresh_signal_present,
+        "shadow_candidate_evidence_ready": shadow_ready,
+        "candidate_authorization_evidence_shape_ready": candidate_shape_ready,
+        "action_time_required_facts_declared": action_time_declared,
+        "action_time_required_fact_keys": declared_fact_keys,
+        "finalgate_input_shape_complete": finalgate.get("input_shape_complete")
+        is True,
+        "finalgate_dry_run_passed": finalgate_passed,
+        "operation_layer_input_shape_complete": (
+            operation_layer.get("input_shape_complete") is True
+        ),
+        "operation_layer_paper_passed": operation_layer_passed,
+        "execution_attempt_rehearsal_ready": execution_ready,
+        "review_outcome_shape_ready": review_ready,
+        "fresh_signal_submit_rehearsal_passed": (
+            fresh_signal_submit_rehearsal_passed
+        ),
+        "not_live_market_signal": (
+            source_signal.get("not_live_market_signal") is True
+            and authority_boundary.get("not_live_market_signal") is True
+        ),
+        "not_execution_authority": (
+            source_signal.get("not_execution_authority") is True
+            and authority_boundary.get("not_execution_authority") is True
+        ),
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "exchange_write": False,
+        "order_created": False,
+    }
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

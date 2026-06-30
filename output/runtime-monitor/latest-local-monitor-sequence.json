@@ -148,6 +148,15 @@
     "status": "cpm_dry_run_submit_rehearsal_shape_ready",
     "strategy_group_id": "CPM-RO-001",
     "submit_rehearsal_shape_ready": true,
+    "synthetic_action_time_required_facts_declared": true,
+    "synthetic_candidate_authorization_evidence_shape_ready": true,
+    "synthetic_execution_attempt_rehearsal_ready": true,
+    "synthetic_finalgate_dry_run_passed": true,
+    "synthetic_fresh_signal_fixture_ready": true,
+    "synthetic_fresh_signal_present": true,
+    "synthetic_fresh_signal_submit_rehearsal_passed": true,
+    "synthetic_operation_layer_paper_passed": true,
+    "synthetic_shadow_candidate_evidence_ready": true,
     "tradeability_decision_source": false
   },
   "cpm_identity_routing_decision": {
@@ -267,7 +276,7 @@
     "strategy_group_id": "CPM-RO-001"
   },
   "daily_check_mode": "cache",
-  "generated_at_utc": "2026-06-30T03:27:36.436001+00:00",
+  "generated_at_utc": "2026-06-30T04:02:17.797518+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -446,6 +455,15 @@
       "status": "cpm_dry_run_submit_rehearsal_shape_ready",
       "strategy_group_id": "CPM-RO-001",
       "submit_rehearsal_shape_ready": true,
+      "synthetic_action_time_required_facts_declared": true,
+      "synthetic_candidate_authorization_evidence_shape_ready": true,
+      "synthetic_execution_attempt_rehearsal_ready": true,
+      "synthetic_finalgate_dry_run_passed": true,
+      "synthetic_fresh_signal_fixture_ready": true,
+      "synthetic_fresh_signal_present": true,
+      "synthetic_fresh_signal_submit_rehearsal_passed": true,
+      "synthetic_operation_layer_paper_passed": true,
+      "synthetic_shadow_candidate_evidence_ready": true,
       "tradeability_decision_source": false
     },
     "cpm_identity_routing_decision": {
