@@ -201,3 +201,36 @@ def test_cpm_runtime_signal_facts_fail_closed_when_candles_missing():
         "reclaim_confirmed",
         "invalidated_below_level",
     }
+
+
+def test_cpm_runtime_signal_facts_can_fallback_to_previous_real_candle_artifact(
+    tmp_path: Path,
+):
+    module = _load_module()
+    fallback_path = tmp_path / "fallback.json"
+    fallback = module.build_cpm_runtime_signal_facts(
+        public_facts=_public_facts(["ETHUSDT"]),
+        symbols=["ETHUSDT"],
+        candle_payloads={"ETHUSDT": _candles_for_symbol(fresh=True)},
+        generated_at_utc="2026-06-01T05:00:00+00:00",
+    )
+    fallback_path.write_text(json.dumps(fallback), encoding="utf-8")
+    current = module.build_cpm_runtime_signal_facts(
+        public_facts=_public_facts(["ETHUSDT"]),
+        symbols=["ETHUSDT"],
+        candle_payloads={"ETHUSDT": {"15m": [], "1h": [], "4h": []}},
+        generated_at_utc="2026-06-01T05:00:00+00:00",
+    )
+
+    artifact = module._fallback_runtime_signal_facts(
+        current,
+        fallback_path=fallback_path,
+        symbols=["ETHUSDT"],
+    )
+
+    assert artifact["status"] == "cpm_runtime_signal_facts_ready_from_fallback"
+    assert artifact["watcher_tick_present"] is True
+    assert artifact["checks"]["used_fallback_after_candle_fetch_failure"] is True
+    assert artifact["checks"]["uses_replay_signal_as_live_signal"] is False
+    assert artifact["interaction"]["calls_exchange_write"] is False
+    assert artifact["safety_invariants"]["order_created"] is False

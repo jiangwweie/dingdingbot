@@ -43,6 +43,7 @@ TIMEFRAMES = ("15m", "1h", "4h")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
+    parser.add_argument("--fallback-json")
     parser.add_argument("--symbols", nargs="*", default=list(DEFAULT_SYMBOLS))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
@@ -53,6 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         public_facts=_read_optional_json(Path(args.public_facts_json)),
         symbols=symbols,
     )
+    if artifact["watcher_tick_present"] is not True and args.fallback_json:
+        artifact = _fallback_runtime_signal_facts(
+            artifact,
+            fallback_path=Path(args.fallback_json),
+            symbols=symbols,
+        )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)
@@ -419,6 +426,56 @@ def _read_optional_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _fallback_runtime_signal_facts(
+    current_artifact: dict[str, Any],
+    *,
+    fallback_path: Path,
+    symbols: list[str],
+) -> dict[str, Any]:
+    if not fallback_path.exists():
+        return current_artifact
+    try:
+        fallback = json.loads(fallback_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return current_artifact
+    if not isinstance(fallback, dict):
+        return current_artifact
+    watcher_scope = _as_dict(fallback.get("watcher_scope"))
+    fallback_symbols = {str(symbol) for symbol in watcher_scope.get("symbol_scope") or []}
+    if (
+        fallback.get("status")
+        not in {
+            "cpm_runtime_signal_facts_ready",
+            "cpm_runtime_signal_facts_ready_from_fallback",
+        }
+        or fallback.get("watcher_tick_present") is not True
+        or not set(symbols).issubset(fallback_symbols)
+    ):
+        return current_artifact
+    fallback = dict(fallback)
+    fallback["status"] = "cpm_runtime_signal_facts_ready_from_fallback"
+    fallback["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    checks = dict(fallback.get("checks") or {})
+    checks["used_fallback_after_candle_fetch_failure"] = True
+    checks["detector_source_is_real_candles"] = True
+    checks["uses_replay_signal_as_live_signal"] = False
+    fallback["checks"] = checks
+    fallback["interaction"] = non_executing_interaction(
+        "L0_local_cpm_runtime_signal_facts_fallback"
+    )
+    fallback["safety_invariants"] = non_executing_safety_invariants(
+        (
+            "calls_finalgate",
+            "calls_operation_layer",
+            "calls_exchange_write",
+            "places_order",
+            "order_created",
+        ),
+        include_authority_mirrors=False,
+    )
+    return fallback
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:

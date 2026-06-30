@@ -10,7 +10,7 @@
     "order_created": false,
     "order_sizing_changed": false
   },
-  "generated_at_utc": "2026-06-30T15:17:00.930980+00:00",
+  "generated_at_utc": "2026-06-30T15:37:52.347858+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -67,7 +67,7 @@
       "liquidity": {
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.5478,
+        "spread_bps": 1.5458,
         "spread_ok": true
       },
       "public_facts_ready": true,
@@ -93,7 +93,7 @@
       "liquidity": {
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.3704,
+        "spread_bps": 1.3635,
         "spread_ok": true
       },
       "public_facts_ready": true,
@@ -106,7 +106,7 @@
       "liquidity": {
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.4565,
+        "spread_bps": 1.4432,
         "spread_ok": true
       },
       "public_facts_ready": true,

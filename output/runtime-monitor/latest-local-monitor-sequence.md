@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T15:14:55.590579+00:00
+- 报告时间: 2026-06-30T15:37:56.020422+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -68,6 +68,9 @@
 - Scope review decision: `four_candidate_scope_review_decision_ready` / readonly expansions `3` / live-scope changes `0`
 - CPM fresh-path public facts / fresh signal / next blocker: `是` / `否` / `fresh_cpm_long_signal_absent`
 - Fresh-signal action-time boundary: `strategy_fresh_signal_action_time_boundary_ready` / fresh `0` / finalgate-if-private-facts `3` / live-submit `0`
+- Replay-live parity: `replay_live_parity_audit_ready` / replay `131` / reproduced `26` / mismatch `105`
+- MI trial admission: `trial_asset_admission_candidate` / scope `trial_admission` / blocker `mi_owner_policy_and_required_facts_mapping_needed`
+- SOR session detector: `sor_session_detector_facts_ready` / fresh `0` / blocker `fresh_sor_session_range_signal_absent`
 - Activation venue basis/match: `coinbase_spot_proxy` / `否`
 - Activation next checkpoint: `attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols`
 - Armed trade candidates: `MPG-001, BRF2-001, SOR-001, CPM-RO-001`
@@ -115,8 +118,11 @@
 | cpm_shadow_candidate_evidence | cpm_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
 | cpm_dry_run_submit_rehearsal | cpm_dry_run_submit_rehearsal_shape_ready | 0 |
 | four_candidate_runtime_activation_evidence | runtime_activation_evidence_ready | 0 |
+| sor_session_scope_detector | sor_session_detector_facts_ready | 0 |
 | mpg_high_beta_scope_readiness | mpg_action_time_facts_readiness_ready | 0 |
 | strategy_fresh_signal_action_time_boundary | strategy_fresh_signal_action_time_boundary_ready | 0 |
+| replay_live_parity_audit | replay_live_parity_audit_ready | 0 |
+| mi_trial_admission_decision | mi_trial_admission_decision_ready | 0 |
 | four_candidate_runtime_activation_closure | four_candidate_runtime_activation_contract_ready | 0 |
 | goal_progress | ready | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |

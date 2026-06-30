@@ -15,7 +15,7 @@
     "would_enter_finalgate_when_fresh_signal_and_private_facts": true
   },
   "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
-  "generated_at_utc": "2026-06-30T15:07:16.911463+00:00",
+  "generated_at_utc": "2026-06-30T15:37:52.205024+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -62,13 +62,13 @@
     {
       "funding": {
         "funding_not_extreme": true,
-        "last_funding_rate": "0.00005541"
+        "last_funding_rate": "0.00006894"
       },
       "liquidity": {
         "min_notional": "5",
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.368,
+        "spread_bps": 1.3635,
         "spread_ok": true
       },
       "next_action": "attach_mpg_readonly_watcher_fact_projection",
@@ -83,13 +83,13 @@
     {
       "funding": {
         "funding_not_extreme": true,
-        "last_funding_rate": "-0.00002417"
+        "last_funding_rate": "-0.00001594"
       },
       "liquidity": {
         "min_notional": "5",
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.5461,
+        "spread_bps": 1.5458,
         "spread_ok": true
       },
       "next_action": "attach_mpg_readonly_watcher_fact_projection",
@@ -135,13 +135,13 @@
     {
       "funding": {
         "funding_not_extreme": true,
-        "last_funding_rate": "-0.00004031"
+        "last_funding_rate": "-0.00003474"
       },
       "liquidity": {
         "min_notional": "5",
         "min_notional_ok": true,
         "qty_step_ok": true,
-        "spread_bps": 1.4543,
+        "spread_bps": 1.4432,
         "spread_ok": true
       },
       "next_action": "attach_mpg_readonly_watcher_fact_projection",

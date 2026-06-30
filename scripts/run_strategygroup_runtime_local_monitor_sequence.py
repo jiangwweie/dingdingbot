@@ -402,6 +402,9 @@ DEFAULT_MPG_ACTION_TIME_FACTS_READINESS_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-mpg-action-time-facts-readiness.json"
 )
+DEFAULT_MPG_EXPANDED_WATCHER_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-mpg-expanded-watcher-facts.json"
+)
 DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
@@ -409,6 +412,24 @@ DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON = (
 DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md"
+)
+DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.json"
+)
+DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.md"
+)
+DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.json"
+)
+DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.md"
+)
+DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.json"
+)
+DEFAULT_SOR_SESSION_DETECTOR_FACTS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.md"
 )
 DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON = (
     REPO_ROOT
@@ -1328,6 +1349,8 @@ def build_local_monitor_sequence_report(
     binance_usdm_public_facts_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/fetch_binance_usdm_public_facts.py"),
+        "--fallback-json",
+        str(binance_usdm_public_facts_json),
         "--output-json",
         str(binance_usdm_public_facts_json),
         "--output-owner-progress",
@@ -1347,6 +1370,8 @@ def build_local_monitor_sequence_report(
         str(REPO_ROOT / "scripts/build_cpm_runtime_signal_facts.py"),
         "--public-facts-json",
         str(binance_usdm_public_facts_json),
+        "--fallback-json",
+        str(cpm_runtime_signal_facts_json),
         "--output-json",
         str(cpm_runtime_signal_facts_json),
         "--output-owner-progress",
@@ -1450,6 +1475,23 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    sor_session_scope_detector_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_sor_session_scope_detector.py"),
+        "--public-facts-json",
+        str(binance_usdm_public_facts_json),
+        "--output-dir",
+        str(four_candidate_runtime_activation_closure_json.parent),
+    ]
+    steps.append(
+        _run_step(
+            "sor_session_scope_detector",
+            sor_session_scope_detector_command,
+            DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON,
+            runner,
+        )
+    )
+
     mpg_high_beta_scope_readiness_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_mpg_high_beta_scope_readiness.py"),
@@ -1485,6 +1527,8 @@ def build_local_monitor_sequence_report(
         str(mpg_runtime_activation_evidence_json),
         "--sor-evidence-json",
         str(sor_runtime_activation_evidence_json),
+        "--sor-detector-json",
+        str(DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON),
         "--output-json",
         str(DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON),
         "--output-owner-progress",
@@ -1495,6 +1539,52 @@ def build_local_monitor_sequence_report(
             "strategy_fresh_signal_action_time_boundary",
             strategy_fresh_signal_action_time_boundary_command,
             DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON,
+            runner,
+        )
+    )
+
+    replay_live_parity_audit_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_replay_live_parity_audit.py"),
+        "--replay-json",
+        str(four_candidate_recent_live_submit_replay_json),
+        "--cpm-facts-json",
+        str(cpm_runtime_signal_facts_json),
+        "--mpg-watcher-json",
+        str(DEFAULT_MPG_EXPANDED_WATCHER_FACTS_JSON),
+        "--sor-evidence-json",
+        str(sor_runtime_activation_evidence_json),
+        "--output-json",
+        str(DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON),
+        "--output-owner-progress",
+        str(DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD),
+    ]
+    steps.append(
+        _run_step(
+            "replay_live_parity_audit",
+            replay_live_parity_audit_command,
+            DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON,
+            runner,
+        )
+    )
+
+    mi_trial_admission_decision_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_mi_trial_admission_decision.py"),
+        "--replay-json",
+        str(four_candidate_recent_live_submit_replay_json),
+        "--public-facts-json",
+        str(binance_usdm_public_facts_json),
+        "--output-json",
+        str(DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON),
+        "--output-owner-progress",
+        str(DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD),
+    ]
+    steps.append(
+        _run_step(
+            "mi_trial_admission_decision",
+            mi_trial_admission_decision_command,
+            DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON,
             runner,
         )
     )
@@ -2312,6 +2402,17 @@ def build_local_monitor_sequence_report(
             artifacts.get("strategy_fresh_signal_action_time_boundary", {})
         )
     )
+    replay_live_parity_audit_summary = _sequence_replay_live_parity_audit_summary(
+        artifacts.get("replay_live_parity_audit", {})
+    )
+    mi_trial_admission_decision_summary = (
+        _sequence_mi_trial_admission_decision_summary(
+            artifacts.get("mi_trial_admission_decision", {})
+        )
+    )
+    sor_session_detector_facts_summary = _sequence_sor_session_detector_facts_summary(
+        artifacts.get("sor_session_scope_detector", {})
+    )
     three_strategy_portfolio_summary = _sequence_three_strategy_portfolio_summary(
         artifacts.get("three_strategy_live_trial_portfolio", {})
     )
@@ -2390,6 +2491,9 @@ def build_local_monitor_sequence_report(
             "strategy_fresh_signal_action_time_boundary": (
                 strategy_fresh_signal_action_time_boundary_summary
             ),
+            "replay_live_parity_audit": replay_live_parity_audit_summary,
+            "mi_trial_admission_decision": mi_trial_admission_decision_summary,
+            "sor_session_detector_facts": sor_session_detector_facts_summary,
             "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
             "armed_trade_candidates": armed_trade_candidate_summary,
             "tradeability_decision": tradeability_summary,
@@ -2433,6 +2537,9 @@ def build_local_monitor_sequence_report(
         "strategy_fresh_signal_action_time_boundary": (
             strategy_fresh_signal_action_time_boundary_summary
         ),
+        "replay_live_parity_audit": replay_live_parity_audit_summary,
+        "mi_trial_admission_decision": mi_trial_admission_decision_summary,
+        "sor_session_detector_facts": sor_session_detector_facts_summary,
         "three_strategy_live_trial_portfolio": three_strategy_portfolio_summary,
         "armed_trade_candidates": armed_trade_candidate_summary,
         "tradeability_decision": tradeability_summary,
@@ -4047,6 +4154,62 @@ def _sequence_strategy_fresh_signal_action_time_boundary_summary(
     }
 
 
+def _sequence_replay_live_parity_audit_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    summary = _as_dict(artifact.get("summary"))
+    return {
+        "status": status,
+        "active": status == "replay_live_parity_audit_ready",
+        "replay_signal_count": int(summary.get("replay_signal_count") or 0),
+        "live_detector_reproduced_count": int(
+            summary.get("live_detector_reproduced_count") or 0
+        ),
+        "mismatch_count": int(summary.get("mismatch_count") or 0),
+        "mismatch_reason_policy": str(summary.get("mismatch_reason_policy") or ""),
+        "projection_role": "replay_live_parity_projection",
+        "state_source": "replay_live_parity_audit",
+    }
+
+
+def _sequence_mi_trial_admission_decision_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    tradeability = _as_dict(artifact.get("tradeability"))
+    return {
+        "status": status,
+        "active": status == "mi_trial_admission_decision_ready",
+        "trial_admission_decision": str(
+            artifact.get("trial_admission_decision") or ""
+        ),
+        "promotion_scope": str(artifact.get("promotion_scope") or ""),
+        "can_trade_now": tradeability.get("can_trade_now") is True,
+        "first_blocker": str(tradeability.get("first_blocker") or ""),
+        "blocker_owner": str(tradeability.get("blocker_owner") or ""),
+        "projection_role": "mi_trial_admission_decision_projection",
+        "state_source": "mi_trial_admission_decision",
+    }
+
+
+def _sequence_sor_session_detector_facts_summary(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    status = _status(artifact) or "missing"
+    summary = _as_dict(artifact.get("summary"))
+    return {
+        "status": status,
+        "active": status == "sor_session_detector_facts_ready",
+        "fresh_session_signal_count": int(
+            summary.get("fresh_session_signal_count") or 0
+        ),
+        "first_blocker": str(summary.get("first_blocker") or ""),
+        "projection_role": "sor_session_detector_projection",
+        "state_source": "sor_session_detector_facts",
+    }
+
+
 @dataclass(frozen=True)
 class _ThreeStrategyPortfolioSummaryProjection:
     status: str
@@ -4569,6 +4732,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     strategy_fresh_signal_action_time_boundary = (
         report.get("strategy_fresh_signal_action_time_boundary") or {}
     )
+    replay_live_parity_audit = report.get("replay_live_parity_audit") or {}
+    mi_trial_admission_decision = report.get("mi_trial_admission_decision") or {}
+    sor_session_detector_facts = report.get("sor_session_detector_facts") or {}
     three_strategy_portfolio = (
         report.get("three_strategy_live_trial_portfolio") or {}
     )
@@ -4662,6 +4828,9 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Scope review decision: `{four_candidate_scope_review_decision.get('status', 'missing')}` / readonly expansions `{four_candidate_scope_review_decision.get('readonly_watcher_scope_expansion_count', 0)}` / live-scope changes `{four_candidate_scope_review_decision.get('primary_live_submit_scope_changed_count', 0)}`",
         f"- CPM fresh-path public facts / fresh signal / next blocker: `{_yes_no(cpm_fresh_signal_live_path_readiness.get('public_fact_path_ready') is True)}` / `{_yes_no(cpm_fresh_signal_live_path_readiness.get('fresh_signal_present') is True)}` / `{cpm_fresh_signal_live_path_readiness.get('next_blocker') or 'missing'}`",
         f"- Fresh-signal action-time boundary: `{strategy_fresh_signal_action_time_boundary.get('status', 'missing')}` / fresh `{strategy_fresh_signal_action_time_boundary.get('fresh_signal_present_count', 0)}` / finalgate-if-private-facts `{strategy_fresh_signal_action_time_boundary.get('would_enter_finalgate_if_private_facts_ready_count', 0)}` / live-submit `{strategy_fresh_signal_action_time_boundary.get('live_submit_allowed_count', 0)}`",
+        f"- Replay-live parity: `{replay_live_parity_audit.get('status', 'missing')}` / replay `{replay_live_parity_audit.get('replay_signal_count', 0)}` / reproduced `{replay_live_parity_audit.get('live_detector_reproduced_count', 0)}` / mismatch `{replay_live_parity_audit.get('mismatch_count', 0)}`",
+        f"- MI trial admission: `{mi_trial_admission_decision.get('trial_admission_decision') or 'missing'}` / scope `{mi_trial_admission_decision.get('promotion_scope') or 'missing'}` / blocker `{mi_trial_admission_decision.get('first_blocker') or 'missing'}`",
+        f"- SOR session detector: `{sor_session_detector_facts.get('status', 'missing')}` / fresh `{sor_session_detector_facts.get('fresh_session_signal_count', 0)}` / blocker `{sor_session_detector_facts.get('first_blocker') or 'missing'}`",
         f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",
         f"- Activation next checkpoint: `{four_candidate_runtime_activation_closure.get('next_checkpoint') or 'missing'}`",
         f"- Armed trade candidates: `{', '.join(armed_trade_candidates) or 'none'}`",

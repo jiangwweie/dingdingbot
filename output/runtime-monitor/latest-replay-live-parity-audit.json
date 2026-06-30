@@ -9,7 +9,7 @@
     "replay_signal_without_live_reproduction_marked_signal_capture_defect": true,
     "replay_treated_as_live_signal": false
   },
-  "generated_at_utc": "2026-06-30T15:09:32.984485+00:00",
+  "generated_at_utc": "2026-06-30T15:37:52.300102+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

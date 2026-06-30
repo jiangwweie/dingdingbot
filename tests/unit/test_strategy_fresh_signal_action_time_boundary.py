@@ -66,6 +66,16 @@ def _evidence(strategy_group_id: str) -> dict:
     }
 
 
+def _sor_detector() -> dict:
+    return {
+        "status": "sor_session_detector_facts_ready",
+        "summary": {
+            "fresh_session_signal_count": 0,
+            "first_blocker": "fresh_sor_session_range_signal_absent",
+        },
+    }
+
+
 def test_fresh_signal_boundary_stops_before_finalgate_and_orders():
     module = _load_module()
 
@@ -75,6 +85,7 @@ def test_fresh_signal_boundary_stops_before_finalgate_and_orders():
         mpg_readiness=_mpg_readiness(),
         mpg_evidence=_evidence("MPG-001"),
         sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(),
         generated_at_utc="2026-06-30T00:00:00+00:00",
     )
 
@@ -106,6 +117,7 @@ def test_absent_signal_keeps_exact_first_blocker():
         mpg_readiness=_mpg_readiness(),
         mpg_evidence=_evidence("MPG-001"),
         sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(),
         generated_at_utc="2026-06-30T00:00:00+00:00",
     )
 
@@ -114,3 +126,22 @@ def test_absent_signal_keeps_exact_first_blocker():
     assert cpm["first_blocker"] == "fresh_cpm_long_signal_absent"
     assert cpm["blocker_owner"] == "market"
     assert cpm["next_action"] == "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+
+
+def test_sor_boundary_uses_session_detector_first_blocker():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=False),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness(),
+        mpg_evidence=_evidence("MPG-001"),
+        sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
+    assert sor["fresh_signal_present"] is False
+    assert sor["first_blocker"] == "fresh_sor_session_range_signal_absent"
+    assert sor["blocker_owner"] == "market"

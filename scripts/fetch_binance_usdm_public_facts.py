@@ -56,6 +56,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbols", nargs="*", default=list(DEFAULT_SYMBOLS))
     parser.add_argument("--ssh-host", help="Run the public fetch on this SSH host.")
+    parser.add_argument(
+        "--fallback-json",
+        help=(
+            "Use this existing local artifact when the current public fetch fails "
+            "and the fallback is still fresh."
+        ),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -65,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
         artifact = _fetch_via_ssh(args.ssh_host, symbols)
     else:
         artifact = build_public_facts(symbols=symbols)
+    if artifact["status"] != "binance_usdm_public_facts_ready" and args.fallback_json:
+        artifact = _fallback_public_facts(
+            artifact,
+            fallback_path=Path(args.fallback_json),
+            symbols=symbols,
+        )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)
@@ -83,7 +96,15 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if artifact["status"] == "binance_usdm_public_facts_ready" else 2
+    return (
+        0
+        if artifact["status"]
+        in {
+            "binance_usdm_public_facts_ready",
+            "binance_usdm_public_facts_ready_from_fallback",
+        }
+        else 2
+    )
 
 
 def build_public_facts(
@@ -333,6 +354,69 @@ def _unavailable_artifact(symbols: list[str], error: str) -> dict[str, Any]:
             include_authority_mirrors=False,
         ),
     }
+
+
+def _fallback_public_facts(
+    current_artifact: dict[str, Any],
+    *,
+    fallback_path: Path,
+    symbols: list[str],
+) -> dict[str, Any]:
+    if not fallback_path.exists():
+        return current_artifact
+    try:
+        fallback = json.loads(fallback_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return current_artifact
+    if not isinstance(fallback, dict):
+        return current_artifact
+    fallback_symbols = {
+        str(row.get("symbol") or "")
+        for row in fallback.get("symbols") or []
+        if isinstance(row, dict) and row.get("public_facts_ready") is True
+    }
+    generated_at = _parse_utc(str(fallback.get("generated_at_utc") or ""))
+    age_seconds = _age_seconds(generated_at, datetime.now(timezone.utc))
+    fallback_fresh = (
+        fallback.get("status")
+        in {
+            "binance_usdm_public_facts_ready",
+            "binance_usdm_public_facts_ready_from_fallback",
+        }
+        and age_seconds is not None
+        and age_seconds <= PUBLIC_FACT_MAX_AGE_SECONDS
+        and set(symbols).issubset(fallback_symbols)
+    )
+    if not fallback_fresh:
+        return current_artifact
+    fallback = dict(fallback)
+    fallback["status"] = "binance_usdm_public_facts_ready_from_fallback"
+    fallback["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    summary = dict(fallback.get("summary") or {})
+    errors = list(summary.get("errors") or [])
+    errors.extend(current_artifact.get("summary", {}).get("errors") or [])
+    summary["errors"] = errors
+    summary["fallback_source"] = str(fallback_path)
+    summary["fallback_age_seconds"] = age_seconds
+    fallback["summary"] = summary
+    checks = dict(fallback.get("checks") or {})
+    checks["public_facts_ready"] = True
+    checks["used_fallback_after_fetch_failure"] = True
+    fallback["checks"] = checks
+    fallback["interaction"] = non_executing_interaction(
+        "L0_local_binance_usdm_public_facts_fallback"
+    )
+    fallback["safety_invariants"] = non_executing_safety_invariants(
+        (
+            "calls_finalgate",
+            "calls_operation_layer",
+            "calls_exchange_write",
+            "places_order",
+            "order_created",
+        ),
+        include_authority_mirrors=False,
+    )
+    return fallback
 
 
 def _build_from_prefetched(symbols: list[str], raw: dict[str, Any]) -> dict[str, Any]:

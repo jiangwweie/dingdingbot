@@ -94,7 +94,7 @@
     "owner": "market",
     "repair_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal"
   },
-  "generated_at_utc": "2026-06-30T15:03:00.462274+00:00",
+  "generated_at_utc": "2026-06-30T15:35:46.142289+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -114,7 +114,7 @@
     ],
     "per_symbol_signal_facts": [
       {
-        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_close_time_utc": "2026-06-30T15:29:59.999000+00:00",
         "candle_input_missing": false,
         "first_blocker_class": "fresh_cpm_long_signal_absent",
         "first_blocker_owner": "market",
@@ -130,7 +130,7 @@
           "funding_not_extreme": {
             "fresh": true,
             "metrics": {
-              "last_funding_rate": "0.00001914"
+              "last_funding_rate": "0.00002841"
             },
             "rule": "public_premium_index_funding_not_extreme",
             "source": "binance_usdm_public_closed_candles",
@@ -140,7 +140,7 @@
           "htf_trend_intact": {
             "fresh": true,
             "metrics": {
-              "close": 1562.85,
+              "close": 1565.21,
               "trend_reference": 1583.9615
             },
             "rule": "close_above_4h_or_1h_sma20",
@@ -151,7 +151,7 @@
           "invalidated_below_level": {
             "fresh": true,
             "metrics": {
-              "close": 1562.85,
+              "close": 1565.21,
               "invalidation_level": 1549.16
             },
             "rule": "latest_close_above_recent_swing_low_invalidation_level",
@@ -172,7 +172,7 @@
           "pullback_depth_normal": {
             "fresh": true,
             "metrics": {
-              "pullback_depth_pct": -1.9207
+              "pullback_depth_pct": -1.9766
             },
             "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
             "source": "binance_usdm_public_closed_candles",
@@ -182,8 +182,8 @@
           "reclaim_confirmed": {
             "fresh": true,
             "metrics": {
-              "close": 1562.85,
-              "prior_close": 1571.8,
+              "close": 1565.21,
+              "prior_close": 1564.89,
               "reference": 1591.1105
             },
             "rule": "latest_closed_15m_close_reclaimed_reference",
@@ -194,7 +194,7 @@
         }
       },
       {
-        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_close_time_utc": "2026-06-30T15:29:59.999000+00:00",
         "candle_input_missing": false,
         "first_blocker_class": "fresh_cpm_long_signal_absent",
         "first_blocker_owner": "market",
@@ -209,7 +209,7 @@
           "funding_not_extreme": {
             "fresh": true,
             "metrics": {
-              "last_funding_rate": "0.00005541"
+              "last_funding_rate": "0.00006894"
             },
             "rule": "public_premium_index_funding_not_extreme",
             "source": "binance_usdm_public_closed_candles",
@@ -219,7 +219,7 @@
           "htf_trend_intact": {
             "fresh": true,
             "metrics": {
-              "close": 72.93,
+              "close": 73.2,
               "trend_reference": 72.53099999999999
             },
             "rule": "close_above_4h_or_1h_sma20",
@@ -230,7 +230,7 @@
           "invalidated_below_level": {
             "fresh": true,
             "metrics": {
-              "close": 72.93,
+              "close": 73.2,
               "invalidation_level": 71.85
             },
             "rule": "latest_close_above_recent_swing_low_invalidation_level",
@@ -241,7 +241,7 @@
           "liquidity_ok": {
             "fresh": true,
             "metrics": {
-              "spread_bps": 1.368
+              "spread_bps": 1.3635
             },
             "rule": "public_contract_spread_min_notional_and_qty_step_ok",
             "source": "binance_usdm_public_closed_candles",
@@ -251,7 +251,7 @@
           "pullback_depth_normal": {
             "fresh": true,
             "metrics": {
-              "pullback_depth_pct": -1.9881
+              "pullback_depth_pct": -2.0825
             },
             "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
             "source": "binance_usdm_public_closed_candles",
@@ -261,8 +261,8 @@
           "reclaim_confirmed": {
             "fresh": true,
             "metrics": {
-              "close": 72.93,
-              "prior_close": 73.61,
+              "close": 73.2,
+              "prior_close": 72.97,
               "reference": 74.1645
             },
             "rule": "latest_closed_15m_close_reclaimed_reference",
@@ -273,7 +273,7 @@
         }
       },
       {
-        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_close_time_utc": "2026-06-30T15:29:59.999000+00:00",
         "candle_input_missing": false,
         "first_blocker_class": "fresh_cpm_long_signal_absent",
         "first_blocker_owner": "market",
@@ -289,7 +289,7 @@
           "funding_not_extreme": {
             "fresh": true,
             "metrics": {
-              "last_funding_rate": "-0.00002417"
+              "last_funding_rate": "-0.00001594"
             },
             "rule": "public_premium_index_funding_not_extreme",
             "source": "binance_usdm_public_closed_candles",
@@ -299,7 +299,7 @@
           "htf_trend_intact": {
             "fresh": true,
             "metrics": {
-              "close": 6.445,
+              "close": 6.459,
               "trend_reference": 6.5155
             },
             "rule": "close_above_4h_or_1h_sma20",
@@ -310,7 +310,7 @@
           "invalidated_below_level": {
             "fresh": true,
             "metrics": {
-              "close": 6.445,
+              "close": 6.459,
               "invalidation_level": 6.381
             },
             "rule": "latest_close_above_recent_swing_low_invalidation_level",
@@ -321,7 +321,7 @@
           "liquidity_ok": {
             "fresh": true,
             "metrics": {
-              "spread_bps": 1.5461
+              "spread_bps": 1.5458
             },
             "rule": "public_contract_spread_min_notional_and_qty_step_ok",
             "source": "binance_usdm_public_closed_candles",
@@ -331,7 +331,7 @@
           "pullback_depth_normal": {
             "fresh": true,
             "metrics": {
-              "pullback_depth_pct": -2.6424
+              "pullback_depth_pct": -2.6727
             },
             "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
             "source": "binance_usdm_public_closed_candles",
@@ -341,8 +341,8 @@
           "reclaim_confirmed": {
             "fresh": true,
             "metrics": {
-              "close": 6.445,
-              "prior_close": 6.496,
+              "close": 6.459,
+              "prior_close": 6.462,
               "reference": 6.6076
             },
             "rule": "latest_closed_15m_close_reclaimed_reference",
@@ -353,7 +353,7 @@
         }
       },
       {
-        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_close_time_utc": "2026-06-30T15:29:59.999000+00:00",
         "candle_input_missing": false,
         "first_blocker_class": "fresh_cpm_long_signal_absent",
         "first_blocker_owner": "market",
@@ -369,7 +369,7 @@
           "funding_not_extreme": {
             "fresh": true,
             "metrics": {
-              "last_funding_rate": "-0.00004031"
+              "last_funding_rate": "-0.00003474"
             },
             "rule": "public_premium_index_funding_not_extreme",
             "source": "binance_usdm_public_closed_candles",
@@ -379,7 +379,7 @@
           "htf_trend_intact": {
             "fresh": true,
             "metrics": {
-              "close": 0.6865,
+              "close": 0.6908,
               "trend_reference": 0.69245
             },
             "rule": "close_above_4h_or_1h_sma20",
@@ -390,7 +390,7 @@
           "invalidated_below_level": {
             "fresh": true,
             "metrics": {
-              "close": 0.6865,
+              "close": 0.6908,
               "invalidation_level": 0.6767
             },
             "rule": "latest_close_above_recent_swing_low_invalidation_level",
@@ -401,7 +401,7 @@
           "liquidity_ok": {
             "fresh": true,
             "metrics": {
-              "spread_bps": 1.4543
+              "spread_bps": 1.4432
             },
             "rule": "public_contract_spread_min_notional_and_qty_step_ok",
             "source": "binance_usdm_public_closed_candles",
@@ -411,7 +411,7 @@
           "pullback_depth_normal": {
             "fresh": true,
             "metrics": {
-              "pullback_depth_pct": -1.3247
+              "pullback_depth_pct": -1.6127
             },
             "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
             "source": "binance_usdm_public_closed_candles",
@@ -421,8 +421,8 @@
           "reclaim_confirmed": {
             "fresh": true,
             "metrics": {
-              "close": 0.6865,
-              "prior_close": 0.6922,
+              "close": 0.6908,
+              "prior_close": 0.6868,
               "reference": 0.6945
             },
             "rule": "latest_closed_15m_close_reclaimed_reference",
@@ -449,7 +449,7 @@
   "schema": "brc.cpm_runtime_signal_facts.v1",
   "scope": "cpm_runtime_signal_facts_live_detector_read_model",
   "source_signal_context": {
-    "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+    "candle_close_time_utc": "2026-06-30T15:29:59.999000+00:00",
     "signal_id": "cpm_long_pullback_reclaim_signal_v1",
     "source": "binance_usdm_public_closed_candles",
     "source_signal_type": "live_detector_readonly",

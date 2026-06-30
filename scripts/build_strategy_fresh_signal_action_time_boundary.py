@@ -37,6 +37,9 @@ DEFAULT_MPG_EVIDENCE_JSON = (
 DEFAULT_SOR_EVIDENCE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-sor-runtime-activation-evidence.json"
 )
+DEFAULT_SOR_DETECTOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
 )
@@ -52,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mpg-readiness-json", default=str(DEFAULT_MPG_READINESS_JSON))
     parser.add_argument("--mpg-evidence-json", default=str(DEFAULT_MPG_EVIDENCE_JSON))
     parser.add_argument("--sor-evidence-json", default=str(DEFAULT_SOR_EVIDENCE_JSON))
+    parser.add_argument("--sor-detector-json", default=str(DEFAULT_SOR_DETECTOR_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -62,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         mpg_readiness=_read_optional_json(Path(args.mpg_readiness_json)),
         mpg_evidence=_read_optional_json(Path(args.mpg_evidence_json)),
         sor_evidence=_read_optional_json(Path(args.sor_evidence_json)),
+        sor_detector=_read_optional_json(Path(args.sor_detector_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -92,6 +97,7 @@ def build_strategy_fresh_signal_action_time_boundary(
     mpg_readiness: dict[str, Any],
     mpg_evidence: dict[str, Any],
     sor_evidence: dict[str, Any],
+    sor_detector: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
@@ -104,13 +110,7 @@ def build_strategy_fresh_signal_action_time_boundary(
             readiness=mpg_readiness,
             evidence=mpg_evidence,
         ),
-        _evidence_row(
-            strategy_group_id="SOR-001",
-            path_id="SOR-SESSION-BREAKOUT",
-            signal_absent_blocker="fresh_sor_signal_absent",
-            readiness={},
-            evidence=sor_evidence,
-        ),
+        _sor_row(sor_evidence, sor_detector or {}),
     ]
     return {
         "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
@@ -206,6 +206,38 @@ def _evidence_row(
             str(readiness.get("first_blocker") or evidence.get("next_blocker") or signal_absent_blocker)
         ),
         blocker_owner=str(readiness.get("blocker_owner") or "market"),
+    )
+
+
+def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, Any]:
+    detector_summary = _as_dict(detector.get("summary"))
+    fresh = int(detector_summary.get("fresh_session_signal_count") or 0) > 0
+    public_ready = evidence.get("runtime_artifact_ready") is True
+    candidate_shape = evidence.get("candidate_evidence_shape_ready") is True
+    rehearsal_ready = evidence.get("fresh_signal_rehearsal_ready") is True
+    would_enter = public_ready and candidate_shape and rehearsal_ready
+    first_blocker = (
+        "private_action_time_facts_required"
+        if fresh
+        else str(
+            detector_summary.get("first_blocker")
+            or evidence.get("next_blocker")
+            or "fresh_sor_session_range_signal_absent"
+        )
+    )
+    return _row(
+        strategy_group_id="SOR-001",
+        path_id="SOR-SESSION-BREAKOUT",
+        fresh_signal_present=fresh,
+        current_signal_state=(
+            "fresh_signal_present" if fresh else "fresh_signal_absent"
+        ),
+        public_facts_ready=public_ready,
+        candidate_evidence_shape_ready=candidate_shape,
+        dry_run_submit_rehearsal_ready=rehearsal_ready,
+        would_enter_finalgate_if_private_facts_ready=would_enter,
+        first_blocker=first_blocker,
+        blocker_owner="runtime" if fresh else "market",
     )
 
 
