@@ -1,0 +1,1206 @@
+{
+  "checks": {
+    "candidate_authorization_created": false,
+    "exchange_write_called": false,
+    "finalgate_called": false,
+    "live_submit_allowed": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "replay_signal_without_live_reproduction_marked_signal_capture_defect": true,
+    "replay_treated_as_live_signal": false
+  },
+  "generated_at_utc": "2026-06-30T15:09:32.984485+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_replay_live_parity_audit",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "per_symbol_mismatch_table": [
+    {
+      "mismatch_count": 16,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "mismatch_count": 13,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "mismatch_count": 7,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SUIUSDT"
+    },
+    {
+      "mismatch_count": 13,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "MPG-001",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "mismatch_count": 10,
+      "mismatch_reasons": [
+        "signal_capture_defect:symbol_scope_not_attached"
+      ],
+      "strategy_group_id": "MPG-001",
+      "symbol": "OPUSDT"
+    },
+    {
+      "mismatch_count": 25,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "MPG-001",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "mismatch_count": 7,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "MPG-001",
+      "symbol": "SUIUSDT"
+    },
+    {
+      "mismatch_count": 6,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "SOR-001",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "mismatch_count": 8,
+      "mismatch_reasons": [
+        "signal_capture_defect:action_time_boundary_not_reproduced"
+      ],
+      "strategy_group_id": "SOR-001",
+      "symbol": "SOLUSDT"
+    }
+  ],
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "places_order": false,
+    "withdrawal_or_transfer_created": false
+  },
+  "schema": "brc.replay_live_parity_audit.v1",
+  "scope": "replay_live_parity_audit_non_authority",
+  "status": "replay_live_parity_audit_ready",
+  "strategy_rows": [
+    {
+      "coverage": {
+        "detector_or_watcher_ready": true,
+        "detector_source": "binance_usdm_public_facts_readonly",
+        "primary_live_submit_scope": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "readonly_symbols": [
+          "SOLUSDT",
+          "AVAXUSDT",
+          "SUIUSDT"
+        ],
+        "symbol_scope": [
+          "BTCUSDT",
+          "ETHUSDT",
+          "SOLUSDT",
+          "AVAXUSDT",
+          "SUIUSDT"
+        ]
+      },
+      "live_detector_reproduced_count": 5,
+      "mismatch_count": 55,
+      "mismatch_table": [
+        {
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T06:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T10:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T12:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T12:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T13:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T20:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T00:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T20:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T21:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T23:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-25T01:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-25T02:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-25T08:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T00:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T18:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T18:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T19:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T19:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "first_blocker_owner": "engineering",
+          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T07:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T10:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T21:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T23:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T00:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T03:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T07:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T08:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T09:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T10:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T12:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT"
+        }
+      ],
+      "path_id": "MPG-LONG",
+      "replay_signal_count": 60,
+      "strategy_group_id": "MPG-001",
+      "window_results": [
+        {
+          "live_detector_reproduced_count": 3,
+          "mismatch_count": 17,
+          "replay_signal_count": 20,
+          "window_days": 3
+        },
+        {
+          "live_detector_reproduced_count": 0,
+          "mismatch_count": 20,
+          "replay_signal_count": 20,
+          "window_days": 7
+        },
+        {
+          "live_detector_reproduced_count": 2,
+          "mismatch_count": 18,
+          "replay_signal_count": 20,
+          "window_days": 14
+        }
+      ]
+    },
+    {
+      "coverage": {
+        "detector_or_watcher_ready": true,
+        "detector_source": "binance_usdm_public_facts_readonly",
+        "primary_live_submit_scope": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "readonly_symbols": [
+          "SOLUSDT",
+          "AVAXUSDT"
+        ],
+        "symbol_scope": [
+          "BTCUSDT",
+          "ETHUSDT",
+          "SOLUSDT",
+          "AVAXUSDT"
+        ]
+      },
+      "live_detector_reproduced_count": 9,
+      "mismatch_count": 14,
+      "mismatch_table": [
+        {
+          "event_time_utc": "2026-06-29T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-17T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T14:45:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T15:30:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT"
+        }
+      ],
+      "path_id": "SOR-LONG",
+      "replay_signal_count": 23,
+      "strategy_group_id": "SOR-001",
+      "window_results": [
+        {
+          "live_detector_reproduced_count": 1,
+          "mismatch_count": 2,
+          "replay_signal_count": 3,
+          "window_days": 3
+        },
+        {
+          "live_detector_reproduced_count": 2,
+          "mismatch_count": 4,
+          "replay_signal_count": 6,
+          "window_days": 7
+        },
+        {
+          "live_detector_reproduced_count": 6,
+          "mismatch_count": 8,
+          "replay_signal_count": 14,
+          "window_days": 14
+        }
+      ]
+    },
+    {
+      "coverage": {
+        "detector_or_watcher_ready": true,
+        "detector_source": "binance_usdm_public_closed_candles",
+        "primary_live_submit_scope": [
+          "ETHUSDT"
+        ],
+        "readonly_symbols": [
+          "SOLUSDT",
+          "AVAXUSDT",
+          "SUIUSDT"
+        ],
+        "symbol_scope": [
+          "ETHUSDT",
+          "SOLUSDT",
+          "AVAXUSDT",
+          "SUIUSDT"
+        ]
+      },
+      "live_detector_reproduced_count": 12,
+      "mismatch_count": 36,
+      "mismatch_table": [
+        {
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T10:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T20:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T21:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-24T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-26T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T02:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T05:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T10:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T21:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-20T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T07:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T09:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-21T16:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-22T11:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-22T12:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-22T13:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-22T13:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T03:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T03:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T20:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        },
+        {
+          "event_time_utc": "2026-06-23T22:00:00+00:00",
+          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "first_blocker_owner": "runtime",
+          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT"
+        }
+      ],
+      "path_id": "CPM-LONG",
+      "replay_signal_count": 48,
+      "strategy_group_id": "CPM-RO-001",
+      "window_results": [
+        {
+          "live_detector_reproduced_count": 3,
+          "mismatch_count": 7,
+          "replay_signal_count": 10,
+          "window_days": 3
+        },
+        {
+          "live_detector_reproduced_count": 3,
+          "mismatch_count": 15,
+          "replay_signal_count": 18,
+          "window_days": 7
+        },
+        {
+          "live_detector_reproduced_count": 6,
+          "mismatch_count": 14,
+          "replay_signal_count": 20,
+          "window_days": 14
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "live_detector_reproduced_count": 26,
+    "mismatch_count": 105,
+    "mismatch_reason_policy": "replay_signal_without_live_reproduction_is_signal_capture_defect_not_market_wait",
+    "replay_signal_count": 131,
+    "strategy_count": 3
+  }
+}
