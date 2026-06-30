@@ -334,7 +334,7 @@
     "status": "four_candidate_scope_review_decision_ready",
     "tradeability_decision_source": false
   },
-  "generated_at_utc": "2026-06-30T11:56:30.449690+00:00",
+  "generated_at_utc": "2026-06-30T14:09:09.114380+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -1286,6 +1286,22 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.json",
       "returncode": 0,
       "status": "cpm_dry_run_submit_rehearsal_shape_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "level": "L0_local_binance_usdm_public_facts",
+        "mutates_remote_files": false,
+        "places_order": false,
+        "remote_interaction_count": 0
+      },
+      "name": "binance_usdm_public_facts",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-binance-usdm-public-facts.json",
+      "returncode": 0,
+      "status": "binance_usdm_public_facts_ready"
     },
     {
       "interaction": {

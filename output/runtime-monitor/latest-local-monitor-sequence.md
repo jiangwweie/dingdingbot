@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T11:56:30.449690+00:00
+- 报告时间: 2026-06-30T14:09:09.114380+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -112,6 +112,7 @@
 | cpm_runtime_signal_capture | cpm_runtime_signal_capture_ready | 0 |
 | cpm_shadow_candidate_evidence | cpm_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
 | cpm_dry_run_submit_rehearsal | cpm_dry_run_submit_rehearsal_shape_ready | 0 |
+| binance_usdm_public_facts | binance_usdm_public_facts_ready | 0 |
 | four_candidate_runtime_activation_evidence | runtime_activation_evidence_ready | 0 |
 | four_candidate_runtime_activation_closure | four_candidate_runtime_activation_contract_ready | 0 |
 | goal_progress | ready | 0 |

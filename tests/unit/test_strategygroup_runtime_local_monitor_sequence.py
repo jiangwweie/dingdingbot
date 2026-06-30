@@ -434,6 +434,29 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
             },
         )
         return True
+    if script == "fetch_binance_usdm_public_facts.py":
+        _write_output(
+            command,
+            {
+                "status": "binance_usdm_public_facts_ready",
+                "generated_at_utc": "2026-06-30T00:00:00+00:00",
+                "summary": {
+                    "symbol_count": 5,
+                    "ready_symbol_count": 5,
+                    "public_fact_max_age_seconds": 300,
+                },
+                "checks": {
+                    "public_facts_ready": True,
+                    "exchange_write": False,
+                    "order_created": False,
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_binance_usdm_public_facts",
+                },
+            },
+        )
+        return True
     if script == "build_four_candidate_runtime_activation_evidence.py":
         output_dir = Path(command[command.index("--output-dir") + 1])
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2421,6 +2444,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_cpm_runtime_signal_capture.py",
         "build_cpm_shadow_candidate_evidence.py",
         "build_cpm_dry_run_submit_rehearsal.py",
+        "fetch_binance_usdm_public_facts.py",
         "build_four_candidate_runtime_activation_evidence.py",
         "build_four_candidate_runtime_activation_closure.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
@@ -5512,6 +5536,43 @@ def test_local_monitor_sequence_does_not_default_monitor_refresh_to_market_wait(
 
     assert status == "temporarily_unavailable_monitor_refresh_needed"
     assert runtime_status == "temporarily_unavailable"
+
+
+def test_local_monitor_sequence_classifies_binance_public_facts_gap_as_refresh() -> None:
+    module = _load_module()
+    artifacts = {
+        "daily_check": {
+            "status": "waiting_for_market",
+            "runtime_status": "waiting_for_market",
+            "owner_runtime_state": {"monitor_status": "fresh"},
+        },
+        "goal_progress": {
+            "status": "waiting_for_market",
+            "runtime_status": "waiting_for_market",
+        },
+        "binance_usdm_public_facts": {
+            "status": "binance_usdm_public_facts_unavailable",
+            "checks": {"public_facts_ready": False},
+        },
+        "completion_audit": {"status": "not_complete_waiting_for_market"},
+        "signal_coverage": {
+            "status": "mainline_no_signal_low_priority_broader_would_enter"
+        },
+    }
+    steps = [
+        {
+            "name": "binance_usdm_public_facts",
+            "returncode": 2,
+            "artifact": artifacts["binance_usdm_public_facts"],
+        }
+    ]
+
+    status = module._sequence_status(steps=steps, artifacts=artifacts)
+
+    assert module._step_returncode_is_allowed_monitor_refresh(
+        steps[0], artifacts
+    ) is True
+    assert status == "temporarily_unavailable_monitor_refresh_needed"
 
 
 def test_local_monitor_sequence_fresh_signal_processing_beats_cache_refresh() -> None:

@@ -382,6 +382,9 @@ DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON = (
 DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
 )
+DEFAULT_BINANCE_USDM_PUBLIC_FACTS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.md"
+)
 DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-mpg-runtime-activation-evidence.json"
 )
@@ -996,6 +999,9 @@ def build_local_monitor_sequence_report(
         binance_usdm_public_facts_json = (
             cpm_parent / DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON.name
         )
+        binance_usdm_public_facts_md = (
+            cpm_parent / DEFAULT_BINANCE_USDM_PUBLIC_FACTS_MD.name
+        )
         mpg_runtime_activation_evidence_json = (
             cpm_parent / DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON.name
         )
@@ -1004,6 +1010,7 @@ def build_local_monitor_sequence_report(
         )
     else:
         binance_usdm_public_facts_json = DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON
+        binance_usdm_public_facts_md = DEFAULT_BINANCE_USDM_PUBLIC_FACTS_MD
         mpg_runtime_activation_evidence_json = (
             DEFAULT_MPG_RUNTIME_ACTIVATION_EVIDENCE_JSON
         )
@@ -1387,6 +1394,23 @@ def build_local_monitor_sequence_report(
             "cpm_dry_run_submit_rehearsal",
             cpm_dry_run_submit_rehearsal_command,
             cpm_dry_run_submit_rehearsal_json,
+            runner,
+        )
+    )
+
+    binance_usdm_public_facts_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/fetch_binance_usdm_public_facts.py"),
+        "--output-json",
+        str(binance_usdm_public_facts_json),
+        "--output-owner-progress",
+        str(binance_usdm_public_facts_md),
+    ]
+    steps.append(
+        _run_step(
+            "binance_usdm_public_facts",
+            binance_usdm_public_facts_command,
+            binance_usdm_public_facts_json,
             runner,
         )
     )
@@ -2552,6 +2576,10 @@ def _sequence_status(
     ]
     if failed_steps:
         return "needs_non_market_repair"
+    if _binance_usdm_public_facts_refresh_needed(
+        artifacts.get("binance_usdm_public_facts", {})
+    ):
+        return "temporarily_unavailable_monitor_refresh_needed"
     completion_status = _status(artifacts["completion_audit"])
     if completion_status == "needs_non_market_repair":
         return "needs_non_market_repair"
@@ -2661,6 +2689,13 @@ def _step_returncode_is_allowed_monitor_refresh(
     artifacts: dict[str, dict[str, Any]],
 ) -> bool:
     step_name = str(step.get("name") or "")
+    if (
+        step_name == "binance_usdm_public_facts"
+        and int(step.get("returncode") or 0) != 0
+    ):
+        return _binance_usdm_public_facts_refresh_needed(
+            artifacts.get(step_name, {})
+        )
     return monitor_step_returncode_is_refresh(
         step_name=step_name,
         returncode=int(step.get("returncode") or 0),
@@ -2678,6 +2713,22 @@ def _step_returncode_is_allowed_deployment_issue(
         returncode=int(step.get("returncode") or 0),
         artifact=artifacts.get(step_name, {}),
     )
+
+
+def _binance_usdm_public_facts_refresh_needed(artifact: dict[str, Any]) -> bool:
+    if not isinstance(artifact, dict):
+        return False
+    if _status(artifact) == "binance_usdm_public_facts_unavailable":
+        return True
+    checks = _as_dict(artifact.get("checks"))
+    if "public_facts_ready" in checks and checks.get("public_facts_ready") is not True:
+        return True
+    summary = _as_dict(artifact.get("summary"))
+    if summary.get("symbol_count") and summary.get("ready_symbol_count") != summary.get(
+        "symbol_count"
+    ):
+        return True
+    return False
 
 
 def _signal_coverage_non_market_gap(artifact: dict[str, Any]) -> dict[str, Any] | None:
