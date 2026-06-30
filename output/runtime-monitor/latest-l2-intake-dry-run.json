@@ -4,10 +4,10 @@
     "failed_count": 0,
     "forbidden_effect_count": 0,
     "passed_count": 0,
-    "source_blocked_count": 5,
+    "source_blocked_count": 1,
     "source_conditional_candidate_count": 0,
     "source_enabled_l2_count": 1,
-    "source_readiness_row_count": 6
+    "source_readiness_row_count": 2
   },
   "dry_run_rows": [],
   "interaction": {
@@ -23,10 +23,6 @@
   "owner_state": "waiting_for_opportunity",
   "review_outcome_state": {
     "blocked_groups": [
-      "MI-001",
-      "MI-001",
-      "CPM-RO-001",
-      "BRF-001",
       "RBR-001"
     ],
     "default_next_step": "continue_signal_coverage_monitoring",
@@ -65,55 +61,6 @@
   "scope": "strategygroup_l2_intake_dry_run",
   "source_l2_readiness_status": "l2_readiness_review_already_enabled",
   "source_readiness_rows": [
-    {
-      "blocking_gaps_before_l2": [],
-      "conditional_l2_review_candidate": false,
-      "current_tier": "unclassified",
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "SOL/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "conditional_l2_review_candidate": false,
-      "current_tier": "unclassified",
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "BNB/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "conditional_l2_review_candidate": false,
-      "current_tier": "unclassified",
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "CPM-RO-001",
-      "symbol": "ETH/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [
-        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
-        "short_squeeze_risk_classifier_missing_from_runtime",
-        "separate_brf_l2_intake_dry_run_missing",
-        "cost_fill_slot_m2m_and_leverage_boundary_missing"
-      ],
-      "conditional_l2_review_candidate": false,
-      "current_tier": "L1",
-      "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
-      "l2_shadow_candidate_observation_enabled": false,
-      "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
-      "side": "short",
-      "strategy_group_id": "BRF-001",
-      "symbol": "BTC/USDT:USDT"
-    },
     {
       "blocking_gaps_before_l2": [
         "fixed_horizon_economic_result_negative",

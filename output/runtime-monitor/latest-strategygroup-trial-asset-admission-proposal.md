@@ -1,8 +1,8 @@
 ## StrategyGroup Trial Asset Admission Proposal
 
 - Status: `trial_asset_admission_proposal_ready`
-- Generated: `2026-06-29T11:49:49.670787+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json`
+- Generated: `2026-06-30T01:54:23.961603+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-asset-admission-proposal.json`
 - StrategyGroup: `BRF2-001`
 - Current stage: `tiny_live_intake_candidate`
 - Proposed stage: `admitted_trial_asset`

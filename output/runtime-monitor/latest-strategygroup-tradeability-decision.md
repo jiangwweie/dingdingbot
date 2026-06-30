@@ -1,19 +1,19 @@
 ## StrategyGroup Tradeability Decision
 
 - Status: `tradeability_decision_ready`
-- Generated: `2026-06-29T15:01:21.490919+00:00`
-- Output JSON: `output/runtime-monitor/latest-strategygroup-tradeability-decision.json`
+- Generated: `2026-06-30T01:54:29.116866+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-decision.json`
 - Decision rows: `13`
 - Tradable now: `0`
-- Top blocker: `BRF2-001` / `not_tradable_market_wait` / `short_squeeze_risk_state_disable_active`
-- Next action: `continue_brf2_armed_observation_until_disable_clears`
+- Top blocker: `BRF2-001` / `not_tradable_market_wait` / `fresh_brf2_short_signal_absent`
+- Next action: `continue_brf2_armed_observation_until_fresh_signal`
 
 ## Decision Rows
 
 | StrategyGroup | Stage | Decision | First Blocker | Owner | Next Action | After |
 | --- | --- | --- | --- | --- | --- | --- |
 | `MPG-001` | `armed_observation` | `not_tradable_market_wait` | `fresh_executable_signal_absent` | `market` | `continue_armed_observation_until_fresh_signal` | `live_submit_ready` |
-| `BRF2-001` | `armed_observation` | `not_tradable_market_wait` | `short_squeeze_risk_state_disable_active` | `market` | `continue_brf2_armed_observation_until_disable_clears` | `live_submit_ready` |
+| `BRF2-001` | `armed_observation` | `not_tradable_market_wait` | `fresh_brf2_short_signal_absent` | `market` | `continue_brf2_armed_observation_until_fresh_signal` | `live_submit_ready` |
 | `RBR-001` | `observe_only_would_enter` | `not_tradable_strategy_quality` | `rbr_loss_boundary_not_expressible_for_mainline` | `strategy_review` | `park_rbr_until_material_new_edge_or_loss_boundary_evidence` | `parked_not_mainline_blocker` |
 | `RBR2-001` | `role_only_intake_candidate` | `not_tradable_strategy_quality` | `role_only_or_classifier_asset_not_trial_candidate` | `strategy_review` | `complete_role_merge_or_classifier_review` | `classifier_or_role_support_asset` |
 | `BTPC-001` | `trial_asset_admission_candidate` | `not_tradable_facts` | `required_facts_or_classifier_mapping_unclosed` | `engineering` | `close_requiredfacts_classifier_and_replay_mapping` | `armed_observation` |

@@ -1,6 +1,6 @@
 {
   "counts": {
-    "blocked_count": 5,
+    "blocked_count": 1,
     "classifier_repair_spec_ready_count": 0,
     "classifier_revision_executed_count": 0,
     "conditional_l2_candidate_count": 0,
@@ -8,7 +8,7 @@
     "economic_replay_spec_ready_count": 0,
     "enabled_l2_count": 1,
     "forbidden_effect_count": 0,
-    "review_row_count": 6
+    "review_row_count": 2
   },
   "interaction": {
     "approaches_real_order": false,
@@ -22,87 +22,6 @@
   },
   "owner_state": "coverage_policy_current",
   "readiness_rows": [
-    {
-      "blocking_gaps_before_l2": [],
-      "classifier_repair_spec": {},
-      "conditional_l2_review_candidate": false,
-      "coverage_review_priority": "unknown",
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "may_change_tier_policy_now": false,
-      "may_create_shadow_candidate_now": false,
-      "may_place_real_order_now": false,
-      "positive_evidence": [],
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "SOL/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "classifier_repair_spec": {},
-      "conditional_l2_review_candidate": false,
-      "coverage_review_priority": "unknown",
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "may_change_tier_policy_now": false,
-      "may_create_shadow_candidate_now": false,
-      "may_place_real_order_now": false,
-      "positive_evidence": [],
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "BNB/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "classifier_repair_spec": {},
-      "conditional_l2_review_candidate": false,
-      "coverage_review_priority": "unknown",
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "l2_readiness": "missing_policy",
-      "l2_shadow_candidate_observation_enabled": false,
-      "may_change_tier_policy_now": false,
-      "may_create_shadow_candidate_now": false,
-      "may_place_real_order_now": false,
-      "positive_evidence": [],
-      "recommended_action": "require_policy_before_l2_review",
-      "side": "long",
-      "strategy_group_id": "CPM-RO-001",
-      "symbol": "ETH/USDT:USDT"
-    },
-    {
-      "blocking_gaps_before_l2": [
-        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
-        "short_squeeze_risk_classifier_missing_from_runtime",
-        "separate_brf_l2_intake_dry_run_missing",
-        "cost_fill_slot_m2m_and_leverage_boundary_missing"
-      ],
-      "classifier_repair_spec": {},
-      "conditional_l2_review_candidate": false,
-      "coverage_review_priority": "P0_5",
-      "current_tier": "L1",
-      "economic_replay_spec": {},
-      "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
-      "l2_shadow_candidate_observation_enabled": false,
-      "may_change_tier_policy_now": false,
-      "may_create_shadow_candidate_now": false,
-      "may_place_real_order_now": false,
-      "positive_evidence": [
-        "runtime semantics builder already defines BRF-001 bear rally failure short entry and structure-extreme protection vocabulary",
-        "main-control runtime tier policy keeps BRF as a known new L1 observe-only group",
-        "BRF shares the short-continuation research track with BTPC but has not passed separate L2 intake"
-      ],
-      "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
-      "side": "short",
-      "strategy_group_id": "BRF-001",
-      "symbol": "BTC/USDT:USDT"
-    },
     {
       "blocking_gaps_before_l2": [
         "fixed_horizon_economic_result_negative",
@@ -197,6 +116,6 @@
     "withdrawal_or_transfer_created": false
   },
   "scope": "strategygroup_l2_readiness_review",
-  "source_expansion_review_status": "review_needed_broader_observe_only_would_enter",
+  "source_expansion_review_status": "low_priority_observe_only_would_enter_parked",
   "status": "l2_readiness_review_already_enabled"
 }

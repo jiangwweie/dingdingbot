@@ -2526,6 +2526,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         is False
     )
     assert report["brf2_runtime_signal_capture"]["runtime_truth_source"] is False
+    assert report["owner_summary"]["brf2_runtime_signal_capture"] == (
+        report["brf2_runtime_signal_capture"]
+    )
     for removed_check in (
         "brf2_runtime_signal_capture_ready",
         "brf2_runtime_signal_fact_input_present",
@@ -2554,6 +2557,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["brf2_shadow_candidate_evidence"][
         "non_executing_evidence"
     ] is True
+    assert report["owner_summary"]["brf2_shadow_candidate_evidence"] == (
+        report["brf2_shadow_candidate_evidence"]
+    )
     for removed_projection_field in (
         "live_submit_authority",
         "operation_layer_authority",

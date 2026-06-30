@@ -6,7 +6,7 @@
 - Signal Observation state: `review_needed`
 - Runtime Owner intervention required: 否
 - Live permission change: 否
-- Output: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-portfolio-board.json`
+- Output: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json`
 
 ## Portfolio Rows
 

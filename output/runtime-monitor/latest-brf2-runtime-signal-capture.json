@@ -1,10 +1,10 @@
 {
   "checks": {
-    "active_disable_fact_count": 2,
+    "active_disable_fact_count": 0,
     "fact_input_present": true,
     "fresh_signal_present": false,
     "mapping_ready": true,
-    "missing_required_fact_count": 1,
+    "missing_required_fact_count": 2,
     "watcher_tick_present": true
   },
   "fact_authority": "readonly_proxy_not_action_time_required_fact",
@@ -21,7 +21,7 @@
   },
   "fact_input_present": true,
   "fact_input_status": "brf2_runtime_signal_facts_ready",
-  "generated_at_utc": "2026-06-28T19:14:04.505994+00:00",
+  "generated_at_utc": "2026-06-30T01:54:25.166217+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -33,17 +33,15 @@
     "remote_interaction_count": 0
   },
   "no_action_attribution": {
-    "active_disable_fact_keys": [
-      "short_squeeze_risk_state",
-      "rally_extension_invalidates_failure_state"
-    ],
+    "active_disable_fact_keys": [],
     "attribution_ready": true,
-    "blocked_fact_count": 3,
+    "blocked_fact_count": 2,
     "blocker_owner": "market",
     "missing_required_fact_keys": [
-      "short_squeeze_risk_state"
+      "rally_context",
+      "rally_failure_trigger_state"
     ],
-    "reason": "short_squeeze_risk_state_disable_active",
+    "reason": "fresh_brf2_short_signal_absent",
     "strategy_group_id": "BRF2-001"
   },
   "safety_invariants": {
@@ -78,18 +76,15 @@
     "strategy_group_id": "BRF2-001"
   },
   "signal_detector_preview": {
-    "active_disable_fact_keys": [
-      "short_squeeze_risk_state",
-      "rally_extension_invalidates_failure_state"
-    ],
-    "current_signal_state": "blocked_by_disable_fact",
+    "active_disable_fact_keys": [],
+    "current_signal_state": "fresh_signal_absent",
     "detector_ready": true,
     "disable_fact_status": [
       {
         "fact_key": "short_squeeze_risk_state",
         "fresh": true,
-        "raw_state": "red",
-        "state": "disable_active"
+        "raw_state": "bounded",
+        "state": "clear"
       },
       {
         "fact_key": "strong_reclaim_disable_state",
@@ -100,8 +95,8 @@
       {
         "fact_key": "rally_extension_invalidates_failure_state",
         "fresh": true,
-        "raw_state": "active",
-        "state": "disable_active"
+        "raw_state": "false",
+        "state": "clear"
       },
       {
         "fact_key": "liquidity_downshift_state",
@@ -118,11 +113,12 @@
     ],
     "fact_input_present": true,
     "fact_input_status": "brf2_runtime_signal_facts_ready",
-    "first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "first_blocker_class": "fresh_brf2_short_signal_absent",
     "first_blocker_owner": "market",
     "fresh_signal_present": false,
     "missing_required_fact_keys": [
-      "short_squeeze_risk_state"
+      "rally_context",
+      "rally_failure_trigger_state"
     ],
     "required_fact_status": [
       {
@@ -140,20 +136,20 @@
       {
         "fact_key": "rally_context",
         "fresh": true,
-        "raw_state": "bear_or_weak_reclaim",
-        "state": "satisfied"
+        "raw_state": "not_satisfied",
+        "state": "not_satisfied"
       },
       {
         "fact_key": "rally_failure_trigger_state",
         "fresh": true,
-        "raw_state": "confirmed",
-        "state": "satisfied"
+        "raw_state": "not_confirmed",
+        "state": "not_satisfied"
       },
       {
         "fact_key": "short_squeeze_risk_state",
         "fresh": true,
-        "raw_state": "red",
-        "state": "not_satisfied"
+        "raw_state": "bounded",
+        "state": "satisfied"
       },
       {
         "fact_key": "strong_reclaim_disable_state",
@@ -174,18 +170,18 @@
         "state": "satisfied"
       }
     ],
-    "signal_capture_checkpoint": "continue_brf2_armed_observation_until_disable_clears",
+    "signal_capture_checkpoint": "continue_brf2_armed_observation_until_fresh_signal",
     "watcher_tick_present": true
   },
   "source_signal_context": {
-    "closed_at_utc": "2026-02-02T13:40:00+00:00",
+    "closed_at_utc": "2026-05-20T23:00:00+00:00",
     "exchange_symbol": "BTC/USDT:USDT",
     "market": "binance_usdm",
     "runtime_instance_id": "",
-    "signal_observation_id": "BRF-001-BTC-SHORT:brf-9d221c462ba943dcc6370db0:1770039600000",
+    "signal_observation_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
     "source": "brf_reference_readonly_preview_derived_brf2_fact_input",
     "source_candidate_id": "BRF-001-BTC-SHORT",
-    "source_signal_type": "would_enter",
+    "source_signal_type": "no_action",
     "source_strategy_group_id": "BRF-001",
     "symbol": "BTC/USDT:USDT",
     "timeframe": "1h_closed_observation_with_5m_proxy"

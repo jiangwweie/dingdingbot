@@ -1,8 +1,8 @@
 ## BRF2 RequiredFacts Mapping
 
 - Status: `brf2_required_facts_mapping_ready`
-- Generated: `2026-06-28T19:14:03.668223+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-brf2-required-facts-mapping.json`
+- Generated: `2026-06-30T01:54:24.155865+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-required-facts-mapping.json`
 - StrategyGroup: `BRF2-001`
 - Current stage: `admitted_trial_asset`
 - After next state: `armed_observation`

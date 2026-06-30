@@ -2,8 +2,20 @@
   "broader_observation": {
     "dominant_no_action_reasons": [
       {
+        "count": 2,
+        "reason_code": "mi001_no_action_impulse_below_threshold"
+      },
+      {
+        "count": 1,
+        "reason_code": "brf_no_action_no_rally_extension"
+      },
+      {
         "count": 1,
         "reason_code": "btpc_disable_stale_signal_before_l2_review"
+      },
+      {
+        "count": 1,
+        "reason_code": "cpm_no_action_trend_ambiguous"
       },
       {
         "count": 1,
@@ -15,6 +27,27 @@
       }
     ],
     "high_priority_no_action_signals": [
+      {
+        "candidate_id": "BRF-001-BTC-SHORT",
+        "confidence": "0.25",
+        "coverage_review_priority": "P0_5",
+        "human_summary": "No sufficient bear-market rally extension for BRF v0.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+        "policy_recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+        "reason_codes": [
+          "brf_no_action_no_rally_extension"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "BRF-001-v0",
+        "strategy_group_id": "BRF-001",
+        "symbol": "BTC/USDT:USDT"
+      },
       {
         "candidate_id": "BTPC-001-AVAX-SHORT",
         "confidence": "0.25",
@@ -82,6 +115,90 @@
     "invalid_signals": [],
     "no_action_sample": [
       {
+        "candidate_id": "MI-001-SOL-LONG",
+        "confidence": "0.20",
+        "coverage_review_priority": null,
+        "human_summary": "MI-001 no-action observation: 12h close-to-close impulse is below threshold.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "mi001_no_action_impulse_below_threshold"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "MI-001-smoke-v0",
+        "strategy_group_id": "MI-001",
+        "symbol": "SOL/USDT:USDT"
+      },
+      {
+        "candidate_id": "MI-001-BNB-LONG",
+        "confidence": "0.20",
+        "coverage_review_priority": null,
+        "human_summary": "MI-001 no-action observation: 12h close-to-close impulse is below threshold.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "mi001_no_action_impulse_below_threshold"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "MI-001-smoke-v0",
+        "strategy_group_id": "MI-001",
+        "symbol": "BNB/USDT:USDT"
+      },
+      {
+        "candidate_id": "CPM-RO-001",
+        "confidence": "0.25",
+        "coverage_review_priority": null,
+        "human_summary": "4h trend is ambiguous under CPM v0.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": null,
+        "policy_recommended_action": null,
+        "reason_codes": [
+          "cpm_no_action_trend_ambiguous"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "CPM-RO-001-v0",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETH/USDT:USDT"
+      },
+      {
+        "candidate_id": "BRF-001-BTC-SHORT",
+        "confidence": "0.25",
+        "coverage_review_priority": "P0_5",
+        "human_summary": "No sufficient bear-market rally extension for BRF v0.",
+        "no_execution_permission": true,
+        "no_order_permission": true,
+        "no_runtime_start": true,
+        "not_execution_intent": true,
+        "not_order": true,
+        "policy_l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+        "policy_recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+        "reason_codes": [
+          "brf_no_action_no_rally_extension"
+        ],
+        "side": "none",
+        "signal_type": "no_action",
+        "strategy_family_version_id": "BRF-001-v0",
+        "strategy_group_id": "BRF-001",
+        "symbol": "BTC/USDT:USDT"
+      },
+      {
         "candidate_id": "BTPC-001-AVAX-SHORT",
         "confidence": "0.25",
         "coverage_review_priority": "P0_5",
@@ -146,9 +263,8 @@
       }
     ],
     "side_counts": {
-      "long": 3,
-      "none": 3,
-      "short": 2
+      "none": 7,
+      "short": 1
     },
     "strategy_group_counts": {
       "BRF-001": 1,
@@ -170,96 +286,6 @@
       "XRP/USDT:USDT": 1
     },
     "would_enter_signals": [
-      {
-        "candidate_id": "MI-001-SOL-LONG",
-        "confidence": "0.65",
-        "coverage_review_priority": null,
-        "human_summary": "MI-001 would-enter long observation: 12h close-to-close momentum impulse crossed threshold.",
-        "no_execution_permission": true,
-        "no_order_permission": true,
-        "no_runtime_start": true,
-        "not_execution_intent": true,
-        "not_order": true,
-        "policy_l2_readiness": null,
-        "policy_recommended_action": null,
-        "reason_codes": [
-          "mi001_12h_momentum_impulse",
-          "observe_only_review_required"
-        ],
-        "side": "long",
-        "signal_type": "would_enter",
-        "strategy_family_version_id": "MI-001-smoke-v0",
-        "strategy_group_id": "MI-001",
-        "symbol": "SOL/USDT:USDT"
-      },
-      {
-        "candidate_id": "MI-001-BNB-LONG",
-        "confidence": "0.65",
-        "coverage_review_priority": null,
-        "human_summary": "MI-001 would-enter long observation: 12h close-to-close momentum impulse crossed threshold.",
-        "no_execution_permission": true,
-        "no_order_permission": true,
-        "no_runtime_start": true,
-        "not_execution_intent": true,
-        "not_order": true,
-        "policy_l2_readiness": null,
-        "policy_recommended_action": null,
-        "reason_codes": [
-          "mi001_12h_momentum_impulse",
-          "observe_only_review_required"
-        ],
-        "side": "long",
-        "signal_type": "would_enter",
-        "strategy_family_version_id": "MI-001-smoke-v0",
-        "strategy_group_id": "MI-001",
-        "symbol": "BNB/USDT:USDT"
-      },
-      {
-        "candidate_id": "CPM-RO-001",
-        "confidence": "0.70",
-        "coverage_review_priority": null,
-        "human_summary": "CPM v0 long pullback-reclaim structure detected.",
-        "no_execution_permission": true,
-        "no_order_permission": true,
-        "no_runtime_start": true,
-        "not_execution_intent": true,
-        "not_order": true,
-        "policy_l2_readiness": null,
-        "policy_recommended_action": null,
-        "reason_codes": [
-          "cpm_long_htf_trend_intact",
-          "cpm_long_pullback_depth_normal",
-          "cpm_long_reclaim_confirmed"
-        ],
-        "side": "long",
-        "signal_type": "would_enter",
-        "strategy_family_version_id": "CPM-RO-001-v0",
-        "strategy_group_id": "CPM-RO-001",
-        "symbol": "ETH/USDT:USDT"
-      },
-      {
-        "candidate_id": "BRF-001-BTC-SHORT",
-        "confidence": "0.64",
-        "coverage_review_priority": "P0_5",
-        "human_summary": "BRF v0 bear-rally-failure short structure detected for review.",
-        "no_execution_permission": true,
-        "no_order_permission": true,
-        "no_runtime_start": true,
-        "not_execution_intent": true,
-        "not_order": true,
-        "policy_l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
-        "policy_recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
-        "reason_codes": [
-          "brf_bear_rally_extended",
-          "brf_rally_high_rejected",
-          "brf_short_squeeze_risk_reviewed"
-        ],
-        "side": "short",
-        "signal_type": "would_enter",
-        "strategy_family_version_id": "BRF-001-v0",
-        "strategy_group_id": "BRF-001",
-        "symbol": "BTC/USDT:USDT"
-      },
       {
         "candidate_id": "RBR-001-ADA-SHORT",
         "confidence": "0.57",
@@ -285,15 +311,15 @@
     ]
   },
   "checks": {
-    "broader_actionable_would_enter_signal_count": 4,
+    "broader_actionable_would_enter_signal_count": 0,
     "broader_candidate_count": 8,
     "broader_current_signal_count": 8,
-    "broader_high_priority_no_action_signal_count": 3,
+    "broader_high_priority_no_action_signal_count": 4,
     "broader_invalid_signal_count": 0,
     "broader_low_priority_would_enter_signal_count": 1,
-    "broader_no_action_signal_count": 3,
-    "broader_would_enter_signal_count": 5,
-    "coverage_gap": true,
+    "broader_no_action_signal_count": 7,
+    "broader_would_enter_signal_count": 1,
+    "coverage_gap": false,
     "forbidden_effects": [],
     "runtime_no_action_signal_count": 0,
     "runtime_ready_signal_count": 0,
@@ -301,19 +327,19 @@
   },
   "diagnosis": {
     "broader_high_priority_no_action_review_available": true,
-    "broader_observation_has_actionable_would_enter": true,
+    "broader_observation_has_actionable_would_enter": false,
     "broader_observation_has_low_priority_would_enter": true,
     "broader_observation_has_would_enter": true,
     "broader_signals_are_observe_only": true,
     "does_not_authorize_real_order": true,
     "does_not_expand_runtime_scope": true,
     "mainline_runtime_is_waiting": true,
-    "next_step": "review_broader_observe_only_signals_before_runtime_scope_change",
-    "owner_summary": "主线暂未触发，但宽观察面已有观察级机会，需要评估是否扩展策略覆盖。",
+    "next_step": "continue_mainline_and_keep_low_priority_observation_parked",
+    "owner_summary": "主线暂未触发，宽观察面只有低优先级或已停放机会，继续等待更高质量机会。",
     "recommended_actions": [
-      "review_broader_signal_quality",
-      "decide_future_strategygroup_scope_or_observe_only_promotion",
-      "keep_current_live_submit_path_waiting_for_selected_runtime_signal"
+      "keep_low_priority_observation_parked",
+      "continue_waiting_for_selected_runtime_signal",
+      "continue_replay_review_for_higher_priority_lanes"
     ]
   },
   "interaction": {
@@ -335,7 +361,7 @@
     "strategy_group_counts": {},
     "symbol_counts": {}
   },
-  "owner_state": "coverage_review_needed",
+  "owner_state": "waiting_for_opportunity",
   "safety_invariants": {
     "broader_signals_are_not_execution_authority": true,
     "exchange_write_called": false,
@@ -361,5 +387,5 @@
     "runtime_summary_path_default": "output/strategygroup-runtime-pilot/current-run-tokyo-reports/latest-summary.json",
     "runtime_summary_status": "runtime_summary_missing"
   },
-  "status": "mainline_no_signal_broader_would_enter"
+  "status": "mainline_no_signal_low_priority_broader_would_enter"
 }

@@ -28,8 +28,8 @@
     "capture_gap_audit_group_count": 10,
     "current_row_count": 12,
     "forbidden_effect_count": 0,
-    "high_priority_no_action_attribution_count": 3,
-    "high_priority_no_action_group_count": 3,
+    "high_priority_no_action_attribution_count": 4,
+    "high_priority_no_action_group_count": 4,
     "l4_scope_change_recommended_count": 0,
     "research_intake_group_count": 2,
     "role_review_row_count": 1,
@@ -52,6 +52,19 @@
     "remote_interaction_count": 0
   },
   "no_action_attribution_queue": [
+    {
+      "attribution_class": "market_structure_or_path_risk",
+      "authority_boundary": "no_action_attribution_only; runtime_safety_gate_required; no_official_live_order_authority",
+      "confidence": "0.25",
+      "next_checkpoint": "BRF-001_market_structure_and_path_risk_review",
+      "reason_codes": [
+        "brf_no_action_no_rally_extension"
+      ],
+      "required_next_evidence": "market_structure_and_path_risk_review",
+      "side": "none",
+      "strategy_group_id": "BRF-001",
+      "symbol": "BTC/USDT:USDT"
+    },
     {
       "attribution_class": "fact_source_or_freshness",
       "authority_boundary": "no_action_attribution_only; runtime_safety_gate_required; no_official_live_order_authority",
@@ -93,15 +106,15 @@
     }
   ],
   "observation_layer": {
-    "broader_actionable_would_enter_count": 4,
-    "broader_would_enter_count": 5,
-    "high_priority_no_action_count": 3,
+    "broader_actionable_would_enter_count": 0,
+    "broader_would_enter_count": 1,
+    "high_priority_no_action_count": 4,
     "latest_observe_only_would_enter": {
-      "confidence": "0.65",
+      "confidence": "0.57",
       "not_live_signal": true,
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "SOL/USDT:USDT"
+      "side": "short",
+      "strategy_group_id": "RBR-001",
+      "symbol": "ADA/USDT:USDT"
     },
     "mainline_ready_signal_count": 0,
     "p0_state": "waiting_for_executable_fresh_signal",
@@ -175,7 +188,7 @@
     "capture_gap_audit": "strategy_capture_gap_audit_ready",
     "opportunity_review_work_loop": "review_work_loop_ready",
     "research_intake_review": "research_intake_review_ready",
-    "signal_coverage": "mainline_no_signal_broader_would_enter"
+    "signal_coverage": "mainline_no_signal_low_priority_broader_would_enter"
   },
   "status": "strategy_asset_state_ready",
   "strategy_asset_state": {

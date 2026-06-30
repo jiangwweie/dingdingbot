@@ -185,7 +185,7 @@
       "spread_liquidity_state.acceptable"
     ]
   },
-  "generated_at_utc": "2026-06-28T19:14:03.668223+00:00",
+  "generated_at_utc": "2026-06-30T01:54:24.155865+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-29T15:00:11.172000+00:00
+- 报告时间: 2026-06-30T01:54:29.153741+00:00
 - 当前阶段: 等待机会
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -32,12 +32,12 @@
 - BRF2 runtime signal facts: `brf2_runtime_signal_facts_ready`
 - BRF2 fact input / watcher tick: `是` / `是`
 - BRF2 runtime signal capture: `brf2_runtime_signal_capture_ready`
-- BRF2 signal state: `blocked_by_disable_fact`
-- BRF2 signal first blocker: `short_squeeze_risk_state_disable_active` / `market`
+- BRF2 signal state: `fresh_signal_absent`
+- BRF2 signal first blocker: `fresh_brf2_short_signal_absent` / `market`
 - BRF2 shadow candidate shape ready: `否`
 - BRF2 shadow candidate evidence: `brf2_shadow_candidate_evidence_waiting_for_fresh_signal`
 - BRF2 shadow evidence ready: `否`
-- BRF2 shadow evidence first blocker: `short_squeeze_risk_state_disable_active` / `market`
+- BRF2 shadow evidence first blocker: `fresh_brf2_short_signal_absent` / `market`
 - 三策略试验组合状态: `three_strategy_live_trial_portfolio_ready`
 - 三策略席位: `MPG-001, BRF2-001, SOR-001`
 - 三策略席位数: `3`
@@ -46,8 +46,8 @@
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - Tradeability Decision 状态: `tradeability_decision_ready`
 - Tradeability Decision Top: `BRF2-001` / `not_tradable_market_wait`
-- 第一阻断: `short_squeeze_risk_state_disable_active` / `market`
-- 下一检查点: `continue_brf2_armed_observation_until_disable_clears`
+- 第一阻断: `fresh_brf2_short_signal_absent` / `market`
+- 下一检查点: `continue_brf2_armed_observation_until_fresh_signal`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
 - Trial-grade 30d observation / action-time submit: `0` / `0`

@@ -42,7 +42,7 @@
       "live signal identity"
     ]
   },
-  "generated_at_ms": 1782674045151,
+  "generated_at_ms": 1782784465902,
   "l1_observe_replay_samples": [
     {
       "blocker_class": "review_only_warning",
@@ -69,7 +69,7 @@
         "L1 observe-only replay.",
         "Would-enter review evidence must not create shadow candidate, FinalGate, Operation Layer, or order authority."
       ],
-      "observed_at_ms": 1782674065151,
+      "observed_at_ms": 1782784485902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -118,7 +118,7 @@
       "notes": [
         "Compression did not contract enough before breakout."
       ],
-      "observed_at_ms": 1782674066151,
+      "observed_at_ms": 1782784486902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -168,7 +168,7 @@
         "False-breakout disable state is not mature enough for L2.",
         "This is observation evidence, not a blocker for MPG P0 live readiness."
       ],
-      "observed_at_ms": 1782674067151,
+      "observed_at_ms": 1782784487902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -217,7 +217,7 @@
       "notes": [
         "Missing compression context keeps the sample observe-only."
       ],
-      "observed_at_ms": 1782674068151,
+      "observed_at_ms": 1782784488902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -266,7 +266,7 @@
       "notes": [
         "Stale VCB observation cannot become L2 review evidence."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -316,7 +316,7 @@
         "L1 observe-only replay.",
         "Current broader preview long-side semantics conflict with the stronger short-revival research lane."
       ],
-      "observed_at_ms": 1782674075151,
+      "observed_at_ms": 1782784495902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -366,7 +366,7 @@
         "Research lead is short upper-range revival, while current local evaluator is long sweep.",
         "This case exists to keep the rewrite gap visible without changing runtime scope."
       ],
-      "observed_at_ms": 1782674076151,
+      "observed_at_ms": 1782784496902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -415,7 +415,7 @@
       "notes": [
         "No reclaim/rejection after sweep, so no observation candidate should be created."
       ],
-      "observed_at_ms": 1782674077151,
+      "observed_at_ms": 1782784497902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -464,7 +464,7 @@
       "notes": [
         "Missing range context keeps the sample observe-only."
       ],
-      "observed_at_ms": 1782674078151,
+      "observed_at_ms": 1782784498902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -513,7 +513,7 @@
       "notes": [
         "Stale LSR observation cannot become L2 review evidence."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -563,7 +563,7 @@
         "L1 observe-only replay.",
         "Rally-high protection shape is visible but cannot authorize a shadow candidate."
       ],
-      "observed_at_ms": 1782674085151,
+      "observed_at_ms": 1782784505902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -612,7 +612,7 @@
       "notes": [
         "Rally did not fail, so BRF should not create observation evidence."
       ],
-      "observed_at_ms": 1782674086151,
+      "observed_at_ms": 1782784506902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -662,7 +662,7 @@
         "Short-side rally failure can be right-tail, but squeeze risk must stay visible.",
         "This warning is review evidence, not a P0 live-order blocker."
       ],
-      "observed_at_ms": 1782674087151,
+      "observed_at_ms": 1782784507902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -711,7 +711,7 @@
       "notes": [
         "Missing rally context keeps BRF observe-only."
       ],
-      "observed_at_ms": 1782674088151,
+      "observed_at_ms": 1782784508902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -760,7 +760,7 @@
       "notes": [
         "Stale BRF observation cannot become L2 review evidence."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -812,7 +812,7 @@
         "L2 shadow candidate observation only.",
         "This can create review evidence but cannot enter FinalGate or Operation Layer."
       ],
-      "observed_at_ms": 1782674055151,
+      "observed_at_ms": 1782784475902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -861,7 +861,7 @@
       "notes": [
         "Bear trend context was not mature enough for would-enter."
       ],
-      "observed_at_ms": 1782674056151,
+      "observed_at_ms": 1782784476902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -910,7 +910,7 @@
       "notes": [
         "Short-side BTPC signal must stay blocked during strong-uptrend conflict."
       ],
-      "observed_at_ms": 1782674057151,
+      "observed_at_ms": 1782784477902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -959,7 +959,7 @@
       "notes": [
         "Missing OI/crowding context blocks L2 review readiness."
       ],
-      "observed_at_ms": 1782674058151,
+      "observed_at_ms": 1782784478902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1008,7 +1008,7 @@
       "notes": [
         "Stale BTPC observation cannot become shadow candidate evidence."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1036,7 +1036,7 @@
   ],
   "owner_summary": {
     "current_state": "signal_observation_replay_ready",
-    "next_action": "Use replay/synthetic rehearsal while P0 waits for a real fresh signal.",
+    "non_authority_checkpoint": "Use replay/synthetic rehearsal while P0 waits for a real fresh signal.",
     "owner_intervention_required": false,
     "summary_lines": [
       "MPG-001 replay corpus is available.",
@@ -1204,7 +1204,7 @@
         "Historical replay sample only.",
         "May exercise dry-run chain shape but is not a live market signal."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1253,7 +1253,7 @@
       "notes": [
         "Replay warning only; weak evidence is not a live-safety blocker."
       ],
-      "observed_at_ms": 1782674046151,
+      "observed_at_ms": 1782784466902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1302,7 +1302,7 @@
       "notes": [
         "Exercises fast exit review shape without live authority."
       ],
-      "observed_at_ms": 1782674047151,
+      "observed_at_ms": 1782784467902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1351,7 +1351,7 @@
       "notes": [
         "No candidate/auth should be generated in choppy replay."
       ],
-      "observed_at_ms": 1782674048151,
+      "observed_at_ms": 1782784468902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1400,7 +1400,7 @@
       "notes": [
         "Stale replay never reaches Operation Layer shape."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1449,7 +1449,7 @@
       "notes": [
         "RequiredFacts missing blocks prepare chain."
       ],
-      "observed_at_ms": 1782674049151,
+      "observed_at_ms": 1782784469902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1498,7 +1498,7 @@
       "notes": [
         "Conflict replay must not reach Operation Layer shape."
       ],
-      "observed_at_ms": 1782674050151,
+      "observed_at_ms": 1782784470902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1547,7 +1547,7 @@
       "notes": [
         "Protection-missing replay proves hard stop behavior."
       ],
-      "observed_at_ms": 1782674051151,
+      "observed_at_ms": 1782784471902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1615,7 +1615,7 @@
       "notes": [
         "No candidate/auth should be generated."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1664,7 +1664,7 @@
       "notes": [
         "Exercises the non-executing fast chain."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1713,7 +1713,7 @@
       "notes": [
         "Stale signal must not enter Operation Layer shape."
       ],
-      "observed_at_ms": 1782673745151,
+      "observed_at_ms": 1782784165902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1762,7 +1762,7 @@
       "notes": [
         "RequiredFacts gate blocks before prepare chain."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1811,7 +1811,7 @@
       "notes": [
         "Active position conflict blocks new real action."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1860,7 +1860,7 @@
       "notes": [
         "Open order conflict blocks duplicate exposure."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1909,7 +1909,7 @@
       "notes": [
         "Protection missing blocks live action."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,
@@ -1959,7 +1959,7 @@
         "Only selected StrategyGroup/symbol/side/profile boundary mismatch blocks.",
         "Generic risk aversion must not block in-boundary opportunities."
       ],
-      "observed_at_ms": 1782674045151,
+      "observed_at_ms": 1782784465902,
       "operation_layer_submit_allowed": false,
       "real_order_allowed": false,
       "replay_only": true,

@@ -49,7 +49,7 @@
     "reduce_only_recovery_standing_authorization_checked": true,
     "status": "ready"
   },
-  "generated_at_utc": "2026-06-29T11:49:51.126892+00:00",
+  "generated_at_utc": "2026-06-30T01:54:25.598499+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -196,19 +196,19 @@
     "state": "ready"
   },
   "source_paths": {
-    "baseline_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/RUNTIME_MONITOR_BASELINE.json",
-    "daily_check_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-daily-check.json",
-    "goal_progress_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.json",
-    "goal_progress_owner_progress_md": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-goal-progress.md",
-    "live_closure_evidence_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence.json",
-    "live_closure_evidence_verification_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence-verification.json",
-    "live_cutover_readiness_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-live-cutover-readiness.json",
-    "p0_completion_audit_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
-    "strategy_review_deep_dive_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json",
-    "strategy_review_evidence_closure_wave_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json",
-    "strategygroup_capital_trial_envelope_projection_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
-    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
-    "tier_policy_json": "/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+    "baseline_json": "/Users/jiangwei/Documents/final/docs/current/RUNTIME_MONITOR_BASELINE.json",
+    "daily_check_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
+    "goal_progress_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
+    "goal_progress_owner_progress_md": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.md",
+    "live_closure_evidence_json": "/Users/jiangwei/Documents/final/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence.json",
+    "live_closure_evidence_verification_json": "/Users/jiangwei/Documents/final/output/strategygroup-runtime-pilot/live-closure-evidence/runtime-live-closure-evidence-verification.json",
+    "live_cutover_readiness_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
+    "p0_completion_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+    "strategy_review_deep_dive_wave_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-review-only-deep-dive-wave.json",
+    "strategy_review_evidence_closure_wave_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-review-only-evidence-closure-wave.json",
+    "strategygroup_capital_trial_envelope_projection_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json",
+    "strategygroup_portfolio_board_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+    "tier_policy_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
   },
   "status": "waiting_for_market_monitor_refresh_needed",
   "strategy_review_deep_dive_boundary": {

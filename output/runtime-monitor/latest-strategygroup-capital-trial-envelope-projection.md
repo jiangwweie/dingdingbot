@@ -2,9 +2,9 @@
 
 - Status: trial_envelope_projection_ready
 - Projection status: trial_envelope_projection_ready
-- Generated: 2026-06-28T19:14:03.411295+00:00
-- Output JSON: /Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json
-- Trial Envelope v0 JSON: /Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
+- Generated: 2026-06-30T01:54:23.863033+00:00
+- Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-projection.json
+- Trial Envelope v0 JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
 - Selected non-MPG candidate: BRF2-001
 - Selected candidate status: short_experiment_evidence_pending_owner_policy
 - Trial envelope generated: 是

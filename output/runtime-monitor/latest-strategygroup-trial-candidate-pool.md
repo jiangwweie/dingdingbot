@@ -4,7 +4,7 @@
 - Candidate count: `3`
 - Trial eligible count: `1`
 - Live permission change count: `0`
-- Output: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md`
+- Output: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-candidate-pool.md`
 
 ## Candidates
 

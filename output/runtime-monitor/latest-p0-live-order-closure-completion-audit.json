@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-28T19:14:04.975474+00:00",
+  "generated_at_utc": "2026-06-30T01:54:25.708492+00:00",
   "goal_complete": false,
   "input_source_gaps": [],
   "input_sources": {
@@ -7,7 +7,7 @@
       "exists": true,
       "generated_at_ms": null,
       "generated_at_utc": "2026-06-24T14:36:25.635464+00:00",
-      "path": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-daily-check.json",
+      "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
       "schema": 13,
       "scope": "strategygroup_runtime_daily_check",
       "source_expected_runtime_head": "runtime-head-1",
@@ -16,9 +16,9 @@
     },
     "dry_run_audit": {
       "exists": true,
-      "generated_at_ms": 1782674042875,
+      "generated_at_ms": 1782784463250,
       "generated_at_utc": null,
-      "path": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
+      "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
       "schema": "brc.runtime_dry_run_audit_chain.v1",
       "scope": "runtime_dry_run_audit_chain",
       "source_expected_runtime_head": null,
@@ -28,8 +28,8 @@
     "goal_progress": {
       "exists": true,
       "generated_at_ms": null,
-      "generated_at_utc": "2026-06-28T19:14:04.885918+00:00",
-      "path": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-goal-progress.json",
+      "generated_at_utc": "2026-06-30T01:54:25.598499+00:00",
+      "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
       "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
       "scope": "strategygroup_runtime_goal_progress_audit",
       "source_expected_runtime_head": null,
@@ -38,9 +38,9 @@
     },
     "live_cutover": {
       "exists": true,
-      "generated_at_ms": 1782674043226,
+      "generated_at_ms": 1782784463642,
       "generated_at_utc": null,
-      "path": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-live-cutover-readiness.json",
+      "path": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-live-cutover-readiness.json",
       "schema": "brc.runtime_live_cutover_readiness.v1",
       "scope": "runtime_live_cutover_readiness",
       "source_expected_runtime_head": null,

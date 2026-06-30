@@ -1,7 +1,7 @@
 ## Runtime Replay Lab
 
 - 当前阶段: signal_observation_replay_ready
-- 当前动作: 本地 replay / synthetic 演练
+- 当前检查点: Use replay/synthetic rehearsal while P0 waits for a real fresh signal.
 - Owner 介入: 否
 - 服务器修改: 否
 - 接近真实订单: 否

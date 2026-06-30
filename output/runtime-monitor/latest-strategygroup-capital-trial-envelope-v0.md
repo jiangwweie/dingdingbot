@@ -8,7 +8,7 @@
 - Promotion scope: intake_only
 - Promotion target: paper_observation_or_experiment_evidence
 - Next checkpoint: BRF2-001_tiny_live_intake_evidence
-- Output JSON: /Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
+- Output JSON: /Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-capital-trial-envelope-v0.json
 - Live permission change: 否
 
 ## Boundary

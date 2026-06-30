@@ -4,8 +4,8 @@
 
 - Status: `strategy_asset_state_ready`
 - Current rows: `12`
-- High-priority no-action groups: `3`
-- No-action attribution rows: `3`
+- High-priority no-action groups: `4`
+- No-action attribution rows: `4`
 - Role review rows: `1`
 - Research intake groups: `2`
 - Single main product: `true`
@@ -34,9 +34,9 @@
 | --- | --- |
 | P0 | `waiting_for_executable_fresh_signal` |
 | Signal Observation | `observation_active` |
-| Broader would-enter | `5` |
-| High-priority no-action | `3` |
-| Latest observe-only would-enter | `MI-001` / `SOL/USDT:USDT` / `long` |
+| Broader would-enter | `1` |
+| High-priority no-action | `4` |
+| Latest observe-only would-enter | `RBR-001` / `ADA/USDT:USDT` / `short` |
 
 ## Role Review
 
@@ -48,6 +48,7 @@
 
 | StrategyGroup | Symbol | Class | Next |
 | --- | --- | --- | --- |
+| `BRF-001` | `BTC/USDT:USDT` | `market_structure_or_path_risk` | `BRF-001_market_structure_and_path_risk_review` |
 | `BTPC-001` | `AVAX/USDT:USDT` | `fact_source_or_freshness` | `BTPC-001_freshness_and_fact_source_mapping` |
 | `LSR-001` | `XRP/USDT:USDT` | `side_specific_rewrite` | `LSR-001_side_specific_rewrite_review` |
 | `VCB-001` | `LINK/USDT:USDT` | `classifier_or_threshold` | `VCB-001_classifier_threshold_review` |

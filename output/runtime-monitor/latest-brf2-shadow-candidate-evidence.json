@@ -1,15 +1,15 @@
 {
   "after_next_state": "armed_observation",
   "checks": {
-    "disable_facts_clear": false,
+    "disable_facts_clear": true,
     "required_facts_satisfied": false
   },
   "first_blocker": {
-    "class": "short_squeeze_risk_state_disable_active",
+    "class": "fresh_brf2_short_signal_absent",
     "owner": "market",
-    "repair_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
+    "repair_checkpoint": "continue_brf2_armed_observation_until_fresh_signal"
   },
-  "generated_at_utc": "2026-06-28T19:14:04.566103+00:00",
+  "generated_at_utc": "2026-06-30T01:54:25.243700+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -20,7 +20,7 @@
     "places_order": false,
     "remote_interaction_count": 0
   },
-  "next_runtime_step": "continue_brf2_armed_observation_until_disable_clears",
+  "next_runtime_step": "continue_brf2_armed_observation_until_fresh_signal",
   "safety_invariants": {
     "authorization_evidence_created": false,
     "calls_exchange_write": false,
@@ -39,8 +39,8 @@
       {
         "fact_key": "short_squeeze_risk_state",
         "fresh": true,
-        "raw_state": "red",
-        "state": "disable_active"
+        "raw_state": "bounded",
+        "state": "clear"
       },
       {
         "fact_key": "strong_reclaim_disable_state",
@@ -51,8 +51,8 @@
       {
         "fact_key": "rally_extension_invalidates_failure_state",
         "fresh": true,
-        "raw_state": "active",
-        "state": "disable_active"
+        "raw_state": "false",
+        "state": "clear"
       },
       {
         "fact_key": "liquidity_downshift_state",
@@ -96,20 +96,20 @@
       {
         "fact_key": "rally_context",
         "fresh": true,
-        "raw_state": "bear_or_weak_reclaim",
-        "state": "satisfied"
+        "raw_state": "not_satisfied",
+        "state": "not_satisfied"
       },
       {
         "fact_key": "rally_failure_trigger_state",
         "fresh": true,
-        "raw_state": "confirmed",
-        "state": "satisfied"
+        "raw_state": "not_confirmed",
+        "state": "not_satisfied"
       },
       {
         "fact_key": "short_squeeze_risk_state",
         "fresh": true,
-        "raw_state": "red",
-        "state": "not_satisfied"
+        "raw_state": "bounded",
+        "state": "satisfied"
       },
       {
         "fact_key": "strong_reclaim_disable_state",
@@ -134,10 +134,10 @@
     "shadow_candidate_evidence_type": "brf2_non_executing_short_signal_candidate_evidence",
     "side": "short",
     "signal_id": "brf2_short_rally_failure_fresh_signal_v1",
-    "signal_state": "blocked_by_disable_fact",
+    "signal_state": "fresh_signal_absent",
     "source_candidate_id": "BRF-001-BTC-SHORT",
-    "source_signal_observation_id": "BRF-001-BTC-SHORT:brf-9d221c462ba943dcc6370db0:1770039600000",
-    "source_signal_type": "would_enter",
+    "source_signal_observation_id": "BRF-001-BTC-SHORT:brf-4ec8dcb68345359621e85929:1779318000000",
+    "source_signal_type": "no_action",
     "source_strategy_group_id": "BRF-001",
     "strategy_group_id": "BRF2-001",
     "symbol": "BTC/USDT:USDT",

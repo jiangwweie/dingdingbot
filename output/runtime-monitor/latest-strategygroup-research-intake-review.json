@@ -232,7 +232,7 @@
       "tier_policy_change": false
     }
   ],
-  "generated_at_utc": "2026-06-28T19:14:03.363167Z",
+  "generated_at_utc": "2026-06-30T01:54:23.809336Z",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -303,7 +303,7 @@
   "scope": "main_control_research_intake_review_only",
   "source_status": {
     "candidate_count": 2,
-    "research_intake_json": "/Users/jiangwei/Documents/final-system-refactor-20260623/docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json",
+    "research_intake_json": "/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/research-intake-snapshots/tiny-live-intake-candidates.json",
     "source_forbidden_effects": [],
     "source_schema": "brc.strategy_research_tiny_live_intake_candidates.v1",
     "source_scope": "strategy_research_only",

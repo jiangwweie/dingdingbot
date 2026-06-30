@@ -1,8 +1,8 @@
 ## BRF2 Runtime Signal Facts
 
 - Status: `brf2_runtime_signal_facts_ready`
-- Generated: `2026-06-28T19:14:04.243301+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-brf2-runtime-signal-facts.json`
+- Generated: `2026-06-30T01:54:24.844827+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-runtime-signal-facts.json`
 - Fact input present: `是`
 - Watcher tick present: `是`
 - First blocker: `none` / `runtime`

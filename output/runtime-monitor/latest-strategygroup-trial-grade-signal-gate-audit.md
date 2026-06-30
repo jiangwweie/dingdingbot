@@ -1,8 +1,8 @@
 ## Trial-Grade Signal Gate Audit
 
 - Status: `trial_grade_signal_gate_audit_ready`
-- Generated: `2026-06-29T11:49:54.029294+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json`
+- Generated: `2026-06-30T01:54:28.869333+00:00`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-trial-grade-signal-gate-audit.json`
 - Scope: `controlled subaccount live scope`
 
 ## Summary

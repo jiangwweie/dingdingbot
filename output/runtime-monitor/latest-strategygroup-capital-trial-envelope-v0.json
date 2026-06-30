@@ -24,15 +24,15 @@
   ],
   "envelope_id": "trial-envelope-v0:BRF2-001:20260622",
   "evidence_refs": {
-    "capture_gap_audit": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
-    "portfolio_board": "/Users/jiangwei/Documents/final-system-refactor-20260623/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
+    "capture_gap_audit": "/Users/jiangwei/Documents/final/output/runtime-monitor/strategy-capture-gap-audit-20260622.json",
+    "portfolio_board": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-portfolio-board.json",
     "recent_opportunity_count": 11,
     "research_intake_position": "paper_observation_admission_candidate",
     "sampled_event_count": 11,
     "tradable_forward_count": 8,
     "would_enter_forward_positive_count": 8
   },
-  "generated_at_utc": "2026-06-28T19:14:03.411295+00:00",
+  "generated_at_utc": "2026-06-30T01:54:23.863033+00:00",
   "hypothesis": "BRF2-001 bear-rally-failure short has a research-intake paper observation asset with explicit path-risk evidence, RequiredFacts draft, disable/review facts, and risk envelope. It can be prepared as non-executing candidate-trade evidence, pending Owner policy scope and future official live gates.",
   "kill_conditions": [
     "owner_policy_not_accepted",

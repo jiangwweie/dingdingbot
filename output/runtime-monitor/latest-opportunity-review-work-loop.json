@@ -1,22 +1,22 @@
 {
   "counts": {
-    "blocking_gap_group_count": 3,
+    "blocking_gap_group_count": 2,
     "btpc_proxy_replay_quality_case_count": 5,
     "btpc_proxy_replay_quality_ready": 1,
     "btpc_proxy_replay_quality_revise_case_count": 3,
-    "coverage_pending_item_count": 10,
+    "coverage_pending_item_count": 4,
     "coverage_ready_item_count": 0,
     "forbidden_effect_count": 0,
     "l2_enabled_count": 1,
     "l4_scope_change_recommended_count": 0,
-    "observed_opportunity_count": 6,
+    "observed_opportunity_count": 2,
     "post_revision_replay_review_passed": 1,
-    "replay_covered_count": 2,
+    "replay_covered_count": 1,
     "revise_before_l2_count": 0,
-    "scheduled_work_queue_item_count": 12,
-    "strategy_asset_recommendation_count": 6,
+    "scheduled_work_queue_item_count": 5,
+    "strategy_asset_recommendation_count": 2,
     "strategy_asset_recommendation_pending_count": 0,
-    "work_queue_item_count": 16
+    "work_queue_item_count": 9
   },
   "interaction": {
     "approaches_real_order": false,
@@ -29,288 +29,6 @@
     "remote_interaction_count": 0
   },
   "opportunity_review_rows": [
-    {
-      "blocking_gaps_before_l2": [],
-      "candidate_or_finalgate_authority": false,
-      "classifier_repair_spec": {},
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "gap_work_items": [],
-      "l4_scope_change_recommended": false,
-      "next_checkpoint": "add_group_replay_corpus_and_would_enter_case",
-      "observed_signal": {
-        "confidence": "0.65",
-        "execution_boundary": "handoff classification required before observation",
-        "reason_codes": [
-          "mi001_12h_momentum_impulse",
-          "observe_only_review_required"
-        ],
-        "source": "signal_coverage_expansion_review",
-        "would_enter": true
-      },
-      "positive_evidence": [],
-      "replay_verification": {
-        "cost_review_fields_by_case": {},
-        "covered": false,
-        "fixture_cases": [],
-        "no_action_sample_count": 0,
-        "non_executing_boundary_ok": false,
-        "review_shape_present": false,
-        "revise_sample_count": 0,
-        "sample_count": 0,
-        "would_enter_sample_count": 0
-      },
-      "review_work_action": "build_replay_corpus_before_l2",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "SOL/USDT:USDT",
-      "tier_state": "missing_policy"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "candidate_or_finalgate_authority": false,
-      "classifier_repair_spec": {},
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "gap_work_items": [],
-      "l4_scope_change_recommended": false,
-      "next_checkpoint": "add_group_replay_corpus_and_would_enter_case",
-      "observed_signal": {
-        "confidence": "0.65",
-        "execution_boundary": "handoff classification required before observation",
-        "reason_codes": [
-          "mi001_12h_momentum_impulse",
-          "observe_only_review_required"
-        ],
-        "source": "signal_coverage_expansion_review",
-        "would_enter": true
-      },
-      "positive_evidence": [],
-      "replay_verification": {
-        "cost_review_fields_by_case": {},
-        "covered": false,
-        "fixture_cases": [],
-        "no_action_sample_count": 0,
-        "non_executing_boundary_ok": false,
-        "review_shape_present": false,
-        "revise_sample_count": 0,
-        "sample_count": 0,
-        "would_enter_sample_count": 0
-      },
-      "review_work_action": "build_replay_corpus_before_l2",
-      "side": "long",
-      "strategy_group_id": "MI-001",
-      "symbol": "BNB/USDT:USDT",
-      "tier_state": "missing_policy"
-    },
-    {
-      "blocking_gaps_before_l2": [],
-      "candidate_or_finalgate_authority": false,
-      "classifier_repair_spec": {},
-      "current_tier": "unclassified",
-      "economic_replay_spec": {},
-      "gap_work_items": [],
-      "l4_scope_change_recommended": false,
-      "next_checkpoint": "add_group_replay_corpus_and_would_enter_case",
-      "observed_signal": {
-        "confidence": "0.70",
-        "execution_boundary": "handoff classification required before observation",
-        "reason_codes": [
-          "cpm_long_htf_trend_intact",
-          "cpm_long_pullback_depth_normal",
-          "cpm_long_reclaim_confirmed"
-        ],
-        "source": "signal_coverage_expansion_review",
-        "would_enter": true
-      },
-      "positive_evidence": [],
-      "replay_verification": {
-        "cost_review_fields_by_case": {},
-        "covered": false,
-        "fixture_cases": [],
-        "no_action_sample_count": 0,
-        "non_executing_boundary_ok": false,
-        "review_shape_present": false,
-        "revise_sample_count": 0,
-        "sample_count": 0,
-        "would_enter_sample_count": 0
-      },
-      "review_work_action": "build_replay_corpus_before_l2",
-      "side": "long",
-      "strategy_group_id": "CPM-RO-001",
-      "symbol": "ETH/USDT:USDT",
-      "tier_state": "missing_policy"
-    },
-    {
-      "blocking_gaps_before_l2": [
-        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
-        "short_squeeze_risk_classifier_missing_from_runtime",
-        "separate_brf_l2_intake_dry_run_missing",
-        "cost_fill_slot_m2m_and_leverage_boundary_missing"
-      ],
-      "candidate_or_finalgate_authority": false,
-      "classifier_repair_spec": {},
-      "current_tier": "L1",
-      "economic_replay_spec": {},
-      "gap_work_items": [
-        {
-          "actionable_task": "BRF-001: rally_high_and_rejection_context_not_attached_to_runtime_facts; attach or model the missing required fact source for replay and readiness review.",
-          "blocks_l2_progression": true,
-          "completion_signal": "required fact gap removed or explicit non-blocking proxy documented",
-          "coverage_ready": false,
-          "coverage_status": "fact_source_pending",
-          "economic_spec": {},
-          "gap": "rally_high_and_rejection_context_not_attached_to_runtime_facts",
-          "next_stage_recommendation": "attach_fact_source_before_l2_review",
-          "owner_priority": "signal-observation-grade-medium",
-          "repair_spec": {},
-          "scheduled": true,
-          "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_l2_readiness_review.py --output-json output/runtime-monitor/latest-l2-readiness-review.json --output-owner-progress output/runtime-monitor/latest-l2-readiness-review.md",
-          "work_type": "required_fact_or_market_data_work"
-        },
-        {
-          "actionable_task": "BRF-001: short_squeeze_risk_classifier_missing_from_runtime; define the runtime classifier or disable-state rule that removes the false-positive path.",
-          "blocks_l2_progression": true,
-          "completion_signal": "classifier gap removed or downgraded to review-only warning",
-          "coverage_ready": false,
-          "coverage_status": "needs_replay_or_spec",
-          "economic_spec": {},
-          "gap": "short_squeeze_risk_classifier_missing_from_runtime",
-          "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-          "owner_priority": "signal-observation-grade-high",
-          "repair_spec": {},
-          "scheduled": true,
-          "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_l2_readiness_review.py --output-json output/runtime-monitor/latest-l2-readiness-review.json --output-owner-progress output/runtime-monitor/latest-l2-readiness-review.md",
-          "work_type": "classifier_or_rule_work"
-        },
-        {
-          "actionable_task": "BRF-001: separate_brf_l2_intake_dry_run_missing; resolve in strategy review before tier promotion.",
-          "blocks_l2_progression": true,
-          "completion_signal": "review work loop row no longer reports the gap",
-          "coverage_ready": false,
-          "coverage_status": "strategy_review_pending",
-          "economic_spec": {},
-          "gap": "separate_brf_l2_intake_dry_run_missing",
-          "next_stage_recommendation": "continue_observe_only_review",
-          "owner_priority": "signal-observation-grade-medium",
-          "repair_spec": {},
-          "scheduled": true,
-          "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_opportunity_review_work_loop.py --output-json output/runtime-monitor/latest-opportunity-review-work-loop.json --output-owner-progress output/runtime-monitor/latest-opportunity-review-work-loop.md",
-          "work_type": "strategy_review_work"
-        },
-        {
-          "actionable_task": "BRF-001: cost_fill_slot_m2m_and_leverage_boundary_missing; replay with cost, slippage, funding, fill slot, and leverage survival fields.",
-          "blocks_l2_progression": true,
-          "completion_signal": "cost/slippage/funding survival fields present in replay review",
-          "coverage_ready": false,
-          "coverage_status": "needs_replay_or_spec",
-          "economic_spec": {},
-          "gap": "cost_fill_slot_m2m_and_leverage_boundary_missing",
-          "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-          "owner_priority": "signal-observation-grade-high",
-          "repair_spec": {},
-          "scheduled": true,
-          "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/runtime-monitor/latest-runtime-replay-lab.json --output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md",
-          "work_type": "economic_replay_work"
-        }
-      ],
-      "l4_scope_change_recommended": false,
-      "next_checkpoint": "map_blocking_gaps_to_required_facts_or_classifier_tasks",
-      "observed_signal": {
-        "confidence": "0.64",
-        "execution_boundary": "observe-only; no candidate/order",
-        "reason_codes": [
-          "brf_bear_rally_extended",
-          "brf_rally_high_rejected",
-          "brf_short_squeeze_risk_reviewed"
-        ],
-        "source": "signal_coverage_expansion_review",
-        "would_enter": true
-      },
-      "positive_evidence": [
-        "runtime semantics builder already defines BRF-001 bear rally failure short entry and structure-extreme protection vocabulary",
-        "main-control runtime tier policy keeps BRF as a known new L1 observe-only group",
-        "BRF shares the short-continuation research track with BTPC but has not passed separate L2 intake"
-      ],
-      "replay_verification": {
-        "cost_review_fields_by_case": {
-          "bear_rally_failure_short_would_enter": [
-            "does_not_lower_owner_selected_leverage",
-            "fee_estimate_usdt",
-            "fill_slot_assumption",
-            "funding_impact_usdt",
-            "leverage_survival_note",
-            "min_qty_step_size_impact",
-            "net_edge_note",
-            "not_submit_authority",
-            "slippage_estimate_usdt"
-          ],
-          "missing_rally_context": [
-            "does_not_lower_owner_selected_leverage",
-            "fee_estimate_usdt",
-            "fill_slot_assumption",
-            "funding_impact_usdt",
-            "leverage_survival_note",
-            "min_qty_step_size_impact",
-            "net_edge_note",
-            "not_submit_authority",
-            "slippage_estimate_usdt"
-          ],
-          "no_signal_rally_not_failed": [
-            "does_not_lower_owner_selected_leverage",
-            "fee_estimate_usdt",
-            "fill_slot_assumption",
-            "funding_impact_usdt",
-            "leverage_survival_note",
-            "min_qty_step_size_impact",
-            "net_edge_note",
-            "not_submit_authority",
-            "slippage_estimate_usdt"
-          ],
-          "short_squeeze_risk_revision_needed": [
-            "does_not_lower_owner_selected_leverage",
-            "fee_estimate_usdt",
-            "fill_slot_assumption",
-            "funding_impact_usdt",
-            "leverage_survival_note",
-            "min_qty_step_size_impact",
-            "net_edge_note",
-            "not_submit_authority",
-            "slippage_estimate_usdt"
-          ],
-          "stale_signal": [
-            "does_not_lower_owner_selected_leverage",
-            "fee_estimate_usdt",
-            "fill_slot_assumption",
-            "funding_impact_usdt",
-            "leverage_survival_note",
-            "min_qty_step_size_impact",
-            "net_edge_note",
-            "not_submit_authority",
-            "slippage_estimate_usdt"
-          ]
-        },
-        "covered": true,
-        "fixture_cases": [
-          "bear_rally_failure_short_would_enter",
-          "missing_rally_context",
-          "no_signal_rally_not_failed",
-          "short_squeeze_risk_revision_needed",
-          "stale_signal"
-        ],
-        "no_action_sample_count": 1,
-        "non_executing_boundary_ok": true,
-        "review_shape_present": true,
-        "revise_sample_count": 3,
-        "sample_count": 5,
-        "would_enter_sample_count": 3
-      },
-      "review_work_action": "repair_blocking_gaps_with_replay_or_facts",
-      "side": "short",
-      "strategy_group_id": "BRF-001",
-      "symbol": "BTC/USDT:USDT",
-      "tier_state": "blocked_requiredfacts_and_squeeze_classifier_needed"
-    },
     {
       "blocking_gaps_before_l2": [
         "fixed_horizon_economic_result_negative",
@@ -621,10 +339,8 @@
     "tradeability_decision_source": false
   },
   "review_work_action_counts": {
-    "build_replay_corpus_before_l2": 3,
     "continue_l2_shadow_quality_review": 1,
-    "park_or_vocabulary_only": 1,
-    "repair_blocking_gaps_with_replay_or_facts": 1
+    "park_or_vocabulary_only": 1
   },
   "safety_invariants": {
     "exchange_write_called": false,
@@ -648,7 +364,7 @@
   "scope": "strategygroup_opportunity_review_work_loop",
   "source_status": {
     "btpc_proxy_replay_quality_review": "btpc_proxy_replay_quality_review_ready",
-    "expansion_review": "review_needed_broader_observe_only_would_enter",
+    "expansion_review": "low_priority_observe_only_would_enter_parked",
     "l2_intake": "l2_intake_dry_run_no_candidates",
     "l2_readiness": "l2_readiness_review_already_enabled",
     "post_revision_replay_review": "passed",
@@ -659,9 +375,7 @@
     "by_revision_execution_status": {},
     "by_revision_status": {},
     "by_strategy_asset_recommendation": {
-      "continue_observe_only_review": 1,
       "keep_l2_shadow_and_revise_fact_classifier_inputs": 1,
-      "needs_replay_before_asset_recommendation": 3,
       "park_until_new_edge": 1
     },
     "counts": {
@@ -676,7 +390,7 @@
       "economic_revision_task": 0,
       "keep_observing": 0,
       "l4_scope_change_recommended": 0,
-      "needs_replay": 3,
+      "needs_replay": 0,
       "park": 1,
       "real_order_authorized": 0,
       "remaining_revision_blocker": 0,
@@ -685,7 +399,7 @@
       "revision_executed": 0,
       "revision_ready": 0,
       "revision_task": 0,
-      "total": 6
+      "total": 2
     },
     "next_checkpoint": "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_review",
     "revision_completion": {
@@ -711,170 +425,6 @@
       "status": "no_revision_execution_required"
     },
     "rows": [
-      {
-        "btpc_proxy_replay_quality": {},
-        "candidate_or_finalgate_authority": false,
-        "current_tier": "unclassified",
-        "evidence": {
-          "blocking_gap_count": 0,
-          "btpc_proxy_replay_quality_case_count": 0,
-          "btpc_proxy_replay_quality_ready": false,
-          "btpc_proxy_replay_quality_revise_case_count": 0,
-          "btpc_proxy_reviewable_would_enter_count": 0,
-          "coverage_ready_item_count": 0,
-          "fact_source_pending_item_count": 0,
-          "parked_item_count": 0,
-          "replay_sample_count": 0,
-          "revise_sample_count": 0,
-          "strategy_asset_recommendation_pending_item_count": 0,
-          "would_enter_sample_count": 0
-        },
-        "next_stage": "add_replay_or_spec_coverage_before_l2",
-        "not_l2_promotion_authority": true,
-        "not_l4_scope_change": true,
-        "reason": "missing_local_replay_coverage",
-        "revision_completion": {
-          "completion_blockers": [],
-          "ready_count": 0,
-          "remaining_blocker_count": 0,
-          "status": "no_revision_required"
-        },
-        "revision_execution": {
-          "executed_count": 0,
-          "execution_blockers": [],
-          "remaining_execution_count": 0,
-          "status": "no_revision_execution_required"
-        },
-        "revision_ready_count": 0,
-        "revision_task_count": 0,
-        "revision_tasks": [],
-        "strategy_asset_recommendation": "needs_replay_before_asset_recommendation",
-        "strategy_group_id": "MI-001",
-        "tier_state": "missing_policy"
-      },
-      {
-        "btpc_proxy_replay_quality": {},
-        "candidate_or_finalgate_authority": false,
-        "current_tier": "unclassified",
-        "evidence": {
-          "blocking_gap_count": 0,
-          "btpc_proxy_replay_quality_case_count": 0,
-          "btpc_proxy_replay_quality_ready": false,
-          "btpc_proxy_replay_quality_revise_case_count": 0,
-          "btpc_proxy_reviewable_would_enter_count": 0,
-          "coverage_ready_item_count": 0,
-          "fact_source_pending_item_count": 0,
-          "parked_item_count": 0,
-          "replay_sample_count": 0,
-          "revise_sample_count": 0,
-          "strategy_asset_recommendation_pending_item_count": 0,
-          "would_enter_sample_count": 0
-        },
-        "next_stage": "add_replay_or_spec_coverage_before_l2",
-        "not_l2_promotion_authority": true,
-        "not_l4_scope_change": true,
-        "reason": "missing_local_replay_coverage",
-        "revision_completion": {
-          "completion_blockers": [],
-          "ready_count": 0,
-          "remaining_blocker_count": 0,
-          "status": "no_revision_required"
-        },
-        "revision_execution": {
-          "executed_count": 0,
-          "execution_blockers": [],
-          "remaining_execution_count": 0,
-          "status": "no_revision_execution_required"
-        },
-        "revision_ready_count": 0,
-        "revision_task_count": 0,
-        "revision_tasks": [],
-        "strategy_asset_recommendation": "needs_replay_before_asset_recommendation",
-        "strategy_group_id": "MI-001",
-        "tier_state": "missing_policy"
-      },
-      {
-        "btpc_proxy_replay_quality": {},
-        "candidate_or_finalgate_authority": false,
-        "current_tier": "unclassified",
-        "evidence": {
-          "blocking_gap_count": 0,
-          "btpc_proxy_replay_quality_case_count": 0,
-          "btpc_proxy_replay_quality_ready": false,
-          "btpc_proxy_replay_quality_revise_case_count": 0,
-          "btpc_proxy_reviewable_would_enter_count": 0,
-          "coverage_ready_item_count": 0,
-          "fact_source_pending_item_count": 0,
-          "parked_item_count": 0,
-          "replay_sample_count": 0,
-          "revise_sample_count": 0,
-          "strategy_asset_recommendation_pending_item_count": 0,
-          "would_enter_sample_count": 0
-        },
-        "next_stage": "add_replay_or_spec_coverage_before_l2",
-        "not_l2_promotion_authority": true,
-        "not_l4_scope_change": true,
-        "reason": "missing_local_replay_coverage",
-        "revision_completion": {
-          "completion_blockers": [],
-          "ready_count": 0,
-          "remaining_blocker_count": 0,
-          "status": "no_revision_required"
-        },
-        "revision_execution": {
-          "executed_count": 0,
-          "execution_blockers": [],
-          "remaining_execution_count": 0,
-          "status": "no_revision_execution_required"
-        },
-        "revision_ready_count": 0,
-        "revision_task_count": 0,
-        "revision_tasks": [],
-        "strategy_asset_recommendation": "needs_replay_before_asset_recommendation",
-        "strategy_group_id": "CPM-RO-001",
-        "tier_state": "missing_policy"
-      },
-      {
-        "btpc_proxy_replay_quality": {},
-        "candidate_or_finalgate_authority": false,
-        "current_tier": "L1",
-        "evidence": {
-          "blocking_gap_count": 4,
-          "btpc_proxy_replay_quality_case_count": 0,
-          "btpc_proxy_replay_quality_ready": false,
-          "btpc_proxy_replay_quality_revise_case_count": 0,
-          "btpc_proxy_reviewable_would_enter_count": 0,
-          "coverage_ready_item_count": 0,
-          "fact_source_pending_item_count": 1,
-          "parked_item_count": 0,
-          "replay_sample_count": 5,
-          "revise_sample_count": 3,
-          "strategy_asset_recommendation_pending_item_count": 0,
-          "would_enter_sample_count": 3
-        },
-        "next_stage": "continue_observe_only_review",
-        "not_l2_promotion_authority": true,
-        "not_l4_scope_change": true,
-        "reason": "insufficient_quality_decision_evidence",
-        "revision_completion": {
-          "completion_blockers": [],
-          "ready_count": 0,
-          "remaining_blocker_count": 0,
-          "status": "no_revision_required"
-        },
-        "revision_execution": {
-          "executed_count": 0,
-          "execution_blockers": [],
-          "remaining_execution_count": 0,
-          "status": "no_revision_execution_required"
-        },
-        "revision_ready_count": 0,
-        "revision_task_count": 0,
-        "revision_tasks": [],
-        "strategy_asset_recommendation": "continue_observe_only_review",
-        "strategy_group_id": "BRF-001",
-        "tier_state": "blocked_requiredfacts_and_squeeze_classifier_needed"
-      },
       {
         "btpc_proxy_replay_quality": {},
         "candidate_or_finalgate_authority": false,
@@ -1001,80 +551,32 @@
   },
   "work_queue": {
     "by_coverage_status": {
-      "fact_source_pending": 5,
-      "needs_replay_or_spec": 5,
+      "fact_source_pending": 4,
       "parked": 4,
-      "strategy_review_pending": 2
+      "strategy_review_pending": 1
     },
     "by_owner_priority": {
-      "signal-observation-grade-high": 7,
-      "signal-observation-grade-low": 4,
-      "signal-observation-grade-medium": 5
+      "signal-observation-grade-high": 5,
+      "signal-observation-grade-low": 4
     },
     "by_work_type": {
-      "classifier_or_rule_work": 1,
-      "economic_replay_work": 2,
-      "replay_corpus_work": 3,
-      "required_fact_or_market_data_work": 6,
+      "economic_replay_work": 1,
+      "required_fact_or_market_data_work": 5,
       "strategy_quality_review": 2,
-      "strategy_review_work": 2
+      "strategy_review_work": 1
     },
     "counts": {
-      "blocked_l2_progression": 11,
-      "coverage_pending": 10,
+      "blocked_l2_progression": 4,
+      "coverage_pending": 4,
       "coverage_ready": 0,
       "l4_scope_change_recommended": 0,
       "real_order_authorized": 0,
-      "scheduled": 12,
+      "scheduled": 5,
       "strategy_asset_recommendation_pending": 0,
-      "strategy_review_pending": 2,
-      "total": 16
+      "strategy_review_pending": 1,
+      "total": 9
     },
     "items": [
-      {
-        "actionable_task": "BRF-001: short_squeeze_risk_classifier_missing_from_runtime; define the runtime classifier or disable-state rule that removes the false-positive path.",
-        "blocks_l2_progression": true,
-        "completion_signal": "classifier gap removed or downgraded to review-only warning",
-        "coverage_ready": false,
-        "coverage_status": "needs_replay_or_spec",
-        "current_tier": "L1",
-        "economic_spec": {},
-        "gap": "short_squeeze_risk_classifier_missing_from_runtime",
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-        "owner_priority": "signal-observation-grade-high",
-        "queue_id": "BRF-001:classifier_or_rule_work:short-squeeze-risk-classifier-missing-from-runtime",
-        "repair_spec": {},
-        "review_work_action": "repair_blocking_gaps_with_replay_or_facts",
-        "scheduled": true,
-        "side": "short",
-        "strategy_group_id": "BRF-001",
-        "symbol": "BTC/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_l2_readiness_review.py --output-json output/runtime-monitor/latest-l2-readiness-review.json --output-owner-progress output/runtime-monitor/latest-l2-readiness-review.md",
-        "work_type": "classifier_or_rule_work"
-      },
-      {
-        "actionable_task": "BRF-001: cost_fill_slot_m2m_and_leverage_boundary_missing; replay with cost, slippage, funding, fill slot, and leverage survival fields.",
-        "blocks_l2_progression": true,
-        "completion_signal": "cost/slippage/funding survival fields present in replay review",
-        "coverage_ready": false,
-        "coverage_status": "needs_replay_or_spec",
-        "current_tier": "L1",
-        "economic_spec": {},
-        "gap": "cost_fill_slot_m2m_and_leverage_boundary_missing",
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-        "owner_priority": "signal-observation-grade-high",
-        "queue_id": "BRF-001:economic_replay_work:cost-fill-slot-m2m-and-leverage-boundary-missing",
-        "repair_spec": {},
-        "review_work_action": "repair_blocking_gaps_with_replay_or_facts",
-        "scheduled": true,
-        "side": "short",
-        "strategy_group_id": "BRF-001",
-        "symbol": "BTC/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/runtime-monitor/latest-runtime-replay-lab.json --output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md",
-        "work_type": "economic_replay_work"
-      },
       {
         "actionable_task": "BTPC-001: historical_global_long_short_ratio_window_missing; attach or model the missing required fact source for replay and readiness review.",
         "blocks_l2_progression": false,
@@ -1186,110 +688,6 @@
         "work_type": "strategy_review_work"
       },
       {
-        "actionable_task": "BRF-001: rally_high_and_rejection_context_not_attached_to_runtime_facts; attach or model the missing required fact source for replay and readiness review.",
-        "blocks_l2_progression": true,
-        "completion_signal": "required fact gap removed or explicit non-blocking proxy documented",
-        "coverage_ready": false,
-        "coverage_status": "fact_source_pending",
-        "current_tier": "L1",
-        "economic_spec": {},
-        "gap": "rally_high_and_rejection_context_not_attached_to_runtime_facts",
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "attach_fact_source_before_l2_review",
-        "owner_priority": "signal-observation-grade-medium",
-        "queue_id": "BRF-001:required_fact_or_market_data_work:rally-high-and-rejection-context-not-attached-to-runtime-facts",
-        "repair_spec": {},
-        "review_work_action": "repair_blocking_gaps_with_replay_or_facts",
-        "scheduled": true,
-        "side": "short",
-        "strategy_group_id": "BRF-001",
-        "symbol": "BTC/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_l2_readiness_review.py --output-json output/runtime-monitor/latest-l2-readiness-review.json --output-owner-progress output/runtime-monitor/latest-l2-readiness-review.md",
-        "work_type": "required_fact_or_market_data_work"
-      },
-      {
-        "actionable_task": "BRF-001: separate_brf_l2_intake_dry_run_missing; resolve in strategy review before tier promotion.",
-        "blocks_l2_progression": true,
-        "completion_signal": "review work loop row no longer reports the gap",
-        "coverage_ready": false,
-        "coverage_status": "strategy_review_pending",
-        "current_tier": "L1",
-        "economic_spec": {},
-        "gap": "separate_brf_l2_intake_dry_run_missing",
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "continue_observe_only_review",
-        "owner_priority": "signal-observation-grade-medium",
-        "queue_id": "BRF-001:strategy_review_work:separate-brf-l2-intake-dry-run-missing",
-        "repair_spec": {},
-        "review_work_action": "repair_blocking_gaps_with_replay_or_facts",
-        "scheduled": true,
-        "side": "short",
-        "strategy_group_id": "BRF-001",
-        "symbol": "BTC/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_strategygroup_opportunity_review_work_loop.py --output-json output/runtime-monitor/latest-opportunity-review-work-loop.json --output-owner-progress output/runtime-monitor/latest-opportunity-review-work-loop.md",
-        "work_type": "strategy_review_work"
-      },
-      {
-        "actionable_task": "CPM-RO-001: add non-executing replay corpus before any L2 intake decision.",
-        "blocks_l2_progression": true,
-        "completion_signal": "non-executing replay sample covers would-enter and no-action paths",
-        "coverage_ready": false,
-        "coverage_status": "needs_replay_or_spec",
-        "current_tier": "unclassified",
-        "gap": null,
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-        "owner_priority": "signal-observation-grade-medium",
-        "queue_id": "CPM-RO-001:replay_corpus_work:build-replay-corpus-before-l2",
-        "review_work_action": "build_replay_corpus_before_l2",
-        "scheduled": true,
-        "side": "long",
-        "strategy_group_id": "CPM-RO-001",
-        "symbol": "ETH/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/runtime-monitor/latest-runtime-replay-lab.json --output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md",
-        "work_type": "replay_corpus_work"
-      },
-      {
-        "actionable_task": "MI-001: add non-executing replay corpus before any L2 intake decision.",
-        "blocks_l2_progression": true,
-        "completion_signal": "non-executing replay sample covers would-enter and no-action paths",
-        "coverage_ready": false,
-        "coverage_status": "needs_replay_or_spec",
-        "current_tier": "unclassified",
-        "gap": null,
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-        "owner_priority": "signal-observation-grade-medium",
-        "queue_id": "MI-001:replay_corpus_work:build-replay-corpus-before-l2",
-        "review_work_action": "build_replay_corpus_before_l2",
-        "scheduled": true,
-        "side": "long",
-        "strategy_group_id": "MI-001",
-        "symbol": "SOL/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/runtime-monitor/latest-runtime-replay-lab.json --output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md",
-        "work_type": "replay_corpus_work"
-      },
-      {
-        "actionable_task": "MI-001: add non-executing replay corpus before any L2 intake decision.",
-        "blocks_l2_progression": true,
-        "completion_signal": "non-executing replay sample covers would-enter and no-action paths",
-        "coverage_ready": false,
-        "coverage_status": "needs_replay_or_spec",
-        "current_tier": "unclassified",
-        "gap": null,
-        "l4_scope_change_recommended": false,
-        "next_stage_recommendation": "add_replay_or_spec_coverage_before_l2",
-        "owner_priority": "signal-observation-grade-medium",
-        "queue_id": "MI-001:replay_corpus_work:build-replay-corpus-before-l2",
-        "review_work_action": "build_replay_corpus_before_l2",
-        "scheduled": true,
-        "side": "long",
-        "strategy_group_id": "MI-001",
-        "symbol": "BNB/USDT:USDT",
-        "validation_command": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/runtime-monitor/latest-runtime-replay-lab.json --output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md",
-        "work_type": "replay_corpus_work"
-      },
-      {
         "actionable_task": "RBR-001: calm_range_m2m_failed; keep parked unless new evidence appears.",
         "blocks_l2_progression": true,
         "completion_signal": "cost/slippage/funding survival fields present in replay review",
@@ -1378,7 +776,7 @@
         "work_type": "strategy_quality_review"
       }
     ],
-    "next_local_checkpoint": "repair_classifier_or_disable_state_gaps_for_lsr_vcb",
+    "next_local_checkpoint": "continue_btpc_l2_shadow_fact_quality_review",
     "safety_invariants": {
       "calls_exchange_write": false,
       "calls_finalgate": false,

@@ -2,7 +2,7 @@
 
 - Status: `brf2_owner_trial_policy_scope_recorded`
 - Generated: `2026-06-29T11:49:48.383084+00:00`
-- Output JSON: `/Users/jiangwei/Documents/final-system-refactor-staging-20260629-lean-v2/output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-brf2-owner-trial-policy-scope.json`
 - StrategyGroup: `BRF2-001`
 - Trial identity: `BRF2_CONTROLLED_SHORT_TRIAL_V0`
 - Policy recorded: `是`
