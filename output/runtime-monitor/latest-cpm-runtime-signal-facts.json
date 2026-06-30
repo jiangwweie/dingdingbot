@@ -1,13 +1,20 @@
 {
   "checks": {
     "action_time_facts_are_authority": false,
+    "detected_fresh_signal_count": 0,
+    "detector_source_is_real_candles": true,
     "fact_input_present": true,
+    "primary_fresh_signal_present": false,
+    "uses_readonly_cpm_proxy": false,
+    "uses_replay_signal_as_live_signal": false,
     "watcher_tick_present": true
   },
-  "fact_authority": "readonly_proxy_not_action_time_required_fact",
+  "detector_source_mode": "binance_usdm_public_closed_candles",
+  "fact_authority": "binance_usdm_public_candles_not_action_time_private_facts",
   "fact_authority_boundary": {
     "action_time_refresh_required": true,
-    "live_required_facts_authority": false
+    "live_required_facts_authority": false,
+    "replay_treated_as_live_signal": false
   },
   "fact_input_present": true,
   "facts": {
@@ -28,66 +35,66 @@
     },
     "funding_extreme": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "false"
     },
     "funding_not_extreme": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "ready"
     },
     "htf_trend_broken": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "false"
     },
     "htf_trend_intact": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "not_satisfied"
     },
     "invalidated_below_level": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "ready"
     },
     "liquidity_not_ok": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "false"
     },
     "liquidity_ok": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "ready"
     },
     "pullback_depth_abnormal": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "false"
     },
     "pullback_depth_normal": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
-      "status": "not_satisfied"
+      "source": "binance_usdm_public_closed_candles",
+      "status": "ready"
     },
     "reclaim_confirmed": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
-      "status": "not_confirmed"
+      "source": "binance_usdm_public_closed_candles",
+      "status": "not_satisfied"
     },
     "reclaim_failed_or_stale": {
       "fresh": true,
-      "source": "readonly_cpm_proxy",
+      "source": "binance_usdm_public_closed_candles",
       "status": "false"
     }
   },
   "first_blocker": {
-    "class": "none",
-    "owner": "runtime",
-    "repair_checkpoint": "run_cpm_runtime_signal_capture"
+    "class": "fresh_cpm_long_signal_absent",
+    "owner": "market",
+    "repair_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal"
   },
-  "generated_at_utc": "2026-06-30T06:41:28.598131+00:00",
+  "generated_at_utc": "2026-06-30T15:03:00.462274+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -97,6 +104,337 @@
     "mutates_remote_files": false,
     "places_order": false,
     "remote_interaction_count": 0
+  },
+  "live_detector": {
+    "detected_fresh_signal_count": 0,
+    "fresh_signal_present": false,
+    "missing_required_trigger_facts": [
+      "htf_trend_intact",
+      "reclaim_confirmed"
+    ],
+    "per_symbol_signal_facts": [
+      {
+        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_input_missing": false,
+        "first_blocker_class": "fresh_cpm_long_signal_absent",
+        "first_blocker_owner": "market",
+        "fresh_signal_present": false,
+        "missing_required_trigger_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "next_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal",
+        "symbol": "ETHUSDT",
+        "timeframe": "15m_closed",
+        "trigger_facts": {
+          "funding_not_extreme": {
+            "fresh": true,
+            "metrics": {
+              "last_funding_rate": "0.00001914"
+            },
+            "rule": "public_premium_index_funding_not_extreme",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "htf_trend_intact": {
+            "fresh": true,
+            "metrics": {
+              "close": 1562.85,
+              "trend_reference": 1583.9615
+            },
+            "rule": "close_above_4h_or_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          },
+          "invalidated_below_level": {
+            "fresh": true,
+            "metrics": {
+              "close": 1562.85,
+              "invalidation_level": 1549.16
+            },
+            "rule": "latest_close_above_recent_swing_low_invalidation_level",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "liquidity_ok": {
+            "fresh": true,
+            "metrics": {
+              "spread_bps": 0.0639
+            },
+            "rule": "public_contract_spread_min_notional_and_qty_step_ok",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "pullback_depth_normal": {
+            "fresh": true,
+            "metrics": {
+              "pullback_depth_pct": -1.9207
+            },
+            "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "reclaim_confirmed": {
+            "fresh": true,
+            "metrics": {
+              "close": 1562.85,
+              "prior_close": 1571.8,
+              "reference": 1591.1105
+            },
+            "rule": "latest_closed_15m_close_reclaimed_reference",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          }
+        }
+      },
+      {
+        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_input_missing": false,
+        "first_blocker_class": "fresh_cpm_long_signal_absent",
+        "first_blocker_owner": "market",
+        "fresh_signal_present": false,
+        "missing_required_trigger_facts": [
+          "reclaim_confirmed"
+        ],
+        "next_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal",
+        "symbol": "SOLUSDT",
+        "timeframe": "15m_closed",
+        "trigger_facts": {
+          "funding_not_extreme": {
+            "fresh": true,
+            "metrics": {
+              "last_funding_rate": "0.00005541"
+            },
+            "rule": "public_premium_index_funding_not_extreme",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "htf_trend_intact": {
+            "fresh": true,
+            "metrics": {
+              "close": 72.93,
+              "trend_reference": 72.53099999999999
+            },
+            "rule": "close_above_4h_or_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "invalidated_below_level": {
+            "fresh": true,
+            "metrics": {
+              "close": 72.93,
+              "invalidation_level": 71.85
+            },
+            "rule": "latest_close_above_recent_swing_low_invalidation_level",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "liquidity_ok": {
+            "fresh": true,
+            "metrics": {
+              "spread_bps": 1.368
+            },
+            "rule": "public_contract_spread_min_notional_and_qty_step_ok",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "pullback_depth_normal": {
+            "fresh": true,
+            "metrics": {
+              "pullback_depth_pct": -1.9881
+            },
+            "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "reclaim_confirmed": {
+            "fresh": true,
+            "metrics": {
+              "close": 72.93,
+              "prior_close": 73.61,
+              "reference": 74.1645
+            },
+            "rule": "latest_closed_15m_close_reclaimed_reference",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          }
+        }
+      },
+      {
+        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_input_missing": false,
+        "first_blocker_class": "fresh_cpm_long_signal_absent",
+        "first_blocker_owner": "market",
+        "fresh_signal_present": false,
+        "missing_required_trigger_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "next_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal",
+        "symbol": "AVAXUSDT",
+        "timeframe": "15m_closed",
+        "trigger_facts": {
+          "funding_not_extreme": {
+            "fresh": true,
+            "metrics": {
+              "last_funding_rate": "-0.00002417"
+            },
+            "rule": "public_premium_index_funding_not_extreme",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "htf_trend_intact": {
+            "fresh": true,
+            "metrics": {
+              "close": 6.445,
+              "trend_reference": 6.5155
+            },
+            "rule": "close_above_4h_or_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          },
+          "invalidated_below_level": {
+            "fresh": true,
+            "metrics": {
+              "close": 6.445,
+              "invalidation_level": 6.381
+            },
+            "rule": "latest_close_above_recent_swing_low_invalidation_level",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "liquidity_ok": {
+            "fresh": true,
+            "metrics": {
+              "spread_bps": 1.5461
+            },
+            "rule": "public_contract_spread_min_notional_and_qty_step_ok",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "pullback_depth_normal": {
+            "fresh": true,
+            "metrics": {
+              "pullback_depth_pct": -2.6424
+            },
+            "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "reclaim_confirmed": {
+            "fresh": true,
+            "metrics": {
+              "close": 6.445,
+              "prior_close": 6.496,
+              "reference": 6.6076
+            },
+            "rule": "latest_closed_15m_close_reclaimed_reference",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          }
+        }
+      },
+      {
+        "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
+        "candle_input_missing": false,
+        "first_blocker_class": "fresh_cpm_long_signal_absent",
+        "first_blocker_owner": "market",
+        "fresh_signal_present": false,
+        "missing_required_trigger_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "next_checkpoint": "continue_cpm_long_armed_observation_until_reclaim_signal",
+        "symbol": "SUIUSDT",
+        "timeframe": "15m_closed",
+        "trigger_facts": {
+          "funding_not_extreme": {
+            "fresh": true,
+            "metrics": {
+              "last_funding_rate": "-0.00004031"
+            },
+            "rule": "public_premium_index_funding_not_extreme",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "htf_trend_intact": {
+            "fresh": true,
+            "metrics": {
+              "close": 0.6865,
+              "trend_reference": 0.69245
+            },
+            "rule": "close_above_4h_or_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          },
+          "invalidated_below_level": {
+            "fresh": true,
+            "metrics": {
+              "close": 0.6865,
+              "invalidation_level": 0.6767
+            },
+            "rule": "latest_close_above_recent_swing_low_invalidation_level",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "liquidity_ok": {
+            "fresh": true,
+            "metrics": {
+              "spread_bps": 1.4543
+            },
+            "rule": "public_contract_spread_min_notional_and_qty_step_ok",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "pullback_depth_normal": {
+            "fresh": true,
+            "metrics": {
+              "pullback_depth_pct": -1.3247
+            },
+            "rule": "latest_low_within_normal_pullback_band_vs_1h_sma20",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "satisfied",
+            "value": true
+          },
+          "reclaim_confirmed": {
+            "fresh": true,
+            "metrics": {
+              "close": 0.6865,
+              "prior_close": 0.6922,
+              "reference": 0.6945
+            },
+            "rule": "latest_closed_15m_close_reclaimed_reference",
+            "source": "binance_usdm_public_closed_candles",
+            "status": "not_satisfied",
+            "value": false
+          }
+        }
+      }
+    ],
+    "primary_symbol": "ETHUSDT",
+    "source": "binance_usdm_public_closed_candles"
   },
   "path_id": "CPM-LONG",
   "safety_invariants": {
@@ -109,14 +447,37 @@
     "withdrawal_or_transfer_created": false
   },
   "schema": "brc.cpm_runtime_signal_facts.v1",
-  "scope": "cpm_runtime_signal_facts_read_model",
+  "scope": "cpm_runtime_signal_facts_live_detector_read_model",
   "source_signal_context": {
+    "candle_close_time_utc": "2026-06-30T14:59:59.999000+00:00",
     "signal_id": "cpm_long_pullback_reclaim_signal_v1",
-    "source": "cpm_runtime_readonly_proxy",
-    "source_signal_type": "no_action",
-    "symbol": ""
+    "source": "binance_usdm_public_closed_candles",
+    "source_signal_type": "live_detector_readonly",
+    "symbol": "ETHUSDT",
+    "timeframe": "15m_closed"
   },
   "status": "cpm_runtime_signal_facts_ready",
   "strategy_group_id": "CPM-RO-001",
+  "watcher_scope": {
+    "expanded_readonly_symbol_scope": [
+      "SOLUSDT",
+      "AVAXUSDT",
+      "SUIUSDT"
+    ],
+    "primary_live_submit_symbol_scope": [
+      "ETHUSDT"
+    ],
+    "symbol_scope": [
+      "ETHUSDT",
+      "SOLUSDT",
+      "AVAXUSDT",
+      "SUIUSDT"
+    ],
+    "timeframes": [
+      "15m",
+      "1h",
+      "4h"
+    ]
+  },
   "watcher_tick_present": true
 }

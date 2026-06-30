@@ -1313,9 +1313,28 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    binance_usdm_public_facts_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/fetch_binance_usdm_public_facts.py"),
+        "--output-json",
+        str(binance_usdm_public_facts_json),
+        "--output-owner-progress",
+        str(binance_usdm_public_facts_md),
+    ]
+    steps.append(
+        _run_step(
+            "binance_usdm_public_facts",
+            binance_usdm_public_facts_command,
+            binance_usdm_public_facts_json,
+            runner,
+        )
+    )
+
     cpm_runtime_signal_facts_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_cpm_runtime_signal_facts.py"),
+        "--public-facts-json",
+        str(binance_usdm_public_facts_json),
         "--output-json",
         str(cpm_runtime_signal_facts_json),
         "--output-owner-progress",
@@ -1394,23 +1413,6 @@ def build_local_monitor_sequence_report(
             "cpm_dry_run_submit_rehearsal",
             cpm_dry_run_submit_rehearsal_command,
             cpm_dry_run_submit_rehearsal_json,
-            runner,
-        )
-    )
-
-    binance_usdm_public_facts_command = [
-        sys.executable,
-        str(REPO_ROOT / "scripts/fetch_binance_usdm_public_facts.py"),
-        "--output-json",
-        str(binance_usdm_public_facts_json),
-        "--output-owner-progress",
-        str(binance_usdm_public_facts_md),
-    ]
-    steps.append(
-        _run_step(
-            "binance_usdm_public_facts",
-            binance_usdm_public_facts_command,
-            binance_usdm_public_facts_json,
             runner,
         )
     )

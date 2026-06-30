@@ -3,12 +3,12 @@
 - Status: `binance_usdm_public_facts_ready`
 - Ready symbols: `5` / `5`
 - Remote interactions: `0`
-- Output JSON: `output/runtime-monitor/latest-binance-usdm-public-facts.json`
+- Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-binance-usdm-public-facts.json`
 
 | Symbol | Ready | Spread bps | Funding | Min notional | Qty step |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `BTCUSDT` | `true` | `0.017` | `0.00004448` | `50` | `0.001` |
-| `ETHUSDT` | `true` | `0.064` | `0.00001706` | `20` | `0.001` |
-| `SOLUSDT` | `true` | `1.3753` | `0.00002891` | `5` | `0.01` |
-| `AVAXUSDT` | `true` | `1.5479` | `-0.00003136` | `5` | `1` |
-| `SUIUSDT` | `true` | `1.4562` | `-0.00003949` | `5` | `0.1` |
+| `BTCUSDT` | `true` | `0.0171` | `0.00003399` | `50` | `0.001` |
+| `ETHUSDT` | `true` | `0.0639` | `0.00001914` | `20` | `0.001` |
+| `SOLUSDT` | `true` | `1.368` | `0.00005541` | `5` | `0.01` |
+| `AVAXUSDT` | `true` | `1.5461` | `-0.00002417` | `5` | `1` |
+| `SUIUSDT` | `true` | `1.4543` | `-0.00004031` | `5` | `0.1` |

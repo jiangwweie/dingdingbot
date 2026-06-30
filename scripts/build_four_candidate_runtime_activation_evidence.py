@@ -382,7 +382,12 @@ def _cpm_fresh_path_artifact(
         for symbol in symbols
     ]
     public_ready = all(row["public_facts_ready"] is True for row in symbol_rows)
-    signal_state = str(cpm_capture.get("current_signal_state") or "")
+    cpm_preview = _as_dict(cpm_capture.get("signal_detector_preview"))
+    signal_state = str(
+        cpm_capture.get("current_signal_state")
+        or cpm_preview.get("current_signal_state")
+        or ""
+    )
     fresh_signal_present = signal_state == "fresh_signal_present"
     return {
         "schema": "brc.cpm_fresh_signal_live_path_readiness.v1",
@@ -616,6 +621,10 @@ def _read_optional_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
