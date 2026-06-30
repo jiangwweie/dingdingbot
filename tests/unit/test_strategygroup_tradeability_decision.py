@@ -129,6 +129,36 @@ def _capital_trial_envelope_projection() -> dict:
     }
 
 
+def _capital_trial_envelope_projection_with_cpm_stale_blockers() -> dict:
+    packet = _capital_trial_envelope_projection()
+    packet["capital_trial_eligibility_rows"].append(
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "candidate_family": "pullback_momentum",
+            "candidate_status": "identity_review_before_trial_prepare",
+            "identity_status": "registry_identity_unresolved",
+            "execution_tier": "unknown",
+            "side_scope": ["long"],
+            "recent_opportunity_count": 18,
+            "would_enter_forward_positive_count": 13,
+            "tradable_forward_count": 13,
+            "ranking_score": 161,
+            "trial_recommendation": "defer_until_identity_or_merge_review_closed",
+            "trial_blockers": [
+                "would_enter_forward_outcome_pending:24h",
+                "registry_identity_unresolved",
+                "owner_capital_scope_not_confirmed",
+                "fresh_signal_absent",
+                "action_time_finalgate_not_reached",
+                "official_operation_layer_not_reached",
+            ],
+            "actionable_now": False,
+            "real_order_authority": False,
+        }
+    )
+    return packet
+
+
 def _registry() -> dict:
     return {
         "status": "registry_ready",
@@ -1209,7 +1239,9 @@ def test_cpm_fact_chain_promotes_to_armed_market_wait_only_after_closure():
     module = _load_module()
 
     packet = module.build_tradeability_decision(
-        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        capital_trial_envelope_projection=(
+            _capital_trial_envelope_projection_with_cpm_stale_blockers()
+        ),
         registry=_registry_with_cpm_trial_asset(),
         tier_policy=_tier_policy_with_cpm_armed_observation(),
         signal_coverage=_signal_coverage(),
@@ -1251,6 +1283,24 @@ def test_cpm_fact_chain_promotes_to_armed_market_wait_only_after_closure():
     )
     assert cpm["runtime_scope_status"]["cpm_current_signal_state"] == (
         "fresh_signal_absent"
+    )
+    cpm_secondary = {row["blocker"] for row in cpm["secondary_blockers"]}
+    cpm_resolved = {row["blocker"] for row in cpm["resolved_blockers"]}
+    assert cpm["secondary_blockers"] == []
+    assert "registry_identity_unresolved" not in cpm_secondary
+    assert "owner_capital_scope_not_confirmed" not in cpm_secondary
+    assert "registry_identity_unresolved" in cpm_resolved
+    assert "owner_capital_scope_not_confirmed" in cpm_resolved
+    assert all(
+        row["resolved_by"] == "cpm_registry_identity_and_owner_trial_policy"
+        for row in cpm["resolved_blockers"]
+    )
+    assert cpm["evidence_snapshot"]["candidate_status"] == "armed_observation"
+    assert cpm["evidence_snapshot"]["trial_recommendation"] == (
+        "continue_cpm_long_armed_observation_until_fresh_signal"
+    )
+    assert "defer_until_identity_or_merge_review_closed" not in (
+        cpm["evidence_snapshot"]["trial_recommendation"]
     )
     assert cpm_long["side"] == "long"
     assert cpm_long["required_facts_mapping_status"] == "ready"

@@ -1099,13 +1099,13 @@
       "can_trade_now": false,
       "decision": "not_tradable_market_wait",
       "evidence_snapshot": {
-        "candidate_status": "identity_review_before_trial_prepare",
+        "candidate_status": "armed_observation",
         "latest_observe_only_side": "",
         "latest_observe_only_symbol": "",
         "ranking_score": 161,
         "recent_opportunity_count": 18,
         "tradable_forward_count": 13,
-        "trial_recommendation": "defer_until_identity_or_merge_review_closed",
+        "trial_recommendation": "continue_cpm_long_armed_observation_until_fresh_signal",
         "would_enter_forward_positive_count": 13
       },
       "first_blocker_class": "fresh_cpm_long_signal_absent",
@@ -1148,7 +1148,18 @@
         "valid_until": "one_review_cycle"
       },
       "required_facts_status": "ready",
-      "resolved_blockers": [],
+      "resolved_blockers": [
+        {
+          "blocker": "registry_identity_unresolved",
+          "class": "asset_admission",
+          "resolved_by": "cpm_registry_identity_and_owner_trial_policy"
+        },
+        {
+          "blocker": "owner_capital_scope_not_confirmed",
+          "class": "policy",
+          "resolved_by": "cpm_registry_identity_and_owner_trial_policy"
+        }
+      ],
       "runtime_safety_reference": {
         "execution_attempt_required_for_lifecycle_entry": true,
         "live_submit_ready": false,
@@ -1179,32 +1190,7 @@
         "trial_envelope_id": "three_strategy_live_trial_envelope_v1",
         "trial_envelope_primary": false
       },
-      "secondary_blockers": [
-        {
-          "blocker": "would_enter_forward_outcome_pending:24h",
-          "class": "facts"
-        },
-        {
-          "blocker": "registry_identity_unresolved",
-          "class": "asset_admission"
-        },
-        {
-          "blocker": "owner_capital_scope_not_confirmed",
-          "class": "policy"
-        },
-        {
-          "blocker": "fresh_signal_absent",
-          "class": "market"
-        },
-        {
-          "blocker": "action_time_finalgate_not_reached",
-          "class": "execution_gate"
-        },
-        {
-          "blocker": "official_operation_layer_not_reached",
-          "class": "execution_gate"
-        }
-      ],
+      "secondary_blockers": [],
       "signal_grade_status": {
         "controlled_live_standby_ready": false,
         "stage_5_waiting_live_opportunity_ready": false,
@@ -1743,7 +1729,7 @@
       "trade_paths": []
     }
   ],
-  "generated_at_utc": "2026-06-30T03:27:36.405078+00:00",
+  "generated_at_utc": "2026-06-30T03:54:00.283603+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,

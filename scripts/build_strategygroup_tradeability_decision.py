@@ -562,10 +562,21 @@ def _decision_row(
         admission_proposal.get("owner_policy_recorded") is True
         and admission_proposal.get("owner_policy_scope_missing") is False
     )
+    cpm_admission_policy_closed = (
+        strategy_group_id == "CPM-RO-001"
+        and registry_present
+        and tier_present
+        and owner_policy_recorded
+        and cpm_identity_routing_decision.get("identity_decision")
+        == "standalone_trial_asset"
+        and cpm_identity_routing_decision.get("cpm_long_vs_mpg_long_distinct")
+        is True
+    )
     resolved_blockers = _resolved_blockers(
         blockers,
         strategy_group_id=strategy_group_id,
         owner_policy_recorded=owner_policy_recorded,
+        cpm_admission_policy_closed=cpm_admission_policy_closed,
     )
     signal_grade_status = _signal_grade_status(
         strategy_group_id=strategy_group_id,
@@ -620,6 +631,8 @@ def _decision_row(
             blockers,
             classifier,
             resolved_blockers,
+            strategy_group_id=strategy_group_id,
+            cpm_admission_policy_closed=cpm_admission_policy_closed,
         ),
         "resolved_blockers": resolved_blockers,
         "policy_scope": policy_scope,
@@ -671,18 +684,13 @@ def _decision_row(
             ),
         },
         "signal_grade_status": signal_grade_status,
-        "evidence_snapshot": {
-            "recent_opportunity_count": _int(candidate.get("recent_opportunity_count")),
-            "would_enter_forward_positive_count": _int(
-                candidate.get("would_enter_forward_positive_count")
-            ),
-            "tradable_forward_count": _int(candidate.get("tradable_forward_count")),
-            "ranking_score": _int(candidate.get("ranking_score")),
-            "candidate_status": str(candidate.get("candidate_status") or ""),
-            "trial_recommendation": str(candidate.get("trial_recommendation") or ""),
-            "latest_observe_only_symbol": str(observed_row.get("symbol") or ""),
-            "latest_observe_only_side": str(observed_row.get("side") or ""),
-        },
+        "evidence_snapshot": _evidence_snapshot(
+            strategy_group_id=strategy_group_id,
+            candidate=candidate,
+            observed_row=observed_row,
+            cpm_admission_policy_closed=cpm_admission_policy_closed,
+            classifier=classifier,
+        ),
         "runtime_safety_reference": runtime_safety_reference,
         "authority_boundary": (
             "tradeability_decision_is_read_model; runtime_safety_state_reports_live_submit_ready_for_strategy; execution_attempt_required_for_lifecycle_entry"
@@ -2227,11 +2235,21 @@ def _secondary_blockers(
     blockers: list[str],
     classifier: dict[str, str],
     resolved_blockers: list[dict[str, str]] | None = None,
+    *,
+    strategy_group_id: str = "",
+    cpm_admission_policy_closed: bool = False,
 ) -> list[dict[str, str]]:
     resolved = {row["blocker"] for row in resolved_blockers or []}
     rows: list[dict[str, str]] = []
     for blocker in blockers:
         if blocker in resolved:
+            continue
+        if (
+            strategy_group_id == "CPM-RO-001"
+            and cpm_admission_policy_closed
+            and classifier["decision"] == "not_tradable_market_wait"
+            and _cpm_market_wait_secondary_blocker_suppressed(blocker)
+        ):
             continue
         klass = _class_for_blocker(blocker)
         if klass == classifier["first_blocker_class"]:
@@ -2245,17 +2263,29 @@ def _resolved_blockers(
     *,
     strategy_group_id: str,
     owner_policy_recorded: bool,
+    cpm_admission_policy_closed: bool = False,
 ) -> list[dict[str, str]]:
-    if strategy_group_id != "BRF2-001" or not owner_policy_recorded:
-        return []
     rows: list[dict[str, str]] = []
+    if strategy_group_id == "BRF2-001" and owner_policy_recorded:
+        for blocker in blockers:
+            if _owner_policy_blocker_resolved_by_brf2_scope(blocker):
+                rows.append(
+                    {
+                        "blocker": blocker,
+                        "class": "policy",
+                        "resolved_by": "brf2_owner_trial_policy_scope",
+                    }
+                )
+        return rows
+    if strategy_group_id != "CPM-RO-001" or not cpm_admission_policy_closed:
+        return []
     for blocker in blockers:
-        if _owner_policy_blocker_resolved_by_brf2_scope(blocker):
+        if _cpm_admission_policy_blocker_resolved(blocker):
             rows.append(
                 {
                     "blocker": blocker,
-                    "class": "policy",
-                    "resolved_by": "brf2_owner_trial_policy_scope",
+                    "class": _class_for_blocker(blocker),
+                    "resolved_by": "cpm_registry_identity_and_owner_trial_policy",
                 }
             )
     return rows
@@ -2271,6 +2301,63 @@ def _owner_policy_blocker_resolved_by_brf2_scope(blocker: str) -> bool:
         "trial_identity_not_confirmed",
     )
     return any(token in lowered for token in resolved_tokens)
+
+
+def _cpm_admission_policy_blocker_resolved(blocker: str) -> bool:
+    lowered = blocker.lower()
+    resolved_tokens = (
+        "registry_identity_unresolved",
+        "identity_or_merge_review",
+        "identity_review",
+        "owner_capital_scope_not_confirmed",
+        "owner_trial_identity_not_confirmed",
+        "owner_policy_scope_not_confirmed",
+        "capital_scope_not_confirmed",
+        "trial_identity_not_confirmed",
+    )
+    return any(token in lowered for token in resolved_tokens)
+
+
+def _cpm_market_wait_secondary_blocker_suppressed(blocker: str) -> bool:
+    lowered = blocker.lower()
+    suppressed_tokens = (
+        "would_enter_forward_outcome_pending",
+        "fresh_signal_absent",
+        "action_time_finalgate_not_reached",
+        "official_operation_layer_not_reached",
+    )
+    return any(token in lowered for token in suppressed_tokens)
+
+
+def _evidence_snapshot(
+    *,
+    strategy_group_id: str,
+    candidate: dict[str, Any],
+    observed_row: dict[str, Any],
+    cpm_admission_policy_closed: bool,
+    classifier: dict[str, str],
+) -> dict[str, Any]:
+    candidate_status = str(candidate.get("candidate_status") or "")
+    trial_recommendation = str(candidate.get("trial_recommendation") or "")
+    if (
+        strategy_group_id == "CPM-RO-001"
+        and cpm_admission_policy_closed
+        and classifier["decision"] == "not_tradable_market_wait"
+    ):
+        candidate_status = "armed_observation"
+        trial_recommendation = "continue_cpm_long_armed_observation_until_fresh_signal"
+    return {
+        "recent_opportunity_count": _int(candidate.get("recent_opportunity_count")),
+        "would_enter_forward_positive_count": _int(
+            candidate.get("would_enter_forward_positive_count")
+        ),
+        "tradable_forward_count": _int(candidate.get("tradable_forward_count")),
+        "ranking_score": _int(candidate.get("ranking_score")),
+        "candidate_status": candidate_status,
+        "trial_recommendation": trial_recommendation,
+        "latest_observe_only_symbol": str(observed_row.get("symbol") or ""),
+        "latest_observe_only_side": str(observed_row.get("side") or ""),
+    }
 
 
 def _class_for_blocker(blocker: str) -> str:
