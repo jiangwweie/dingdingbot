@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T09:24:15.126070+00:00
+- 报告时间: 2026-06-30T10:15:18.895002+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -60,9 +60,10 @@
 - CPM synthetic candidate/action-time shape: `是` / `是`
 - CPM synthetic FinalGate/Operation Layer paper: `是` / `是`
 - CPM synthetic authority fail-closed: `是`
-- Four-candidate activation closure: `four_candidate_runtime_activation_closure_ready`
-- P0/P1 activation closed: `是` / `是`
-- Scope/watcher/facts/candidate/rehearsal/boundary ready: `4` / `4` / `3` / `3` / `3` / `3`
+- Four-candidate activation contract: `four_candidate_runtime_activation_contract_ready`
+- P0/P1 contract declared: `是` / `是`
+- P0/P1 runtime artifacts ready: `否` / `否`
+- Contract/runtime/scope/watcher/facts/candidate/rehearsal/boundary ready: `4` / `1` / `4` / `1` / `1` / `1` / `1` / `1`
 - MI formal replay review opened: `1`
 - Activation venue basis/match: `coinbase_spot_proxy` / `否`
 - Activation next checkpoint: `attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols`
@@ -109,7 +110,7 @@
 | cpm_runtime_signal_capture | cpm_runtime_signal_capture_ready | 0 |
 | cpm_shadow_candidate_evidence | cpm_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
 | cpm_dry_run_submit_rehearsal | cpm_dry_run_submit_rehearsal_shape_ready | 0 |
-| four_candidate_runtime_activation_closure | four_candidate_runtime_activation_closure_ready | 0 |
+| four_candidate_runtime_activation_closure | four_candidate_runtime_activation_contract_ready | 0 |
 | goal_progress | ready | 0 |
 | completion_audit | not_complete_waiting_for_market | 0 |
 | replay_lab | passed | 0 |

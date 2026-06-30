@@ -1,9 +1,10 @@
-## Four-Candidate Runtime Activation Closure
+## Four-Candidate Runtime Activation Contract
 
-- Status: `four_candidate_runtime_activation_closure_ready`
-- P0 closed: `是`
-- P1 closed: `是`
-- Action-time boundary ready rows: `3`
+- Status: `four_candidate_runtime_activation_contract_ready`
+- P0 contract declared: `是`
+- P1 contract declared: `是`
+- Runtime artifact ready rows: `1`
+- Action-time boundary ready rows: `1`
 - Live-submit allowed: `0`
 - Venue basis: `coinbase_spot_proxy`
 - Execution venue match: `false`
@@ -11,14 +12,15 @@
 
 ## Activation Rows
 
-| Priority | Strategy | Watcher symbols | Expanded read-only symbols | Boundary ready | Next blocker |
-| --- | --- | --- | --- | ---: | --- |
-| `P0` | `CPM-RO-001` | `ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `fresh_cpm_long_signal_absent_or_action_time_facts` |
-| `P0` | `MPG-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `strong_symbol_action_time_facts_not_live_collected` |
-| `P1` | `SOR-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT` | `SOLUSDT, AVAXUSDT` | `true` | `session_breakout_action_time_facts_not_live_collected` |
-| `P1` | `MI-001` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `false` | `formal_registry_admission_not_requested_for_mi` |
+| Priority | Strategy | Watcher symbols | Expanded read-only symbols | Runtime artifact ready | Boundary ready | Next blocker |
+| --- | --- | --- | --- | ---: | ---: | --- |
+| `P0` | `CPM-RO-001` | `ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `true` | `true` | `fresh_cpm_long_signal_absent_or_action_time_facts` |
+| `P0` | `MPG-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT, SUIUSDT` | `SOLUSDT, AVAXUSDT, SUIUSDT` | `false` | `false` | `runtime_watcher_facts_rehearsal_artifact_missing` |
+| `P1` | `SOR-001` | `BTCUSDT, ETHUSDT, SOLUSDT, AVAXUSDT` | `SOLUSDT, AVAXUSDT` | `false` | `false` | `runtime_watcher_facts_rehearsal_artifact_missing` |
+| `P1` | `MI-001` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `AVAXUSDT, ETHUSDT, SOLUSDT, SUIUSDT` | `false` | `false` | `formal_registry_admission_not_requested_for_mi` |
 
 ## Boundary
 
-- Replay and watcher contracts are not live signals.
+- Replay and declared watcher contracts are not live signals.
+- MPG/SOR declared contracts do not count as runtime-ready without watcher, RequiredFacts, and rehearsal artifacts.
 - No live profile change, order-sizing change, FinalGate call, Operation Layer call, exchange write, or order creation.

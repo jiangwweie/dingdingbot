@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build runtime activation closure for replay-discovered P0/P1 paths.
+"""Build runtime activation contract for replay-discovered P0/P1 paths.
 
 The artifact turns recent replay findings into non-authority runtime work:
 watcher scope contracts, RequiredFacts contracts, candidate-evidence shape, and
-fresh-signal rehearsal readiness. It does not change live profile, order sizing,
-FinalGate, Operation Layer, exchange state, or real-order authority.
+fresh-signal rehearsal readiness. Readiness is counted only when backed by a
+runtime artifact. It does not change live profile, order sizing, FinalGate,
+Operation Layer, exchange state, or real-order authority.
 """
 
 from __future__ import annotations
@@ -41,6 +42,12 @@ DEFAULT_CPM_CAPTURE_JSON = (
 DEFAULT_CPM_REHEARSAL_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.json"
 )
+DEFAULT_MPG_RUNTIME_ARTIFACT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-mpg-runtime-activation-evidence.json"
+)
+DEFAULT_SOR_RUNTIME_ARTIFACT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-runtime-activation-evidence.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.json"
@@ -50,8 +57,8 @@ DEFAULT_OUTPUT_MD = (
     / "output/runtime-monitor/latest-four-candidate-runtime-activation-closure.md"
 )
 
-SCHEMA = "brc.four_candidate_runtime_activation_closure.v1"
-STATUS_READY = "four_candidate_runtime_activation_closure_ready"
+SCHEMA = "brc.four_candidate_runtime_activation_contract.v2"
+STATUS_READY = "four_candidate_runtime_activation_contract_ready"
 LONG_ACTION_FACTS = (
     "exchange_contract_exists",
     "mark_price_fresh",
@@ -73,6 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--cpm-capture-json", default=str(DEFAULT_CPM_CAPTURE_JSON))
     parser.add_argument("--cpm-rehearsal-json", default=str(DEFAULT_CPM_REHEARSAL_JSON))
+    parser.add_argument(
+        "--mpg-runtime-artifact-json", default=str(DEFAULT_MPG_RUNTIME_ARTIFACT_JSON)
+    )
+    parser.add_argument(
+        "--sor-runtime-artifact-json", default=str(DEFAULT_SOR_RUNTIME_ARTIFACT_JSON)
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -82,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         cpm_required_facts=_read_optional_json(Path(args.cpm_required_facts_json)),
         cpm_capture=_read_optional_json(Path(args.cpm_capture_json)),
         cpm_rehearsal=_read_optional_json(Path(args.cpm_rehearsal_json)),
+        mpg_runtime_artifact=_read_optional_json(Path(args.mpg_runtime_artifact_json)),
+        sor_runtime_artifact=_read_optional_json(Path(args.sor_runtime_artifact_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -91,8 +106,15 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": artifact["status"],
-                "p0_closed": artifact["summary"]["p0_tasks_closed"],
-                "p1_closed": artifact["summary"]["p1_tasks_closed"],
+                "p0_contract_declared": artifact["summary"][
+                    "p0_contract_declared"
+                ],
+                "p1_contract_declared": artifact["summary"][
+                    "p1_contract_declared"
+                ],
+                "runtime_artifacts_ready": artifact["summary"][
+                    "runtime_artifact_ready_count"
+                ],
                 "live_submit_allowed": artifact["summary"]["live_submit_allowed_count"],
                 "output_json": str(output_json),
             },
@@ -109,9 +131,21 @@ def build_runtime_activation_closure(
     cpm_required_facts: dict[str, Any],
     cpm_capture: dict[str, Any],
     cpm_rehearsal: dict[str, Any],
+    mpg_runtime_artifact: dict[str, Any] | None = None,
+    sor_runtime_artifact: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     source = _as_dict(_as_dict(replay.get("data_sources")).get("public_market_candles"))
+    mpg_readiness = _runtime_artifact_readiness(
+        artifact=mpg_runtime_artifact or {},
+        expected_strategy_group_id="MPG-001",
+        expected_scope_symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+    )
+    sor_readiness = _runtime_artifact_readiness(
+        artifact=sor_runtime_artifact or {},
+        expected_strategy_group_id="SOR-001",
+        expected_scope_symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT"],
+    )
     rows = [
         _row(
             priority="P0",
@@ -135,10 +169,12 @@ def build_runtime_activation_closure(
             fresh_signal_rehearsal_ready=(
                 _as_dict(cpm_rehearsal.get("synthetic_fresh_signal_rehearsal")).get(
                     "fresh_signal_submit_rehearsal_passed"
-                )
-                is True
+            )
+            is True
             ),
             exact_next_blocker="fresh_cpm_long_signal_absent_or_action_time_facts",
+            runtime_artifact_source="cpm_required_facts_mapping+cpm_runtime_signal_capture+cpm_dry_run_submit_rehearsal",
+            contract_declared=True,
         ),
         _row(
             priority="P0",
@@ -148,11 +184,15 @@ def build_runtime_activation_closure(
             primary_live_symbols=["BTCUSDT", "ETHUSDT"],
             expanded_symbols=["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
             replay=replay,
-            required_facts_contract_ready=True,
-            watcher_contract_ready=True,
-            candidate_evidence_shape_ready=True,
-            fresh_signal_rehearsal_ready=True,
-            exact_next_blocker="strong_symbol_action_time_facts_not_live_collected",
+            required_facts_contract_ready=mpg_readiness["required_facts_contract_ready"],
+            watcher_contract_ready=mpg_readiness["watcher_scope_contract_ready"],
+            candidate_evidence_shape_ready=mpg_readiness[
+                "candidate_evidence_shape_ready"
+            ],
+            fresh_signal_rehearsal_ready=mpg_readiness["fresh_signal_rehearsal_ready"],
+            exact_next_blocker=mpg_readiness["next_blocker"],
+            runtime_artifact_source=mpg_readiness["source"],
+            contract_declared=True,
         ),
         _row(
             priority="P1",
@@ -162,35 +202,45 @@ def build_runtime_activation_closure(
             primary_live_symbols=["BTCUSDT", "ETHUSDT"],
             expanded_symbols=["SOLUSDT", "AVAXUSDT"],
             replay=replay,
-            required_facts_contract_ready=True,
-            watcher_contract_ready=True,
-            candidate_evidence_shape_ready=True,
-            fresh_signal_rehearsal_ready=True,
-            exact_next_blocker="session_breakout_action_time_facts_not_live_collected",
+            required_facts_contract_ready=sor_readiness["required_facts_contract_ready"],
+            watcher_contract_ready=sor_readiness["watcher_scope_contract_ready"],
+            candidate_evidence_shape_ready=sor_readiness[
+                "candidate_evidence_shape_ready"
+            ],
+            fresh_signal_rehearsal_ready=sor_readiness["fresh_signal_rehearsal_ready"],
+            exact_next_blocker=sor_readiness["next_blocker"],
+            runtime_artifact_source=sor_readiness["source"],
+            contract_declared=True,
         ),
         _mi_row(replay),
     ]
-    p0_tasks_closed = all(
-        row["activation_contract_ready"]
+    p0_contract_declared = all(
+        row["contract_declared"]
         for row in rows
         if row["priority"] == "P0"
     )
-    p1_tasks_closed = all(
+    p1_contract_declared = all(
         (
-            row["activation_contract_ready"]
+            row["contract_declared"]
             or row.get("formal_replay_review_opened") is True
         )
         for row in rows
         if row["priority"] == "P1"
     )
-    status = (
-        STATUS_READY
-        if p0_tasks_closed and p1_tasks_closed
-        else "four_candidate_runtime_activation_closure_blocked"
+    p0_runtime_artifacts_ready = all(
+        row["runtime_artifact_ready"]
+        for row in rows
+        if row["priority"] == "P0"
     )
+    p1_runtime_artifacts_ready = all(
+        row["runtime_artifact_ready"]
+        for row in rows
+        if row["priority"] == "P1"
+    )
+    status = STATUS_READY if p0_contract_declared and p1_contract_declared else "four_candidate_runtime_activation_contract_blocked"
     return {
         "schema": SCHEMA,
-        "scope": "four_candidate_runtime_activation_closure_non_authority",
+        "scope": "four_candidate_runtime_activation_contract_non_authority",
         "status": status,
         "generated_at_utc": generated_at_utc
         or datetime.now(timezone.utc).isoformat(),
@@ -202,8 +252,18 @@ def build_runtime_activation_closure(
             "absorbability_grade": source.get("absorbability_grade") or "",
         },
         "summary": {
-            "p0_tasks_closed": p0_tasks_closed,
-            "p1_tasks_closed": p1_tasks_closed,
+            "p0_contract_declared": p0_contract_declared,
+            "p1_contract_declared": p1_contract_declared,
+            "p0_runtime_artifacts_ready": p0_runtime_artifacts_ready,
+            "p1_runtime_artifacts_ready": p1_runtime_artifacts_ready,
+            "p0_tasks_closed": p0_runtime_artifacts_ready,
+            "p1_tasks_closed": p1_runtime_artifacts_ready,
+            "contract_declared_count": sum(
+                row["contract_declared"] is True for row in rows
+            ),
+            "runtime_artifact_ready_count": sum(
+                row["runtime_artifact_ready"] is True for row in rows
+            ),
             "scope_review_closed_count": sum(
                 row["scope_review_closed"] is True for row in rows
             ),
@@ -230,7 +290,7 @@ def build_runtime_activation_closure(
         },
         "activation_rows": rows,
         "authority_boundary": {
-            "artifact_role": "runtime_activation_contract_not_live_authority",
+            "artifact_role": "expanded_readonly_watcher_scope_contract_not_live_authority",
             "changes_live_profile": False,
             "changes_order_sizing": False,
             "replay_treated_as_live_signal": False,
@@ -245,13 +305,19 @@ def build_runtime_activation_closure(
             == "recent_counterfactual_replay_ready",
             "venue_is_proxy_not_execution": source.get("execution_venue_match")
             is not True,
-            "p0_activation_contract_ready": p0_tasks_closed,
-            "p1_scope_closed_without_live_authority": p1_tasks_closed,
+            "p0_contract_declared": p0_contract_declared,
+            "p1_contract_declared_without_live_authority": p1_contract_declared,
+            "mpg_runtime_artifact_ready": mpg_readiness["runtime_artifact_ready"],
+            "sor_runtime_artifact_ready": sor_readiness["runtime_artifact_ready"],
+            "mpg_sor_not_counted_without_runtime_artifacts": (
+                not mpg_readiness["runtime_artifact_ready"]
+                and not sor_readiness["runtime_artifact_ready"]
+            ),
             "live_submit_allowed_count_zero": True,
             "no_finalgate_or_operation_layer": True,
         },
         "interaction": non_executing_interaction(
-            "L0_local_four_candidate_runtime_activation_closure"
+            "L0_local_four_candidate_runtime_activation_contract"
         ),
         "safety_invariants": non_executing_safety_invariants(
             (
@@ -284,6 +350,8 @@ def _row(
     candidate_evidence_shape_ready: bool,
     fresh_signal_rehearsal_ready: bool,
     exact_next_blocker: str,
+    runtime_artifact_source: str,
+    contract_declared: bool,
 ) -> dict[str, Any]:
     replay_row = _replay_row(replay, strategy_group_id)
     unique_signal_count = _longest_window_value(
@@ -300,11 +368,16 @@ def _row(
         required_facts_contract_ready
         and watcher_contract_ready
         and candidate_evidence_shape_ready
+        and fresh_signal_rehearsal_ready
     )
+    runtime_artifact_ready = action_time_boundary_ready
     return {
         "priority": priority,
         "strategy_group_id": strategy_group_id,
         "path_id": path_id,
+        "contract_declared": contract_declared,
+        "runtime_artifact_ready": runtime_artifact_ready,
+        "runtime_artifact_source": runtime_artifact_source,
         "scope_review_closed": scope_review_closed,
         "scope_review_source": "latest-four-candidate-recent-live-submit-replay",
         "watcher_scope_contract_ready": watcher_contract_ready,
@@ -314,7 +387,7 @@ def _row(
         "live_submit_symbol_scope_changed": False,
         "watcher_scope_contract": {
             "ready": watcher_contract_ready,
-            "source": "recent_replay_scope_review",
+            "source": runtime_artifact_source,
             "expanded_symbols_are_read_only": True,
         },
         "required_facts_contract_ready": required_facts_contract_ready,
@@ -324,6 +397,7 @@ def _row(
             "action_time_fact_keys": list(LONG_ACTION_FACTS),
             "binance_usdm_confirmation_required": True,
             "replay_proxy_facts_are_not_live_required_facts": True,
+            "runtime_artifact_source": runtime_artifact_source,
         },
         "candidate_evidence_shape_ready": candidate_evidence_shape_ready,
         "candidate_evidence_shape": {
@@ -350,6 +424,8 @@ def _row(
         "activation_contract_ready": all(
             [
                 scope_review_closed,
+                contract_declared,
+                runtime_artifact_ready,
                 watcher_contract_ready,
                 required_facts_contract_ready,
                 candidate_evidence_shape_ready,
@@ -364,6 +440,79 @@ def _row(
     }
 
 
+def _runtime_artifact_readiness(
+    *,
+    artifact: dict[str, Any],
+    expected_strategy_group_id: str,
+    expected_scope_symbols: list[str],
+) -> dict[str, Any]:
+    if not artifact:
+        return _missing_runtime_artifact_readiness(expected_strategy_group_id)
+    checks = _as_dict(artifact.get("checks"))
+    watcher_scope = _as_dict(artifact.get("watcher_scope"))
+    actual_symbols = watcher_scope.get("symbol_scope") or watcher_scope.get("symbols")
+    source = str(artifact.get("schema") or artifact.get("status") or "runtime_artifact")
+    strategy_matches = artifact.get("strategy_group_id") == expected_strategy_group_id
+    symbols_match = actual_symbols == expected_scope_symbols
+    watcher_ready = (
+        strategy_matches
+        and symbols_match
+        and (
+            artifact.get("watcher_scope_contract_ready") is True
+            or checks.get("watcher_scope_contract_ready") is True
+        )
+    )
+    required_ready = (
+        strategy_matches
+        and (
+            artifact.get("required_facts_contract_ready") is True
+            or checks.get("required_facts_contract_ready") is True
+        )
+    )
+    candidate_ready = (
+        strategy_matches
+        and (
+            artifact.get("candidate_evidence_shape_ready") is True
+            or checks.get("candidate_evidence_shape_ready") is True
+        )
+    )
+    rehearsal_ready = (
+        strategy_matches
+        and (
+            artifact.get("fresh_signal_rehearsal_ready") is True
+            or checks.get("fresh_signal_rehearsal_ready") is True
+        )
+    )
+    runtime_ready = all(
+        [watcher_ready, required_ready, candidate_ready, rehearsal_ready]
+    )
+    return {
+        "source": source,
+        "runtime_artifact_ready": runtime_ready,
+        "watcher_scope_contract_ready": watcher_ready,
+        "required_facts_contract_ready": required_ready,
+        "candidate_evidence_shape_ready": candidate_ready,
+        "fresh_signal_rehearsal_ready": rehearsal_ready,
+        "next_blocker": (
+            "binance_usdm_runtime_artifact_ready"
+            if runtime_ready
+            else "runtime_watcher_facts_rehearsal_artifact_missing_or_incomplete"
+        ),
+    }
+
+
+def _missing_runtime_artifact_readiness(strategy_group_id: str) -> dict[str, Any]:
+    return {
+        "source": f"missing:{strategy_group_id}:runtime_watcher_facts_rehearsal_artifact",
+        "runtime_artifact_ready": False,
+        "watcher_scope_contract_ready": False,
+        "required_facts_contract_ready": False,
+        "candidate_evidence_shape_ready": False,
+        "fresh_signal_rehearsal_ready": False,
+        "next_blocker": "runtime_watcher_facts_rehearsal_artifact_missing",
+    }
+
+
 def _mi_row(replay: dict[str, Any]) -> dict[str, Any]:
     mi = _as_dict(replay.get("fifth_candidate_review"))
     symbols = sorted({str(item.get("symbol") or "") for item in mi.get("events") or [] if item.get("symbol")})
@@ -373,17 +522,21 @@ def _mi_row(replay: dict[str, Any]) -> dict[str, Any]:
         "strategy_group_id": "MI-001",
         "path_id": "MI-FORMAL-REPLAY-REVIEW",
         "formal_replay_review_opened": review_opened,
+        "contract_declared": review_opened,
+        "runtime_artifact_ready": False,
+        "runtime_artifact_source": "formal_replay_review_only",
         "scope_review_closed": review_opened,
         "scope_review_source": "latest-four-candidate-recent-live-submit-replay",
-        "watcher_scope_contract_ready": review_opened,
+        "watcher_scope_contract_ready": False,
         "watcher_scope_symbols": symbols,
         "expanded_readonly_watcher_symbols": symbols,
         "primary_live_submit_symbol_scope": [],
         "live_submit_symbol_scope_changed": False,
         "watcher_scope_contract": {
-            "ready": review_opened,
+            "ready": False,
             "source": "formal_replay_review_only",
             "expanded_symbols_are_read_only": True,
+            "blocked_by": "formal_registry_admission_not_requested_for_mi",
         },
         "required_facts_contract_ready": False,
         "required_action_time_fact_keys": list(LONG_ACTION_FACTS),
@@ -443,11 +596,12 @@ def _longest_window_value(row: dict[str, Any], key: str) -> int:
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
     lines = [
-        "## Four-Candidate Runtime Activation Closure",
+        "## Four-Candidate Runtime Activation Contract",
         "",
         f"- Status: `{artifact['status']}`",
-        f"- P0 closed: `{_yes_no(artifact['summary']['p0_tasks_closed'])}`",
-        f"- P1 closed: `{_yes_no(artifact['summary']['p1_tasks_closed'])}`",
+        f"- P0 contract declared: `{_yes_no(artifact['summary']['p0_contract_declared'])}`",
+        f"- P1 contract declared: `{_yes_no(artifact['summary']['p1_contract_declared'])}`",
+        f"- Runtime artifact ready rows: `{artifact['summary']['runtime_artifact_ready_count']}`",
         f"- Action-time boundary ready rows: `{artifact['summary']['action_time_boundary_ready_count']}`",
         f"- Live-submit allowed: `{artifact['summary']['live_submit_allowed_count']}`",
         f"- Venue basis: `{artifact['source_replay']['venue_basis']}`",
@@ -456,16 +610,17 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
         "",
         "## Activation Rows",
         "",
-        "| Priority | Strategy | Watcher symbols | Expanded read-only symbols | Boundary ready | Next blocker |",
-        "| --- | --- | --- | --- | ---: | --- |",
+        "| Priority | Strategy | Watcher symbols | Expanded read-only symbols | Runtime artifact ready | Boundary ready | Next blocker |",
+        "| --- | --- | --- | --- | ---: | ---: | --- |",
     ]
     for row in artifact["activation_rows"]:
         lines.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 row["priority"],
                 row["strategy_group_id"],
                 ", ".join(row["watcher_scope_symbols"]) or "none",
                 ", ".join(row["expanded_readonly_watcher_symbols"]) or "none",
+                str(row["runtime_artifact_ready"]).lower(),
                 str(row["action_time_boundary_ready"]).lower(),
                 row["exact_next_blocker"],
             )
@@ -475,7 +630,8 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             "",
             "## Boundary",
             "",
-            "- Replay and watcher contracts are not live signals.",
+            "- Replay and declared watcher contracts are not live signals.",
+            "- MPG/SOR declared contracts do not count as runtime-ready without watcher, RequiredFacts, and rehearsal artifacts.",
             "- No live profile change, order-sizing change, FinalGate call, Operation Layer call, exchange write, or order creation.",
         ]
     )

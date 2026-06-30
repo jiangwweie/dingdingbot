@@ -83,7 +83,20 @@ def _replay() -> dict:
     }
 
 
-def test_activation_closure_completes_p0_p1_without_live_authority():
+def _runtime_artifact(strategy_group_id: str, symbols: list[str]) -> dict:
+    return {
+        "schema": "brc.test.runtime_activation_evidence.v1",
+        "status": "runtime_activation_evidence_ready",
+        "strategy_group_id": strategy_group_id,
+        "watcher_scope": {"symbol_scope": symbols},
+        "watcher_scope_contract_ready": True,
+        "required_facts_contract_ready": True,
+        "candidate_evidence_shape_ready": True,
+        "fresh_signal_rehearsal_ready": True,
+    }
+
+
+def test_activation_contract_downgrades_mpg_sor_without_runtime_artifacts():
     module = _load_module()
 
     artifact = module.build_runtime_activation_closure(
@@ -106,10 +119,13 @@ def test_activation_closure_completes_p0_p1_without_live_authority():
         generated_at_utc="2026-06-30T00:00:00+00:00",
     )
 
-    assert artifact["status"] == "four_candidate_runtime_activation_closure_ready"
-    assert artifact["summary"]["p0_tasks_closed"] is True
-    assert artifact["summary"]["p1_tasks_closed"] is True
-    assert artifact["summary"]["action_time_boundary_ready_count"] == 3
+    assert artifact["status"] == "four_candidate_runtime_activation_contract_ready"
+    assert artifact["summary"]["p0_contract_declared"] is True
+    assert artifact["summary"]["p1_contract_declared"] is True
+    assert artifact["summary"]["p0_tasks_closed"] is False
+    assert artifact["summary"]["p1_tasks_closed"] is False
+    assert artifact["summary"]["runtime_artifact_ready_count"] == 1
+    assert artifact["summary"]["action_time_boundary_ready_count"] == 1
     assert artifact["summary"]["live_submit_allowed_count"] == 0
     assert artifact["summary"]["formal_replay_review_opened_count"] == 1
     assert artifact["source_replay"]["execution_venue_match"] is False
@@ -119,6 +135,17 @@ def test_activation_closure_completes_p0_p1_without_live_authority():
     assert artifact["authority_boundary"]["operation_layer_called"] is False
     assert artifact["authority_boundary"]["exchange_write_called"] is False
     assert artifact["authority_boundary"]["order_created"] is False
+    rows = {row["strategy_group_id"]: row for row in artifact["activation_rows"]}
+    assert rows["CPM-RO-001"]["runtime_artifact_ready"] is True
+    assert rows["MPG-001"]["contract_declared"] is True
+    assert rows["MPG-001"]["runtime_artifact_ready"] is False
+    assert rows["MPG-001"]["action_time_boundary_ready"] is False
+    assert rows["MPG-001"]["exact_next_blocker"] == (
+        "runtime_watcher_facts_rehearsal_artifact_missing"
+    )
+    assert rows["SOR-001"]["contract_declared"] is True
+    assert rows["SOR-001"]["runtime_artifact_ready"] is False
+    assert rows["SOR-001"]["action_time_boundary_ready"] is False
     mi = next(
         row
         for row in artifact["activation_rows"]
@@ -127,7 +154,50 @@ def test_activation_closure_completes_p0_p1_without_live_authority():
     assert mi["formal_replay_review_opened"] is True
     assert mi["activation_contract_ready"] is False
     assert mi["action_time_boundary_ready"] is False
+    assert mi["watcher_scope_contract_ready"] is False
     assert mi["candidate_evidence_shape"]["candidate_authorization_created"] is False
+
+
+def test_mpg_sor_count_only_when_runtime_artifacts_are_ready():
+    module = _load_module()
+
+    artifact = module.build_runtime_activation_closure(
+        replay=_replay(),
+        cpm_required_facts={
+            "status": "cpm_required_facts_mapping_ready",
+            "required_facts_mapping_ready": True,
+        },
+        cpm_capture={
+            "watcher_scope": {
+                "symbol_scope": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"]
+            }
+        },
+        cpm_rehearsal={
+            "submit_rehearsal_shape_ready": True,
+            "synthetic_fresh_signal_rehearsal": {
+                "fresh_signal_submit_rehearsal_passed": True
+            },
+        },
+        mpg_runtime_artifact=_runtime_artifact(
+            "MPG-001",
+            ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+        ),
+        sor_runtime_artifact=_runtime_artifact(
+            "SOR-001",
+            ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT"],
+        ),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    assert artifact["summary"]["p0_tasks_closed"] is True
+    assert artifact["summary"]["p1_tasks_closed"] is False
+    assert artifact["summary"]["runtime_artifact_ready_count"] == 3
+    assert artifact["summary"]["action_time_boundary_ready_count"] == 3
+    rows = {row["strategy_group_id"]: row for row in artifact["activation_rows"]}
+    assert rows["MPG-001"]["runtime_artifact_ready"] is True
+    assert rows["SOR-001"]["runtime_artifact_ready"] is True
+    assert rows["MI-001"]["formal_replay_review_opened"] is True
+    assert rows["MI-001"]["runtime_artifact_ready"] is False
 
 
 def test_cpm_expands_readonly_watcher_scope_without_live_scope_change():
@@ -172,3 +242,4 @@ def test_cpm_expands_readonly_watcher_scope_without_live_scope_change():
     assert cpm["primary_live_submit_symbol_scope"] == ["ETHUSDT"]
     assert cpm["live_submit_symbol_scope_changed"] is False
     assert cpm["activation_contract_ready"] is True
+    assert cpm["runtime_artifact_ready"] is True

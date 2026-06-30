@@ -3705,9 +3705,25 @@ def _sequence_four_candidate_runtime_activation_closure_summary(
     source = _as_dict(artifact.get("source_replay"))
     return {
         "status": status,
-        "active": status == "four_candidate_runtime_activation_closure_ready",
+        "active": status
+        in {
+            "four_candidate_runtime_activation_contract_ready",
+            "four_candidate_runtime_activation_closure_ready",
+        },
+        "p0_contract_declared": summary.get("p0_contract_declared") is True,
+        "p1_contract_declared": summary.get("p1_contract_declared") is True,
+        "p0_runtime_artifacts_ready": (
+            summary.get("p0_runtime_artifacts_ready") is True
+        ),
+        "p1_runtime_artifacts_ready": (
+            summary.get("p1_runtime_artifacts_ready") is True
+        ),
         "p0_tasks_closed": summary.get("p0_tasks_closed") is True,
         "p1_tasks_closed": summary.get("p1_tasks_closed") is True,
+        "contract_declared_count": int(summary.get("contract_declared_count") or 0),
+        "runtime_artifact_ready_count": int(
+            summary.get("runtime_artifact_ready_count") or 0
+        ),
         "scope_review_closed_count": int(summary.get("scope_review_closed_count") or 0),
         "watcher_scope_contract_ready_count": int(
             summary.get("watcher_scope_contract_ready_count") or 0
@@ -3733,7 +3749,7 @@ def _sequence_four_candidate_runtime_activation_closure_summary(
         "next_checkpoint": str(summary.get("next_checkpoint") or ""),
         "venue_basis": str(source.get("venue_basis") or ""),
         "execution_venue_match": source.get("execution_venue_match") is True,
-        "projection_role": "runtime_activation_contract_projection",
+        "projection_role": "expanded_readonly_watcher_scope_contract_projection",
         "state_source": "four_candidate_runtime_activation_closure",
         "primary_judgment_source": False,
         "tradeability_decision_source": False,
@@ -4339,9 +4355,10 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM synthetic candidate/action-time shape: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_candidate_authorization_evidence_shape_ready') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_action_time_required_facts_declared') is True)}`",
         f"- CPM synthetic FinalGate/Operation Layer paper: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_finalgate_dry_run_passed') is True)}` / `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_operation_layer_paper_passed') is True)}`",
         f"- CPM synthetic authority fail-closed: `{_yes_no(cpm_dry_run_submit_rehearsal.get('synthetic_dangerous_authority_fields_fail_closed') is True)}`",
-        f"- Four-candidate activation closure: `{four_candidate_runtime_activation_closure.get('status', 'missing')}`",
-        f"- P0/P1 activation closed: `{_yes_no(four_candidate_runtime_activation_closure.get('p0_tasks_closed') is True)}` / `{_yes_no(four_candidate_runtime_activation_closure.get('p1_tasks_closed') is True)}`",
-        f"- Scope/watcher/facts/candidate/rehearsal/boundary ready: `{four_candidate_runtime_activation_closure.get('scope_review_closed_count', 0)}` / `{four_candidate_runtime_activation_closure.get('watcher_scope_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('required_facts_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('candidate_evidence_shape_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('fresh_signal_rehearsal_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('action_time_boundary_ready_count', 0)}`",
+        f"- Four-candidate activation contract: `{four_candidate_runtime_activation_closure.get('status', 'missing')}`",
+        f"- P0/P1 contract declared: `{_yes_no(four_candidate_runtime_activation_closure.get('p0_contract_declared') is True)}` / `{_yes_no(four_candidate_runtime_activation_closure.get('p1_contract_declared') is True)}`",
+        f"- P0/P1 runtime artifacts ready: `{_yes_no(four_candidate_runtime_activation_closure.get('p0_runtime_artifacts_ready') is True)}` / `{_yes_no(four_candidate_runtime_activation_closure.get('p1_runtime_artifacts_ready') is True)}`",
+        f"- Contract/runtime/scope/watcher/facts/candidate/rehearsal/boundary ready: `{four_candidate_runtime_activation_closure.get('contract_declared_count', 0)}` / `{four_candidate_runtime_activation_closure.get('runtime_artifact_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('scope_review_closed_count', 0)}` / `{four_candidate_runtime_activation_closure.get('watcher_scope_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('required_facts_contract_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('candidate_evidence_shape_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('fresh_signal_rehearsal_ready_count', 0)}` / `{four_candidate_runtime_activation_closure.get('action_time_boundary_ready_count', 0)}`",
         f"- MI formal replay review opened: `{four_candidate_runtime_activation_closure.get('formal_replay_review_opened_count', 0)}`",
         f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",
         f"- Activation next checkpoint: `{four_candidate_runtime_activation_closure.get('next_checkpoint') or 'missing'}`",
