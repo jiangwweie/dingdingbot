@@ -64,6 +64,115 @@ DECISION_ORDER = {
     "not_tradable_strategy_quality": 7,
 }
 
+CONTRACT_BLOCKER_CLASSES = {
+    "artifact_missing",
+    "schema_invalid",
+    "detector_not_attached",
+    "watcher_tick_missing",
+    "scope_not_attached",
+    "computed_not_satisfied",
+    "replay_live_rule_mismatch",
+    "action_time_boundary_not_reproduced",
+    "policy_scope_missing",
+    "runtime_profile_scope_missing",
+    "market_wait_validated",
+    "active_position_resolution",
+    "hard_safety_stop",
+    "review_only_warning",
+}
+
+BLOCKER_DECISION_BY_CLASS = {
+    "artifact_missing": "not_tradable_facts",
+    "schema_invalid": "not_tradable_facts",
+    "detector_not_attached": "not_tradable_facts",
+    "watcher_tick_missing": "not_tradable_facts",
+    "scope_not_attached": "not_tradable_asset_admission",
+    "computed_not_satisfied": "not_tradable_market_wait",
+    "replay_live_rule_mismatch": "not_tradable_facts",
+    "action_time_boundary_not_reproduced": "not_tradable_execution_gate",
+    "policy_scope_missing": "not_tradable_policy",
+    "runtime_profile_scope_missing": "not_tradable_execution_gate",
+    "market_wait_validated": "not_tradable_market_wait",
+    "active_position_resolution": "not_tradable_execution_gate",
+    "hard_safety_stop": "not_tradable_safety_stop",
+    "review_only_warning": "not_tradable_strategy_quality",
+}
+
+BLOCKER_OWNER_BY_CLASS = {
+    "artifact_missing": "engineering",
+    "schema_invalid": "engineering",
+    "detector_not_attached": "engineering",
+    "watcher_tick_missing": "runtime",
+    "scope_not_attached": "engineering",
+    "computed_not_satisfied": "market",
+    "replay_live_rule_mismatch": "engineering",
+    "action_time_boundary_not_reproduced": "runtime",
+    "policy_scope_missing": "owner",
+    "runtime_profile_scope_missing": "runtime",
+    "market_wait_validated": "market",
+    "active_position_resolution": "runtime",
+    "hard_safety_stop": "safety",
+    "review_only_warning": "strategy_review",
+}
+
+BLOCKER_PRIORITY = {
+    "hard_safety_stop": 0,
+    "artifact_missing": 10,
+    "schema_invalid": 20,
+    "detector_not_attached": 30,
+    "watcher_tick_missing": 40,
+    "scope_not_attached": 50,
+    "policy_scope_missing": 55,
+    "runtime_profile_scope_missing": 58,
+    "replay_live_rule_mismatch": 60,
+    "action_time_boundary_not_reproduced": 70,
+    "active_position_resolution": 75,
+    "computed_not_satisfied": 80,
+    "market_wait_validated": 90,
+    "review_only_warning": 100,
+}
+
+REPLAY_LIVE_PARITY_SCHEMA = "brc.replay_live_parity_audit.v1"
+ACTION_TIME_BOUNDARY_SCHEMA = "brc.strategy_fresh_signal_action_time_boundary.v1"
+MI_TRIAL_ADMISSION_SCHEMA = "brc.mi_trial_admission_decision.v1"
+REPLAY_LIVE_PARITY_STRATEGY_IDS = {"CPM-RO-001", "MPG-001", "SOR-001"}
+ACTION_TIME_BOUNDARY_STRATEGY_IDS = {"CPM-RO-001", "MPG-001", "SOR-001"}
+
+LEGACY_BLOCKER_CLASS_MAP = {
+    "brf2_candidate_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "brf2_shadow_candidate_evidence_ready_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "brf2_watcher_fact_input_missing": "watcher_tick_missing",
+    "cpm_candidate_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "cpm_disable_fact_active": "computed_not_satisfied",
+    "cpm_dry_run_submit_rehearsal_gap": "action_time_boundary_not_reproduced",
+    "cpm_registry_identity_gap": "scope_not_attached",
+    "cpm_required_facts_mapping_gap": "artifact_missing",
+    "cpm_runtime_signal_capture_gap": "detector_not_attached",
+    "cpm_watcher_scope_gap": "watcher_tick_missing",
+    "experiment_worthiness_or_loss_envelope_unclosed": "review_only_warning",
+    "forbidden_effect_detected": "hard_safety_stop",
+    "fresh_brf2_short_signal_absent": "market_wait_validated",
+    "fresh_cpm_long_signal_absent": "market_wait_validated",
+    "fresh_cpm_short_signal_absent": "market_wait_validated",
+    "fresh_executable_signal_absent": "market_wait_validated",
+    "fresh_mpg_long_signal_absent": "market_wait_validated",
+    "fresh_session_range_signal_absent": "market_wait_validated",
+    "fresh_signal_absent": "market_wait_validated",
+    "fresh_sor_long_signal_absent": "market_wait_validated",
+    "fresh_sor_session_range_signal_absent": "market_wait_validated",
+    "fresh_strategy_signal_absent": "market_wait_validated",
+    "mpg_high_beta_public_facts_gap": "scope_not_attached",
+    "mpg_public_facts_gap": "scope_not_attached",
+    "official_runtime_chain_ready": "market_wait_validated",
+    "owner_trial_scope_or_capital_policy_missing": "policy_scope_missing",
+    "portfolio_tradeability_decision_state_missing": "schema_invalid",
+    "private_action_time_facts_required": "action_time_boundary_not_reproduced",
+    "required_facts_mapping_gap": "artifact_missing",
+    "required_facts_or_classifier_mapping_unclosed": "artifact_missing",
+    "short_squeeze_risk_state_disable_active": "computed_not_satisfied",
+    "strategy_group_not_admitted_as_final_trial_asset": "scope_not_attached",
+}
+
 FORBIDDEN_TRUE_KEYS = {
     "actionable_now",
     "real_order_authority",
@@ -187,6 +296,18 @@ def main(argv: list[str] | None = None) -> int:
             "audit output from changing Tradeability judgment."
         ),
     )
+    parser.add_argument(
+        "--replay-live-parity-audit-json",
+        help="Explicit replay/live parity audit input for first-blocker classification.",
+    )
+    parser.add_argument(
+        "--mi-trial-admission-decision-json",
+        help="Explicit MI trial admission decision input.",
+    )
+    parser.add_argument(
+        "--strategy-fresh-signal-action-time-boundary-json",
+        help="Explicit action-time boundary readiness input.",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -269,6 +390,23 @@ def main(argv: list[str] | None = None) -> int:
             if args.trial_grade_signal_gate_audit_json
             else {}
         ),
+        replay_live_parity_audit=(
+            _read_optional_json(Path(args.replay_live_parity_audit_json))
+            if args.replay_live_parity_audit_json
+            else {}
+        ),
+        mi_trial_admission_decision=(
+            _read_optional_json(Path(args.mi_trial_admission_decision_json))
+            if args.mi_trial_admission_decision_json
+            else {}
+        ),
+        strategy_fresh_signal_action_time_boundary=(
+            _read_optional_json(
+                Path(args.strategy_fresh_signal_action_time_boundary_json)
+            )
+            if args.strategy_fresh_signal_action_time_boundary_json
+            else {}
+        ),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -310,6 +448,9 @@ def build_tradeability_decision(
     brf2_runtime_signal_capture: dict[str, Any] | None = None,
     brf2_shadow_candidate_evidence: dict[str, Any] | None = None,
     trial_grade_signal_gate_audit: dict[str, Any] | None = None,
+    replay_live_parity_audit: dict[str, Any] | None = None,
+    mi_trial_admission_decision: dict[str, Any] | None = None,
+    strategy_fresh_signal_action_time_boundary: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
@@ -329,6 +470,9 @@ def build_tradeability_decision(
         brf2_runtime_signal_capture or {},
         brf2_shadow_candidate_evidence or {},
         trial_grade_signal_gate_audit or {},
+        replay_live_parity_audit or {},
+        mi_trial_admission_decision or {},
+        strategy_fresh_signal_action_time_boundary or {},
     )
     registry_rows = _registry_rows_by_id(registry)
     tier_rows = _tier_rows_by_id(tier_policy)
@@ -354,6 +498,8 @@ def build_tradeability_decision(
     all_ids.update(admission_proposals)
     all_ids.update(owner_policy_scopes)
     all_ids.update(portfolio_seats)
+    if _mi_trial_admission_present(mi_trial_admission_decision or {}):
+        all_ids.add("MI-001")
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
 
@@ -409,6 +555,11 @@ def build_tradeability_decision(
             ),
             trial_grade_row=trial_grade_rows.get(strategy_group_id, {}),
             runtime_safety_state=runtime_safety_state,
+            replay_live_parity_audit=replay_live_parity_audit or {},
+            mi_trial_admission_decision=mi_trial_admission_decision or {},
+            strategy_fresh_signal_action_time_boundary=(
+                strategy_fresh_signal_action_time_boundary or {}
+            ),
             forbidden_effects=forbidden_effects,
         )
         for strategy_group_id in sorted(all_ids, key=_strategy_sort_key)
@@ -457,6 +608,12 @@ def build_tradeability_decision(
                 in {"armed_observation", "tiny_live_ready", "live_submit_ready"}
                 for row in rows
             ),
+            "market_wait_validated_has_full_checklist": all(
+                row["first_blocker_class"] != "market_wait_validated"
+                or _as_dict(row.get("market_wait_validation")).get("valid")
+                is True
+                for row in rows
+            ),
             "july_bullish_rebound_paths_consumed": july_trade_paths["checks"][
                 "machine_consumed_path_count"
             ]
@@ -497,6 +654,9 @@ def _decision_row(
     cpm_dry_run_submit_rehearsal: dict[str, Any],
     trial_grade_row: dict[str, Any],
     runtime_safety_state: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
     blockers = [str(item) for item in candidate.get("trial_blockers") or []]
@@ -512,6 +672,7 @@ def _decision_row(
         owner_policy_scope=owner_policy_scope,
         portfolio_seat=portfolio_seat,
         runtime_safety_state=runtime_safety_state,
+        mi_trial_admission_decision=mi_trial_admission_decision,
     )
     brf2_shadow_candidate_evidence_provenance = (
         _brf2_shadow_candidate_evidence_provenance(
@@ -543,6 +704,11 @@ def _decision_row(
         cpm_runtime_signal_capture=cpm_runtime_signal_capture,
         cpm_shadow_candidate_evidence=cpm_shadow_candidate_evidence,
         cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+        replay_live_parity_audit=replay_live_parity_audit,
+        mi_trial_admission_decision=mi_trial_admission_decision,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
         blockers=blockers,
         runtime_safety_state=runtime_safety_state,
         forbidden_effects=forbidden_effects,
@@ -605,6 +771,60 @@ def _decision_row(
         and cpm_required_facts_mapping.get("required_facts_mapping_ready") is True
     ):
         required_facts_status = "ready"
+    market_wait_validation = _market_wait_validation(
+        strategy_group_id=strategy_group_id,
+        stage=stage,
+        classifier=classifier,
+        registry_present=registry_present,
+        tier_present=tier_present,
+        tier_row=tier_row,
+        portfolio_seat=portfolio_seat,
+        owner_policy_recorded=owner_policy_recorded,
+        required_facts_status=required_facts_status,
+        cpm_admission_policy_closed=cpm_admission_policy_closed,
+        cpm_required_facts_mapping=cpm_required_facts_mapping,
+        cpm_runtime_signal_capture=cpm_runtime_signal_capture,
+        cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+        brf2_runtime_signal_capture=brf2_runtime_signal_capture,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+        runtime_safety_state=runtime_safety_state,
+    )
+    if (
+        classifier["first_blocker_class"] == "market_wait_validated"
+        and not market_wait_validation["valid"]
+    ):
+        classifier = _classifier(
+            "not_tradable_facts",
+            "artifact_missing",
+            "market_wait_validated checklist is incomplete",
+            "engineering",
+            "complete_market_wait_validation_checklist",
+            "market_wait_validated",
+        )
+        market_wait_validation = _market_wait_validation(
+            strategy_group_id=strategy_group_id,
+            stage=stage,
+            classifier=classifier,
+            registry_present=registry_present,
+            tier_present=tier_present,
+            tier_row=tier_row,
+            portfolio_seat=portfolio_seat,
+            owner_policy_recorded=owner_policy_recorded,
+            required_facts_status=required_facts_status,
+            cpm_admission_policy_closed=cpm_admission_policy_closed,
+            cpm_required_facts_mapping=cpm_required_facts_mapping,
+            cpm_runtime_signal_capture=cpm_runtime_signal_capture,
+            cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+            brf2_runtime_signal_capture=brf2_runtime_signal_capture,
+            replay_live_parity_audit=replay_live_parity_audit,
+            strategy_fresh_signal_action_time_boundary=(
+                strategy_fresh_signal_action_time_boundary
+            ),
+            runtime_safety_state=runtime_safety_state,
+        )
     trade_paths = _trade_paths_for_strategy(
         strategy_group_id=strategy_group_id,
         row_classifier=classifier,
@@ -624,6 +844,7 @@ def _decision_row(
         "can_trade_now": classifier["decision"] == "tradable_now",
         "first_blocker_class": classifier["first_blocker_class"],
         "first_blocker_detail": classifier["first_blocker_detail"],
+        "legacy_blocker_raw": classifier["legacy_blocker_raw"],
         "blocker_owner": classifier["blocker_owner"],
         "next_action": classifier["next_action"],
         "after_next_state": classifier["after_next_state"],
@@ -637,6 +858,7 @@ def _decision_row(
         "resolved_blockers": resolved_blockers,
         "policy_scope": policy_scope,
         "required_facts_status": required_facts_status,
+        "market_wait_validation": market_wait_validation,
         "trade_paths": trade_paths,
         "observe_only_exit": observe_only_exit,
         "runtime_scope_status": {
@@ -682,6 +904,16 @@ def _decision_row(
                 ).get("current_signal_state")
                 or ""
             ),
+            "mi_trial_admission_decision": str(
+                mi_trial_admission_decision.get("trial_admission_decision") or ""
+            )
+            if strategy_group_id == "MI-001"
+            else "",
+            "mi_promotion_scope": str(
+                mi_trial_admission_decision.get("promotion_scope") or ""
+            )
+            if strategy_group_id == "MI-001"
+            else "",
         },
         "signal_grade_status": signal_grade_status,
         "evidence_snapshot": _evidence_snapshot(
@@ -725,6 +957,9 @@ def _first_blocker(
     cpm_runtime_signal_capture: dict[str, Any],
     cpm_shadow_candidate_evidence: dict[str, Any],
     cpm_dry_run_submit_rehearsal: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
     blockers: list[str],
     runtime_safety_state: dict[str, Any],
     forbidden_effects: list[str],
@@ -764,10 +999,38 @@ def _first_blocker(
             runtime_signal_capture=cpm_runtime_signal_capture,
             shadow_candidate_evidence=cpm_shadow_candidate_evidence,
             dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+            replay_live_parity_audit=replay_live_parity_audit,
             blockers=blockers,
         )
         if cpm:
             return cpm
+    if strategy_group_id == "MI-001":
+        mi_guard = _mi_trial_admission_guard(mi_trial_admission_decision)
+        if mi_guard:
+            return mi_guard
+    if strategy_group_id == "MI-001" and _mi_trial_admission_candidate(
+        mi_trial_admission_decision
+    ):
+        if _mi_readonly_observation_scope_attached(mi_trial_admission_decision):
+            return _classifier(
+                "not_tradable_policy",
+                "policy_scope_missing",
+                (
+                    "MI trial admission candidate has readonly observation "
+                    "scope; Owner trial policy is not recorded"
+                ),
+                "owner",
+                "record_scoped_owner_policy",
+                "policy_scope_recorded",
+            )
+        return _classifier(
+            "not_tradable_asset_admission",
+            "scope_not_attached",
+            "MI trial admission candidate is recorded; runtime observation scope is not attached",
+            "engineering",
+            "attach_mi_trial_candidate_to_runtime_observation_scope",
+            "armed_observation",
+        )
     if stage == "observe_only_would_enter":
         exit_rule = _observe_only_exit_for_strategy(
             strategy_group_id=strategy_group_id,
@@ -830,6 +1093,15 @@ def _first_blocker(
                 if brf2_candidate_blocker:
                     return brf2_candidate_blocker
             return brf2_capture_blocker
+    external_blocker = _external_first_blocker(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    if external_blocker:
+        return external_blocker
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         runtime_safety_state=runtime_safety_state,
@@ -979,6 +1251,7 @@ def _cpm_first_blocker(
     runtime_signal_capture: dict[str, Any],
     shadow_candidate_evidence: dict[str, Any],
     dry_run_submit_rehearsal: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
     blockers: list[str],
 ) -> dict[str, str]:
     text = " ".join(
@@ -1127,6 +1400,14 @@ def _cpm_first_blocker(
             "live_submit_ready",
         )
 
+    external_blocker = _external_first_blocker(
+        strategy_group_id="CPM-RO-001",
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary={},
+    )
+    if external_blocker:
+        return external_blocker
+
     return _classifier(
         "not_tradable_market_wait",
         "fresh_cpm_long_signal_absent",
@@ -1221,6 +1502,128 @@ def _brf2_shadow_candidate_evidence_provenance(
     return _BRF2ShadowCandidateEvidenceProvenance.from_artifact(artifact).as_dict()
 
 
+def _market_wait_validation(
+    *,
+    strategy_group_id: str,
+    stage: str,
+    classifier: dict[str, str],
+    registry_present: bool,
+    tier_present: bool,
+    tier_row: dict[str, Any],
+    portfolio_seat: dict[str, Any],
+    owner_policy_recorded: bool,
+    required_facts_status: str,
+    cpm_admission_policy_closed: bool,
+    cpm_required_facts_mapping: dict[str, Any],
+    cpm_runtime_signal_capture: dict[str, Any],
+    cpm_dry_run_submit_rehearsal: dict[str, Any],
+    brf2_runtime_signal_capture: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+    runtime_safety_state: dict[str, Any],
+) -> dict[str, Any]:
+    if classifier["first_blocker_class"] != "market_wait_validated":
+        return {"valid": False, "not_applicable": True, "checks": {}}
+
+    runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
+    cpm_mapping_ready = (
+        cpm_required_facts_mapping.get("status") == "cpm_required_facts_mapping_ready"
+        and cpm_required_facts_mapping.get("required_facts_mapping_ready") is True
+    )
+    cpm_capture_ready = (
+        cpm_runtime_signal_capture.get("status") == "cpm_runtime_signal_capture_ready"
+        and _as_dict(cpm_runtime_signal_capture.get("checks")).get(
+            "watcher_scope_ready"
+        )
+        is True
+    )
+    cpm_rehearsal_ready = (
+        cpm_dry_run_submit_rehearsal.get("status")
+        in {
+            "cpm_dry_run_submit_rehearsal_passed",
+            "cpm_dry_run_submit_rehearsal_shape_ready",
+        }
+        and (
+            cpm_dry_run_submit_rehearsal.get("dry_run_submit_rehearsal")
+            in {"passed", "fresh_signal_passed", "shape_ready"}
+            or _as_dict(cpm_dry_run_submit_rehearsal.get("checks")).get(
+                "submit_rehearsal_shape_ready"
+            )
+            is True
+        )
+    )
+    brf2_capture_ready = (
+        brf2_runtime_signal_capture.get("status")
+        == "brf2_runtime_signal_capture_ready"
+    )
+    external_lane_checks = _market_wait_external_lane_checks(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    generic_runtime_ready = (
+        bool(portfolio_seat)
+        or runtime_readiness.get("armed_observation_ready") is True
+        or runtime_readiness.get("watcher_scope_ready") is True
+    )
+
+    checks = {
+        "asset_admission": stage
+        in {"armed_observation", "tiny_live_ready", "live_submit_ready"},
+        "scope": bool(registry_present or tier_present or portfolio_seat),
+        "policy": bool(
+            owner_policy_recorded
+            or cpm_admission_policy_closed
+            or portfolio_seat
+        ),
+        "symbol": bool(
+            strategy_group_id in {"CPM-RO-001", "BRF2-001"}
+            or external_lane_checks["symbol"]
+        ),
+        "detector": bool(
+            cpm_capture_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["detector"]
+        ),
+        "watcher_input": bool(
+            cpm_capture_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["watcher_input"]
+        ),
+        "facts": bool(
+            required_facts_status in {"ready", "action_time_only"}
+            or cpm_mapping_ready
+            or external_lane_checks["facts"]
+        ),
+        "failed_facts_clear": bool(
+            strategy_group_id in {"CPM-RO-001", "BRF2-001"}
+            or external_lane_checks["failed_facts_clear"]
+        ),
+        "classification": classifier["first_blocker_class"]
+        in CONTRACT_BLOCKER_CLASSES,
+        "action_time_path": bool(
+            cpm_rehearsal_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["action_time_path"]
+        ),
+        "fresh_signal": classifier["legacy_blocker_raw"]
+        in LEGACY_BLOCKER_CLASS_MAP,
+    }
+    return {
+        "valid": all(checks.values()),
+        "not_applicable": False,
+        "checks": checks,
+    }
+
+
 def _classifier(
     decision: str,
     first_blocker_class: str,
@@ -1229,6 +1632,12 @@ def _classifier(
     next_action: str,
     after_next_state: str,
 ) -> dict[str, str]:
+    legacy_blocker_raw = first_blocker_class
+    if decision != "tradable_now":
+        contract_class = _contract_blocker_class(first_blocker_class, decision)
+        decision = BLOCKER_DECISION_BY_CLASS.get(contract_class, decision)
+        blocker_owner = BLOCKER_OWNER_BY_CLASS.get(contract_class, blocker_owner)
+        first_blocker_class = contract_class
     return {
         "decision": decision,
         "first_blocker_class": first_blocker_class,
@@ -1236,7 +1645,569 @@ def _classifier(
         "blocker_owner": blocker_owner,
         "next_action": next_action,
         "after_next_state": after_next_state,
+        "legacy_blocker_raw": legacy_blocker_raw,
     }
+
+
+def _external_first_blocker(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> dict[str, str]:
+    replay_guard = _external_artifact_guard(
+        artifact=replay_live_parity_audit,
+        artifact_name="replay_live_parity_audit",
+        expected_schema=REPLAY_LIVE_PARITY_SCHEMA,
+        expected_status="replay_live_parity_audit_ready",
+        required_strategy_ids=REPLAY_LIVE_PARITY_STRATEGY_IDS,
+        row_keys=("per_symbol_mismatch_table",),
+        strategy_group_id=strategy_group_id,
+    )
+    if replay_guard:
+        return replay_guard
+    action_time_guard = _external_artifact_guard(
+        artifact=strategy_fresh_signal_action_time_boundary,
+        artifact_name="strategy_fresh_signal_action_time_boundary",
+        expected_schema=ACTION_TIME_BOUNDARY_SCHEMA,
+        expected_status="strategy_fresh_signal_action_time_boundary_ready",
+        required_strategy_ids=ACTION_TIME_BOUNDARY_STRATEGY_IDS,
+        row_keys=(
+            "strategy_rows",
+            "per_strategy_boundary_table",
+            "boundary_rows",
+            "strategy_group_rows",
+            "decision_rows",
+        ),
+        strategy_group_id=strategy_group_id,
+    )
+    if action_time_guard:
+        return action_time_guard
+    rows = _external_blocker_rows(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    if not rows:
+        return {}
+    row = sorted(
+        rows,
+        key=lambda item: (
+            BLOCKER_PRIORITY.get(str(item.get("blocker_class") or ""), 999),
+            str(item.get("symbol") or ""),
+        ),
+    )[0]
+    blocker_class = str(row.get("blocker_class") or "")
+    failed_facts = _string_list(row.get("failed_facts"))
+    symbol = str(row.get("symbol") or "strategy_scope")
+    detail = str(row.get("detail") or "")
+    if not detail:
+        detail = (
+            (
+                f"{strategy_group_id}/{symbol} external blocker classified as "
+                f"{blocker_class}"
+            )
+            if not failed_facts
+            else (
+                f"{strategy_group_id}/{symbol} computed facts not satisfied: "
+                f"{','.join(failed_facts)}"
+            )
+        )
+    next_action = str(row.get("next_action") or _next_action_for_contract(blocker_class))
+    return _classifier(
+        BLOCKER_DECISION_BY_CLASS.get(blocker_class, "not_tradable_facts"),
+        blocker_class,
+        detail,
+        BLOCKER_OWNER_BY_CLASS.get(blocker_class, "engineering"),
+        next_action,
+        str(row.get("after_next_state") or _after_next_state_for_contract(blocker_class)),
+    )
+
+
+def _external_blocker_rows(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in _dict_rows(replay_live_parity_audit.get("per_symbol_mismatch_table")):
+        if str(row.get("strategy_group_id") or "") != strategy_group_id:
+            continue
+        if not _external_row_shape_valid(row):
+            rows.append(
+                {
+                    "symbol": str(row.get("symbol") or ""),
+                    "blocker_class": "schema_invalid",
+                    "detail": "replay_live_parity_audit row shape is invalid",
+                    "next_action": "repair_artifact_schema_and_add_regression",
+                    "after_next_state": "artifact_schema_valid",
+                }
+            )
+            continue
+        blocker_class = _contract_blocker_class(
+            str(row.get("blocker_class") or row.get("first_blocker_class") or ""),
+            "not_tradable_facts",
+        )
+        rows.append(
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "blocker_class": blocker_class,
+                "failed_facts": _string_list(row.get("failed_facts")),
+                "next_action": str(
+                    row.get("next_action") or _next_action_for_contract(blocker_class)
+                ),
+                "after_next_state": _after_next_state_for_contract(blocker_class),
+            }
+        )
+    for row in _action_time_boundary_rows(strategy_fresh_signal_action_time_boundary):
+        if str(row.get("strategy_group_id") or "") != strategy_group_id:
+            continue
+        if not _external_row_shape_valid(row):
+            rows.append(
+                {
+                    "symbol": str(row.get("symbol") or ""),
+                    "blocker_class": "schema_invalid",
+                    "detail": (
+                        "strategy_fresh_signal_action_time_boundary row shape "
+                        "is invalid"
+                    ),
+                    "next_action": "repair_artifact_schema_and_add_regression",
+                    "after_next_state": "artifact_schema_valid",
+                }
+            )
+            continue
+        blocker_class = _contract_blocker_class(
+            str(
+                row.get("blocker_class")
+                or row.get("first_blocker_class")
+                or row.get("first_blocker")
+                or ""
+            ),
+            "not_tradable_execution_gate",
+        )
+        if not blocker_class:
+            continue
+        rows.append(
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "blocker_class": blocker_class,
+                "detail": str(
+                    row.get("first_blocker_detail")
+                    or row.get("detail")
+                    or row.get("first_blocker")
+                    or "action-time boundary did not reproduce"
+                ),
+                "next_action": _next_action_for_contract(blocker_class),
+                "after_next_state": str(
+                    row.get("after_next_state")
+                    or _after_next_state_for_contract(blocker_class)
+                ),
+            }
+        )
+    return rows
+
+
+def _market_wait_external_lane_checks(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> dict[str, bool]:
+    parity_ready_symbols = {
+        str(row.get("symbol") or "")
+        for row in _dict_rows(replay_live_parity_audit.get("per_symbol_mismatch_table"))
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+        and str(row.get("symbol") or "")
+        and _contract_blocker_class(
+            str(row.get("blocker_class") or row.get("first_blocker_class") or ""),
+            "not_tradable_market_wait",
+        )
+        == "market_wait_validated"
+        and row.get("detector_attached") is True
+        and row.get("watcher_tick_present") is True
+        and row.get("computed") is True
+        and not _string_list(row.get("failed_facts"))
+    }
+    action_time_ready_symbols = {
+        str(row.get("symbol") or "")
+        for row in _action_time_boundary_rows(strategy_fresh_signal_action_time_boundary)
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+        and str(row.get("symbol") or "")
+        and _contract_blocker_class(
+            str(
+                row.get("blocker_class")
+                or row.get("first_blocker_class")
+                or row.get("first_blocker")
+                or ""
+            ),
+            "not_tradable_market_wait",
+        )
+        == "market_wait_validated"
+        and (
+            row.get("action_time_path_ready") is True
+            or row.get("dry_run_submit_rehearsal_ready") is True
+        )
+    }
+    matched_symbols = parity_ready_symbols & action_time_ready_symbols
+    return {
+        "symbol": bool(matched_symbols),
+        "detector": bool(matched_symbols),
+        "watcher_input": bool(matched_symbols),
+        "facts": bool(matched_symbols),
+        "failed_facts_clear": bool(matched_symbols),
+        "action_time_path": bool(matched_symbols),
+    }
+
+
+def _action_time_boundary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key in (
+        "strategy_rows",
+        "per_strategy_boundary_table",
+        "boundary_rows",
+        "strategy_group_rows",
+        "decision_rows",
+    ):
+        rows.extend(_dict_rows(artifact.get(key)))
+    return rows
+
+
+def _external_artifact_guard(
+    *,
+    artifact: dict[str, Any],
+    artifact_name: str,
+    expected_schema: str,
+    expected_status: str,
+    required_strategy_ids: set[str],
+    row_keys: tuple[str, ...],
+    strategy_group_id: str,
+) -> dict[str, str]:
+    if not artifact:
+        return {}
+    if strategy_group_id not in required_strategy_ids:
+        return {}
+    if _artifact_marked_fixture_or_partial(artifact):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} is marked fixture or partial",
+        )
+    if _status(artifact) != expected_status:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} status is not {expected_status}",
+        )
+    if artifact.get("schema") != expected_schema:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} schema is not {expected_schema}",
+        )
+    if not _parseable_timestamp(str(artifact.get("generated_at_utc") or "")):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} generated_at_utc is missing or invalid",
+        )
+    summary = _as_dict(artifact.get("summary"))
+    rows = _external_artifact_rows(artifact, row_keys)
+    strategy_ids = {
+        str(row.get("strategy_group_id") or "")
+        for row in rows
+        if str(row.get("strategy_group_id") or "")
+    }
+    summary_strategy_count = _int(summary.get("strategy_count"))
+    if summary_strategy_count < len(required_strategy_ids):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="artifact_missing",
+            detail=f"{artifact_name} summary does not cover required WIP lanes",
+        )
+    if not required_strategy_ids <= strategy_ids:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="artifact_missing",
+            detail=f"{artifact_name} rows do not cover required WIP lanes",
+        )
+    if artifact_name == "replay_live_parity_audit":
+        if _int(summary.get("replay_signal_count")) <= 0:
+            return _invalid_external_artifact_classifier(
+                artifact_name=artifact_name,
+                blocker_class="artifact_missing",
+                detail=f"{artifact_name} replay_signal_count is empty",
+            )
+        if not _dict_rows(artifact.get("per_symbol_mismatch_table")):
+            return _invalid_external_artifact_classifier(
+                artifact_name=artifact_name,
+                blocker_class="artifact_missing",
+                detail=f"{artifact_name} per_symbol_mismatch_table is empty",
+            )
+    return {}
+
+
+def _external_artifact_rows(
+    artifact: dict[str, Any],
+    row_keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key in row_keys:
+        rows.extend(_dict_rows(artifact.get(key)))
+    return rows
+
+
+def _external_row_shape_valid(row: dict[str, Any]) -> bool:
+    if not str(row.get("strategy_group_id") or ""):
+        return False
+    blocker_class = str(
+        row.get("blocker_class")
+        or row.get("first_blocker_class")
+        or row.get("first_blocker")
+        or ""
+    )
+    if not blocker_class:
+        return False
+    return _contract_blocker_class(blocker_class) in CONTRACT_BLOCKER_CLASSES
+
+
+def _artifact_marked_fixture_or_partial(artifact: dict[str, Any]) -> bool:
+    status = _status(artifact).lower()
+    scope = str(artifact.get("scope") or "").lower()
+    marker_values = json.dumps(
+        [
+            artifact.get("fixture"),
+            artifact.get("partial"),
+            artifact.get("source"),
+            _as_dict(artifact.get("summary")).get("source"),
+            _as_dict(artifact.get("summary")).get("artifact_kind"),
+        ],
+        ensure_ascii=False,
+    ).lower()
+    return any(
+        token in status or token in scope or token in marker_values
+        for token in ("fixture", "partial")
+    )
+
+
+def _parseable_timestamp(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _invalid_external_artifact_classifier(
+    *,
+    artifact_name: str,
+    blocker_class: str,
+    detail: str,
+) -> dict[str, str]:
+    return _classifier(
+        BLOCKER_DECISION_BY_CLASS.get(blocker_class, "not_tradable_facts"),
+        blocker_class,
+        detail,
+        BLOCKER_OWNER_BY_CLASS.get(blocker_class, "engineering"),
+        _next_action_for_contract(blocker_class),
+        _after_next_state_for_contract(blocker_class),
+    )
+
+
+def _mi_trial_admission_candidate(artifact: dict[str, Any]) -> bool:
+    if _mi_trial_admission_guard(artifact):
+        return False
+    return (
+        _status(artifact) == "mi_trial_admission_decision_ready"
+        and artifact.get("trial_admission_decision")
+        == "trial_asset_admission_candidate"
+        and artifact.get("promotion_scope") == "trial_admission"
+    )
+
+
+def _mi_readonly_observation_scope_attached(artifact: dict[str, Any]) -> bool:
+    watcher_scope = _as_dict(artifact.get("watcher_scope"))
+    symbol_scope = _as_dict(artifact.get("symbol_scope"))
+    watcher_symbols = watcher_scope.get("symbol_scope")
+    readonly_candidates = symbol_scope.get("readonly_watcher_candidates")
+    return bool(
+        (isinstance(watcher_symbols, list) and watcher_symbols)
+        or (isinstance(readonly_candidates, list) and readonly_candidates)
+    )
+
+
+def _mi_trial_admission_present(artifact: dict[str, Any]) -> bool:
+    return bool(artifact) and (
+        _status(artifact) == "mi_trial_admission_decision_ready"
+        or artifact.get("trial_admission_decision") is not None
+        or artifact.get("promotion_scope") is not None
+        or artifact.get("strategy_group_id") == "MI-001"
+    )
+
+
+def _mi_trial_admission_guard(artifact: dict[str, Any]) -> dict[str, str]:
+    if not _mi_trial_admission_present(artifact):
+        return {}
+    if _artifact_marked_fixture_or_partial(artifact):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision is marked fixture or partial",
+        )
+    if _status(artifact) != "mi_trial_admission_decision_ready":
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail=(
+                "mi_trial_admission_decision status is not "
+                "mi_trial_admission_decision_ready"
+            ),
+        )
+    if artifact.get("schema") != MI_TRIAL_ADMISSION_SCHEMA:
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail=(
+                "mi_trial_admission_decision schema is not "
+                f"{MI_TRIAL_ADMISSION_SCHEMA}"
+            ),
+        )
+    if not _parseable_timestamp(str(artifact.get("generated_at_utc") or "")):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision generated_at_utc is missing or invalid",
+        )
+    if artifact.get("strategy_group_id") != "MI-001":
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision strategy_group_id is not MI-001",
+        )
+    tradeability = _as_dict(artifact.get("tradeability"))
+    if (
+        artifact.get("trial_admission_decision")
+        not in {"trial_asset_admission_candidate", "park"}
+        or artifact.get("promotion_scope") != "trial_admission"
+        or not str(tradeability.get("first_blocker") or "")
+    ):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision row shape is invalid",
+        )
+    return {}
+
+
+def _contract_blocker_class(blocker: str, decision: str = "") -> str:
+    lowered = blocker.lower()
+    if blocker in CONTRACT_BLOCKER_CLASSES:
+        return blocker
+    if lowered in LEGACY_BLOCKER_CLASS_MAP:
+        return LEGACY_BLOCKER_CLASS_MAP[lowered]
+    if lowered in {"", "none"}:
+        return "market_wait_validated" if decision == "not_tradable_market_wait" else "artifact_missing"
+    if any(token in lowered for token in ("forbidden", "safety", "hard_stop")):
+        return "hard_safety_stop"
+    if any(token in lowered for token in ("owner", "capital", "trial_identity", "policy")):
+        return "policy_scope_missing"
+    if any(
+        token in lowered
+        for token in (
+            "registry",
+            "identity",
+            "tier",
+            "non_executing_trial_readiness",
+            "not_admitted",
+            "scope",
+        )
+    ):
+        return "scope_not_attached"
+    if any(token in lowered for token in ("schema", "decision_state_missing")):
+        return "schema_invalid"
+    if any(token in lowered for token in ("detector", "runtime_signal_capture_gap")):
+        return "detector_not_attached"
+    if any(token in lowered for token in ("watcher", "tick", "fact_input")):
+        return "watcher_tick_missing"
+    if any(token in lowered for token in ("role_only", "stop", "overfit", "role", "filler", "quality", "loss_envelope", "worthiness")):
+        return "review_only_warning"
+    if any(token in lowered for token in ("rule_mismatch", "replay_live")):
+        return "replay_live_rule_mismatch"
+    if any(
+        token in lowered
+        for token in (
+            "finalgate",
+            "operation_layer",
+            "candidate_authorization",
+            "shadow_candidate",
+            "dry_run_submit_rehearsal",
+            "action_time",
+            "exchange",
+            "account",
+            "protection",
+        )
+    ):
+        return "action_time_boundary_not_reproduced"
+    if lowered.startswith("fresh_") or "fresh_signal" in lowered:
+        return "schema_invalid"
+    if any(
+        token in lowered
+        for token in (
+            "required_facts",
+            "fact",
+            "stale",
+            "classifier",
+            "rewrite",
+            "squeeze",
+            "disable",
+            "forward",
+            "range_context",
+        )
+    ):
+        return "computed_not_satisfied" if decision == "not_tradable_market_wait" else "artifact_missing"
+    return "review_only_warning"
+
+
+def _next_action_for_contract(blocker_class: str) -> str:
+    return {
+        "artifact_missing": "generate_or_wire_current_artifact",
+        "schema_invalid": "repair_artifact_schema_and_add_regression",
+        "detector_not_attached": "attach_live_detector_to_selected_lane",
+        "watcher_tick_missing": "refresh_or_repair_watcher_fact_source",
+        "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
+        "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
+        "replay_live_rule_mismatch": "normalize_replay_live_rules_or_record_revision",
+        "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
+        "policy_scope_missing": "record_scoped_owner_policy",
+        "runtime_profile_scope_missing": "bind_runtime_profile_scope",
+        "market_wait_validated": "continue_armed_observation_until_fresh_signal",
+        "active_position_resolution": "resolve_active_position_or_open_order",
+        "hard_safety_stop": "remove_hard_safety_violation",
+        "review_only_warning": "record_strategy_review_decision",
+    }.get(blocker_class, "repair_tradeability_blocker_classification")
+
+
+def _after_next_state_for_contract(blocker_class: str) -> str:
+    return {
+        "artifact_missing": "artifact_ready",
+        "schema_invalid": "artifact_schema_valid",
+        "detector_not_attached": "detector_attached",
+        "watcher_tick_missing": "watcher_tick_present",
+        "scope_not_attached": "armed_observation",
+        "computed_not_satisfied": "live_submit_ready",
+        "replay_live_rule_mismatch": "replay_live_rule_aligned",
+        "action_time_boundary_not_reproduced": "action_time_rehearsal_ready",
+        "policy_scope_missing": "admitted_trial_asset",
+        "runtime_profile_scope_missing": "runtime_profile_scope_bound",
+        "market_wait_validated": "live_submit_ready",
+        "active_position_resolution": "runtime_safety_clear",
+        "hard_safety_stop": "safety_clear_for_tradeability_review",
+        "review_only_warning": "strategy_asset_state_updated",
+    }.get(blocker_class, "tradeability_decision_ready")
 
 
 def _stage(
@@ -1250,6 +2221,7 @@ def _stage(
     owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
     runtime_safety_state: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any] | None = None,
 ) -> str:
     if _row_live_submit_ready(
         strategy_group_id=strategy_group_id,
@@ -1270,6 +2242,10 @@ def _stage(
     portfolio_stage = str(portfolio_seat.get("stage") or "")
     if portfolio_stage == "armed_observation":
         return "armed_observation"
+    if strategy_group_id == "MI-001" and _mi_trial_admission_candidate(
+        mi_trial_admission_decision or {}
+    ):
+        return "trial_asset_admission_candidate"
     if admission_proposal:
         if owner_policy_recorded:
             return str(admission_proposal.get("proposed_stage") or "admitted_trial_asset")
@@ -2361,28 +3337,7 @@ def _evidence_snapshot(
 
 
 def _class_for_blocker(blocker: str) -> str:
-    lowered = blocker.lower()
-    if any(
-        token in lowered
-        for token in (
-            "registry",
-            "identity",
-            "tier",
-            "non_executing_trial_readiness",
-        )
-    ):
-        return "asset_admission"
-    if any(token in lowered for token in ("owner", "capital", "trial_identity")):
-        return "policy"
-    if any(token in lowered for token in ("fact", "stale", "classifier", "rewrite", "squeeze", "forward", "range")):
-        return "facts"
-    if "fresh_signal" in lowered:
-        return "market"
-    if any(token in lowered for token in ("finalgate", "operation_layer", "exchange", "account", "protection")):
-        return "execution_gate"
-    if any(token in lowered for token in ("stop", "overfit", "role", "filler", "quality")):
-        return "strategy_quality"
-    return "review"
+    return _contract_blocker_class(blocker)
 
 
 def _consistency_checks(
@@ -2403,6 +3358,11 @@ def _consistency_checks(
                 strategy_group_id=str(row.get("strategy_group_id") or ""),
                 runtime_safety_state=runtime_safety_state,
             )
+            for row in rows
+        ),
+        "first_blocker_classes_follow_contract": all(
+            row["decision"] == "tradable_now"
+            or row["first_blocker_class"] in CONTRACT_BLOCKER_CLASSES
             for row in rows
         ),
     }

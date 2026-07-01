@@ -78,6 +78,45 @@ A Goal Packet must include:
 | `Safety boundary` | Conditions that stop the task |
 | `Report format` | Required Evidence Packet contents |
 
+## Single Lane Task Packet Gate
+
+After the Daily Live Enablement Table exists, every live-enablement engineering
+task must start from exactly one row in
+`output/runtime-monitor/latest-daily-live-enablement-table.json`.
+
+The task entry must name one StrategyGroup + symbol lane and one first blocker.
+Broad prompts such as `continue MPG`, `advance live readiness`, or `fix runtime`
+are invalid unless they are rewritten into the required lane entry shape below.
+
+Every task must include these fields before implementation starts:
+
+| Field | Required value |
+| --- | --- |
+| `active_lane` | One `StrategyGroup + symbol` row from the Daily Table |
+| `chain_position` | The row's chain position |
+| `first_blocker` | The row's blocker class from `BLOCKER_CLASSIFICATION_CONTRACT.md` |
+| `expected_state_change` | One state field expected to change after the task |
+| `allowed_files` | Files or directories allowed for the bounded task |
+| `forbidden_files` | Files, authority paths, credentials, profiles, sizing defaults, and core execution paths that must not be touched |
+| `stop_condition` | The row's stop condition or a stricter task-specific stop |
+| `authority_boundary` | The row's authority boundary, preserving no FinalGate bypass, no Operation Layer bypass, no live profile expansion, no sizing expansion, and no exchange write |
+
+Completion must change at least one of these fields:
+
+| State field | Meaning |
+| --- | --- |
+| `first_blocker` | The blocker is removed or reclassified |
+| `lane_stage` | The lane moves to a later live-enablement stage or exits WIP |
+| `replay_live_status` | Replay/live parity becomes matched, reclassified, or no longer first blocker |
+| `live_detector_status` | Detector attachment, watcher input, or computed state changes |
+| `facts_state` | Required facts become present, computed, failed, or cleared with per-fact evidence |
+| `action_time_boundary_status` | Candidate/auth or non-executing action-time rehearsal boundary changes |
+| `next_action` | The next action no longer repeats the same blocker-removal instruction |
+| `stop_condition` | The lane exits, parks, waits for Owner, or reaches a stricter stop condition |
+
+A task that only regenerates artifacts, adds commentary, or repeats the same
+`next_action` without changing one of these fields is incomplete.
+
 ## Evidence Packet Required Shape
 
 The execution window must report:

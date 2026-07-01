@@ -211,9 +211,13 @@ def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str
     symbol = str(event.get("symbol") or "")
     facts = _symbol_facts(coverage, symbol)
     detector_attached = coverage.get("detector_attached")
+    if facts and "detector_attached" in facts:
+        detector_attached = facts.get("detector_attached")
     if detector_attached is None:
         detector_attached = coverage.get("detector_or_watcher_ready") is True
     watcher_tick_present = coverage.get("watcher_tick_present")
+    if facts and "watcher_tick_present" in facts:
+        watcher_tick_present = facts.get("watcher_tick_present")
     if watcher_tick_present is None:
         watcher_tick_present = coverage.get("detector_or_watcher_ready") is True
     computed = facts.get("computed") if facts else coverage.get("computed")
@@ -357,15 +361,24 @@ def _watcher_coverage(artifact: dict[str, Any]) -> dict[str, Any]:
             "runtime_activation_evidence_ready",
         }
     )
+    symbol_scope = watcher.get("symbol_scope") or []
     return {
         "detector_source": watcher.get("source") or artifact.get("scope"),
         "detector_attached": ready,
         "watcher_tick_present": ready,
         "computed": ready,
         "detector_or_watcher_ready": ready,
-        "symbol_scope": watcher.get("symbol_scope") or [],
+        "symbol_scope": symbol_scope,
         "primary_live_submit_scope": watcher.get("primary_live_submit_symbol_scope") or [],
         "readonly_symbols": watcher.get("expanded_readonly_watcher_symbols") or [],
+        "scoped_live_observation_proposal_symbols": (
+            watcher.get("scoped_live_observation_proposal_symbols") or []
+        ),
+        "per_symbol_facts": _watcher_per_symbol_facts(
+            artifact=artifact,
+            symbol_scope=set(str(symbol) for symbol in symbol_scope),
+            detector_attached=ready,
+        ),
     }
 
 
@@ -393,6 +406,49 @@ def _cpm_per_symbol_facts(live_detector: dict[str, Any]) -> dict[str, dict[str, 
             "timeframe": row.get("timeframe"),
         }
     return rows
+
+
+def _watcher_per_symbol_facts(
+    *,
+    artifact: dict[str, Any],
+    symbol_scope: set[str],
+    detector_attached: bool,
+) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in artifact.get("symbol_public_fact_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        public_facts_ready = row.get("public_facts_ready") is True
+        if symbol in symbol_scope and public_facts_ready:
+            continue
+        failed_facts = _string_list(row.get("rejection_reasons"))
+        rows[symbol] = {
+            "detector_attached": detector_attached,
+            "watcher_tick_present": public_facts_ready,
+            "computed": True,
+            "fresh_signal_present": False,
+            "failed_facts": failed_facts,
+            "live_fact_names": _watcher_public_fact_names(row),
+            "timeframe": "public_facts_readonly",
+        }
+    return rows
+
+
+def _watcher_public_fact_names(row: dict[str, Any]) -> list[str]:
+    names = {
+        "exchange_contract_exists",
+        "mark_price_fresh",
+        "public_facts_ready",
+    }
+    names.update(str(item) for item in row.get("rejection_reasons") or [])
+    liquidity = _as_dict(row.get("liquidity"))
+    funding = _as_dict(row.get("funding"))
+    names.update(str(key) for key in liquidity if str(key).endswith("_ok"))
+    names.update(str(key) for key in funding if str(key).endswith("_extreme"))
+    return sorted(name for name in names if name)
 
 
 def _fact_failed(value: Any) -> bool:
@@ -434,6 +490,14 @@ def _string_set(value: Any) -> set[str]:
     if isinstance(value, list | tuple | set):
         return {str(item) for item in value if str(item)}
     return set()
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list | tuple | set):
+        return [str(item) for item in value if str(item)]
+    return []
 
 
 def _next_action(blocker_class: str) -> str:

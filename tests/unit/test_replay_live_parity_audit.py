@@ -99,6 +99,35 @@ def _mpg_watcher() -> dict:
     }
 
 
+def _mpg_watcher_with_op_scope_proposal() -> dict:
+    watcher = _mpg_watcher()
+    watcher["watcher_scope"]["scoped_live_observation_proposal_symbols"] = [
+        "OPUSDT"
+    ]
+    watcher["symbol_public_fact_rows"] = [
+        {
+            "symbol": "OPUSDT",
+            "scope_decision": "defer_primary_or_readonly_scope",
+            "public_facts_ready": False,
+            "strategy_fit": True,
+            "liquidity": {
+                "spread_ok": False,
+                "min_notional_ok": False,
+                "qty_step_ok": False,
+            },
+            "funding": {"funding_not_extreme": False},
+            "rejection_reasons": [
+                "binance_usdm_public_facts_missing_or_stale",
+                "funding_not_extreme",
+                "spread_ok",
+                "min_notional_ok",
+                "qty_step_ok",
+            ],
+        }
+    ]
+    return watcher
+
+
 def _trigger_facts(*failed: str) -> dict:
     fact_names = [
         "funding_not_extreme",
@@ -178,6 +207,29 @@ def test_replay_live_parity_counts_windows_and_symbol_mismatches():
     assert symbol_row["symbol"] == "OPUSDT"
     assert symbol_row["blocker_class"] == "scope_not_attached"
     assert symbol_row["mismatch_reasons"] == ["scope_not_attached"]
+
+
+def test_replay_live_parity_reclassifies_mpg_scope_proposal_without_public_tick():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay=_replay(),
+        cpm_facts={},
+        mpg_watcher=_mpg_watcher_with_op_scope_proposal(),
+        sor_evidence={},
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    by_symbol = {
+        item["symbol"]: item for item in artifact["per_symbol_mismatch_table"]
+    }
+    op_row = by_symbol["OPUSDT"]
+
+    assert op_row["blocker_class"] == "watcher_tick_missing"
+    assert op_row["watcher_tick_present"] is False
+    assert op_row["computed"] is True
+    assert "binance_usdm_public_facts_missing_or_stale" in op_row["failed_facts"]
+    assert op_row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
 
 
 def test_replay_live_parity_never_marks_unreproduced_signal_as_market_wait():

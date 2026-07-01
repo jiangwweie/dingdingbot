@@ -558,12 +558,45 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
         _write_output(
             command,
             {
+                "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+                "scope": "fresh_signal_action_time_boundary_non_authority",
                 "status": "strategy_fresh_signal_action_time_boundary_ready",
+                "generated_at_utc": "2026-07-01T00:00:00+00:00",
                 "summary": {
+                    "strategy_count": 3,
                     "fresh_signal_present_count": 0,
                     "would_enter_finalgate_if_private_facts_ready_count": 0,
                     "live_submit_allowed_count": 0,
                 },
+                "strategy_rows": [
+                    {
+                        "strategy_group_id": "CPM-RO-001",
+                        "symbol": "ETHUSDT",
+                        "first_blocker": "fresh_cpm_long_signal_absent",
+                        "blocker_class": "fresh_cpm_long_signal_absent",
+                        "next_action": (
+                            "continue_cpm_long_armed_observation_until_reclaim_signal"
+                        ),
+                    },
+                    {
+                        "strategy_group_id": "MPG-001",
+                        "symbol": "SOLUSDT",
+                        "first_blocker": "fresh_mpg_long_signal_absent",
+                        "blocker_class": "fresh_mpg_long_signal_absent",
+                        "next_action": (
+                            "continue_mpg_armed_observation_until_fresh_signal"
+                        ),
+                    },
+                    {
+                        "strategy_group_id": "SOR-001",
+                        "symbol": "SOLUSDT",
+                        "first_blocker": "fresh_sor_session_range_signal_absent",
+                        "blocker_class": "fresh_sor_session_range_signal_absent",
+                        "next_action": (
+                            "continue_sor_session_observation_until_range_signal"
+                        ),
+                    },
+                ],
                 "checks": {
                     "calls_finalgate": False,
                     "calls_operation_layer": False,
@@ -581,13 +614,17 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
         _write_output(
             command,
             {
+                "schema": "brc.replay_live_parity_audit.v1",
+                "scope": "replay_live_parity_audit_non_authority",
                 "status": "replay_live_parity_audit_ready",
+                "generated_at_utc": "2026-07-01T00:00:00+00:00",
                 "summary": {
-                    "replay_signal_count": 4,
-                    "live_detector_reproduced_count": 0,
-                    "mismatch_count": 4,
+                    "strategy_count": 3,
+                    "replay_signal_count": 131,
+                    "live_detector_reproduced_count": 14,
+                    "mismatch_count": 117,
                     "mismatch_reason_policy": (
-                        "replay_signal_without_live_reproduction_is_not_market_wait"
+                        "replay_signal_without_live_reproduction_is_signal_capture_defect_not_market_wait"
                     ),
                 },
                 "per_symbol_mismatch_table": [
@@ -605,9 +642,39 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                         "next_action": (
                             "continue_observation_with_failed_fact_matrix"
                         ),
-                        "mismatch_count": 1,
+                        "mismatch_count": 4,
+                    },
+                    {
+                        "strategy_group_id": "MPG-001",
+                        "symbol": "SOLUSDT",
+                        "detector_attached": True,
+                        "watcher_tick_present": True,
+                        "computed": False,
+                        "failed_facts": ["action_time_boundary"],
+                        "blocker_class": "action_time_boundary_not_reproduced",
+                        "next_action": "repair_non_executing_action_time_rehearsal",
+                        "mismatch_count": 25,
+                    },
+                    {
+                        "strategy_group_id": "SOR-001",
+                        "symbol": "SOLUSDT",
+                        "detector_attached": True,
+                        "watcher_tick_present": True,
+                        "computed": False,
+                        "failed_facts": ["session_range_boundary"],
+                        "blocker_class": "action_time_boundary_not_reproduced",
+                        "next_action": "repair_non_executing_action_time_rehearsal",
+                        "mismatch_count": 25,
                     }
                 ],
+                "checks": {
+                    "replay_treated_as_live_signal": False,
+                    "live_submit_allowed": False,
+                    "finalgate_called": False,
+                    "operation_layer_called": False,
+                    "exchange_write_called": False,
+                    "order_created": False,
+                },
                 "interaction": {
                     **base_interaction,
                     "level": "L0_local_replay_live_parity_audit",
@@ -619,13 +686,24 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
         _write_output(
             command,
             {
+                "schema": "brc.mi_trial_admission_decision.v1",
+                "scope": "mi_trial_admission_decision_non_authority",
                 "status": "mi_trial_admission_decision_ready",
+                "generated_at_utc": "2026-07-01T00:00:00+00:00",
+                "strategy_group_id": "MI-001",
                 "trial_admission_decision": "trial_asset_admission_candidate",
                 "promotion_scope": "trial_admission",
                 "tradeability": {
                     "can_trade_now": False,
                     "first_blocker": "trial_admission_fact_not_integrated",
                     "blocker_owner": "engineering",
+                },
+                "checks": {
+                    "live_submit_allowed": False,
+                    "finalgate_called": False,
+                    "operation_layer_called": False,
+                    "exchange_write_called": False,
+                    "order_created": False,
                 },
                 "interaction": {
                     **base_interaction,
@@ -2101,6 +2179,79 @@ def _write_passed_runtime_dry_run_audit_chain(command: list[str]) -> None:
     )
 
 
+def _write_ready_daily_live_enablement_table(command: list[str]) -> None:
+    rows = []
+    for rank, strategy_group_id in enumerate(
+        ["CPM-RO-001", "MPG-001", "MI-001", "SOR-001", "BRF2-001"],
+        start=1,
+    ):
+        blocker = (
+            "computed_not_satisfied"
+            if strategy_group_id in {"CPM-RO-001", "BRF2-001"}
+            else "scope_not_attached"
+            if strategy_group_id in {"MPG-001", "MI-001"}
+            else "detector_not_attached"
+        )
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "symbol": "SOLUSDT",
+                "side": "long",
+                "stage": "armed",
+                "chain_position": "tradeability_first_blocker",
+                "first_blocker": blocker,
+                "first_blocker_evidence": (
+                    "output/runtime-monitor/latest-strategygroup-tradeability-decision.json"
+                ),
+                "owner_action_required": "no",
+                "next_engineering_action": "continue_observation_with_failed_fact_matrix",
+                "stop_condition": "first_blocker changes or lane exits WIP",
+                "closest_to_live_rank": rank,
+                "rank_reason": f"fixture rank {rank}",
+                "authority_boundary": (
+                    "daily_table_is_read_model; "
+                    "no_finalgate_no_operation_layer_no_exchange_write"
+                ),
+                "market_wait_validation": {
+                    "valid": False,
+                    "not_applicable": True,
+                    "checks": {},
+                },
+            }
+        )
+    _write_output(
+        command,
+        {
+            "schema": "brc.daily_live_enablement_table.v1",
+            "scope": "daily_live_enablement_table_non_authority",
+            "status": "daily_live_enablement_table_ready",
+            "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "rows": rows,
+            "summary": {
+                "row_count": 5,
+                "wip_lane_count": 5,
+                "rank_1_lane": "CPM-RO-001:SOLUSDT",
+                "non_authority": True,
+            },
+            "checks": {
+                "active_wip_lanes_only": True,
+                "single_rank_1": True,
+                "authority_boundary_preserved": True,
+                "finalgate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+            "interaction": {
+                "level": "L0_local_daily_live_enablement_table",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+            },
+        },
+    )
+
+
 def _maybe_write_strategygroup_closure_step(
     script: str, command: list[str]
 ) -> subprocess.CompletedProcess[str] | None:
@@ -2133,6 +2284,11 @@ def _maybe_write_strategygroup_closure_step(
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_strategygroup_tradeability_decision.py":
         _write_ready_tradeability_decision(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "build_daily_live_enablement_table.py":
+        _write_ready_daily_live_enablement_table(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "validate_daily_live_enablement_table.py":
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
@@ -2180,6 +2336,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     portfolio_board_commands: list[list[str]] = []
     three_strategy_commands: list[list[str]] = []
     tradeability_commands: list[list[str]] = []
+    daily_table_commands: list[list[str]] = []
+    daily_table_validator_commands: list[list[str]] = []
+    action_time_boundary_commands: list[list[str]] = []
+    replay_live_parity_commands: list[list[str]] = []
+    mi_trial_admission_commands: list[list[str]] = []
+    dry_run_audit_commands: list[list[str]] = []
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
@@ -2214,6 +2376,18 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             three_strategy_commands.append(command)
         if script == "build_strategygroup_tradeability_decision.py":
             tradeability_commands.append(command)
+        if script == "build_daily_live_enablement_table.py":
+            daily_table_commands.append(command)
+        if script == "validate_daily_live_enablement_table.py":
+            daily_table_validator_commands.append(command)
+        if script == "build_strategy_fresh_signal_action_time_boundary.py":
+            action_time_boundary_commands.append(command)
+        if script == "build_replay_live_parity_audit.py":
+            replay_live_parity_commands.append(command)
+        if script == "build_mi_trial_admission_decision.py":
+            mi_trial_admission_commands.append(command)
+        if script == "runtime_dry_run_audit_chain.py":
+            dry_run_audit_commands.append(command)
         closure_result = _maybe_write_strategygroup_closure_step(script, command)
         if closure_result is not None:
             return closure_result
@@ -2436,6 +2610,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        dry_run_audit_json=tmp_path / "dry-run-audit-chain.json",
+        dry_run_audit_dir=tmp_path / "dry-run-audit-chain",
         replay_lab_json=tmp_path / "replay.json",
         replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
@@ -2525,6 +2701,16 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             tmp_path / "brf2-shadow-evidence.json"
         ),
         brf2_shadow_candidate_evidence_md=tmp_path / "brf2-shadow-evidence.md",
+        strategy_fresh_signal_action_time_boundary_json=(
+            tmp_path / "fresh-signal-action-time-boundary.json"
+        ),
+        strategy_fresh_signal_action_time_boundary_md=(
+            tmp_path / "fresh-signal-action-time-boundary.md"
+        ),
+        replay_live_parity_audit_json=tmp_path / "replay-live-parity.json",
+        replay_live_parity_audit_md=tmp_path / "replay-live-parity.md",
+        mi_trial_admission_decision_json=tmp_path / "mi-trial-admission.json",
+        mi_trial_admission_decision_md=tmp_path / "mi-trial-admission.md",
         strategygroup_trial_grade_signal_gate_audit_json=tmp_path
         / "trial-grade-audit.json",
         strategygroup_trial_grade_signal_gate_audit_md=tmp_path
@@ -2535,6 +2721,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "three-strategy-portfolio.md",
         strategygroup_tradeability_decision_json=tmp_path / "tradeability.json",
         strategygroup_tradeability_decision_md=tmp_path / "tradeability.md",
+        daily_live_enablement_table_json=tmp_path / "daily-live-table.json",
+        daily_live_enablement_table_md=tmp_path / "daily-live-table.md",
         command_runner=fake_runner,
     )
 
@@ -2593,6 +2781,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_trial_grade_signal_gate_audit.py",
         "build_strategygroup_three_strategy_live_trial_portfolio.py",
         "build_strategygroup_tradeability_decision.py",
+        "build_daily_live_enablement_table.py",
+        "validate_daily_live_enablement_table.py",
     ]
     assert len(decision_loop_commands) == 2
     assert len(trial_admission_commands) == 1
@@ -2740,6 +2930,14 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_runtime_safety_state.py"
     )
     assert len(tradeability_commands) == 1
+    assert len(dry_run_audit_commands) == 1
+    dry_run_audit_command = dry_run_audit_commands[0]
+    assert dry_run_audit_command[
+        dry_run_audit_command.index("--output-json") + 1
+    ] == str(tmp_path / "dry-run-audit-chain.json")
+    assert dry_run_audit_command[
+        dry_run_audit_command.index("--output-dir") + 1
+    ] == str(tmp_path / "dry-run-audit-chain")
     assert len(three_strategy_commands) == 1
     three_strategy_command = three_strategy_commands[0]
     assert "--capital-trial-envelope-projection-json" in three_strategy_command
@@ -2807,6 +3005,74 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert tradeability_command[
         tradeability_command.index("--brf2-shadow-candidate-evidence-json") + 1
     ] == str(tmp_path / "brf2-shadow-evidence.json")
+    assert len(action_time_boundary_commands) == 1
+    action_time_boundary_command = action_time_boundary_commands[0]
+    assert action_time_boundary_command[
+        action_time_boundary_command.index("--output-json") + 1
+    ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
+    assert action_time_boundary_command[
+        action_time_boundary_command.index("--output-owner-progress") + 1
+    ] == str(tmp_path / "fresh-signal-action-time-boundary.md")
+    assert len(replay_live_parity_commands) == 1
+    replay_live_parity_command = replay_live_parity_commands[0]
+    assert replay_live_parity_command[
+        replay_live_parity_command.index("--output-json") + 1
+    ] == str(tmp_path / "replay-live-parity.json")
+    assert replay_live_parity_command[
+        replay_live_parity_command.index("--output-owner-progress") + 1
+    ] == str(tmp_path / "replay-live-parity.md")
+    assert len(mi_trial_admission_commands) == 1
+    mi_trial_admission_command = mi_trial_admission_commands[0]
+    assert mi_trial_admission_command[
+        mi_trial_admission_command.index("--output-json") + 1
+    ] == str(tmp_path / "mi-trial-admission.json")
+    assert mi_trial_admission_command[
+        mi_trial_admission_command.index("--output-owner-progress") + 1
+    ] == str(tmp_path / "mi-trial-admission.md")
+    assert "--replay-live-parity-audit-json" in tradeability_command
+    assert tradeability_command[
+        tradeability_command.index("--replay-live-parity-audit-json") + 1
+    ] == str(tmp_path / "replay-live-parity.json")
+    assert "--mi-trial-admission-decision-json" in tradeability_command
+    assert tradeability_command[
+        tradeability_command.index("--mi-trial-admission-decision-json") + 1
+    ] == str(tmp_path / "mi-trial-admission.json")
+    assert "--strategy-fresh-signal-action-time-boundary-json" in (
+        tradeability_command
+    )
+    assert tradeability_command[
+        tradeability_command.index(
+            "--strategy-fresh-signal-action-time-boundary-json"
+        )
+        + 1
+    ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
+    assert len(daily_table_commands) == 1
+    daily_table_command = daily_table_commands[0]
+    assert daily_table_command[
+        daily_table_command.index("--tradeability-json") + 1
+    ] == str(tmp_path / "tradeability.json")
+    assert daily_table_command[
+        daily_table_command.index("--replay-live-parity-json") + 1
+    ] == str(tmp_path / "replay-live-parity.json")
+    assert daily_table_command[
+        daily_table_command.index("--action-time-boundary-json") + 1
+    ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
+    assert daily_table_command[
+        daily_table_command.index("--mi-trial-admission-json") + 1
+    ] == str(tmp_path / "mi-trial-admission.json")
+    assert daily_table_command[
+        daily_table_command.index("--runtime-safety-json") + 1
+    ] == str(tmp_path / "runtime-safety-state.json")
+    assert daily_table_command[
+        daily_table_command.index("--output-json") + 1
+    ] == str(tmp_path / "daily-live-table.json")
+    assert daily_table_command[
+        daily_table_command.index("--output-owner-progress") + 1
+    ] == str(tmp_path / "daily-live-table.md")
+    assert len(daily_table_validator_commands) == 1
+    assert daily_table_validator_commands[0][-1] == str(
+        tmp_path / "daily-live-table.json"
+    )
     runtime_safety_state_command = runtime_safety_state_commands[0]
     assert "--brf2-shadow-candidate-evidence-json" in runtime_safety_state_command
     assert runtime_safety_state_command[
@@ -2848,7 +3114,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             "failed_facts": ["htf_trend_intact", "reclaim_confirmed"],
             "blocker_class": "computed_not_satisfied",
             "next_action": "continue_observation_with_failed_fact_matrix",
-            "mismatch_count": 1,
+            "mismatch_count": 4,
         }
     ]
     assert report["owner_summary"]["replay_live_parity_audit"][
@@ -3456,6 +3722,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        dry_run_audit_json=tmp_path / "dry-run-audit-chain.json",
+        dry_run_audit_dir=tmp_path / "dry-run-audit-chain",
         replay_lab_json=tmp_path / "replay.json",
         replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
@@ -3811,6 +4079,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        dry_run_audit_json=tmp_path / "dry-run-audit-chain.json",
+        dry_run_audit_dir=tmp_path / "dry-run-audit-chain",
         replay_lab_json=tmp_path / "replay.json",
         replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
@@ -4151,6 +4421,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        dry_run_audit_json=tmp_path / "dry-run-audit-chain.json",
+        dry_run_audit_dir=tmp_path / "dry-run-audit-chain",
         replay_lab_json=tmp_path / "replay.json",
         replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
@@ -4441,6 +4713,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        dry_run_audit_json=tmp_path / "dry-run-audit-chain.json",
+        dry_run_audit_dir=tmp_path / "dry-run-audit-chain",
         replay_lab_json=tmp_path / "replay.json",
         replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",

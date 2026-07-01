@@ -131,3 +131,9 @@ def test_mpg_high_beta_scope_defers_op_without_public_facts():
     assert "binance_usdm_public_facts_missing_or_stale" in op_row["rejection_reasons"]
     assert "not_in_current_readonly_watcher_batch" in op_row["rejection_reasons"]
     assert op_row["primary_live_submit_scope_changed"] is False
+    assert artifacts["scope_decision"][
+        "scoped_live_observation_proposal_symbols"
+    ] == ["OPUSDT"]
+    assert artifacts["expanded_watcher"]["watcher_scope"][
+        "scoped_live_observation_proposal_symbols"
+    ] == ["OPUSDT"]

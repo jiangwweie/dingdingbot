@@ -461,6 +461,12 @@ DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_JSON = (
 DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategygroup-tradeability-decision.md"
 )
+DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
+)
+DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -685,6 +691,8 @@ def main(argv: list[str] | None = None) -> int:
         strategygroup_tradeability_decision_md=Path(
             args.strategygroup_tradeability_decision_md
         ),
+        daily_live_enablement_table_json=Path(args.daily_live_enablement_table_json),
+        daily_live_enablement_table_md=Path(args.daily_live_enablement_table_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -924,6 +932,16 @@ def build_local_monitor_sequence_report(
     cpm_dry_run_submit_rehearsal_md: Path = (
         DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD
     ),
+    strategy_fresh_signal_action_time_boundary_json: Path = (
+        DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON
+    ),
+    strategy_fresh_signal_action_time_boundary_md: Path = (
+        DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD
+    ),
+    replay_live_parity_audit_json: Path = DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON,
+    replay_live_parity_audit_md: Path = DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD,
+    mi_trial_admission_decision_json: Path = DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON,
+    mi_trial_admission_decision_md: Path = DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD,
     four_candidate_recent_live_submit_replay_json: Path = (
         DEFAULT_FOUR_CANDIDATE_RECENT_LIVE_SUBMIT_REPLAY_JSON
     ),
@@ -951,6 +969,10 @@ def build_local_monitor_sequence_report(
     strategygroup_tradeability_decision_md: Path = (
         DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD
     ),
+    daily_live_enablement_table_json: Path = (
+        DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON
+    ),
+    daily_live_enablement_table_md: Path = DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     if (
@@ -1013,6 +1035,49 @@ def build_local_monitor_sequence_report(
         if cpm_dry_run_submit_rehearsal_md == DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD:
             cpm_dry_run_submit_rehearsal_md = (
                 cpm_parent / DEFAULT_CPM_DRY_RUN_SUBMIT_REHEARSAL_MD.name
+            )
+        if (
+            strategy_fresh_signal_action_time_boundary_json
+            == DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON
+        ):
+            strategy_fresh_signal_action_time_boundary_json = (
+                cpm_parent
+                / DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON.name
+            )
+        if (
+            strategy_fresh_signal_action_time_boundary_md
+            == DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD
+        ):
+            strategy_fresh_signal_action_time_boundary_md = (
+                cpm_parent
+                / DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD.name
+            )
+        if replay_live_parity_audit_json == DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON:
+            replay_live_parity_audit_json = (
+                cpm_parent / DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON.name
+            )
+        if replay_live_parity_audit_md == DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD:
+            replay_live_parity_audit_md = (
+                cpm_parent / DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD.name
+            )
+        if (
+            mi_trial_admission_decision_json
+            == DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON
+        ):
+            mi_trial_admission_decision_json = (
+                cpm_parent / DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON.name
+            )
+        if mi_trial_admission_decision_md == DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD:
+            mi_trial_admission_decision_md = (
+                cpm_parent / DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD.name
+            )
+        if daily_live_enablement_table_json == DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON:
+            daily_live_enablement_table_json = (
+                cpm_parent / DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON.name
+            )
+        if daily_live_enablement_table_md == DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD:
+            daily_live_enablement_table_md = (
+                cpm_parent / DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD.name
             )
         if (
             four_candidate_runtime_activation_closure_json
@@ -1530,15 +1595,15 @@ def build_local_monitor_sequence_report(
         "--sor-detector-json",
         str(DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON),
         "--output-json",
-        str(DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON),
+        str(strategy_fresh_signal_action_time_boundary_json),
         "--output-owner-progress",
-        str(DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_MD),
+        str(strategy_fresh_signal_action_time_boundary_md),
     ]
     steps.append(
         _run_step(
             "strategy_fresh_signal_action_time_boundary",
             strategy_fresh_signal_action_time_boundary_command,
-            DEFAULT_STRATEGY_FRESH_SIGNAL_ACTION_TIME_BOUNDARY_JSON,
+            strategy_fresh_signal_action_time_boundary_json,
             runner,
         )
     )
@@ -1555,15 +1620,15 @@ def build_local_monitor_sequence_report(
         "--sor-evidence-json",
         str(sor_runtime_activation_evidence_json),
         "--output-json",
-        str(DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON),
+        str(replay_live_parity_audit_json),
         "--output-owner-progress",
-        str(DEFAULT_REPLAY_LIVE_PARITY_AUDIT_MD),
+        str(replay_live_parity_audit_md),
     ]
     steps.append(
         _run_step(
             "replay_live_parity_audit",
             replay_live_parity_audit_command,
-            DEFAULT_REPLAY_LIVE_PARITY_AUDIT_JSON,
+            replay_live_parity_audit_json,
             runner,
         )
     )
@@ -1576,15 +1641,15 @@ def build_local_monitor_sequence_report(
         "--public-facts-json",
         str(binance_usdm_public_facts_json),
         "--output-json",
-        str(DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON),
+        str(mi_trial_admission_decision_json),
         "--output-owner-progress",
-        str(DEFAULT_MI_TRIAL_ADMISSION_DECISION_MD),
+        str(mi_trial_admission_decision_md),
     ]
     steps.append(
         _run_step(
             "mi_trial_admission_decision",
             mi_trial_admission_decision_command,
-            DEFAULT_MI_TRIAL_ADMISSION_DECISION_JSON,
+            mi_trial_admission_decision_json,
             runner,
         )
     )
@@ -2241,6 +2306,12 @@ def build_local_monitor_sequence_report(
         str(brf2_shadow_candidate_evidence_json),
         "--trial-grade-signal-gate-audit-json",
         str(strategygroup_trial_grade_signal_gate_audit_json),
+        "--replay-live-parity-audit-json",
+        str(replay_live_parity_audit_json),
+        "--mi-trial-admission-decision-json",
+        str(mi_trial_admission_decision_json),
+        "--strategy-fresh-signal-action-time-boundary-json",
+        str(strategy_fresh_signal_action_time_boundary_json),
         "--output-json",
         str(strategygroup_tradeability_decision_json),
         "--output-owner-progress",
@@ -2251,6 +2322,47 @@ def build_local_monitor_sequence_report(
             "strategygroup_tradeability_decision",
             strategygroup_tradeability_decision_command,
             strategygroup_tradeability_decision_json,
+            runner,
+        )
+    )
+
+    daily_live_enablement_table_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_daily_live_enablement_table.py"),
+        "--tradeability-json",
+        str(strategygroup_tradeability_decision_json),
+        "--replay-live-parity-json",
+        str(replay_live_parity_audit_json),
+        "--action-time-boundary-json",
+        str(strategy_fresh_signal_action_time_boundary_json),
+        "--mi-trial-admission-json",
+        str(mi_trial_admission_decision_json),
+        "--runtime-safety-json",
+        str(strategygroup_runtime_safety_state_json),
+        "--output-json",
+        str(daily_live_enablement_table_json),
+        "--output-owner-progress",
+        str(daily_live_enablement_table_md),
+    ]
+    steps.append(
+        _run_step(
+            "daily_live_enablement_table",
+            daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
+            runner,
+        )
+    )
+
+    validate_daily_live_enablement_table_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/validate_daily_live_enablement_table.py"),
+        str(daily_live_enablement_table_json),
+    ]
+    steps.append(
+        _run_step(
+            "validate_daily_live_enablement_table",
+            validate_daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
             runner,
         )
     )
@@ -2607,6 +2719,7 @@ def build_local_monitor_sequence_report(
             "strategygroup_runtime_safety_state_json": str(
                 strategygroup_runtime_safety_state_json
             ),
+            "daily_live_enablement_table_json": str(daily_live_enablement_table_json),
             "strategygroup_portfolio_board_json": str(strategygroup_portfolio_board_json),
             "strategygroup_review_only_deep_dive_wave_json": str(
                 strategygroup_review_only_deep_dive_wave_json
@@ -5370,6 +5483,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--strategygroup-tradeability-decision-md",
         dest="strategygroup_tradeability_decision_md",
         default=str(DEFAULT_STRATEGYGROUP_TRADEABILITY_DECISION_MD),
+    )
+    parser.add_argument(
+        "--daily-live-enablement-table-json",
+        default=str(DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON),
+    )
+    parser.add_argument(
+        "--daily-live-enablement-table-md",
+        default=str(DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

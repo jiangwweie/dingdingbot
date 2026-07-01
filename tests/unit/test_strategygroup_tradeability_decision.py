@@ -885,6 +885,102 @@ def _cpm_dry_run_submit_rehearsal() -> dict:
     }
 
 
+def _valid_replay_live_parity_audit(*rows: dict) -> dict:
+    per_symbol_rows = [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "ETHUSDT",
+            "blocker_class": "computed_not_satisfied",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": ["reclaim_confirmed"],
+            "next_action": "continue_observation_with_failed_fact_matrix",
+        },
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "BTCUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "next_action": "continue_armed_observation_until_fresh_signal",
+        },
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "next_action": "continue_armed_observation_until_fresh_signal",
+        },
+    ] + list(rows)
+    deduped: dict[tuple[str, str], dict] = {}
+    for row in per_symbol_rows:
+        deduped[(row["strategy_group_id"], row["symbol"])] = row
+    return {
+        "schema": "brc.replay_live_parity_audit.v1",
+        "scope": "replay_live_parity_audit_non_authority",
+        "status": "replay_live_parity_audit_ready",
+        "generated_at_utc": "2026-07-01T00:00:00+00:00",
+        "per_symbol_mismatch_table": list(deduped.values()),
+        "summary": {
+            "strategy_count": 3,
+            "replay_signal_count": 131,
+            "live_detector_reproduced_count": 14,
+            "mismatch_count": 117,
+        },
+    }
+
+
+def _valid_action_time_boundary_artifact(*rows: dict) -> dict:
+    strategy_rows = [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "ETHUSDT",
+            "path_id": "CPM-LONG",
+            "first_blocker": "fresh_cpm_long_signal_absent",
+            "action_time_path_ready": True,
+            "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        },
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "BTCUSDT",
+            "path_id": "MPG-LONG",
+            "first_blocker": "fresh_mpg_long_signal_absent",
+            "action_time_path_ready": True,
+            "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        },
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "path_id": "SOR-LONG",
+            "first_blocker": "fresh_sor_long_signal_absent",
+            "action_time_path_ready": True,
+            "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        },
+    ] + list(rows)
+    deduped: dict[str, dict] = {}
+    for row in strategy_rows:
+        deduped[row["strategy_group_id"]] = row
+    return {
+        "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+        "scope": "fresh_signal_action_time_boundary_non_authority",
+        "status": "strategy_fresh_signal_action_time_boundary_ready",
+        "generated_at_utc": "2026-07-01T00:00:00+00:00",
+        "strategy_rows": list(deduped.values()),
+        "summary": {
+            "strategy_count": 3,
+            "fresh_signal_present_count": 0,
+            "would_enter_finalgate_if_private_facts_ready_count": 0,
+            "live_submit_allowed_count": 0,
+        },
+    }
+
+
 def test_tradeability_decision_classifies_first_blockers_without_authority():
     module = _load_module()
 
@@ -901,21 +997,18 @@ def test_tradeability_decision_classifies_first_blockers_without_authority():
     assert packet["status"] == "tradeability_decision_ready"
     assert packet["summary"]["top_decision"] == "not_tradable_asset_admission"
     assert rows["BRF2-001"]["decision"] == "not_tradable_asset_admission"
-    assert rows["BRF2-001"]["first_blocker_class"] == (
-        "strategy_group_not_admitted_as_final_trial_asset"
-    )
+    assert rows["BRF2-001"]["first_blocker_class"] == "scope_not_attached"
     assert rows["BRF2-001"]["blocker_owner"] == "engineering"
     assert rows["BRF2-001"]["next_action"] == "build_trial_asset_admission_proposal"
     assert rows["BRF2-001"]["after_next_state"] == "trial_asset_admission_candidate"
 
-    assert rows["MPG-001"]["decision"] == "not_tradable_market_wait"
+    assert rows["MPG-001"]["decision"] == "not_tradable_facts"
     assert rows["MPG-001"]["stage"] == "armed_observation"
-    assert rows["MPG-001"]["blocker_owner"] == "market"
+    assert rows["MPG-001"]["first_blocker_class"] == "artifact_missing"
+    assert rows["MPG-001"]["blocker_owner"] == "engineering"
 
     assert rows["BTPC-001"]["decision"] == "not_tradable_facts"
-    assert rows["BTPC-001"]["first_blocker_class"] == (
-        "required_facts_or_classifier_mapping_unclosed"
-    )
+    assert rows["BTPC-001"]["first_blocker_class"] == "artifact_missing"
 
     assert rows["RBR-001"]["decision"] == "not_tradable_strategy_quality"
     assert rows["RBR-001"]["stage"] == "observe_only_would_enter"
@@ -987,7 +1080,7 @@ def test_tradeability_decision_advances_brf2_to_facts_blocker_after_policy_recor
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "admitted_trial_asset"
     assert brf2["decision"] == "not_tradable_facts"
-    assert brf2["first_blocker_class"] == "required_facts_mapping_gap"
+    assert brf2["first_blocker_class"] == "artifact_missing"
     assert brf2["blocker_owner"] == "engineering"
     assert brf2["next_action"] == (
         "close_brf2_required_facts_mapping_for_armed_observation"
@@ -1043,7 +1136,10 @@ def test_tradeability_decision_moves_brf2_to_market_wait_after_mapping():
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
     assert brf2["decision"] == "not_tradable_market_wait"
-    assert brf2["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert brf2["first_blocker_class"] == "market_wait_validated"
+    assert brf2["legacy_blocker_raw"] == "fresh_brf2_short_signal_absent"
+    assert brf2["market_wait_validation"]["valid"] is True
+    assert all(brf2["market_wait_validation"]["checks"].values())
     assert brf2["blocker_owner"] == "market"
     assert brf2["next_action"] == (
         "continue_brf2_armed_observation_until_fresh_signal"
@@ -1062,6 +1158,7 @@ def test_tradeability_decision_moves_brf2_to_market_wait_after_mapping():
     assert packet["summary"]["controlled_live_standby_count"] == 3
     assert packet["summary"]["stage_5_waiting_live_opportunity_ready_count"] == 3
     assert packet["checks"]["market_wait_only_after_admission"] is True
+    assert packet["checks"]["market_wait_validated_has_full_checklist"] is True
 
 
 def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
@@ -1100,9 +1197,7 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
     assert closure["checks"]["no_fixed_30u_contract"] is True
     assert closure["checks"]["rbr_observe_only_has_exit_decision"] is True
 
-    assert rows["CPM-RO-001"]["first_blocker_class"] == (
-        "cpm_registry_identity_gap"
-    )
+    assert rows["CPM-RO-001"]["first_blocker_class"] == "scope_not_attached"
     assert rows["CPM-RO-001"]["decision"] == "not_tradable_asset_admission"
     assert rows["CPM-RO-001"]["stage"] == "observe_only_would_enter"
     assert rows["CPM-RO-001"]["required_facts_status"] == "not_applicable"
@@ -1125,16 +1220,14 @@ def test_tradeability_decision_consumes_july_bullish_rebound_trade_paths():
         "funding_not_extreme",
         "action_time_available_balance",
     ]
-    assert paths["CPM-LONG"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-LONG"]["first_blocker"] == "scope_not_attached"
     assert paths["CPM-LONG"]["blocker_owner"] == "engineering"
-    assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert paths["CPM-SHORT"]["first_blocker"] == "scope_not_attached"
     assert paths["CPM-SHORT"]["blocker_owner"] == "engineering"
     assert paths["BRF2-SHORT"]["required_facts_mapping_status"] == "ready"
-    assert paths["BRF2-SHORT"]["first_blocker"] == "fresh_brf2_short_signal_absent"
-    assert paths["MPG-LONG"]["first_blocker"] == "fresh_mpg_long_signal_absent"
-    assert paths["SOR-LONG"]["first_blocker"] == (
-        "strategy_group_not_admitted_as_final_trial_asset"
-    )
+    assert paths["BRF2-SHORT"]["first_blocker"] == "market_wait_validated"
+    assert paths["MPG-LONG"]["first_blocker"] == "artifact_missing"
+    assert paths["SOR-LONG"]["first_blocker"] == "scope_not_attached"
     assert paths["SOR-LONG"]["blocker_owner"] == "engineering"
 
     mpg_diff = paths["MPG-LONG"]["production_vs_trial_trigger_diff"]
@@ -1187,12 +1280,8 @@ def test_brf2_path_inherits_specific_market_disable_blocker_from_row():
     }
 
     assert rows["BRF2-001"]["decision"] == "not_tradable_market_wait"
-    assert rows["BRF2-001"]["first_blocker_class"] == (
-        "short_squeeze_risk_state_disable_active"
-    )
-    assert paths["BRF2-SHORT"]["first_blocker"] == (
-        "short_squeeze_risk_state_disable_active"
-    )
+    assert rows["BRF2-001"]["first_blocker_class"] == "computed_not_satisfied"
+    assert paths["BRF2-SHORT"]["first_blocker"] == "computed_not_satisfied"
     assert paths["BRF2-SHORT"]["blocker_owner"] == "market"
     assert paths["BRF2-SHORT"]["next_action"] == (
         "continue_brf2_armed_observation_until_disable_clears"
@@ -1228,9 +1317,9 @@ def test_cpm_path_schema_does_not_promote_identity_review_to_market_wait():
     assert cpm["decision"] != "not_tradable_market_wait"
     assert cpm["first_blocker_class"] != "fresh_cpm_long_signal_absent"
     assert cpm["required_facts_status"] != "ready"
-    assert cpm["first_blocker_class"] == "cpm_registry_identity_gap"
-    assert paths["CPM-LONG"]["first_blocker"] == "cpm_registry_identity_gap"
-    assert paths["CPM-SHORT"]["first_blocker"] == "cpm_registry_identity_gap"
+    assert cpm["first_blocker_class"] == "scope_not_attached"
+    assert paths["CPM-LONG"]["first_blocker"] == "scope_not_attached"
+    assert paths["CPM-SHORT"]["first_blocker"] == "scope_not_attached"
     assert paths["CPM-LONG"]["required_facts_mapping_status"] == "not_applicable"
     assert paths["CPM-SHORT"]["required_facts_mapping_status"] == "not_applicable"
 
@@ -1271,7 +1360,10 @@ def test_cpm_fact_chain_promotes_to_armed_market_wait_only_after_closure():
 
     assert cpm["stage"] == "armed_observation"
     assert cpm["decision"] == "not_tradable_market_wait"
-    assert cpm["first_blocker_class"] == "fresh_cpm_long_signal_absent"
+    assert cpm["first_blocker_class"] == "market_wait_validated"
+    assert cpm["legacy_blocker_raw"] == "fresh_cpm_long_signal_absent"
+    assert cpm["market_wait_validation"]["valid"] is True
+    assert all(cpm["market_wait_validation"]["checks"].values())
     assert cpm["blocker_owner"] == "market"
     assert cpm["next_action"] == (
         "continue_cpm_long_armed_observation_until_reclaim_signal"
@@ -1308,13 +1400,405 @@ def test_cpm_fact_chain_promotes_to_armed_market_wait_only_after_closure():
         "action_time_exchange_available_balance"
     )
     assert cpm_long["can_trade_now"] is False
-    assert cpm_long["first_blocker"] == "fresh_cpm_long_signal_absent"
+    assert cpm_long["first_blocker"] == "market_wait_validated"
     assert cpm_long["blocker_owner"] == "market"
     assert "actionable_now" not in cpm
     assert "real_order_authority" not in cpm
     assert "actionable_now" not in cpm_long
     assert "real_order_authority" not in cpm_long
     assert packet["summary"]["tradable_now_count"] == 0
+
+
+def test_tradeability_consumes_cpm_replay_live_parity_failed_fact_matrix():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=(
+            _capital_trial_envelope_projection_with_cpm_stale_blockers()
+        ),
+        registry=_registry_with_cpm_trial_asset(),
+        tier_policy=_tier_policy_with_cpm_armed_observation(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        trial_asset_admission_proposal=_trial_asset_admission_proposal_with_policy(),
+        brf2_owner_trial_policy_scope=_owner_policy_scope(),
+        cpm_identity_routing_decision=_cpm_identity_routing_decision(),
+        cpm_owner_trial_policy_scope=_cpm_owner_trial_policy_scope(),
+        cpm_required_facts_mapping=_cpm_required_facts_mapping(),
+        cpm_runtime_signal_capture=_cpm_runtime_signal_capture(),
+        cpm_shadow_candidate_evidence=_cpm_shadow_candidate_evidence(),
+        cpm_dry_run_submit_rehearsal=_cpm_dry_run_submit_rehearsal(),
+        three_strategy_live_trial_portfolio=(
+            _three_strategy_portfolio_with_brf2_armed_observation()
+        ),
+        brf2_runtime_signal_capture=_brf2_runtime_signal_capture(),
+        replay_live_parity_audit=_valid_replay_live_parity_audit(
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "detector_attached": True,
+                "watcher_tick_present": True,
+                "computed": True,
+                "failed_facts": ["htf_trend_intact", "reclaim_confirmed"],
+                "blocker_class": "computed_not_satisfied",
+                "next_action": "continue_observation_with_failed_fact_matrix",
+            }
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    paths = {
+        path["path_id"]: path
+        for path in packet["july_bullish_rebound_trade_path_closure"]["paths"]
+    }
+    cpm = rows["CPM-RO-001"]
+
+    assert cpm["stage"] == "armed_observation"
+    assert cpm["decision"] == "not_tradable_market_wait"
+    assert cpm["first_blocker_class"] == "computed_not_satisfied"
+    assert cpm["blocker_owner"] == "market"
+    assert "htf_trend_intact,reclaim_confirmed" in cpm["first_blocker_detail"]
+    assert paths["CPM-LONG"]["first_blocker"] == "computed_not_satisfied"
+
+
+def test_tradeability_consumes_mpg_replay_live_action_time_blocker():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        replay_live_parity_audit=_valid_replay_live_parity_audit(
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "SOLUSDT",
+                "blocker_class": "action_time_boundary_not_reproduced",
+                "next_action": "repair_non_executing_action_time_rehearsal_path",
+            }
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["stage"] == "armed_observation"
+    assert mpg["decision"] == "not_tradable_execution_gate"
+    assert mpg["first_blocker_class"] == "action_time_boundary_not_reproduced"
+    assert mpg["legacy_blocker_raw"] == "action_time_boundary_not_reproduced"
+    assert mpg["blocker_owner"] == "runtime"
+    assert mpg["next_action"] == "repair_non_executing_action_time_rehearsal_path"
+
+
+def test_tradeability_rejects_fixture_replay_live_parity_artifact():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        replay_live_parity_audit={
+            "status": "fixture",
+            "schema": "brc.replay_live_parity_audit.v1",
+            "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "summary": {
+                "strategy_count": 3,
+                "replay_signal_count": 131,
+                "mismatch_count": 1,
+            },
+            "per_symbol_mismatch_table": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "SOLUSDT",
+                    "blocker_class": "action_time_boundary_not_reproduced",
+                },
+                {
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETHUSDT",
+                    "blocker_class": "computed_not_satisfied",
+                },
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "blocker_class": "market_wait_validated",
+                },
+            ],
+        },
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["decision"] == "not_tradable_facts"
+    assert mpg["first_blocker_class"] == "schema_invalid"
+    assert mpg["legacy_blocker_raw"] == "schema_invalid"
+    assert "fixture or partial" in mpg["first_blocker_detail"]
+
+
+def test_tradeability_consumes_action_time_boundary_artifact_without_parity():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        strategy_fresh_signal_action_time_boundary=(
+            _valid_action_time_boundary_artifact(
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "SOLUSDT",
+                    "first_blocker": "action_time_boundary_not_reproduced",
+                    "next_action": "repair_non_executing_action_time_rehearsal_path",
+                }
+            )
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    assert rows["MPG-001"]["decision"] == "not_tradable_execution_gate"
+    assert rows["MPG-001"]["first_blocker_class"] == (
+        "action_time_boundary_not_reproduced"
+    )
+
+
+def test_tradeability_rejects_cross_symbol_mpg_market_wait_evidence():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        replay_live_parity_audit=_valid_replay_live_parity_audit(),
+        strategy_fresh_signal_action_time_boundary=(
+            _valid_action_time_boundary_artifact(
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "SOLUSDT",
+                    "path_id": "MPG-LONG",
+                    "first_blocker": "fresh_mpg_long_signal_absent",
+                    "action_time_path_ready": True,
+                    "next_action": (
+                        "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+                    ),
+                }
+            )
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["decision"] == "not_tradable_facts"
+    assert mpg["first_blocker_class"] == "artifact_missing"
+    assert mpg["first_blocker_detail"] == "market_wait_validated checklist is incomplete"
+    assert mpg["next_action"] == "complete_market_wait_validation_checklist"
+
+
+def test_tradeability_maps_mpg_public_facts_gap_to_scope_blocker():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        strategy_fresh_signal_action_time_boundary=(
+            _valid_action_time_boundary_artifact(
+                {
+                    "strategy_group_id": "MPG-001",
+                    "path_id": "MPG-STRONG-SYMBOL-ROTATION",
+                    "first_blocker": "mpg_high_beta_public_facts_gap",
+                    "required_facts_readiness": {
+                        "public_facts_ready": False,
+                        "private_action_time_facts_ready": False,
+                    },
+                    "next_action": (
+                        "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+                    ),
+                }
+            )
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["decision"] == "not_tradable_asset_admission"
+    assert mpg["first_blocker_class"] == "scope_not_attached"
+    assert mpg["first_blocker_detail"] == "mpg_high_beta_public_facts_gap"
+    assert mpg["next_action"] == (
+        "produce_scoped_live_observation_or_scope_proposal"
+    )
+    assert mpg["next_action"] != (
+        "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+    )
+
+
+def test_tradeability_rejects_partial_action_time_boundary_artifact():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        strategy_fresh_signal_action_time_boundary={
+            "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+            "scope": "fresh_signal_action_time_boundary_non_authority",
+            "status": "strategy_fresh_signal_action_time_boundary_ready",
+            "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "summary": {
+                "strategy_count": 1,
+                "fresh_signal_present_count": 0,
+                "would_enter_finalgate_if_private_facts_ready_count": 0,
+                "live_submit_allowed_count": 0,
+            },
+            "strategy_rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "first_blocker": "action_time_boundary_not_reproduced",
+                }
+            ],
+        },
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["decision"] == "not_tradable_facts"
+    assert mpg["first_blocker_class"] == "artifact_missing"
+    assert "required WIP lanes" in mpg["first_blocker_detail"]
+
+
+def test_tradeability_absorbs_mi_trial_admission_candidate_fact():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        mi_trial_admission_decision={
+            "schema": "brc.mi_trial_admission_decision.v1",
+            "scope": "mi_trial_admission_decision_non_authority",
+            "status": "mi_trial_admission_decision_ready",
+            "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "strategy_group_id": "MI-001",
+            "trial_admission_decision": "trial_asset_admission_candidate",
+            "promotion_scope": "trial_admission",
+            "tradeability": {
+                "can_trade_now": False,
+                "first_blocker": "trial_admission_fact_not_integrated",
+                "blocker_owner": "engineering",
+            },
+        },
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mi = rows["MI-001"]
+
+    assert mi["stage"] == "trial_asset_admission_candidate"
+    assert mi["decision"] == "not_tradable_asset_admission"
+    assert mi["first_blocker_class"] == "scope_not_attached"
+    assert mi["runtime_scope_status"]["mi_trial_admission_decision"] == (
+        "trial_asset_admission_candidate"
+    )
+    assert mi["runtime_scope_status"]["mi_promotion_scope"] == "trial_admission"
+
+
+def test_tradeability_reclassifies_scoped_mi_trial_admission_to_policy_gap():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        mi_trial_admission_decision={
+            "schema": "brc.mi_trial_admission_decision.v1",
+            "scope": "mi_trial_admission_decision_non_authority",
+            "status": "mi_trial_admission_decision_ready",
+            "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "strategy_group_id": "MI-001",
+            "trial_admission_decision": "trial_asset_admission_candidate",
+            "promotion_scope": "trial_admission",
+            "symbol_scope": {
+                "readonly_watcher_candidates": ["AVAXUSDT"],
+                "primary_live_submit_symbol_scope": [],
+                "live_submit_scope_changed": False,
+            },
+            "watcher_scope": {
+                "source": "binance_usdm_public_facts_readonly",
+                "symbol_scope": ["AVAXUSDT"],
+                "read_only": True,
+            },
+            "tradeability": {
+                "can_trade_now": False,
+                "first_blocker": "mi_owner_policy_and_required_facts_mapping_needed",
+                "blocker_owner": "owner_policy",
+            },
+        },
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mi = rows["MI-001"]
+
+    assert mi["stage"] == "trial_asset_admission_candidate"
+    assert mi["decision"] == "not_tradable_policy"
+    assert mi["first_blocker_class"] == "policy_scope_missing"
+    assert mi["blocker_owner"] == "owner"
+    assert mi["next_action"] == "record_scoped_owner_policy"
+
+
+def test_tradeability_rejects_invalid_mi_trial_admission_artifact():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        mi_trial_admission_decision={
+            "status": "mi_trial_admission_decision_ready",
+            "trial_admission_decision": "trial_asset_admission_candidate",
+            "promotion_scope": "trial_admission",
+            "tradeability": {
+                "can_trade_now": False,
+                "first_blocker": "trial_admission_fact_not_integrated",
+                "blocker_owner": "engineering",
+            },
+        },
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mi = rows["MI-001"]
+
+    assert mi["decision"] == "not_tradable_facts"
+    assert mi["first_blocker_class"] == "schema_invalid"
+    assert mi["legacy_blocker_raw"] == "schema_invalid"
+    assert "schema is not" in mi["first_blocker_detail"]
 
 
 def test_july_closure_does_not_pass_rbr_exit_check_when_rows_are_absent():
@@ -1367,11 +1851,11 @@ def test_tradeability_decision_does_not_default_portfolio_blocker_to_market_wait
 
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     brf2 = rows["BRF2-001"]
-    assert brf2["decision"] == "not_tradable_execution_gate"
+    assert brf2["decision"] == "not_tradable_facts"
     assert brf2["decision"] != "not_tradable_market_wait"
     assert (
         brf2["first_blocker_class"]
-        == "portfolio_tradeability_decision_state_missing"
+        == "schema_invalid"
     )
     assert brf2["blocker_owner"] == "engineering"
     assert brf2["next_action"] == "repair_portfolio_tradeability_decision_evidence"
@@ -1440,8 +1924,8 @@ def test_tradeability_decision_exposes_brf2_watcher_fact_input_gap():
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
     assert brf2["decision"] == "not_tradable_facts"
-    assert brf2["first_blocker_class"] == "brf2_watcher_fact_input_missing"
-    assert brf2["blocker_owner"] == "engineering"
+    assert brf2["first_blocker_class"] == "watcher_tick_missing"
+    assert brf2["blocker_owner"] == "runtime"
     assert brf2["next_action"] == "attach_brf2_watcher_fact_input_producer"
     assert brf2["after_next_state"] == "armed_observation"
     assert "actionable_now" not in brf2
@@ -1475,9 +1959,7 @@ def test_tradeability_decision_moves_brf2_to_candidate_packet_after_fresh_captur
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
     assert brf2["decision"] == "not_tradable_execution_gate"
-    assert brf2["first_blocker_class"] == (
-        "brf2_candidate_authorization_evidence_not_created"
-    )
+    assert brf2["first_blocker_class"] == "action_time_boundary_not_reproduced"
     assert brf2["blocker_owner"] == "runtime"
     assert brf2["next_action"] == (
         "build_brf2_shadow_candidate_evidence_for_action_time_chain"
@@ -1518,9 +2000,7 @@ def test_tradeability_decision_moves_brf2_past_candidate_packet_when_ready():
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
     assert brf2["decision"] == "not_tradable_execution_gate"
-    assert brf2["first_blocker_class"] == (
-        "brf2_shadow_candidate_evidence_ready_authorization_evidence_not_created"
-    )
+    assert brf2["first_blocker_class"] == "action_time_boundary_not_reproduced"
     assert brf2["blocker_owner"] == "runtime"
     assert brf2["next_action"] == "prepare_fresh_candidate_authorization_evidence"
     assert brf2["after_next_state"] == (
@@ -1577,9 +2057,7 @@ def test_tradeability_prefers_runtime_safety_candidate_authorization_state():
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     brf2 = rows["BRF2-001"]
     assert brf2["decision"] == "not_tradable_execution_gate"
-    assert brf2["first_blocker_class"] == (
-        "brf2_shadow_candidate_evidence_ready_authorization_evidence_not_created"
-    )
+    assert brf2["first_blocker_class"] == "action_time_boundary_not_reproduced"
     assert brf2["next_action"] == "prepare_fresh_candidate_authorization_evidence"
     assert brf2["after_next_state"] == (
         "candidate_authorization_evidence_pending_action_time_finalgate"
@@ -1676,7 +2154,9 @@ def test_cli_explicit_brf2_runtime_signal_capture_path_feeds_signal_state(
         == "brf2_runtime_signal_capture_ready"
     )
     assert runtime_scope["brf2_current_signal_state"] == "fresh_signal_absent"
-    assert brf2["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert brf2["first_blocker_class"] == "artifact_missing"
+    assert brf2["legacy_blocker_raw"] == "artifact_missing"
+    assert brf2["market_wait_validation"]["not_applicable"] is True
     assert "actionable_now" not in brf2
     assert "real_order_authority" not in brf2
     assert brf2["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
@@ -1833,9 +2313,7 @@ def test_cli_without_explicit_trial_asset_admission_does_not_read_default_propos
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "tiny_live_intake_candidate"
     assert brf2["decision"] == "not_tradable_asset_admission"
-    assert brf2["first_blocker_class"] == (
-        "strategy_group_not_admitted_as_final_trial_asset"
-    )
+    assert brf2["first_blocker_class"] == "scope_not_attached"
     assert brf2["runtime_scope_status"][
         "trial_asset_admission_proposal_ready"
     ] is False
@@ -1905,7 +2383,7 @@ def test_cli_explicit_trial_asset_admission_path_feeds_strategy_asset_state(
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "trial_asset_admission_candidate"
     assert brf2["decision"] == "not_tradable_policy"
-    assert brf2["first_blocker_class"] == "owner_trial_scope_or_capital_policy_missing"
+    assert brf2["first_blocker_class"] == "policy_scope_missing"
     assert brf2["runtime_scope_status"][
         "trial_asset_admission_proposal_ready"
     ] is True
@@ -1971,7 +2449,7 @@ def test_cli_without_explicit_brf2_owner_policy_does_not_read_default_scope(
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "trial_asset_admission_candidate"
     assert brf2["decision"] == "not_tradable_policy"
-    assert brf2["first_blocker_class"] == "owner_trial_scope_or_capital_policy_missing"
+    assert brf2["first_blocker_class"] == "policy_scope_missing"
     runtime_scope = brf2["runtime_scope_status"]
     assert runtime_scope["owner_policy_recorded"] is False
     assert runtime_scope["owner_policy_scope_missing"] is True
@@ -2042,7 +2520,7 @@ def test_cli_explicit_brf2_owner_policy_path_feeds_policy_state(
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "trial_asset_admission_candidate"
     assert brf2["decision"] == "not_tradable_facts"
-    assert brf2["first_blocker_class"] == "required_facts_mapping_gap"
+    assert brf2["first_blocker_class"] == "artifact_missing"
     runtime_scope = brf2["runtime_scope_status"]
     assert runtime_scope["owner_policy_recorded"] is True
     assert runtime_scope["owner_policy_scope_missing"] is False
@@ -2108,7 +2586,7 @@ def test_cli_without_explicit_three_strategy_portfolio_does_not_read_default_tri
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     brf2 = rows["BRF2-001"]
     assert brf2["decision"] == "not_tradable_facts"
-    assert brf2["first_blocker_class"] == "required_facts_mapping_gap"
+    assert brf2["first_blocker_class"] == "artifact_missing"
     assert brf2["policy_scope"]["source"] == "brf2_owner_trial_policy_scope"
     assert brf2["runtime_scope_status"]["live_trial_portfolio_seat"] is False
     assert brf2["runtime_scope_status"]["trial_envelope_id"] == ""
@@ -2177,8 +2655,9 @@ def test_cli_explicit_three_strategy_portfolio_path_feeds_trial_envelope_state(
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     brf2 = rows["BRF2-001"]
     assert brf2["stage"] == "armed_observation"
-    assert brf2["decision"] == "not_tradable_market_wait"
-    assert brf2["first_blocker_class"] == "fresh_brf2_short_signal_absent"
+    assert brf2["decision"] == "not_tradable_facts"
+    assert brf2["first_blocker_class"] == "artifact_missing"
+    assert brf2["legacy_blocker_raw"] == "artifact_missing"
     assert brf2["policy_scope"]["source"] == "trial_envelope"
     assert brf2["runtime_scope_status"]["live_trial_portfolio_seat"] is True
     assert brf2["runtime_scope_status"]["trial_envelope_id"] == (
@@ -2567,8 +3046,9 @@ def test_cli_explicit_runtime_safety_state_path_feeds_runtime_safety_state(
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     mpg = rows["MPG-001"]
     assert mpg["stage"] == "armed_observation"
-    assert mpg["decision"] == "not_tradable_market_wait"
-    assert mpg["first_blocker_class"] == "fresh_executable_signal_absent"
+    assert mpg["decision"] == "not_tradable_facts"
+    assert mpg["first_blocker_class"] == "artifact_missing"
+    assert mpg["first_blocker_detail"] == "market_wait_validated checklist is incomplete"
     assert "actionable_now" not in mpg
     assert "real_order_authority" not in mpg
     assert mpg["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
@@ -2646,7 +3126,7 @@ def test_scoped_live_submit_only_marks_matching_strategy_group_tradable():
     ] is True
 
     assert rows["BRF2-001"]["decision"] == "not_tradable_facts"
-    assert rows["BRF2-001"]["first_blocker_class"] == "required_facts_mapping_gap"
+    assert rows["BRF2-001"]["first_blocker_class"] == "artifact_missing"
     assert rows["BTPC-001"]["decision"] != "tradable_now"
     assert rows["RBR-001"]["decision"] != "tradable_now"
     assert rows["RBR2-001"]["decision"] != "tradable_now"

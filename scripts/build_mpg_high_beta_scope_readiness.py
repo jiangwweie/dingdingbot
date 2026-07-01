@@ -102,15 +102,23 @@ def build_mpg_high_beta_scope_readiness(
         for row in symbol_rows
         if row["scope_decision"] == "approve_readonly_watcher_scope"
     ]
+    scoped_observation_proposal = [
+        row["symbol"]
+        for row in symbol_rows
+        if row["scope_decision"] != "approve_readonly_watcher_scope"
+        and row["strategy_fit"] is True
+    ]
     scope_decision = _scope_decision_artifact(
         generated_at_utc=generated,
         symbol_rows=symbol_rows,
         approved_readonly=approved_readonly,
+        scoped_observation_proposal=scoped_observation_proposal,
     )
     watcher = _watcher_artifact(
         generated_at_utc=generated,
         symbol_rows=symbol_rows,
         approved_readonly=approved_readonly,
+        scoped_observation_proposal=scoped_observation_proposal,
     )
     readiness = _action_time_readiness_artifact(
         generated_at_utc=generated,
@@ -194,6 +202,7 @@ def _scope_decision_artifact(
     generated_at_utc: str,
     symbol_rows: list[dict[str, Any]],
     approved_readonly: list[str],
+    scoped_observation_proposal: list[str],
 ) -> dict[str, Any]:
     return {
         "schema": "brc.mpg_symbol_scope_decision.v1",
@@ -204,6 +213,7 @@ def _scope_decision_artifact(
         "path_id": "MPG-STRONG-SYMBOL-ROTATION",
         "primary_live_submit_symbol_scope": list(PRIMARY_LIVE_SCOPE),
         "approved_readonly_watcher_symbols": approved_readonly,
+        "scoped_live_observation_proposal_symbols": scoped_observation_proposal,
         "reviewed_high_beta_symbols": list(HIGH_BETA_REVIEW_SCOPE),
         "symbol_decisions": symbol_rows,
         "checks": _common_checks(),
@@ -221,6 +231,7 @@ def _watcher_artifact(
     generated_at_utc: str,
     symbol_rows: list[dict[str, Any]],
     approved_readonly: list[str],
+    scoped_observation_proposal: list[str],
 ) -> dict[str, Any]:
     symbol_scope = [*PRIMARY_LIVE_SCOPE, *approved_readonly]
     return {
@@ -233,6 +244,9 @@ def _watcher_artifact(
             "symbol_scope": symbol_scope,
             "primary_live_submit_symbol_scope": list(PRIMARY_LIVE_SCOPE),
             "expanded_readonly_watcher_symbols": approved_readonly,
+            "scoped_live_observation_proposal_symbols": (
+                scoped_observation_proposal
+            ),
             "source": "binance_usdm_public_facts_readonly",
         },
         "symbol_public_fact_rows": symbol_rows,
