@@ -218,13 +218,20 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
         for row in detector.get("symbol_detector_rows") or []
         if isinstance(row, dict)
     ]
+    selected_row = _sor_selected_detector_row(detector_rows)
+    selected_symbol = str(selected_row.get("symbol") or "SOLUSDT")
     fresh = int(detector_summary.get("fresh_session_signal_count") or 0) > 0
-    public_ready = evidence.get("runtime_artifact_ready") is True
+    public_ready = (
+        evidence.get("runtime_artifact_ready") is True
+        and _sor_detector_row_public_ready(selected_row)
+    )
     candidate_shape = evidence.get("candidate_evidence_shape_ready") is True
     rehearsal_ready = evidence.get("fresh_signal_rehearsal_ready") is True
     would_enter = public_ready and candidate_shape and rehearsal_ready
     first_blocker = (
-        "private_action_time_facts_required"
+        "watcher_tick_missing"
+        if not public_ready
+        else "private_action_time_facts_required"
         if fresh
         else str(
             detector_summary.get("first_blocker")
@@ -234,7 +241,7 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
     )
     return _row(
         strategy_group_id="SOR-001",
-        symbol=_sor_selected_symbol(detector_rows),
+        symbol=selected_symbol,
         path_id="SOR-SESSION-BREAKOUT",
         fresh_signal_present=fresh,
         current_signal_state=(
@@ -245,7 +252,7 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
         dry_run_submit_rehearsal_ready=rehearsal_ready,
         would_enter_finalgate_if_private_facts_ready=would_enter,
         first_blocker=first_blocker,
-        blocker_owner="runtime" if fresh else "market",
+        blocker_owner="runtime" if fresh or not public_ready else "market",
     )
 
 
@@ -292,7 +299,9 @@ def _row(
         "first_blocker": first_blocker,
         "blocker_owner": blocker_owner,
         "next_action": (
-            "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+            "refresh_or_repair_watcher_public_fact_input"
+            if first_blocker == "watcher_tick_missing"
+            else "wait_for_fresh_signal_then_refresh_private_action_time_facts"
             if not fresh_signal_present
             else "refresh_private_action_time_facts_before_finalgate"
         ),
@@ -323,16 +332,27 @@ def _first_symbol(*artifacts: dict[str, Any], default: str) -> str:
 
 
 def _sor_selected_symbol(detector_rows: list[dict[str, Any]]) -> str:
+    return str(_sor_selected_detector_row(detector_rows).get("symbol") or "SOLUSDT")
+
+
+def _sor_selected_detector_row(detector_rows: list[dict[str, Any]]) -> dict[str, Any]:
     for row in detector_rows:
         if row.get("fresh_session_range_signal") is True:
-            symbol = str(row.get("symbol") or "")
-            if symbol:
-                return symbol
+            return row
     for row in detector_rows:
         symbol = str(row.get("symbol") or "")
         if symbol:
-            return symbol
-    return "SOLUSDT"
+            return row
+    return {}
+
+
+def _sor_detector_row_public_ready(row: dict[str, Any]) -> bool:
+    missing_facts = _string_list(row.get("missing_required_trigger_facts"))
+    return (
+        row.get("public_facts_ready") is True
+        and bool(row.get("latest_candle_close_time_utc"))
+        and "opening_range_available" not in missing_facts
+    )
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
@@ -369,6 +389,14 @@ def _write_text(path: Path, text: str) -> None:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list | tuple | set):
+        return [str(item) for item in value if str(item)]
+    return []
 
 
 if __name__ == "__main__":

@@ -66,7 +66,16 @@ def _evidence(strategy_group_id: str) -> dict:
     }
 
 
-def _sor_detector() -> dict:
+def _sor_detector(
+    *,
+    latest_candle: bool = True,
+    missing_required_trigger_facts: list[str] | None = None,
+) -> dict:
+    missing_required_trigger_facts = (
+        missing_required_trigger_facts
+        if missing_required_trigger_facts is not None
+        else ["breakout_level_crossed"]
+    )
     return {
         "status": "sor_session_detector_facts_ready",
         "summary": {
@@ -77,10 +86,18 @@ def _sor_detector() -> dict:
             {
                 "symbol": "SOLUSDT",
                 "fresh_session_range_signal": False,
+                "public_facts_ready": True,
+                "latest_candle_close_time_utc": (
+                    "2026-06-30T01:59:59+00:00" if latest_candle else None
+                ),
+                "missing_required_trigger_facts": missing_required_trigger_facts,
             },
             {
                 "symbol": "AVAXUSDT",
                 "fresh_session_range_signal": False,
+                "public_facts_ready": True,
+                "latest_candle_close_time_utc": "2026-06-30T01:59:59+00:00",
+                "missing_required_trigger_facts": ["breakout_level_crossed"],
             },
         ],
     }
@@ -159,3 +176,32 @@ def test_sor_boundary_uses_session_detector_first_blocker():
     assert sor["first_blocker"] == "fresh_sor_session_range_signal_absent"
     assert sor["blocker_owner"] == "market"
     assert sor["action_time_path_ready"] is True
+
+
+def test_sor_boundary_requires_selected_detector_public_facts_and_candle_tick():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=False),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness(),
+        mpg_evidence=_evidence("MPG-001"),
+        sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(
+            latest_candle=False,
+            missing_required_trigger_facts=[
+                "opening_range_available",
+                "breakout_level_crossed",
+            ],
+        ),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
+    assert sor["symbol"] == "SOLUSDT"
+    assert sor["required_facts_readiness"]["public_facts_ready"] is False
+    assert sor["action_time_path_ready"] is False
+    assert sor["would_enter_finalgate_if_private_facts_ready"] is False
+    assert sor["first_blocker"] == "watcher_tick_missing"
+    assert sor["blocker_owner"] == "runtime"
+    assert sor["next_action"] == "refresh_or_repair_watcher_public_fact_input"
