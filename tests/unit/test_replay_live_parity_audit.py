@@ -289,11 +289,11 @@ def test_replay_live_parity_reclassifies_mpg_scope_proposal_without_public_tick(
     }
     op_row = by_symbol["OPUSDT"]
 
-    assert op_row["blocker_class"] == "watcher_tick_missing"
+    assert op_row["blocker_class"] == "scope_not_attached"
     assert op_row["watcher_tick_present"] is False
     assert op_row["computed"] is True
     assert "binance_usdm_public_facts_missing_or_stale" in op_row["failed_facts"]
-    assert op_row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+    assert op_row["next_action"] == "produce_scoped_live_observation_or_scope_proposal"
 
 
 def test_replay_live_parity_reclassifies_sor_missing_candles_as_watcher_tick_missing():

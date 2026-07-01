@@ -1,28 +1,28 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-01T16:00:06.217340+00:00",
+  "generated_at_utc": "2026-07-01T16:23:57.735674+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {
     "strategy_group_id": "MPG-001",
-    "symbol": "SOLUSDT",
-    "first_blocker": "watcher_tick_missing",
+    "symbol": "OPUSDT",
+    "first_blocker": "scope_not_attached",
     "closest_to_live_rank": 1,
-    "next_engineering_action": "refresh_or_repair_watcher_public_fact_input"
+    "next_engineering_action": "produce_scoped_live_observation_or_scope_proposal"
   },
-  "task_id": "P0-MPG-001-WATCHER-TICK-MISSING-CLOSURE",
+  "task_id": "P0-MPG-001-SCOPE-NOT-ATTACHED-CLOSURE",
   "active_lane": {
     "strategy_group_id": "MPG-001",
-    "symbol": "SOLUSDT",
+    "symbol": "OPUSDT",
     "side": "long",
     "stage": "armed"
   },
-  "chain_position": "replay_live_parity",
-  "first_blocker": "watcher_tick_missing",
-  "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT blocker_class=watcher_tick_missing",
-  "expected_state_change": "MPG-001/SOLUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
-  "next_action": "refresh_or_repair_watcher_public_fact_input",
+  "chain_position": "symbol_scope_decision",
+  "first_blocker": "scope_not_attached",
+  "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT blocker_class=scope_not_attached",
+  "expected_state_change": "MPG-001/OPUSDT first_blocker changes from scope_not_attached to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
+  "next_action": "produce_scoped_live_observation_or_scope_proposal",
   "allowed_files": [
     "scripts/build_single_lane_task_packet.py",
     "scripts/validate_single_lane_task_packet.py",
@@ -34,10 +34,10 @@
     "output/runtime-monitor/latest-single-lane-task-packet.md",
     "output/runtime-monitor/latest-daily-live-enablement-table.json",
     "output/runtime-monitor/latest-daily-live-enablement-table.md",
-    "scripts/build_replay_live_parity_audit.py",
-    "tests/unit/test_replay_live_parity_audit.py",
-    "output/runtime-monitor/latest-replay-live-parity-audit.json",
-    "output/runtime-monitor/latest-replay-live-parity-audit.md"
+    "scripts/build_strategygroup_tradeability_decision.py",
+    "tests/unit/test_strategygroup_tradeability_decision.py",
+    "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
+    "output/runtime-monitor/latest-strategygroup-tradeability-decision.md"
   ],
   "forbidden_files": [
     "src/application/execution_orchestrator.py",
@@ -53,16 +53,16 @@
     "FinalGate bypass paths",
     "Operation Layer bypass paths"
   ],
-  "stop_condition": "watcher/public facts tick is present for the selected lane",
+  "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
   "tests": [
-    "pytest -q tests/unit/test_replay_live_parity_audit.py tests/unit/test_daily_live_enablement_table.py",
+    "pytest -q tests/unit/test_strategygroup_tradeability_decision.py tests/unit/test_daily_live_enablement_table.py",
     "python3 -m py_compile scripts/build_single_lane_task_packet.py scripts/validate_single_lane_task_packet.py",
     "pytest -q tests/unit/test_single_lane_task_packet.py",
     "python3 scripts/validate_single_lane_task_packet.py output/runtime-monitor/latest-single-lane-task-packet.json",
     "python3 scripts/validate_output_artifact_scope.py --git-status",
     "git diff --check"
   ],
-  "done_when": "MPG-001/SOLUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
+  "done_when": "MPG-001/OPUSDT no longer has scope_not_attached, or the Daily Table reclassifies the same lane to a more precise first blocker.",
   "authority_boundary": "single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
   "source_authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
   "owner_action_required": "no",

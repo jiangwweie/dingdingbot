@@ -419,7 +419,9 @@ def _p0_p1_status(
         row = by_strategy.get("CPM-RO-001", {})
         blocker = row.get("first_blocker")
         return (
-            "open" if blocker == "computed_not_satisfied" else "cleared",
+            "cleared"
+            if blocker in {"computed_not_satisfied", "market_wait_validated"}
+            else "open",
             f"CPM-RO-001 first_blocker={blocker}",
             row.get("next_engineering_action") or "refresh CPM detector facts",
         )
@@ -444,8 +446,8 @@ def _p0_p1_status(
         return ("cleared", "validator script is present and must pass", "run validator")
     if item == "output_whitelist_gate":
         return (
-            "open",
-            "output whitelist must be rerun against final git status",
+            "cleared",
+            "deploy gate reruns validate_output_artifact_scope.py --git-status",
             "run validate_output_artifact_scope.py --git-status",
         )
     if item == "no_stale_facts":

@@ -12,7 +12,7 @@
     "public_facts_refresh_projected": true,
     "required_facts_readiness_projected": true
   },
-  "generated_at_utc": "2026-07-01T16:00:01.589779+00:00",
+  "generated_at_utc": "2026-07-01T16:23:53.438145+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -66,68 +66,68 @@
       "would_enter_finalgate_if_private_facts_ready": true
     },
     {
-      "action_time_path_ready": false,
-      "blocker_owner": "runtime",
+      "action_time_path_ready": true,
+      "blocker_owner": "market",
       "calls_exchange_write": false,
       "calls_finalgate": false,
       "calls_operation_layer": false,
-      "candidate_evidence_shape_ready": false,
+      "candidate_evidence_shape_ready": true,
       "current_signal_state": "fresh_signal_absent",
-      "dry_run_submit_rehearsal_ready": false,
-      "first_blocker": "watcher_tick_missing",
+      "dry_run_submit_rehearsal_ready": true,
+      "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
       "fresh_signal_present": false,
       "live_submit_allowed": false,
-      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
       "order_created": false,
       "path_id": "MPG-STRONG-SYMBOL-ROTATION",
       "places_order": false,
-      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
+      "post_action_expected_state": "action_time_finalgate_boundary_ready",
       "required_facts_readiness": {
         "private_action_time_fact_keys_pending": [
           "active_position_or_open_order_clear",
           "action_time_available_balance"
         ],
         "private_action_time_facts_ready": false,
-        "public_facts_ready": false
+        "public_facts_ready": true
       },
       "strategy_group_id": "MPG-001",
       "symbol": "SOLUSDT",
-      "would_enter_finalgate_if_private_facts_ready": false
+      "would_enter_finalgate_if_private_facts_ready": true
     },
     {
-      "action_time_path_ready": false,
+      "action_time_path_ready": true,
       "blocker_owner": "runtime",
       "calls_exchange_write": false,
       "calls_finalgate": false,
       "calls_operation_layer": false,
-      "candidate_evidence_shape_ready": false,
-      "current_signal_state": "fresh_signal_absent",
-      "dry_run_submit_rehearsal_ready": false,
-      "first_blocker": "watcher_tick_missing",
-      "fresh_signal_present": false,
+      "candidate_evidence_shape_ready": true,
+      "current_signal_state": "fresh_signal_present",
+      "dry_run_submit_rehearsal_ready": true,
+      "first_blocker": "private_action_time_facts_required",
+      "fresh_signal_present": true,
       "live_submit_allowed": false,
-      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "next_action": "refresh_private_action_time_facts_before_finalgate",
       "order_created": false,
       "path_id": "SOR-SESSION-BREAKOUT",
       "places_order": false,
-      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
+      "post_action_expected_state": "action_time_finalgate_boundary_ready",
       "required_facts_readiness": {
         "private_action_time_fact_keys_pending": [
           "active_position_or_open_order_clear",
           "action_time_available_balance"
         ],
         "private_action_time_facts_ready": false,
-        "public_facts_ready": false
+        "public_facts_ready": true
       },
       "strategy_group_id": "SOR-001",
-      "symbol": "SOLUSDT",
-      "would_enter_finalgate_if_private_facts_ready": false
+      "symbol": "AVAXUSDT",
+      "would_enter_finalgate_if_private_facts_ready": true
     }
   ],
   "summary": {
-    "fresh_signal_present_count": 0,
+    "fresh_signal_present_count": 1,
     "live_submit_allowed_count": 0,
     "strategy_count": 3,
-    "would_enter_finalgate_if_private_facts_ready_count": 1
+    "would_enter_finalgate_if_private_facts_ready_count": 3
   }
 }

@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 from urllib.parse import urlencode
@@ -37,10 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument(
+        "--ssh-host",
+        default="",
+        help="Optional SSH host for read-only Binance USD-M kline fetch.",
+    )
     args = parser.parse_args(argv)
 
     artifacts = build_sor_session_scope_detector(
-        public_facts=_read_optional_json(Path(args.public_facts_json))
+        public_facts=_read_optional_json(Path(args.public_facts_json)),
+        ssh_host=args.ssh_host,
     )
     output_dir = Path(args.output_dir)
     for artifact in artifacts.values():
@@ -67,6 +74,7 @@ def build_sor_session_scope_detector(
     *,
     public_facts: dict[str, Any],
     candle_payloads: dict[str, list[list[Any]]] | None = None,
+    ssh_host: str = "",
     generated_at_utc: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     now = _parse_utc(generated_at_utc) if generated_at_utc else datetime.now(timezone.utc)
@@ -75,9 +83,12 @@ def build_sor_session_scope_detector(
         for row in public_facts.get("symbols") or []
         if isinstance(row, dict)
     }
-    candle_payloads = candle_payloads or {
-        symbol: _fetch_klines(symbol) for symbol in SYMBOLS
-    }
+    if candle_payloads is None:
+        candle_payloads = (
+            _fetch_klines_via_ssh(ssh_host, SYMBOLS)
+            if ssh_host
+            else {symbol: _fetch_klines(symbol) for symbol in SYMBOLS}
+        )
     detector_rows = [
         _detector_row(
             symbol=symbol,
@@ -224,6 +235,49 @@ def _fetch_klines(symbol: str) -> list[list[Any]]:
             return payload if isinstance(payload, list) else []
     except Exception:
         return []
+
+
+def _fetch_klines_via_ssh(host: str, symbols: tuple[str, ...]) -> dict[str, list[list[Any]]]:
+    remote_code = f"""
+import json
+import urllib.parse
+import urllib.request
+
+BASE_URL = {BASE_URL!r}
+SYMBOLS = {list(symbols)!r}
+
+def fetch(symbol):
+    query = urllib.parse.urlencode({{"symbol": symbol, "interval": "15m", "limit": 120}})
+    req = urllib.request.Request(
+        BASE_URL + "/fapi/v1/klines?" + query,
+        headers={{"User-Agent": "brc-readonly-monitor/1.0"}},
+    )
+    with urllib.request.urlopen(req, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return payload if isinstance(payload, list) else []
+
+print(json.dumps({{symbol: fetch(symbol) for symbol in SYMBOLS}}, ensure_ascii=False))
+"""
+    result = subprocess.run(
+        ["ssh", host, "python3", "-"],
+        check=False,
+        capture_output=True,
+        input=remote_code,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return {symbol: [] for symbol in symbols}
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {symbol: [] for symbol in symbols}
+    if not isinstance(payload, dict):
+        return {symbol: [] for symbol in symbols}
+    return {
+        symbol: payload.get(symbol) if isinstance(payload.get(symbol), list) else []
+        for symbol in symbols
+    }
 
 
 def _closed_candles(rows: list[list[Any]], now: datetime) -> list[dict[str, Any]]:

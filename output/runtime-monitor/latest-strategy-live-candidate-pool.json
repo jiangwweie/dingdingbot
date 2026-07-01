@@ -14,7 +14,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "reclaim / pullback recovery long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 4,
+      "daily_rank": 3,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT blocker_class=computed_not_satisfied",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -30,30 +30,30 @@
     },
     {
       "action_time_readiness": {
-        "action_time_path_ready": false,
-        "first_blocker": "watcher_tick_missing",
-        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "action_time_path_ready": true,
+        "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
         "private_action_time_facts_ready": false,
-        "public_facts_ready": false,
-        "status": "blocked_public_facts"
+        "public_facts_ready": true,
+        "status": "ready_for_private_action_time_facts"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "runtime",
+      "blocker_owner": "engineering",
       "candidate_positioning": "selective leader continuation long candidate",
-      "candidate_status": "candidate_runtime_input_blocked",
+      "candidate_status": "candidate_scope_decision_pending",
       "daily_rank": 1,
-      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT blocker_class=watcher_tick_missing",
-      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
-      "first_blocker": "watcher_tick_missing",
-      "market_condition": "public market facts must refresh before market condition can be trusted",
-      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT blocker_class=scope_not_attached",
+      "exit_condition": "exit or support-only if scoped admission is rejected",
+      "first_blocker": "scope_not_attached",
+      "market_condition": "market condition is secondary until scope/admission is attached",
+      "next_engineering_action": "produce_scoped_live_observation_or_scope_proposal",
       "owner_action_required": "no",
-      "selected_symbol": "SOLUSDT",
+      "selected_symbol": "OPUSDT",
       "side": "long",
       "stage": "armed",
-      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
       "strategy_group_id": "MPG-001",
-      "trigger_condition": "SOLUSDT selective leader continuation signal with fresh public facts"
+      "trigger_condition": "OPUSDT selective leader continuation signal with fresh public facts"
     },
     {
       "action_time_readiness": {
@@ -63,47 +63,47 @@
         "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "engineering",
+      "blocker_owner": "owner",
       "candidate_positioning": "relative strength / cross-asset candidate",
-      "candidate_status": "candidate_scope_decision_pending",
-      "daily_rank": 3,
-      "evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=park",
-      "exit_condition": "exit or support-only if scoped admission is rejected",
-      "first_blocker": "scope_not_attached",
-      "market_condition": "market condition is secondary until scope/admission is attached",
-      "next_engineering_action": "build_trial_asset_admission_proposal",
-      "owner_action_required": "no",
+      "candidate_status": "candidate_owner_policy_pending",
+      "daily_rank": 5,
+      "evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=trial_asset_admission_candidate",
+      "exit_condition": "exit under WIP stop rule if blocker does not move",
+      "first_blocker": "policy_scope_missing",
+      "market_condition": "selected lane must satisfy its fresh eligible signal contract",
+      "next_engineering_action": "record_scoped_owner_policy",
+      "owner_action_required": "yes",
       "selected_symbol": "AVAXUSDT",
       "side": "long",
       "stage": "admission",
-      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "stop_condition": "Owner scoped policy is recorded or lane exits mainline",
       "strategy_group_id": "MI-001",
       "trigger_condition": "AVAXUSDT relative strength admission and scoped observation lane accepted"
     },
     {
       "action_time_readiness": {
-        "action_time_path_ready": false,
-        "first_blocker": "watcher_tick_missing",
-        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "action_time_path_ready": true,
+        "first_blocker": "private_action_time_facts_required",
+        "next_action": "refresh_private_action_time_facts_before_finalgate",
         "private_action_time_facts_ready": false,
-        "public_facts_ready": false,
-        "status": "blocked_public_facts"
+        "public_facts_ready": true,
+        "status": "ready_for_private_action_time_facts"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "runtime",
+      "blocker_owner": "engineering",
       "candidate_positioning": "session / flow confirmation candidate",
-      "candidate_status": "candidate_runtime_input_blocked",
+      "candidate_status": "candidate_scope_decision_pending",
       "daily_rank": 2,
-      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT blocker_class=watcher_tick_missing",
-      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
-      "first_blocker": "watcher_tick_missing",
-      "market_condition": "public market facts must refresh before market condition can be trusted",
-      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT blocker_class=scope_not_attached",
+      "exit_condition": "exit or support-only if scoped admission is rejected",
+      "first_blocker": "scope_not_attached",
+      "market_condition": "market condition is secondary until scope/admission is attached",
+      "next_engineering_action": "produce_scoped_live_observation_or_scope_proposal",
       "owner_action_required": "no",
       "selected_symbol": "ETHUSDT",
       "side": "long",
       "stage": "armed",
-      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
       "strategy_group_id": "SOR-001",
       "trigger_condition": "ETHUSDT session opening range plus breakout and follow-through confirmation"
     },
@@ -118,7 +118,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "conditional failed-rebound short candidate",
       "candidate_status": "candidate_conditional_observation",
-      "daily_rank": 5,
+      "daily_rank": 4,
       "evidence": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:BRF2-001 BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
       "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
       "first_blocker": "computed_not_satisfied",
@@ -139,15 +139,15 @@
     "calls_finalgate": false,
     "calls_operation_layer": false,
     "daily_table_single_lane_consistent": true,
-    "deploy_ready": false,
+    "deploy_ready": true,
     "five_wip_candidates_present": true,
     "order_created": false,
-    "p0_cleared": false,
-    "p1_cleared_or_waived": false,
+    "p0_cleared": true,
+    "p1_cleared_or_waived": true,
     "places_order": false,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-01T16:00:06.217340+00:00",
+  "generated_at_utc": "2026-07-01T16:23:57.735674+00:00",
   "p0_p1_review": [
     {
       "evidence": "candidate_rows contain required fields for all active WIP lanes",
@@ -157,32 +157,32 @@
       "status": "cleared"
     },
     {
-      "evidence": "MPG-001 first_blocker=watcher_tick_missing",
+      "evidence": "MPG-001 first_blocker=scope_not_attached",
       "item": "mpg_watcher_closure",
-      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "next_action": "produce_scoped_live_observation_or_scope_proposal",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
-      "evidence": "SOR-001 first_blocker=watcher_tick_missing",
+      "evidence": "SOR-001 first_blocker=scope_not_attached",
       "item": "sor_watcher_closure",
-      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "next_action": "produce_scoped_live_observation_or_scope_proposal",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
-      "evidence": "MI-001 first_blocker=scope_not_attached",
+      "evidence": "MI-001 first_blocker=policy_scope_missing",
       "item": "mi_scope_closure",
-      "next_action": "build_trial_asset_admission_proposal",
+      "next_action": "record_scoped_owner_policy",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "CPM-RO-001 first_blocker=computed_not_satisfied",
       "item": "cpm_computed_refresh",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "BRF2-001 candidate_status=candidate_conditional_observation",
@@ -213,18 +213,18 @@
       "status": "cleared"
     },
     {
-      "evidence": "output whitelist must be rerun against final git status",
+      "evidence": "deploy gate reruns validate_output_artifact_scope.py --git-status",
       "item": "output_whitelist_gate",
       "next_action": "run validate_output_artifact_scope.py --git-status",
       "priority": "P1",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "watcher_tick_missing rows prove public facts are not current",
       "item": "no_stale_facts",
       "next_action": "refresh approved public facts path",
       "priority": "P1",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "candidate pool includes machine-readable p0_p1_review rows",
@@ -266,12 +266,12 @@
   "status": "strategy_live_candidate_pool_ready",
   "summary": {
     "candidate_count": 5,
-    "deploy_ready": false,
+    "deploy_ready": true,
     "non_authority": true,
-    "p0_cleared": false,
-    "p1_cleared_or_waived": false,
-    "rank_1_lane": "MPG-001:SOLUSDT",
-    "rank_1_task_id": "P0-MPG-001-WATCHER-TICK-MISSING-CLOSURE",
+    "p0_cleared": true,
+    "p1_cleared_or_waived": true,
+    "rank_1_lane": "MPG-001:OPUSDT",
+    "rank_1_task_id": "P0-MPG-001-SCOPE-NOT-ATTACHED-CLOSURE",
     "wip_lane_count": 5
   }
 }

@@ -2497,6 +2497,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     single_lane_task_packet_validator_commands: list[list[str]] = []
     strategy_live_candidate_pool_commands: list[list[str]] = []
     strategy_live_candidate_pool_validator_commands: list[list[str]] = []
+    binance_public_facts_commands: list[list[str]] = []
+    sor_session_scope_detector_commands: list[list[str]] = []
     action_time_boundary_commands: list[list[str]] = []
     replay_live_parity_commands: list[list[str]] = []
     mi_trial_admission_commands: list[list[str]] = []
@@ -2547,6 +2549,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             strategy_live_candidate_pool_commands.append(command)
         if script == "validate_strategy_live_candidate_pool.py":
             strategy_live_candidate_pool_validator_commands.append(command)
+        if script == "fetch_binance_usdm_public_facts.py":
+            binance_public_facts_commands.append(command)
+        if script == "build_sor_session_scope_detector.py":
+            sor_session_scope_detector_commands.append(command)
         if script == "build_strategy_fresh_signal_action_time_boundary.py":
             action_time_boundary_commands.append(command)
         if script == "build_replay_live_parity_audit.py":
@@ -2892,6 +2898,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         daily_live_enablement_table_md=tmp_path / "daily-live-table.md",
         single_lane_task_packet_json=tmp_path / "single-lane-task-packet.json",
         single_lane_task_packet_md=tmp_path / "single-lane-task-packet.md",
+        binance_public_facts_ssh_host="tokyo",
         command_runner=fake_runner,
     )
 
@@ -2964,6 +2971,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert len(single_lane_task_packet_validator_commands) == 1
     assert len(strategy_live_candidate_pool_commands) == 1
     assert len(strategy_live_candidate_pool_validator_commands) == 1
+    assert len(binance_public_facts_commands) == 1
+    binance_command = binance_public_facts_commands[0]
+    assert binance_command[binance_command.index("--ssh-host") + 1] == "tokyo"
+    assert len(sor_session_scope_detector_commands) == 1
+    sor_session_command = sor_session_scope_detector_commands[0]
+    assert sor_session_command[sor_session_command.index("--ssh-host") + 1] == "tokyo"
     single_lane_command = single_lane_task_packet_commands[0]
     assert "--daily-table-json" in single_lane_command
     assert single_lane_command[

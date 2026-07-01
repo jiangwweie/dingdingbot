@@ -187,7 +187,9 @@ def test_candidate_pool_review_keeps_open_p0_items_visible():
     assert review["daily_table_single_lane_consistency"]["status"] == "cleared"
     assert review["mpg_watcher_closure"]["status"] == "open"
     assert review["sor_watcher_closure"]["status"] == "open"
+    assert review["cpm_computed_refresh"]["status"] == "cleared"
     assert review["brf2_conditionalization"]["status"] == "cleared"
+    assert review["output_whitelist_gate"]["status"] == "cleared"
     assert review["review_report"]["status"] == "cleared"
     assert review["postdeploy_validation_script"]["status"] == "cleared"
 

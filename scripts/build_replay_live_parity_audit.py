@@ -241,6 +241,9 @@ def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str
     if detector_attached is not True:
         blocker_class = "detector_not_attached"
         owner = "engineering"
+    elif symbol not in set(coverage.get("symbol_scope") or []):
+        blocker_class = "scope_not_attached"
+        owner = "engineering"
     elif watcher_tick_present is not True:
         blocker_class = "watcher_tick_missing"
         owner = "runtime"
@@ -253,9 +256,6 @@ def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str
     elif computed is True and failed_facts:
         blocker_class = "computed_not_satisfied"
         owner = "market"
-    elif symbol not in set(coverage.get("symbol_scope") or []):
-        blocker_class = "scope_not_attached"
-        owner = "engineering"
     elif _as_dict(event.get("gate_breakdown")).get("would_reach_action_time_boundary") is not True:
         blocker_class = "action_time_boundary_not_reproduced"
         owner = "runtime"

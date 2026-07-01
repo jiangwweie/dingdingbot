@@ -713,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
             args.strategy_live_candidate_pool_json
         ),
         strategy_live_candidate_pool_md=Path(args.strategy_live_candidate_pool_md),
+        binance_public_facts_ssh_host=args.binance_public_facts_ssh_host,
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -1000,6 +1001,7 @@ def build_local_monitor_sequence_report(
     single_lane_task_packet_md: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_MD,
     strategy_live_candidate_pool_json: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON,
     strategy_live_candidate_pool_md: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD,
+    binance_public_facts_ssh_host: str = "",
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     if (
@@ -1487,6 +1489,10 @@ def build_local_monitor_sequence_report(
         "--output-owner-progress",
         str(binance_usdm_public_facts_md),
     ]
+    if binance_public_facts_ssh_host:
+        binance_usdm_public_facts_command.extend(
+            ["--ssh-host", binance_public_facts_ssh_host]
+        )
     steps.append(
         _run_step(
             "binance_usdm_public_facts",
@@ -1614,6 +1620,10 @@ def build_local_monitor_sequence_report(
         "--output-dir",
         str(four_candidate_runtime_activation_closure_json.parent),
     ]
+    if binance_public_facts_ssh_host:
+        sor_session_scope_detector_command.extend(
+            ["--ssh-host", binance_public_facts_ssh_host]
+        )
     steps.append(
         _run_step(
             "sor_session_scope_detector",
@@ -5667,6 +5677,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategy-live-candidate-pool-md",
         default=str(DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD),
+    )
+    parser.add_argument(
+        "--binance-public-facts-ssh-host",
+        default="",
+        help=(
+            "Optional SSH host for read-only Binance USD-M public facts fetch "
+            "when local public endpoints are unavailable."
+        ),
     )
     parser.add_argument(
         "--signal-coverage-source",
