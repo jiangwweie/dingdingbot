@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-23
+last_verified: 2026-07-01
 ---
 
 # Owner Runtime Operating Model
@@ -79,6 +79,13 @@ monitor integration, runtime readiness, or a non-authority engineering defect,
 the system and agents should continue engineering progress instead of escalating
 ordinary process work to the Owner.
 
+Blocker naming follows `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
+When the gap is detector attachment, watcher input, fact mapping,
+replay/live rule parity, action-time rehearsal, monitor integration, or runtime
+readiness, the system should remove or precisely classify the blocker. It
+should not convert that engineering work into Owner operation or broad
+no-trade explanation.
+
 Execution frictions in the small-capital pilot are engineering lifecycle
 branches first and live calibration questions second. Fill probability, coarse
 slippage, reject handling, partial-fill handling, protection acceptance,
@@ -114,13 +121,15 @@ authorization and not automatic strategy disqualification. The system should
 advance experiment-worthy strategy assets when their thesis, failure modes, risk
 envelope, replay or paper evidence, and main-control absorption route are clear.
 
-Strategy tradeability follows `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
+Strategy tradeability follows `docs/current/TRADEABILITY_DECISION_CONTRACT.md`
+and blocker classification follows
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 The Owner-facing system must make the difference between these states explicit:
 
 | State | Meaning | Owner role |
 | --- | --- | --- |
 | `trade_allowed_now` | Tradeability Decision and Runtime Safety State allow the official path to proceed | Supervise status |
-| `market_wait` | Strategy is admitted and ready enough, but no fresh signal exists | No action |
+| `market_wait_validated` | Strategy is admitted, scoped, policy-covered, detector-attached, watcher-fed, fact-computed, classification-clean, action-time-path ready, and no fresh signal exists | No action |
 | `asset_admission_gap` | Strategy is promising but not yet a final-owned trial/runtime asset | Review admission only when policy is needed |
 | `policy_gap` | Capital, profile, symbol/side, leverage scenario, attempt cap, or tier decision is missing | Decide scoped policy |
 | `facts_gap` | Fact source, RequiredFacts mapping, or freshness path is incomplete | No normal Owner action |
@@ -133,22 +142,23 @@ merely "waiting for market" when it has not yet passed asset admission or scoped
 policy. It should say that it is pending admission, policy, facts, execution
 gate, quality review, or safety resolution.
 
-## Strategy Learning Mode
+## Live Enablement Mode
 
 When the live path is healthy but waiting for a fresh market signal, the system
-should continue improving StrategyGroup quality locally and through read-only
-observation:
+should continue Live Enablement work locally and through read-only observation:
 
 ```text
 no-action / would-enter observation
--> replay match or replay gap
--> classifier, facts, freshness, cost, or tier diagnosis
+-> per-symbol / per-fact blocker matrix
+-> detector / watcher / scope / policy / runtime-profile closure
+-> replay/live rule or computed-not-satisfied classification
+-> action-time rehearsal readiness
 -> keep, revise, promote, park, kill, go-live, or block-for-safety decision
 ```
 
-This is not Owner-operated trading. It is system learning. The Owner should not
-manually interpret raw no-action evidence, replay files, or RequiredFacts gaps in
-normal operation.
+This is not Owner-operated trading. It is system execution-readiness work. The
+Owner should not manually interpret raw no-action evidence, replay files,
+detector outputs, or RequiredFacts gaps in normal operation.
 
 The current pre-live strategy-decision source is Strategy Asset State.
 `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` is the current Strategy
@@ -190,7 +200,8 @@ separate:
 | Tradeability Decision | The only read model that answers whether the StrategyGroup can trade now and identifies the first blocker |
 | Runtime Safety State | The only runtime safety read model that says whether the official live-submit path is currently safe enough to proceed |
 
-No fresh signal makes the Tradeability Decision report market wait. It does not
+No fresh signal may make the Tradeability Decision report market wait only
+after the blocker-classification checklist is satisfied. It does not
 automatically make the StrategyGroup a bad strategy or remove its trial
 eligibility.
 
@@ -222,8 +233,8 @@ watcher tick
 ```
 
 If live facts are ready but no fresh signal exists, the correct product state is
-`waiting_for_opportunity`. This is not an Owner blocker and should not ask for
-chat confirmation.
+`waiting_for_opportunity` only when non-market blockers are closed. This is not
+an Owner blocker and should not ask for chat confirmation.
 
 ## Product Language Rule
 

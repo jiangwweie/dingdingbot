@@ -104,8 +104,8 @@ The current local corpus covers eight window shapes:
 | Case | Purpose |
 | --- | --- |
 | `trend_continuation` | Exercises the target right-tail continuation path |
-| `false_breakout` | Keeps execution shape valid while review downgrades signal quality |
-| `fast_reversal` | Exercises fast exit and review downgrade behavior |
+| `false_breakout` | Keeps execution shape valid while review reclassifies signal quality |
+| `fast_reversal` | Exercises fast exit and review reclassification behavior |
 | `choppy_no_trade` | Proves noisy regimes stay quiet and do not generate candidate/auth |
 | `stale_signal` | Proves freshness rejection before submit authority |
 | `missing_facts` | Proves RequiredFacts stop the path before execution-cost authority matters |

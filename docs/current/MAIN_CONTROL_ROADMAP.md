@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-23
+last_verified: 2026-07-01
 ---
 
 # Main Control Roadmap
@@ -46,11 +46,12 @@ runtime gates pass.
 Dry-run audit and source readiness are support tracks for that target. Static
 product-client work is externalized and is no longer part of the main runtime goal.
 
-This file is not a product-client design spec or historical packet index. It is also
-not a generic research backlog: research, replay, paper/simulator, and cost-model
-work are included only when they help the system find opportunities, capture
-them through the official runtime path, preserve net edge after execution costs,
-and feed review decisions.
+This file is not a product-client design spec or historical packet index. It is
+also not a generic research backlog: research, replay, paper/simulator, and
+cost-model work are included only when they remove or precisely classify a Live
+Enablement blocker, help the system capture current/future opportunities through
+the official runtime path, preserve net edge after execution costs, and feed
+review decisions.
 
 Strategy quality is evaluated by
 `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`. The roadmap must not
@@ -72,17 +73,28 @@ or
 cannot trade because first blocker X remains
 ```
 
-The current planning phase is strategy learning on top of a live-ready P0
-chain. P0 remains ready for the first selected StrategyGroup allocated-subaccount
-live closure. Signal Observation grade work must now turn market observations
-into StrategyGroup learning decisions:
+Blocker naming is governed by
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. The current planning phase is
+Live Enablement: choose a StrategyGroup + symbol lane, classify the earliest
+blocker, remove it where engineering can remove it, and reach
+`market_wait_validated` only when the lane is genuinely waiting for a current or
+future fresh signal.
+
+Daily management is governed by
+`docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`. Active work
+limits and seven-day stop rules are governed by
+`docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
+
+P0 remains ready for the first selected StrategyGroup allocated-subaccount live
+closure. Signal Observation grade work must now turn market observations into
+Live Enablement blocker decisions:
 
 ```text
-live path waits
--> broad read-only observation continues
--> no-action / would-enter rows are captured
--> replay-to-review explains or challenges them
--> classifier, facts, cost, freshness, and tier gaps become decisions
+select StrategyGroup + symbol lane
+-> classify detector / watcher / scope / policy / facts / runtime profile
+-> repair or validate the earliest non-market blocker
+-> use replay only for rule calibration and future live capture
+-> reach market_wait_validated only after the blocker contract checklist passes
 -> stage-worthy decisions deploy once, not continuously
 ```
 
@@ -96,18 +108,21 @@ The next phase is governed by eight execution constraints:
 | Authority split | Owner controls policy and tier/risk scope; the system continues normal process execution inside selected boundaries |
 | Capability closure | Every goal-mode task must close one engineering problem class, unlock a concrete capability, and expose the next engineering bottleneck |
 | Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
-| Strategy Asset State evidence gate | New Signal Observation grade artifacts must change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| Strategy Asset State evidence gate | New Signal Observation grade artifacts must move a lane forward, prove a precise blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
 | Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
 | Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / Strategy Asset State evidence surfaces and replace or reduce older entry points |
 
-The deploy-worthy checkpoint for the current Signal Observation grade phase is:
+The deploy-worthy checkpoint for the current Live Enablement phase is:
 
 ```text
-high-priority no-action
--> Strategy Asset State pre-live evidence
--> replay-to-review matching
--> one current decision per StrategyGroup
+selected StrategyGroup + symbol lane
+-> blocker matrix per symbol / per fact
+-> detector / watcher / scope / policy / runtime-profile closure
+-> market_wait_validated or a concrete next blocker
+-> one current decision per lane
+-> daily table row updated
+-> stop condition named
 -> local monitor sequence
 -> targeted tests pass
 ```
@@ -130,8 +145,8 @@ Use this frame to prevent drift:
 
 | Layer | Purpose | Current project meaning |
 | --- | --- | --- |
-| Strategy Edge | Find regime-specific right-tail opportunities | Strategy research and handoff packs propose candidate edges |
-| Runtime Capture | Turn fresh signals into official bounded actions | Watcher, RequiredFacts, candidate/auth, FinalGate, Operation Layer |
+| Strategy Edge | Find regime-specific right-tail opportunities | Strategy research and handoff packs propose candidate edges for final-owned admission |
+| Runtime Capture | Turn current/future fresh signals into official bounded actions | Detector, watcher, RequiredFacts, candidate/auth, FinalGate, Operation Layer |
 | Execution Quality | Preserve net edge after market friction | Fee, funding, slippage, filters, partial fill, retry and error taxonomy |
 | Risk Capital | Use Owner-allocated loss-capable subaccount capital aggressively inside explicit boundaries | Probe, trial, promotion, parked, and kill capital states |
 | Learning Loop | Convert outcomes into better decisions | Review ledger, negative evidence, promote/revise/park/kill |
@@ -143,9 +158,11 @@ The learning loop now has two main records:
 | Strategy Asset State pre-live evidence | Before live submit | Preserve keep, revise, promote, park, kill, go live, do not go live, or safety-block evidence from high-priority observations |
 | Review Ledger | After live action | Learn from entry, exit, protection, costs, PnL, reconciliation, and final review |
 
-Engineering work is mainline only when it improves one of those layers. Extra
-evidence fields, broad product-client work, historical cleanup, or strategy expansion are
-not mainline unless they directly support this profitability-oriented loop.
+Engineering work is mainline only when it improves one of those layers by
+removing a blocker, proving `market_wait_validated`, or creating a scoped
+live-enable proposal. Extra evidence fields, broad product-client work,
+historical cleanup, read-only scope expansion, or strategy expansion are not
+mainline unless they directly support this profitability-oriented loop.
 
 ## Tradeability-Oriented Operating Frame
 
@@ -173,8 +190,12 @@ If not, what is the first blocker, who owns it, and what action removes it?
 | --- | --- | --- |
 | `asset_admission` | Candidate is not a final-owned trial/runtime asset | Build or reject trial asset admission proposal |
 | `owner_policy_required` | Capital, profile, symbol/side, leverage scenario, attempt cap, loss unit, or tier decision is missing | Ask for scoped Owner policy only |
-| `market_wait` | Strategy is admitted, scoped, armed, and only lacks a fresh signal | Keep observing |
-| `facts_gap` | RequiredFacts or source mapping is not closed | Engineer fact mapping or freshness checks |
+| `market_wait_validated` | Admission, scope, policy, detector, watcher input, facts, classification, and action-time path are closed; only current fresh signal is absent | Keep observing and preempt lower work on fresh signal |
+| `computed_not_satisfied` | Detector and watcher ran, but strategy facts are false/stale/below threshold | Keep observing; preserve failing fact matrix |
+| `detector_not_attached` / `watcher_tick_missing` | Live/current detector or current watcher input is absent | Attach detector or repair watcher/public facts source |
+| `scope_not_attached` | Strategy/symbol/side/timeframe is not attached to selected runtime observation or live-scope proposal | Produce scoped proposal or explicit deferral |
+| `replay_live_rule_mismatch` | Replay and current live detector/fact rules do not match | Normalize rules or produce a strategy revision decision |
+| `action_time_boundary_not_reproduced` | Live-like event cannot reach candidate/auth or action-time rehearsal | Repair non-executing action-time path |
 | `execution_gate_gap` | Runtime, protection, account, exchange, order, position, or Operation Layer path blocks submit | Repair runtime gate or recovery branch |
 | `strategy_quality_gap` | Strategy is not experiment-worthy or risk cannot be bounded | Revise, park, or kill |
 | `hard_safety_stop` | Action violates a hard boundary | Stop and surface safety state |
@@ -249,10 +270,12 @@ close one engineering problem
 -> reveal the next engineering problem
 ```
 
-This rule prevents `waiting_for_market` or `needs_real_trade` from becoming a
-blanket answer. Only real fresh signal, action-time live facts, exchange
-acceptance, and real outcome calibration are truly market/live dependent. Even
-then, they block only real submit or live calibration; they do not block
+This rule prevents `waiting_for_market`, `fresh_signal_absent`,
+`live_detector_artifact_missing`, or `needs_real_trade` from becoming blanket
+answers. Only real fresh signal, action-time live facts, exchange acceptance,
+and real outcome calibration are truly market/live dependent. Even then, they
+block only real submit or live calibration; they do not block detector
+attachment, watcher integration, per-symbol / per-fact classification,
 non-executing rehearsal, simulation, lifecycle modeling, or review-shape work.
 
 Small-capital execution frictions are not reasons to stop the engineering lane:
@@ -303,23 +326,115 @@ even if no live order exists yet.
 
 ## No-Signal Progress Policy
 
-Healthy `waiting_for_market` is not a project blocker. It means the real market
-has not supplied an eligible fresh signal. During no-signal periods, the main
-runtime window should advance non-market-dependent proof lanes without touching
-real funds:
+Healthy `market_wait_validated` is not a project blocker. It means the real
+market has not supplied an eligible fresh signal after all non-market lane
+blockers are closed. During no-signal periods, the main runtime window should
+advance non-market-dependent proof lanes without touching real funds:
 
 | Lane | Purpose | Boundary |
 | --- | --- | --- |
-| Signal Coverage Diagnostic | Compare selected mainline runtime observation with the broader read-only StrategyGroup shelf so no-signal periods expose whether the search surface is too narrow | Local/read-only diagnostic only; broader would-enter signals do not authorize real submit |
-| Replay Lab | Re-run historical market or signal windows through current runtime behavior | Does not create real orders or pretend historical signals are live |
+| Signal Coverage Diagnostic | Compare selected mainline runtime observation with broader read-only candidates to identify scope_not_attached or computed_not_satisfied lanes | Local/read-only diagnostic only; broader would-enter signals do not authorize real submit |
+| Replay Lab | Re-run historical market or signal windows through current runtime behavior to calibrate rules for future live capture | Does not create real orders or pretend historical signals are live |
 | Synthetic Signal Factory | Generate fresh/stale/wrong-scope/missing-fact/conflict fixtures | Never feeds synthetic signals into real Operation Layer submit |
 | Paper/Simulator Operation Layer | Exercise order lifecycle branches without real funds | Uses non-live simulation only; testnet is not a mainline value layer |
 | Post-Submit Simulator | Exercise fill, partial fill, reject, protection failure, recovery, reconcile and settle branches | Non-executing simulation only |
 | Cost/Slippage/Funding Model | Estimate whether strategy gross edge can survive friction | Research/review input, not submit authority |
 | Allocated-Subaccount Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with allocated subaccount experiment funds | Uses the official live path only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
 
-The no-signal lanes exist to reduce the chance that a real market opportunity
-arrives before the runtime chain, execution shape, or review loop is ready.
+The no-signal lanes exist to reduce the chance that a current/future market
+opportunity arrives before the runtime chain, execution shape, or review loop
+is ready.
+
+## 2026-07-01 Planning Correction: Live Enablement Blocker Closure
+
+This checkpoint narrows the near-term plan around the current generated
+runtime evidence. The generated views remain checkpoint evidence only; they do
+not override code, machine config, runtime state, or Owner policy. The planning
+change is that no-signal work must now remove or precisely classify
+Live Enablement blockers before adding more portfolio, projection, packet, or
+readiness surfaces.
+
+Current evidence:
+
+| Evidence | Current checkpoint | Planning meaning |
+| --- | --- | --- |
+| Tradeability Decision | `13` rows, `tradable_now=0` in `output/runtime-monitor/latest-strategygroup-tradeability-decision.*` | The project still needs one current first blocker per StrategyGroup rather than broad `waiting_for_market` compression |
+| Replay Live Parity Audit | `131` replay signals, `14` live-detector reproductions, `117` mismatches in `output/runtime-monitor/latest-replay-live-parity-audit.*` | The main short-term bottleneck is precise blocker classification for replay/live parity, not FinalGate or Operation Layer strictness |
+| Four-candidate scope review | `3` read-only watcher expansions and `0` primary live-submit scope changes in `output/runtime-monitor/latest-four-candidate-scope-review-decision.*` | Expanded symbols are not progress until they become scoped live-enable proposals or prove concrete blockers |
+| Three-strategy trial portfolio | `MPG-001`, `BRF2-001`, and `SOR-001` are seated in `output/runtime-monitor/latest-three-strategy-live-trial-portfolio.*` | Seat count closure is not the same as best near-term opportunity capture |
+
+Near-term planning must therefore treat these as separate layers:
+
+| Layer | Meaning | Must not mean |
+| --- | --- | --- |
+| `live_trial_portfolio_seat` | A StrategyGroup has enough registry, tier, policy, and readiness shape to hold a trial seat | The selected set is the optimal opportunity-capture set |
+| `read_only_watcher_expansion` | Binance USDM public facts may be observed for additional symbols | A milestone or live-submit scope change |
+| `replay_live_parity_match` | A replay event can be reproduced by the live detector in the relevant symbol, venue, timeframe, and facts shape | Real-order authority |
+| `action_time_boundary_reproduced` | A live-like signal can reach the candidate / action-time boundary without exchange write | FinalGate or Operation Layer may be bypassed |
+| `market_wait_validated` | Non-market blockers are closed and only current fresh signal is absent | Generic no-trade explanation |
+| `live_submit_ready` | A current fresh signal and action-time facts may proceed through FinalGate and Operation Layer | Replay or synthetic evidence is live authority |
+
+### Near-Term Priority Order
+
+The current planning priority is:
+
+1. Keep the **P0 live path** ready for a real fresh selected StrategyGroup
+   signal.
+2. Replace broad **Replay Live Parity Audit** mismatches with precise blocker
+   classes and per-symbol / per-fact evidence.
+3. Convert read-only scope into evidence-backed live scope proposals only when
+   detector, watcher, fact, risk-envelope, and policy boundaries are explicit.
+4. Close StrategyGroup admission gaps for candidates that better match current
+   opportunity evidence.
+5. Keep Owner-facing state compressed to one first blocker, one owner, and one
+   next action.
+
+The first mismatch classes to reduce are:
+
+| Blocker class | Current examples | Default next action |
+| --- | --- | --- |
+| `computed_not_satisfied` | CPM detector output exists for `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, and `SUIUSDT`, but current facts such as trend intact or reclaim confirmation are false | Reclassify CPM parity rows from missing detector to per-symbol / per-fact computed status |
+| `replay_live_rule_mismatch` | Replay rows that still fail after detector, watcher input, scope, and computed facts are present | Compare replay rule and live detector rule field-by-field, then normalize or revise |
+| `action_time_boundary_not_reproduced` | `MPG-001` and `SOR-001` on expanded read-only symbols | Make live-like detector output reach action-time boundary rehearsal without creating order authority |
+| `scope_not_attached` | `MPG-001` on `OPUSDT` or any read-only-only lane | Produce a scoped live-enable proposal or explicitly defer it with policy/risk reason |
+
+### Opportunity-Capture Queue
+
+The trial portfolio may remain a valid trial envelope, but active execution
+planning must use the WIP-limited opportunity-capture queue:
+
+| Priority | StrategyGroup | Current planning role | Next checkpoint |
+| --- | --- | --- | --- |
+| `P0` | `CPM-RO-001` | Rebound / pullback reclaim lane with detector output present but broad blocker classification wrong | Reclassify CPM rows into `computed_not_satisfied` or `replay_live_rule_mismatch` per symbol / fact |
+| `P0` | `MPG-001` | Main momentum / continuation lane | Reproduce replay-like expanded-symbol events through live detector and action-time boundary rehearsal |
+| `P1` | `MI-001` | Relative-strength impulse / rebound candidate | Close trial admission decision instead of leaving it as an indefinite intake gap |
+| `P1` | `SOR-001` | Session / opening-range lane | Keep armed observation and reduce action-time reproduction gaps on `SOLUSDT` and `AVAXUSDT` |
+| `P2` | `BRF2-001` | Short-side rally-failure lane | Keep armed observation quiet while the squeeze-risk disable fact is active |
+
+This queue does not grant live profile expansion, order-sizing changes, real
+orders, FinalGate bypass, or Operation Layer bypass. It is a planning order for
+engineering focus while the official runtime chain remains unchanged. Other
+StrategyGroups are support-only unless one of these lanes exits mainline under
+the WIP contract.
+
+### Daily Live Enablement Status Requirement
+
+Daily status reporting is not an independent workstream. It must use the table
+shape in `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` and
+answer these Live Enablement blocker-closure questions before adding new
+diagnostics:
+
+1. Did the current live-submit scope have a fresh eligible signal.
+2. Did expanded read-only scope have replay-like or live-like signal evidence.
+3. Was the first blocker market, scope, detector, facts, admission, runtime
+   safety, or strategy quality.
+4. Did any replay event fail live reproduction, and which mismatch class owns
+   the failure.
+5. Which single next action reduces the earliest blocker.
+
+Healthy `market_wait_validated` is valid only after admission, scope, policy,
+detector, watcher input, facts, classification, and action-time boundary
+readiness are not the earliest missing state.
 
 ## Server Interaction and Deploy Discipline
 
@@ -356,6 +471,12 @@ market-dependent first real-order proof.
 
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
+| P0 Daily Live Enablement Table | Owner and main control read one WIP-limited table instead of many artifacts | Main controller | contract added; implementation pending | Produce one row per active WIP lane with first blocker, evidence, next action, and stop condition |
+| P0 WIP + Stop Rules | Active mainline stays limited to CPM / MPG / MI / SOR / BRF2 until a lane exits or Owner changes scope | Main controller | contract added; implementation pending | Enforce seven-day blocker movement review and support-only status for non-WIP StrategyGroups |
+| P0 Blocker Classification Contract + CPM Parity Reclassification | Broad replay/live blockers are replaced by precise blocker classes with per-symbol / per-fact evidence | Main runtime window | active planning correction; blocker contract added; CPM detector output is present but current parity wording overstates detector missing | Update parity audit code/tests so CPM fallback-ready detector output becomes `computed_not_satisfied` or `replay_live_rule_mismatch`, not detector missing |
+| P0 Replay-to-Live Capture Parity | Replay-observed opportunities are either reproduced by the live detector or assigned to a concrete blocker class | Main runtime window | active local evidence; `latest-replay-live-parity-audit.*` reports `131` replay signals, `14` live-detector reproductions, and `117` mismatches | Reduce first classes: CPM computed-fact classification, MPG/SOR expanded-symbol action-time rehearsal, and MPG `OPUSDT` scope proposal/deferral |
+| P0 Read-Only Scope to Live-Scope Proposal Gate | Expanded symbols become live-scope candidates only after detector, watcher, fact, parity, risk envelope, and policy boundaries are explicit | Main runtime window | read-only watcher expansion exists for MPG/CPM/SOR; primary live-submit scope changed count remains `0` | Produce symbol-level proposals only for lanes with precise blocker evidence; keep replay and read-only evidence non-authoritative until Owner-scoped live profile policy exists |
+| P1 Opportunity-Capture Queue Compression | Short-term engineering focus follows the earliest removable live-enablement blocker, not only the seated trial portfolio | Main runtime window | planning queue is CPM / MPG / MI / SOR / BRF2; seated trial envelope remains MPG / BRF2 / SOR | Reclassify CPM blocker, integrate MI trial-admission fact into Tradeability Decision, repair MPG/SOR action-time reproduction gaps, and keep BRF2 quiet while squeeze-risk disable is active |
 | P0 First Bounded Live Order Closure | First selected StrategyGroup + allocated subaccount risk-budget real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, deployed at `e5f8c13b`; cutover ready; live closure evidence, same-tick goal-status, same-tick source-readiness refresh, and local cutover visibility contract are deployed; waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> protection/reconciliation/settlement/review |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting artifacts | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher evidence |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
@@ -371,7 +492,7 @@ market-dependent first real-order proof.
 | P1 Paper/Simulator Operation Layer | Official submit lifecycle branches can be exercised without real funds | Main runtime window | planned | Use paper/simulator for lifecycle branches; do not make testnet a mainline milestone |
 | P1 Allocated-Subaccount Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with allocated subaccount funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
 | P1 Execution Cost Model | StrategyGroup review can compare gross edge against fee, funding, slippage, and filter costs | Strategy research window first, main runtime consumes summaries | planned | Define cost-survival fields in StrategyGroup review output |
-| P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and allocated subaccount experiment results | Main runtime window | planned | Add promotion/demotion criteria after first allocated-subaccount real loop and replay evidence |
+| P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and allocated subaccount experiment results | Main runtime window | planned | Add promotion/downshift criteria after first allocated-subaccount real loop and replay evidence |
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only status artifact | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |

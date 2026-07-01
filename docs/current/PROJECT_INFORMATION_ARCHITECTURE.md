@@ -2,7 +2,7 @@
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
 authority: docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-last_verified: 2026-06-23
+last_verified: 2026-07-01
 ---
 
 # Project Information Architecture
@@ -10,7 +10,7 @@ last_verified: 2026-06-23
 ## Purpose
 
 This file defines the global information-source contract for the StrategyGroup
-runtime-governance pilot.
+live-enablement pilot.
 
 It exists to prevent current project truth from being spread across narrative
 documents, generated reports, local output files, and chat memory. It does not
@@ -58,6 +58,9 @@ StrategyGroup can trade now and, if not, names the first blocker.
 official live-submit path is currently safe enough to proceed. Other generated
 views may summarize those models, but they must not recompute can-trade or
 live-submit authority from documents or generated artifact metadata.
+`blocker_classification` is the current blocker-language contract. Generated
+views may report blocker classes, but planning and acceptance must interpret
+them through `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 
 ## Information Classes
 
@@ -93,6 +96,9 @@ Owner decisions.
 | Product objective and Owner role | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
 | Strategy experiment evaluation semantics | `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` |
 | Tradeability Decision semantics | `docs/current/TRADEABILITY_DECISION_CONTRACT.md` |
+| Blocker classification and Live Enablement completion rules | `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
+| Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
+| WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
 | Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
 | Agent boundaries and goal-mode execution | `docs/current/AI_AGENT_CONSTRAINTS.md` |
@@ -201,7 +207,7 @@ The long-term system should record Owner policy as explicit, scoped events:
 | `allow_l2_shadow` | Owner allows non-executing shadow candidate review |
 | `allow_l3_armed_observation` | Owner allows armed observation without real-order authority |
 | `allow_l4_live_trial` | Owner allows small-capital real-order eligibility inside official boundaries |
-| `force_downshift` | Owner or system downgrades a StrategyGroup tier |
+| `force_downshift` | Owner or system moves a StrategyGroup to a lower tier |
 | `park_strategygroup` | Owner or system pauses strategy asset allocation |
 | `kill_strategygroup` | Owner or system marks the StrategyGroup as no longer worth active work |
 

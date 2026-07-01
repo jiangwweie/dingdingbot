@@ -77,7 +77,7 @@
         "slippage_estimate_usdt": "0.052",
         "funding_impact_usdt": "-0.003",
         "min_qty_step_size_impact": "passes_min_qty_and_step_size_shape",
-        "net_edge_note": "fast reversal remains useful to rehearse exit and review downgrade behavior",
+        "net_edge_note": "fast reversal remains useful to rehearse exit and review reclassification behavior",
         "not_submit_authority": true
       },
       "replay_only": true,

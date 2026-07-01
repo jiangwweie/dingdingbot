@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-23
-Current phase: StrategyGroup runtime-governance pilot
+Last updated: 2026-07-01
+Current phase: StrategyGroup live-enablement pilot
 
 ## Current Document Authority
 
@@ -21,6 +21,9 @@ docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
 docs/current/TRADEABILITY_DECISION_CONTRACT.md
+docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
+docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
+docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
@@ -55,8 +58,14 @@ Archives preserve provenance.
 
 `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md` defines source classes and
 authority order. `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md`
-defines the StrategyGroup asset layer. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md`
-defines how architecture direction becomes bounded execution work.
+defines the StrategyGroup asset layer.
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` defines blocker classes and
+Live Enablement completion rules.
+`docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
+single daily management table.
+`docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop
+rules. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` defines how architecture
+direction becomes bounded execution work.
 
 Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,
@@ -96,25 +105,41 @@ Strategy tradeability follows
 `docs/current/TRADEABILITY_DECISION_CONTRACT.md`: every active or newly absorbed
 StrategyGroup candidate must answer whether it can trade now. If it cannot, the
 system must identify the first blocker, blocker owner, next action, and
-post-action state. Do not compress asset-admission, Owner-policy, fact-mapping,
-execution-gate, strategy-quality, or safety blockers into generic
-`waiting_for_market`.
+post-action state. Blocker naming follows
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. Do not compress
+asset-admission, Owner-policy, fact-mapping, detector, watcher, replay/live
+rule, runtime-profile, execution-gate, strategy-quality, or safety blockers into
+generic `waiting_for_market`.
 
-Current planning must use this operating loop:
+Current planning must use this Live Enablement loop:
 
 ```text
-P0 live path stays ready
--> no-signal periods expand read-only opportunity discovery
--> no-action / would-enter observations enter replay-to-review
--> classifier, facts, freshness, cost, and tier gaps become decisions
--> StrategyGroups are kept, revised, promoted, parked, or killed
--> real allocated-subaccount outcomes later update the review ledger
+select StrategyGroup + symbol lane
+-> classify the earliest blocker with the Blocker Classification Contract
+-> attach detector / watcher / facts / scope / policy / runtime profile
+-> reach market_wait_validated only after non-market blockers are closed
+-> on fresh signal refresh action-time facts
+-> candidate / authorization evidence
+-> FinalGate
+-> Operation Layer
+-> protection / reconciliation / settlement / review
 ```
 
-The main bottleneck after the P0 runtime chain is StrategyGroup quality:
-opportunity discovery, no-action diagnosis, replay coverage, fact/source
-mapping, classifier repair, and tier governance. Reports and markdown are
-mainline only when they feed this loop.
+Current WIP is limited by `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
+Daily status must collapse into
+`docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`.
+The daily management unit is:
+
+```text
+StrategyGroup + symbol + first blocker + evidence + next action + stop condition
+```
+
+The main bottleneck is no longer a general explanation of no-trade periods. The
+main bottleneck is removing or precisely proving the earliest Live Enablement
+blocker for the selected StrategyGroup + symbol lane. Reports, markdown,
+read-only watcher expansion, replay outputs, and daily status reports are mainline
+only when they move a lane forward or replace a broad blocker with a precise
+per-symbol / per-fact blocker and next action.
 
 `StrategyGroup Decision Ledger` is the minimal pre-live strategy-learning
 ledger. For compatibility, its active contract lives at
@@ -178,8 +203,9 @@ the Owner to manually judge raw no-action rows, replay samples, signal
 freshness, RequiredFacts assembly, candidate/auth evidence, FinalGate, Operation
 Layer, or ordinary in-boundary execution steps.
 
-If the remaining gap is fact mapping, classifier repair, replay coverage,
-monitor integration, runtime readiness, or a non-authority engineering defect,
+If the remaining gap is detector attachment, watcher input, fact mapping,
+classifier repair, replay/live rule parity, action-time rehearsal, monitor
+integration, runtime readiness, or another non-authority engineering defect,
 continue engineering progress. Escalate to the Owner only for policy, tier,
 capital/profile/scope, pause/resume, promote/downshift/park/kill, production
 transition, or abnormal intervention.
@@ -219,22 +245,18 @@ This does not authorize:
 
 ## Gate Behavior
 
-Every blocker must classify itself as one of:
+Every blocker must classify itself through
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 
-| Class | Meaning |
-| --- | --- |
-| `waiting_for_market` | No fresh signal exists |
-| `asset_admission` | StrategyGroup is not yet a final-owned admitted trial/runtime asset |
-| `owner_policy_required` | Owner capital, profile, risk, scope, promotion, pause, park, or kill decision is required |
-| `missing_fact` | Required fact or evidence is absent or stale |
-| `deployment_issue` | Tokyo or local deployment is behind current code |
-| `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
-| `active_position_resolution` | Position, open order, or protection state needs resolution |
-| `hard_safety_stop` | Execution would violate the safety boundary |
-| `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
+Current planning, task cards, code review, and generated summaries must map
+legacy coarse labels into the contract classes before accepting completion.
+`waiting_for_market`, `fresh_signal_absent`, `missing_fact`, and
+`live_detector_artifact_missing` are not valid planning conclusions unless the
+contract's stricter conditions are true.
 
 Gates protect bounded real-funds safety. They must not become opaque all-AND
-project blockers.
+project blockers, and they must not let explanation artifacts replace Live
+Enablement progress.
 
 Gate checks must be scoped by execution surface:
 
@@ -247,9 +269,10 @@ Gate checks must be scoped by execution surface:
 
 No live-only condition may block pre-live engineering closure. A missing fresh
 signal, missing action-time live fact, or absent real exchange outcome blocks
-real submit and live outcome calibration only. It does not block simulation,
-dry-run, paper Operation Layer, post-submit lifecycle rehearsal, rough cost/PnL
-calculation, or Review Ledger shape work.
+real submit and live outcome calibration only. It does not block detector
+attachment, watcher integration, per-symbol / per-fact classification,
+simulation, dry-run, paper Operation Layer, post-submit lifecycle rehearsal,
+rough cost/PnL calculation, or Review Ledger shape work.
 
 Rehearsal and simulation may unlock the next engineering capability, but they
 must never grant runtime trade/order authority, pretend to be live
@@ -263,6 +286,12 @@ Monitor cache freshness is a reporting constraint, not a trading safety gate.
 local monitor artifact, but they must not enter `checks.blockers`, must not
 become `hard_safety_stop`, and must not make P0 look blocked when the only
 remaining real condition is a market fresh signal.
+
+`market_wait_validated` is allowed only after admission, scope, policy,
+detector, watcher input, fact computation, blocker classification, and
+action-time path readiness are closed for the lane. A detector artifact that
+exists and reports computed false facts must be classified as
+`computed_not_satisfied`, not as a missing detector.
 
 ## StrategyGroup Runtime Path
 
@@ -369,6 +398,12 @@ Allowed files
 Forbidden files
 Requirements
 Global Authority Model
+Chain Position
+Live Enablement State Before
+Live Enablement State After
+Blocker Removed Or Reclassified
+Per-Symbol / Per-Fact Acceptance
+Stop Condition
 Capability Unlocked
 Next Engineering Bottleneck
 Rehearsal/Simulation Boundary
