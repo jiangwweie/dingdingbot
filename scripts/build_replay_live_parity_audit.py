@@ -39,6 +39,20 @@ DEFAULT_OUTPUT_JSON = REPO_ROOT / "output/runtime-monitor/latest-replay-live-par
 DEFAULT_OUTPUT_MD = REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.md"
 
 STRATEGY_IDS = ("CPM-RO-001", "MPG-001", "SOR-001")
+CPM_READY_STATUSES = {
+    "cpm_runtime_signal_facts_ready",
+    "cpm_runtime_signal_facts_ready_from_fallback",
+}
+BLOCKER_PRIORITY = {
+    "artifact_missing": 10,
+    "schema_invalid": 10,
+    "detector_not_attached": 20,
+    "watcher_tick_missing": 30,
+    "scope_not_attached": 40,
+    "replay_live_rule_mismatch": 50,
+    "action_time_boundary_not_reproduced": 60,
+    "computed_not_satisfied": 70,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,6 +187,18 @@ def _strategy_parity_row(row: dict[str, Any], coverage: dict[str, Any]) -> dict[
 def _event_reproduced(event: dict[str, Any], coverage: dict[str, Any]) -> bool:
     symbol = str(event.get("symbol") or "")
     gate = _as_dict(event.get("gate_breakdown"))
+    facts = _symbol_facts(coverage, symbol)
+    if facts:
+        return (
+            coverage.get("detector_attached") is True
+            and coverage.get("watcher_tick_present") is True
+            and facts.get("computed") is True
+            and not facts.get("failed_facts")
+            and facts.get("fresh_signal_present") is True
+            and not _replay_live_rule_mismatch(event, facts)
+            and gate.get("required_facts_replay_shape_present") is True
+            and gate.get("would_reach_action_time_boundary") is True
+        )
     return (
         coverage.get("detector_or_watcher_ready") is True
         and symbol in set(coverage.get("symbol_scope") or [])
@@ -183,26 +209,54 @@ def _event_reproduced(event: dict[str, Any], coverage: dict[str, Any]) -> bool:
 
 def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str, Any]:
     symbol = str(event.get("symbol") or "")
-    if coverage.get("detector_or_watcher_ready") is not True:
-        reason = "signal_capture_defect:live_detector_artifact_missing"
+    facts = _symbol_facts(coverage, symbol)
+    detector_attached = coverage.get("detector_attached")
+    if detector_attached is None:
+        detector_attached = coverage.get("detector_or_watcher_ready") is True
+    watcher_tick_present = coverage.get("watcher_tick_present")
+    if watcher_tick_present is None:
+        watcher_tick_present = coverage.get("detector_or_watcher_ready") is True
+    computed = facts.get("computed") if facts else coverage.get("computed")
+    failed_facts = list(facts.get("failed_facts") or []) if facts else []
+
+    if detector_attached is not True:
+        blocker_class = "detector_not_attached"
         owner = "engineering"
+    elif watcher_tick_present is not True:
+        blocker_class = "watcher_tick_missing"
+        owner = "runtime"
+    elif facts and _replay_live_rule_mismatch(event, facts):
+        blocker_class = "replay_live_rule_mismatch"
+        owner = "engineering"
+    elif computed is True and failed_facts:
+        blocker_class = "computed_not_satisfied"
+        owner = "market"
     elif symbol not in set(coverage.get("symbol_scope") or []):
-        reason = "signal_capture_defect:symbol_scope_not_attached"
+        blocker_class = "scope_not_attached"
         owner = "engineering"
     elif _as_dict(event.get("gate_breakdown")).get("would_reach_action_time_boundary") is not True:
-        reason = "signal_capture_defect:action_time_boundary_not_reproduced"
+        blocker_class = "action_time_boundary_not_reproduced"
         owner = "runtime"
+    elif computed is not True:
+        blocker_class = "artifact_missing"
+        owner = "engineering"
     else:
-        reason = "signal_capture_defect:required_facts_shape_not_reproduced"
-        owner = "runtime"
+        blocker_class = "replay_live_rule_mismatch"
+        owner = "engineering"
+    next_action = _next_action(blocker_class)
     return {
         "strategy_group_id": event.get("strategy_group_id"),
         "symbol": symbol,
         "event_time_utc": event.get("event_time_utc"),
-        "mismatch_reason": reason,
-        "first_blocker_class": reason,
+        "detector_attached": detector_attached is True,
+        "watcher_tick_present": watcher_tick_present is True,
+        "computed": computed is True,
+        "failed_facts": failed_facts,
+        "blocker_class": blocker_class,
+        "mismatch_reason": blocker_class,
+        "first_blocker_class": blocker_class,
         "first_blocker_owner": owner,
-        "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+        "next_action": next_action,
     }
 
 
@@ -216,6 +270,20 @@ def _per_symbol_rows(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 {
                     "strategy_group_id": key[0],
                     "symbol": key[1],
+                    "detector_attached": mismatch.get("detector_attached") is True,
+                    "watcher_tick_present": mismatch.get("watcher_tick_present") is True,
+                    "computed": mismatch.get("computed") is True,
+                    "failed_facts": [],
+                    "blocker_class": mismatch.get("blocker_class")
+                    or mismatch.get("first_blocker_class"),
+                    "next_action": mismatch.get("next_action"),
+                    "blocker_priority": _blocker_priority(
+                        str(
+                            mismatch.get("blocker_class")
+                            or mismatch.get("first_blocker_class")
+                            or ""
+                        )
+                    ),
                     "mismatch_count": 0,
                     "mismatch_reasons": [],
                 },
@@ -224,6 +292,26 @@ def _per_symbol_rows(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]
             reason = mismatch["mismatch_reason"]
             if reason not in bucket["mismatch_reasons"]:
                 bucket["mismatch_reasons"].append(reason)
+            for fact in mismatch.get("failed_facts") or []:
+                if fact not in bucket["failed_facts"]:
+                    bucket["failed_facts"].append(fact)
+            blocker_class = str(
+                mismatch.get("blocker_class")
+                or mismatch.get("first_blocker_class")
+                or ""
+            )
+            priority = _blocker_priority(blocker_class)
+            if priority < int(bucket["blocker_priority"]):
+                bucket["blocker_class"] = blocker_class
+                bucket["next_action"] = mismatch.get("next_action")
+                bucket["detector_attached"] = mismatch.get("detector_attached") is True
+                bucket["watcher_tick_present"] = (
+                    mismatch.get("watcher_tick_present") is True
+                )
+                bucket["computed"] = mismatch.get("computed") is True
+                bucket["blocker_priority"] = priority
+    for bucket in buckets.values():
+        bucket.pop("blocker_priority", None)
     return sorted(buckets.values(), key=lambda item: (item["strategy_group_id"], item["symbol"]))
 
 
@@ -236,30 +324,132 @@ def _is_replay_signal(event: dict[str, Any]) -> bool:
 
 def _cpm_coverage(cpm_facts: dict[str, Any]) -> dict[str, Any]:
     watcher = _as_dict(cpm_facts.get("watcher_scope"))
+    live_detector = _as_dict(cpm_facts.get("live_detector"))
+    per_symbol_facts = _cpm_per_symbol_facts(live_detector)
+    detector_attached = bool(
+        cpm_facts.get("detector_source_mode") or live_detector.get("source")
+    )
+    watcher_tick_present = cpm_facts.get("watcher_tick_present") is True
+    computed = (
+        cpm_facts.get("status") in CPM_READY_STATUSES
+        and watcher_tick_present
+        and bool(per_symbol_facts)
+    )
     return {
         "detector_source": cpm_facts.get("detector_source_mode"),
-        "detector_or_watcher_ready": cpm_facts.get("status") == "cpm_runtime_signal_facts_ready",
+        "detector_attached": detector_attached,
+        "watcher_tick_present": watcher_tick_present,
+        "computed": computed,
+        "detector_or_watcher_ready": computed,
         "symbol_scope": watcher.get("symbol_scope") or [],
         "primary_live_submit_scope": watcher.get("primary_live_submit_symbol_scope") or [],
         "readonly_symbols": watcher.get("expanded_readonly_symbol_scope") or [],
+        "per_symbol_facts": per_symbol_facts,
     }
 
 
 def _watcher_coverage(artifact: dict[str, Any]) -> dict[str, Any]:
     watcher = _as_dict(artifact.get("watcher_scope"))
+    ready = (
+        artifact.get("runtime_artifact_ready") is True
+        or artifact.get("status") in {
+            "mpg_expanded_watcher_facts_ready",
+            "runtime_activation_evidence_ready",
+        }
+    )
     return {
         "detector_source": watcher.get("source") or artifact.get("scope"),
-        "detector_or_watcher_ready": (
-            artifact.get("runtime_artifact_ready") is True
-            or artifact.get("status") in {
-                "mpg_expanded_watcher_facts_ready",
-                "runtime_activation_evidence_ready",
-            }
-        ),
+        "detector_attached": ready,
+        "watcher_tick_present": ready,
+        "computed": ready,
+        "detector_or_watcher_ready": ready,
         "symbol_scope": watcher.get("symbol_scope") or [],
         "primary_live_submit_scope": watcher.get("primary_live_submit_symbol_scope") or [],
         "readonly_symbols": watcher.get("expanded_readonly_watcher_symbols") or [],
     }
+
+
+def _cpm_per_symbol_facts(live_detector: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in live_detector.get("per_symbol_signal_facts") or []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        trigger_facts = _as_dict(row.get("trigger_facts"))
+        failed_facts = list(row.get("missing_required_trigger_facts") or [])
+        if not failed_facts:
+            failed_facts = [
+                fact_name
+                for fact_name, fact_payload in trigger_facts.items()
+                if _fact_failed(fact_payload)
+            ]
+        rows[symbol] = {
+            "computed": bool(trigger_facts) and row.get("candle_input_missing") is not True,
+            "fresh_signal_present": row.get("fresh_signal_present") is True,
+            "failed_facts": failed_facts,
+            "live_fact_names": sorted(trigger_facts.keys()),
+            "timeframe": row.get("timeframe"),
+        }
+    return rows
+
+
+def _fact_failed(value: Any) -> bool:
+    fact = _as_dict(value)
+    return fact.get("status") in {"not_satisfied", "missing", "stale"} or (
+        fact.get("value") is False and fact.get("status") != "satisfied"
+    )
+
+
+def _symbol_facts(coverage: dict[str, Any], symbol: str) -> dict[str, Any]:
+    return _as_dict(_as_dict(coverage.get("per_symbol_facts")).get(symbol))
+
+
+def _replay_live_rule_mismatch(event: dict[str, Any], facts: dict[str, Any]) -> bool:
+    replay_fact_names = _event_replay_fact_names(event)
+    if not replay_fact_names:
+        return False
+    live_fact_names = set(facts.get("live_fact_names") or [])
+    return not replay_fact_names.issubset(live_fact_names)
+
+
+def _event_replay_fact_names(event: dict[str, Any]) -> set[str]:
+    gate = _as_dict(event.get("gate_breakdown"))
+    names: set[str] = set()
+    for key in (
+        "required_facts",
+        "required_trigger_facts",
+        "replay_required_facts",
+        "replay_trigger_facts",
+    ):
+        names.update(_string_set(event.get(key)))
+        names.update(_string_set(gate.get(key)))
+    return names
+
+
+def _string_set(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, list | tuple | set):
+        return {str(item) for item in value if str(item)}
+    return set()
+
+
+def _next_action(blocker_class: str) -> str:
+    return {
+        "detector_not_attached": "attach_live_detector_to_parity_audit",
+        "watcher_tick_missing": "refresh_or_repair_watcher_public_fact_input",
+        "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
+        "replay_live_rule_mismatch": "normalize_replay_and_live_detector_fact_rules",
+        "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
+        "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
+        "artifact_missing": "generate_or_wire_current_fact_artifact",
+    }.get(blocker_class, "repair_replay_live_parity_classification")
+
+
+def _blocker_priority(blocker_class: str) -> int:
+    return BLOCKER_PRIORITY.get(blocker_class, 100)
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:

@@ -520,6 +520,120 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
             encoding="utf-8",
         )
         return True
+    if script == "build_sor_session_scope_detector.py":
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "latest-sor-session-detector-facts.json").write_text(
+            json.dumps(
+                {
+                    "status": "sor_session_detector_facts_ready",
+                    "fresh_session_signal_count": 0,
+                    "first_blocker": "computed_not_satisfied",
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_sor_session_detector",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return True
+    if script == "build_mpg_high_beta_scope_readiness.py":
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "latest-mpg-action-time-facts-readiness.json").write_text(
+            json.dumps(
+                {
+                    "status": "mpg_action_time_facts_readiness_ready",
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_mpg_high_beta_scope_readiness",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return True
+    if script == "build_strategy_fresh_signal_action_time_boundary.py":
+        _write_output(
+            command,
+            {
+                "status": "strategy_fresh_signal_action_time_boundary_ready",
+                "summary": {
+                    "fresh_signal_present_count": 0,
+                    "would_enter_finalgate_if_private_facts_ready_count": 0,
+                    "live_submit_allowed_count": 0,
+                },
+                "checks": {
+                    "calls_finalgate": False,
+                    "calls_operation_layer": False,
+                    "calls_exchange_write": False,
+                    "order_created": False,
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_strategy_fresh_signal_action_time_boundary",
+                },
+            },
+        )
+        return True
+    if script == "build_replay_live_parity_audit.py":
+        _write_output(
+            command,
+            {
+                "status": "replay_live_parity_audit_ready",
+                "summary": {
+                    "replay_signal_count": 4,
+                    "live_detector_reproduced_count": 0,
+                    "mismatch_count": 4,
+                    "mismatch_reason_policy": (
+                        "replay_signal_without_live_reproduction_is_not_market_wait"
+                    ),
+                },
+                "per_symbol_mismatch_table": [
+                    {
+                        "strategy_group_id": "CPM-RO-001",
+                        "symbol": "ETHUSDT",
+                        "detector_attached": True,
+                        "watcher_tick_present": True,
+                        "computed": True,
+                        "failed_facts": [
+                            "htf_trend_intact",
+                            "reclaim_confirmed",
+                        ],
+                        "blocker_class": "computed_not_satisfied",
+                        "next_action": (
+                            "continue_observation_with_failed_fact_matrix"
+                        ),
+                        "mismatch_count": 1,
+                    }
+                ],
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_replay_live_parity_audit",
+                },
+            },
+        )
+        return True
+    if script == "build_mi_trial_admission_decision.py":
+        _write_output(
+            command,
+            {
+                "status": "mi_trial_admission_decision_ready",
+                "trial_admission_decision": "trial_asset_admission_candidate",
+                "promotion_scope": "trial_admission",
+                "tradeability": {
+                    "can_trade_now": False,
+                    "first_blocker": "trial_admission_fact_not_integrated",
+                    "blocker_owner": "engineering",
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_mi_trial_admission_decision",
+                },
+            },
+        )
+        return True
     if script == "build_four_candidate_runtime_activation_closure.py":
         _write_output(
             command,
@@ -2440,12 +2554,17 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_cpm_identity_routing_decision.py",
         "build_cpm_owner_trial_policy_scope.py",
         "build_cpm_required_facts_mapping.py",
+        "fetch_binance_usdm_public_facts.py",
         "build_cpm_runtime_signal_facts.py",
         "build_cpm_runtime_signal_capture.py",
         "build_cpm_shadow_candidate_evidence.py",
         "build_cpm_dry_run_submit_rehearsal.py",
-        "fetch_binance_usdm_public_facts.py",
         "build_four_candidate_runtime_activation_evidence.py",
+        "build_sor_session_scope_detector.py",
+        "build_mpg_high_beta_scope_readiness.py",
+        "build_strategy_fresh_signal_action_time_boundary.py",
+        "build_replay_live_parity_audit.py",
+        "build_mi_trial_admission_decision.py",
         "build_four_candidate_runtime_activation_closure.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
@@ -2709,6 +2828,32 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
+    replay_parity = report["replay_live_parity_audit"]
+    assert replay_parity["status"] == "replay_live_parity_audit_ready"
+    assert replay_parity["cpm_first_blocker_class"] == "computed_not_satisfied"
+    assert replay_parity["cpm_first_failed_facts"] == [
+        "htf_trend_intact",
+        "reclaim_confirmed",
+    ]
+    assert replay_parity["cpm_first_next_action"] == (
+        "continue_observation_with_failed_fact_matrix"
+    )
+    assert replay_parity["cpm_per_symbol_blocker_matrix"] == [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "ETHUSDT",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": ["htf_trend_intact", "reclaim_confirmed"],
+            "blocker_class": "computed_not_satisfied",
+            "next_action": "continue_observation_with_failed_fact_matrix",
+            "mismatch_count": 1,
+        }
+    ]
+    assert report["owner_summary"]["replay_live_parity_audit"][
+        "cpm_first_blocker_class"
+    ] == "computed_not_satisfied"
     assert report["strategy_research_intake"]["active"] is True
     assert report["strategy_research_intake"]["strategy_group_ids"] == [
         "BRF2-001",

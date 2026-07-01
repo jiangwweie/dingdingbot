@@ -4159,6 +4159,14 @@ def _sequence_replay_live_parity_audit_summary(
 ) -> dict[str, Any]:
     status = _status(artifact) or "missing"
     summary = _as_dict(artifact.get("summary"))
+    per_symbol = [
+        _replay_live_parity_symbol_row(row)
+        for row in _dict_rows(artifact.get("per_symbol_mismatch_table"))
+    ]
+    cpm_symbol_rows = [
+        row for row in per_symbol if row.get("strategy_group_id") == "CPM-RO-001"
+    ]
+    first_cpm_row = cpm_symbol_rows[0] if cpm_symbol_rows else {}
     return {
         "status": status,
         "active": status == "replay_live_parity_audit_ready",
@@ -4168,8 +4176,27 @@ def _sequence_replay_live_parity_audit_summary(
         ),
         "mismatch_count": int(summary.get("mismatch_count") or 0),
         "mismatch_reason_policy": str(summary.get("mismatch_reason_policy") or ""),
+        "per_symbol_blocker_matrix": per_symbol,
+        "cpm_per_symbol_blocker_matrix": cpm_symbol_rows,
+        "cpm_first_blocker_class": str(first_cpm_row.get("blocker_class") or ""),
+        "cpm_first_failed_facts": list(first_cpm_row.get("failed_facts") or []),
+        "cpm_first_next_action": str(first_cpm_row.get("next_action") or ""),
         "projection_role": "replay_live_parity_projection",
         "state_source": "replay_live_parity_audit",
+    }
+
+
+def _replay_live_parity_symbol_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strategy_group_id": str(row.get("strategy_group_id") or ""),
+        "symbol": str(row.get("symbol") or ""),
+        "detector_attached": row.get("detector_attached") is True,
+        "watcher_tick_present": row.get("watcher_tick_present") is True,
+        "computed": row.get("computed") is True,
+        "failed_facts": [str(item) for item in row.get("failed_facts") or []],
+        "blocker_class": str(row.get("blocker_class") or ""),
+        "next_action": str(row.get("next_action") or ""),
+        "mismatch_count": int(row.get("mismatch_count") or 0),
     }
 
 
@@ -4829,6 +4856,12 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- CPM fresh-path public facts / fresh signal / next blocker: `{_yes_no(cpm_fresh_signal_live_path_readiness.get('public_fact_path_ready') is True)}` / `{_yes_no(cpm_fresh_signal_live_path_readiness.get('fresh_signal_present') is True)}` / `{cpm_fresh_signal_live_path_readiness.get('next_blocker') or 'missing'}`",
         f"- Fresh-signal action-time boundary: `{strategy_fresh_signal_action_time_boundary.get('status', 'missing')}` / fresh `{strategy_fresh_signal_action_time_boundary.get('fresh_signal_present_count', 0)}` / finalgate-if-private-facts `{strategy_fresh_signal_action_time_boundary.get('would_enter_finalgate_if_private_facts_ready_count', 0)}` / live-submit `{strategy_fresh_signal_action_time_boundary.get('live_submit_allowed_count', 0)}`",
         f"- Replay-live parity: `{replay_live_parity_audit.get('status', 'missing')}` / replay `{replay_live_parity_audit.get('replay_signal_count', 0)}` / reproduced `{replay_live_parity_audit.get('live_detector_reproduced_count', 0)}` / mismatch `{replay_live_parity_audit.get('mismatch_count', 0)}`",
+        "- CPM replay-live first blocker: `{}` / failed `{}` / next `{}`".format(
+            replay_live_parity_audit.get("cpm_first_blocker_class") or "missing",
+            ", ".join(replay_live_parity_audit.get("cpm_first_failed_facts") or [])
+            or "none",
+            replay_live_parity_audit.get("cpm_first_next_action") or "missing",
+        ),
         f"- MI trial admission: `{mi_trial_admission_decision.get('trial_admission_decision') or 'missing'}` / scope `{mi_trial_admission_decision.get('promotion_scope') or 'missing'}` / blocker `{mi_trial_admission_decision.get('first_blocker') or 'missing'}`",
         f"- SOR session detector: `{sor_session_detector_facts.get('status', 'missing')}` / fresh `{sor_session_detector_facts.get('fresh_session_signal_count', 0)}` / blocker `{sor_session_detector_facts.get('first_blocker') or 'missing'}`",
         f"- Activation venue basis/match: `{four_candidate_runtime_activation_closure.get('venue_basis') or 'missing'}` / `{_yes_no(four_candidate_runtime_activation_closure.get('execution_venue_match') is True)}`",

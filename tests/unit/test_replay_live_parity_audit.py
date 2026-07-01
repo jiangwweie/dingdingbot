@@ -39,6 +39,15 @@ def _event(symbol: str, *, boundary: bool = True) -> dict:
     }
 
 
+def _cpm_event(symbol: str, *, replay_required_facts: list[str] | None = None) -> dict:
+    event = _event(symbol)
+    event["strategy_group_id"] = "CPM-RO-001"
+    event["gate_breakdown"]["would_reach_action_time_boundary"] = True
+    if replay_required_facts is not None:
+        event["gate_breakdown"]["replay_required_facts"] = replay_required_facts
+    return event
+
+
 def _replay() -> dict:
     return {
         "strategy_rows": [
@@ -61,6 +70,23 @@ def _replay() -> dict:
     }
 
 
+def _cpm_replay(*events: dict) -> dict:
+    return {
+        "strategy_rows": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "path_id": "CPM-LONG",
+                "window_results": [
+                    {
+                        "window_days": 3,
+                        "counterfactual_events": list(events),
+                    }
+                ],
+            }
+        ]
+    }
+
+
 def _mpg_watcher() -> dict:
     return {
         "status": "mpg_expanded_watcher_facts_ready",
@@ -69,6 +95,64 @@ def _mpg_watcher() -> dict:
             "primary_live_submit_symbol_scope": ["BTCUSDT", "ETHUSDT"],
             "expanded_readonly_watcher_symbols": ["SOLUSDT"],
             "source": "binance_usdm_public_facts_readonly",
+        },
+    }
+
+
+def _trigger_facts(*failed: str) -> dict:
+    fact_names = [
+        "funding_not_extreme",
+        "htf_trend_intact",
+        "invalidated_below_level",
+        "liquidity_ok",
+        "pullback_depth_normal",
+        "reclaim_confirmed",
+    ]
+    return {
+        fact_name: {
+            "fresh": True,
+            "status": "not_satisfied" if fact_name in failed else "satisfied",
+            "value": fact_name not in failed,
+        }
+        for fact_name in fact_names
+    }
+
+
+def _cpm_symbol_row(symbol: str, failed: list[str]) -> dict:
+    return {
+        "symbol": symbol,
+        "timeframe": "15m_closed",
+        "candle_input_missing": False,
+        "fresh_signal_present": False,
+        "missing_required_trigger_facts": failed,
+        "trigger_facts": _trigger_facts(*failed),
+    }
+
+
+def _cpm_fallback_facts() -> dict:
+    return {
+        "status": "cpm_runtime_signal_facts_ready_from_fallback",
+        "detector_source_mode": "binance_usdm_public_closed_candles",
+        "watcher_tick_present": True,
+        "fact_input_present": True,
+        "watcher_scope": {
+            "symbol_scope": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "primary_live_submit_symbol_scope": ["ETHUSDT"],
+            "expanded_readonly_symbol_scope": ["SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+        },
+        "live_detector": {
+            "per_symbol_signal_facts": [
+                _cpm_symbol_row(
+                    "ETHUSDT", ["htf_trend_intact", "reclaim_confirmed"]
+                ),
+                _cpm_symbol_row("SOLUSDT", ["reclaim_confirmed"]),
+                _cpm_symbol_row(
+                    "AVAXUSDT", ["htf_trend_intact", "reclaim_confirmed"]
+                ),
+                _cpm_symbol_row(
+                    "SUIUSDT", ["htf_trend_intact", "reclaim_confirmed"]
+                ),
+            ]
         },
     }
 
@@ -92,9 +176,8 @@ def test_replay_live_parity_counts_windows_and_symbol_mismatches():
     assert artifact["summary"]["mismatch_count"] == 1
     symbol_row = artifact["per_symbol_mismatch_table"][0]
     assert symbol_row["symbol"] == "OPUSDT"
-    assert symbol_row["mismatch_reasons"] == [
-        "signal_capture_defect:symbol_scope_not_attached"
-    ]
+    assert symbol_row["blocker_class"] == "scope_not_attached"
+    assert symbol_row["mismatch_reasons"] == ["scope_not_attached"]
 
 
 def test_replay_live_parity_never_marks_unreproduced_signal_as_market_wait():
@@ -118,10 +201,107 @@ def test_replay_live_parity_never_marks_unreproduced_signal_as_market_wait():
         for mismatch in row["mismatch_table"]
     }
     assert "market_wait" not in " ".join(reasons)
-    assert "signal_capture_defect:action_time_boundary_not_reproduced" in reasons
+    assert "action_time_boundary_not_reproduced" in reasons
     checks = artifact["checks"]
     assert checks["replay_treated_as_live_signal"] is False
     assert checks["finalgate_called"] is False
     assert checks["operation_layer_called"] is False
     assert checks["exchange_write_called"] is False
     assert checks["order_created"] is False
+
+
+def test_cpm_fallback_ready_classifies_current_false_facts_as_computed_not_satisfied():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay=_cpm_replay(
+            _cpm_event("ETHUSDT"),
+            _cpm_event("SOLUSDT"),
+            _cpm_event("AVAXUSDT"),
+            _cpm_event("SUIUSDT"),
+        ),
+        cpm_facts=_cpm_fallback_facts(),
+        mpg_watcher={},
+        sor_evidence={},
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    row = artifact["strategy_rows"][0]
+    assert row["coverage"]["detector_attached"] is True
+    assert row["coverage"]["watcher_tick_present"] is True
+    assert row["coverage"]["computed"] is True
+    assert row["coverage"]["detector_or_watcher_ready"] is True
+
+    by_symbol = {
+        item["symbol"]: item for item in artifact["per_symbol_mismatch_table"]
+    }
+    assert set(by_symbol) == {"ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"}
+    for symbol in ("ETHUSDT", "AVAXUSDT", "SUIUSDT"):
+        assert by_symbol[symbol]["detector_attached"] is True
+        assert by_symbol[symbol]["watcher_tick_present"] is True
+        assert by_symbol[symbol]["computed"] is True
+        assert by_symbol[symbol]["blocker_class"] == "computed_not_satisfied"
+        assert by_symbol[symbol]["failed_facts"] == [
+            "htf_trend_intact",
+            "reclaim_confirmed",
+        ]
+    assert by_symbol["SOLUSDT"]["blocker_class"] == "computed_not_satisfied"
+    assert by_symbol["SOLUSDT"]["failed_facts"] == ["reclaim_confirmed"]
+
+
+def test_cpm_replay_live_rule_mismatch_precedes_computed_fact_failure():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay=_cpm_replay(
+            _cpm_event(
+                "ETHUSDT",
+                replay_required_facts=["legacy_reclaim_rule", "htf_trend_intact"],
+            )
+        ),
+        cpm_facts=_cpm_fallback_facts(),
+        mpg_watcher={},
+        sor_evidence={},
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    mismatch = artifact["strategy_rows"][0]["mismatch_table"][0]
+    assert mismatch["detector_attached"] is True
+    assert mismatch["watcher_tick_present"] is True
+    assert mismatch["computed"] is True
+    assert mismatch["failed_facts"] == ["htf_trend_intact", "reclaim_confirmed"]
+    assert mismatch["blocker_class"] == "replay_live_rule_mismatch"
+    assert mismatch["first_blocker_class"] == "replay_live_rule_mismatch"
+    assert artifact["per_symbol_mismatch_table"][0]["blocker_class"] == (
+        "replay_live_rule_mismatch"
+    )
+
+
+def test_per_symbol_blocker_priority_is_deterministic_for_mixed_cpm_mismatches():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay=_cpm_replay(
+            _cpm_event("ETHUSDT"),
+            _cpm_event(
+                "ETHUSDT",
+                replay_required_facts=["legacy_reclaim_rule", "htf_trend_intact"],
+            ),
+        ),
+        cpm_facts=_cpm_fallback_facts(),
+        mpg_watcher={},
+        sor_evidence={},
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    symbol_row = artifact["per_symbol_mismatch_table"][0]
+    assert symbol_row["symbol"] == "ETHUSDT"
+    assert symbol_row["mismatch_reasons"] == [
+        "computed_not_satisfied",
+        "replay_live_rule_mismatch",
+    ]
+    assert symbol_row["blocker_class"] == "replay_live_rule_mismatch"
+    assert symbol_row["next_action"] == (
+        "normalize_replay_and_live_detector_fact_rules"
+    )
+    assert symbol_row["failed_facts"] == ["htf_trend_intact", "reclaim_confirmed"]

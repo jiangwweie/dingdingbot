@@ -9,7 +9,7 @@
     "replay_signal_without_live_reproduction_marked_signal_capture_defect": true,
     "replay_treated_as_live_signal": false
   },
-  "generated_at_utc": "2026-06-30T15:37:52.300102+00:00",
+  "generated_at_utc": "2026-07-01T03:32:49.521246+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -22,76 +22,155 @@
   },
   "per_symbol_mismatch_table": [
     {
+      "blocker_class": "computed_not_satisfied",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [
+        "htf_trend_intact",
+        "reclaim_confirmed"
+      ],
       "mismatch_count": 16,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "computed_not_satisfied"
       ],
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "strategy_group_id": "CPM-RO-001",
-      "symbol": "AVAXUSDT"
+      "symbol": "AVAXUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "computed_not_satisfied",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [
+        "htf_trend_intact",
+        "reclaim_confirmed"
+      ],
+      "mismatch_count": 12,
+      "mismatch_reasons": [
+        "computed_not_satisfied"
+      ],
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "ETHUSDT",
+      "watcher_tick_present": true
+    },
+    {
+      "blocker_class": "computed_not_satisfied",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [
+        "reclaim_confirmed"
+      ],
       "mismatch_count": 13,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "computed_not_satisfied"
       ],
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "strategy_group_id": "CPM-RO-001",
-      "symbol": "SOLUSDT"
+      "symbol": "SOLUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "computed_not_satisfied",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [
+        "htf_trend_intact",
+        "reclaim_confirmed"
+      ],
       "mismatch_count": 7,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "computed_not_satisfied"
       ],
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "strategy_group_id": "CPM-RO-001",
-      "symbol": "SUIUSDT"
+      "symbol": "SUIUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "action_time_boundary_not_reproduced",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 13,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "action_time_boundary_not_reproduced"
       ],
+      "next_action": "repair_non_executing_action_time_rehearsal_path",
       "strategy_group_id": "MPG-001",
-      "symbol": "AVAXUSDT"
+      "symbol": "AVAXUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "scope_not_attached",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 10,
       "mismatch_reasons": [
-        "signal_capture_defect:symbol_scope_not_attached"
+        "scope_not_attached"
       ],
+      "next_action": "produce_scoped_live_observation_or_scope_proposal",
       "strategy_group_id": "MPG-001",
-      "symbol": "OPUSDT"
+      "symbol": "OPUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "action_time_boundary_not_reproduced",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 25,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "action_time_boundary_not_reproduced"
       ],
+      "next_action": "repair_non_executing_action_time_rehearsal_path",
       "strategy_group_id": "MPG-001",
-      "symbol": "SOLUSDT"
+      "symbol": "SOLUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "action_time_boundary_not_reproduced",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 7,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "action_time_boundary_not_reproduced"
       ],
+      "next_action": "repair_non_executing_action_time_rehearsal_path",
       "strategy_group_id": "MPG-001",
-      "symbol": "SUIUSDT"
+      "symbol": "SUIUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "action_time_boundary_not_reproduced",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 6,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "action_time_boundary_not_reproduced"
       ],
+      "next_action": "repair_non_executing_action_time_rehearsal_path",
       "strategy_group_id": "SOR-001",
-      "symbol": "AVAXUSDT"
+      "symbol": "AVAXUSDT",
+      "watcher_tick_present": true
     },
     {
+      "blocker_class": "action_time_boundary_not_reproduced",
+      "computed": true,
+      "detector_attached": true,
+      "failed_facts": [],
       "mismatch_count": 8,
       "mismatch_reasons": [
-        "signal_capture_defect:action_time_boundary_not_reproduced"
+        "action_time_boundary_not_reproduced"
       ],
+      "next_action": "repair_non_executing_action_time_rehearsal_path",
       "strategy_group_id": "SOR-001",
-      "symbol": "SOLUSDT"
+      "symbol": "SOLUSDT",
+      "watcher_tick_present": true
     }
   ],
   "safety_invariants": {
@@ -109,6 +188,8 @@
   "strategy_rows": [
     {
       "coverage": {
+        "computed": true,
+        "detector_attached": true,
         "detector_or_watcher_ready": true,
         "detector_source": "binance_usdm_public_facts_readonly",
         "primary_live_submit_scope": [
@@ -126,505 +207,781 @@
           "SOLUSDT",
           "AVAXUSDT",
           "SUIUSDT"
-        ]
+        ],
+        "watcher_tick_present": true
       },
       "live_detector_reproduced_count": 5,
       "mismatch_count": 55,
       "mismatch_table": [
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T06:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T10:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T12:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T12:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T13:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T20:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T00:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T20:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T21:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T23:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-25T01:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-25T02:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-25T08:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T00:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T18:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T18:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T19:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T19:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "scope_not_attached",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:symbol_scope_not_attached",
+          "failed_facts": [],
+          "first_blocker_class": "scope_not_attached",
           "first_blocker_owner": "engineering",
-          "mismatch_reason": "signal_capture_defect:symbol_scope_not_attached",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "scope_not_attached",
+          "next_action": "produce_scoped_live_observation_or_scope_proposal",
           "strategy_group_id": "MPG-001",
-          "symbol": "OPUSDT"
+          "symbol": "OPUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T07:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T10:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T21:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T23:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T00:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T03:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T07:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T08:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T09:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T10:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T12:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "MPG-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         }
       ],
       "path_id": "MPG-LONG",
@@ -653,6 +1010,8 @@
     },
     {
       "coverage": {
+        "computed": true,
+        "detector_attached": true,
         "detector_or_watcher_ready": true,
         "detector_source": "binance_usdm_public_facts_readonly",
         "primary_live_submit_scope": [
@@ -668,136 +1027,207 @@
           "ETHUSDT",
           "SOLUSDT",
           "AVAXUSDT"
-        ]
+        ],
+        "watcher_tick_present": true
       },
       "live_detector_reproduced_count": 9,
       "mismatch_count": 14,
       "mismatch_table": [
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-17T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T14:45:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "action_time_boundary_not_reproduced",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
+          "failed_facts": [],
+          "first_blocker_class": "action_time_boundary_not_reproduced",
           "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "mismatch_reason": "action_time_boundary_not_reproduced",
+          "next_action": "repair_non_executing_action_time_rehearsal_path",
           "strategy_group_id": "SOR-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         }
       ],
       "path_id": "SOR-LONG",
@@ -826,8 +1256,79 @@
     },
     {
       "coverage": {
+        "computed": true,
+        "detector_attached": true,
         "detector_or_watcher_ready": true,
         "detector_source": "binance_usdm_public_closed_candles",
+        "per_symbol_facts": {
+          "AVAXUSDT": {
+            "computed": true,
+            "failed_facts": [
+              "htf_trend_intact",
+              "reclaim_confirmed"
+            ],
+            "fresh_signal_present": false,
+            "live_fact_names": [
+              "funding_not_extreme",
+              "htf_trend_intact",
+              "invalidated_below_level",
+              "liquidity_ok",
+              "pullback_depth_normal",
+              "reclaim_confirmed"
+            ],
+            "timeframe": "15m_closed"
+          },
+          "ETHUSDT": {
+            "computed": true,
+            "failed_facts": [
+              "htf_trend_intact",
+              "reclaim_confirmed"
+            ],
+            "fresh_signal_present": false,
+            "live_fact_names": [
+              "funding_not_extreme",
+              "htf_trend_intact",
+              "invalidated_below_level",
+              "liquidity_ok",
+              "pullback_depth_normal",
+              "reclaim_confirmed"
+            ],
+            "timeframe": "15m_closed"
+          },
+          "SOLUSDT": {
+            "computed": true,
+            "failed_facts": [
+              "reclaim_confirmed"
+            ],
+            "fresh_signal_present": false,
+            "live_fact_names": [
+              "funding_not_extreme",
+              "htf_trend_intact",
+              "invalidated_below_level",
+              "liquidity_ok",
+              "pullback_depth_normal",
+              "reclaim_confirmed"
+            ],
+            "timeframe": "15m_closed"
+          },
+          "SUIUSDT": {
+            "computed": true,
+            "failed_facts": [
+              "htf_trend_intact",
+              "reclaim_confirmed"
+            ],
+            "fresh_signal_present": false,
+            "live_fact_names": [
+              "funding_not_extreme",
+              "htf_trend_intact",
+              "invalidated_below_level",
+              "liquidity_ok",
+              "pullback_depth_normal",
+              "reclaim_confirmed"
+            ],
+            "timeframe": "15m_closed"
+          }
+        },
         "primary_live_submit_scope": [
           "ETHUSDT"
         ],
@@ -841,334 +1342,814 @@
           "SOLUSDT",
           "AVAXUSDT",
           "SUIUSDT"
-        ]
+        ],
+        "watcher_tick_present": true
       },
-      "live_detector_reproduced_count": 12,
-      "mismatch_count": 36,
+      "live_detector_reproduced_count": 0,
+      "mismatch_count": 48,
       "mismatch_table": [
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T10:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T20:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T21:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-24T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-26T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T02:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T05:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T14:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-27T14:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-27T15:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-27T15:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T10:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-29T17:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-29T17:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-20T14:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T21:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-20T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-20T22:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T07:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T09:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-21T16:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-21T18:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-22T01:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-22T11:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-22T11:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-22T12:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-22T13:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SOLUSDT"
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-22T13:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "event_time_utc": "2026-06-22T13:00:00+00:00",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T03:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T03:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "SUIUSDT"
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T20:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         },
         {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
           "event_time_utc": "2026-06-23T22:00:00+00:00",
-          "first_blocker_class": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
-          "mismatch_reason": "signal_capture_defect:action_time_boundary_not_reproduced",
-          "next_action": "attach_live_detector_or_action_time_boundary_for_replay_signal",
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "CPM-RO-001",
-          "symbol": "AVAXUSDT"
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
         }
       ],
       "path_id": "CPM-LONG",
@@ -1176,20 +2157,20 @@
       "strategy_group_id": "CPM-RO-001",
       "window_results": [
         {
-          "live_detector_reproduced_count": 3,
-          "mismatch_count": 7,
+          "live_detector_reproduced_count": 0,
+          "mismatch_count": 10,
           "replay_signal_count": 10,
           "window_days": 3
         },
         {
-          "live_detector_reproduced_count": 3,
-          "mismatch_count": 15,
+          "live_detector_reproduced_count": 0,
+          "mismatch_count": 18,
           "replay_signal_count": 18,
           "window_days": 7
         },
         {
-          "live_detector_reproduced_count": 6,
-          "mismatch_count": 14,
+          "live_detector_reproduced_count": 0,
+          "mismatch_count": 20,
           "replay_signal_count": 20,
           "window_days": 14
         }
@@ -1197,8 +2178,8 @@
     }
   ],
   "summary": {
-    "live_detector_reproduced_count": 26,
-    "mismatch_count": 105,
+    "live_detector_reproduced_count": 14,
+    "mismatch_count": 117,
     "mismatch_reason_policy": "replay_signal_without_live_reproduction_is_signal_capture_defect_not_market_wait",
     "replay_signal_count": 131,
     "strategy_count": 3
