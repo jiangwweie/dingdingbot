@@ -469,6 +469,12 @@ DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON = (
 DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.md"
 )
+DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
+)
+DEFAULT_SINGLE_LANE_TASK_PACKET_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -695,6 +701,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         daily_live_enablement_table_json=Path(args.daily_live_enablement_table_json),
         daily_live_enablement_table_md=Path(args.daily_live_enablement_table_md),
+        single_lane_task_packet_json=Path(args.single_lane_task_packet_json),
+        single_lane_task_packet_md=Path(args.single_lane_task_packet_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -978,6 +986,8 @@ def build_local_monitor_sequence_report(
         DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_JSON
     ),
     daily_live_enablement_table_md: Path = DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD,
+    single_lane_task_packet_json: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_JSON,
+    single_lane_task_packet_md: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     if (
@@ -1084,6 +1094,14 @@ def build_local_monitor_sequence_report(
             daily_live_enablement_table_md = (
                 cpm_parent / DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD.name
             )
+        if single_lane_task_packet_json == DEFAULT_SINGLE_LANE_TASK_PACKET_JSON:
+            single_lane_task_packet_json = (
+                cpm_parent / DEFAULT_SINGLE_LANE_TASK_PACKET_JSON.name
+            )
+        if single_lane_task_packet_md == DEFAULT_SINGLE_LANE_TASK_PACKET_MD:
+            single_lane_task_packet_md = (
+                cpm_parent / DEFAULT_SINGLE_LANE_TASK_PACKET_MD.name
+            )
         if (
             four_candidate_runtime_activation_closure_json
             == DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_JSON
@@ -1098,6 +1116,22 @@ def build_local_monitor_sequence_report(
         ):
             four_candidate_runtime_activation_closure_md = (
                 cpm_parent / DEFAULT_FOUR_CANDIDATE_RUNTIME_ACTIVATION_CLOSURE_MD.name
+            )
+        if (
+            strategygroup_trial_grade_signal_gate_audit_json
+            == DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON
+        ):
+            strategygroup_trial_grade_signal_gate_audit_json = (
+                cpm_parent
+                / DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_JSON.name
+            )
+        if (
+            strategygroup_trial_grade_signal_gate_audit_md
+            == DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD
+        ):
+            strategygroup_trial_grade_signal_gate_audit_md = (
+                cpm_parent
+                / DEFAULT_STRATEGYGROUP_TRIAL_GRADE_SIGNAL_GATE_AUDIT_MD.name
             )
         binance_usdm_public_facts_json = (
             cpm_parent / DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON.name
@@ -2378,6 +2412,39 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    single_lane_task_packet_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_single_lane_task_packet.py"),
+        "--daily-table-json",
+        str(daily_live_enablement_table_json),
+        "--output-json",
+        str(single_lane_task_packet_json),
+        "--output-owner-progress",
+        str(single_lane_task_packet_md),
+    ]
+    steps.append(
+        _run_step(
+            "single_lane_task_packet",
+            single_lane_task_packet_command,
+            single_lane_task_packet_json,
+            runner,
+        )
+    )
+
+    validate_single_lane_task_packet_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/validate_single_lane_task_packet.py"),
+        str(single_lane_task_packet_json),
+    ]
+    steps.append(
+        _run_step(
+            "validate_single_lane_task_packet",
+            validate_single_lane_task_packet_command,
+            single_lane_task_packet_json,
+            runner,
+        )
+    )
+
     artifacts = {
         step["name"]: step.get("artifact") if isinstance(step.get("artifact"), dict) else {}
         for step in steps
@@ -2731,6 +2798,7 @@ def build_local_monitor_sequence_report(
                 strategygroup_runtime_safety_state_json
             ),
             "daily_live_enablement_table_json": str(daily_live_enablement_table_json),
+            "single_lane_task_packet_json": str(single_lane_task_packet_json),
             "strategygroup_portfolio_board_json": str(strategygroup_portfolio_board_json),
             "strategygroup_review_only_deep_dive_wave_json": str(
                 strategygroup_review_only_deep_dive_wave_json
@@ -5518,6 +5586,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--daily-live-enablement-table-md",
         default=str(DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD),
+    )
+    parser.add_argument(
+        "--single-lane-task-packet-json",
+        default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_JSON),
+    )
+    parser.add_argument(
+        "--single-lane-task-packet-md",
+        default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

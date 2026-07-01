@@ -1,9 +1,17 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
+  "generated_at_utc": "2026-07-01T15:04:49.356568+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
-  "task_id": "P0-MPG-WATCHER-TICK-CLOSURE",
+  "source_row_fingerprint": {
+    "strategy_group_id": "MPG-001",
+    "symbol": "SOLUSDT",
+    "first_blocker": "watcher_tick_missing",
+    "closest_to_live_rank": 1,
+    "next_engineering_action": "refresh_or_repair_watcher_public_fact_input"
+  },
+  "task_id": "P0-MPG-001-WATCHER-TICK-MISSING-CLOSURE",
   "active_lane": {
     "strategy_group_id": "MPG-001",
     "symbol": "SOLUSDT",
@@ -13,37 +21,58 @@
   "chain_position": "replay_live_parity",
   "first_blocker": "watcher_tick_missing",
   "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT blocker_class=watcher_tick_missing",
-  "expected_state_change": "MPG-001/SOLUSDT watcher/public facts tick becomes present and the lane advances to the next precise blocker or market_wait_validated if all non-market blockers close.",
+  "expected_state_change": "MPG-001/SOLUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
   "next_action": "refresh_or_repair_watcher_public_fact_input",
   "allowed_files": [
-    "scripts/build_replay_live_parity_audit.py",
+    "scripts/build_single_lane_task_packet.py",
+    "scripts/validate_single_lane_task_packet.py",
     "scripts/build_daily_live_enablement_table.py",
-    "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-    "tests/unit/test_replay_live_parity_audit.py",
+    "scripts/validate_daily_live_enablement_table.py",
+    "tests/unit/test_single_lane_task_packet.py",
     "tests/unit/test_daily_live_enablement_table.py",
-    "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
-    "output/runtime-monitor/latest-*.json",
-    "output/runtime-monitor/latest-*.md"
+    "output/runtime-monitor/latest-single-lane-task-packet.json",
+    "output/runtime-monitor/latest-single-lane-task-packet.md",
+    "output/runtime-monitor/latest-daily-live-enablement-table.json",
+    "output/runtime-monitor/latest-daily-live-enablement-table.md",
+    "scripts/build_replay_live_parity_audit.py",
+    "tests/unit/test_replay_live_parity_audit.py",
+    "output/runtime-monitor/latest-replay-live-parity-audit.json",
+    "output/runtime-monitor/latest-replay-live-parity-audit.md"
   ],
   "forbidden_files": [
     "src/application/execution_orchestrator.py",
     "src/application/order_lifecycle_service.py",
+    "src/application/position_projection_service.py",
+    "src/application/capital_protection.py",
     "src/infrastructure/exchange_gateway.py",
+    "src/application/reconciliation.py",
+    "src/application/startup_reconciliation_service.py",
     "live profile files",
     "order sizing defaults",
     "credential or secret files",
     "FinalGate bypass paths",
     "Operation Layer bypass paths"
   ],
-  "stop_condition": "MPG-001/SOLUSDT no longer has watcher_tick_missing, or the refreshed evidence proves a different earlier blocker class.",
+  "stop_condition": "watcher/public facts tick is present for the selected lane",
   "tests": [
-    "python3 -m py_compile scripts/build_replay_live_parity_audit.py scripts/build_daily_live_enablement_table.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-    "pytest -q tests/unit/test_replay_live_parity_audit.py tests/unit/test_daily_live_enablement_table.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
-    "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py --json",
-    "python3 scripts/validate_daily_live_enablement_table.py output/runtime-monitor/latest-daily-live-enablement-table.json",
+    "pytest -q tests/unit/test_replay_live_parity_audit.py tests/unit/test_daily_live_enablement_table.py",
+    "python3 -m py_compile scripts/build_single_lane_task_packet.py scripts/validate_single_lane_task_packet.py",
+    "pytest -q tests/unit/test_single_lane_task_packet.py",
+    "python3 scripts/validate_single_lane_task_packet.py output/runtime-monitor/latest-single-lane-task-packet.json",
+    "python3 scripts/validate_output_artifact_scope.py --git-status",
     "git diff --check"
   ],
-  "done_when": "Daily Table rank 1 either moves past MPG-001/SOLUSDT watcher_tick_missing or reclassifies it into a more precise first blocker with Tradeability and Daily Table agreeing on the same lane.",
-  "authority_boundary": "non-executing read model only; no FinalGate bypass, no Operation Layer bypass, no exchange write, no live profile expansion, no order sizing expansion",
-  "owner_action_required": "no"
+  "done_when": "MPG-001/SOLUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
+  "authority_boundary": "single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+  "source_authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+  "owner_action_required": "no",
+  "safety_invariants": {
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "calls_exchange_write": false,
+    "places_order": false,
+    "order_created": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false
+  }
 }

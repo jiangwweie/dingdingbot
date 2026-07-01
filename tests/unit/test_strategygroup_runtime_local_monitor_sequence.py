@@ -2378,6 +2378,36 @@ def _maybe_write_strategygroup_closure_step(
             "",
             "\n".join(errors),
         )
+    if script == "build_single_lane_task_packet.py":
+        from scripts.build_single_lane_task_packet import (  # noqa: PLC0415
+            build_single_lane_task_packet,
+        )
+
+        daily_table_path = Path(command[command.index("--daily-table-json") + 1])
+        output_json = Path(command[command.index("--output-json") + 1])
+        output_md = Path(command[command.index("--output-owner-progress") + 1])
+        packet = build_single_lane_task_packet(
+            daily_table=json.loads(daily_table_path.read_text(encoding="utf-8")),
+            source="output/runtime-monitor/latest-daily-live-enablement-table.json",
+            generated_at_utc="2026-07-01T00:00:00+00:00",
+        )
+        output_json.write_text(json.dumps(packet), encoding="utf-8")
+        output_md.write_text("## Single Lane Task Packet\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "validate_single_lane_task_packet.py":
+        from scripts.validate_single_lane_task_packet import (  # noqa: PLC0415
+            validate_single_lane_task_packet,
+        )
+
+        packet_path = Path(command[-1])
+        packet = json.loads(packet_path.read_text(encoding="utf-8"))
+        errors = validate_single_lane_task_packet(packet)
+        return subprocess.CompletedProcess(
+            command,
+            1 if errors else 0,
+            "",
+            "\n".join(errors),
+        )
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -2426,6 +2456,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     tradeability_commands: list[list[str]] = []
     daily_table_commands: list[list[str]] = []
     daily_table_validator_commands: list[list[str]] = []
+    single_lane_task_packet_commands: list[list[str]] = []
+    single_lane_task_packet_validator_commands: list[list[str]] = []
     action_time_boundary_commands: list[list[str]] = []
     replay_live_parity_commands: list[list[str]] = []
     mi_trial_admission_commands: list[list[str]] = []
@@ -2468,6 +2500,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             daily_table_commands.append(command)
         if script == "validate_daily_live_enablement_table.py":
             daily_table_validator_commands.append(command)
+        if script == "build_single_lane_task_packet.py":
+            single_lane_task_packet_commands.append(command)
+        if script == "validate_single_lane_task_packet.py":
+            single_lane_task_packet_validator_commands.append(command)
         if script == "build_strategy_fresh_signal_action_time_boundary.py":
             action_time_boundary_commands.append(command)
         if script == "build_replay_live_parity_audit.py":
@@ -2811,6 +2847,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         strategygroup_tradeability_decision_md=tmp_path / "tradeability.md",
         daily_live_enablement_table_json=tmp_path / "daily-live-table.json",
         daily_live_enablement_table_md=tmp_path / "daily-live-table.md",
+        single_lane_task_packet_json=tmp_path / "single-lane-task-packet.json",
+        single_lane_task_packet_md=tmp_path / "single-lane-task-packet.md",
         command_runner=fake_runner,
     )
 
@@ -2871,10 +2909,22 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_tradeability_decision.py",
         "build_daily_live_enablement_table.py",
         "validate_daily_live_enablement_table.py",
+        "build_single_lane_task_packet.py",
+        "validate_single_lane_task_packet.py",
     ]
     assert len(decision_loop_commands) == 2
     assert len(trial_admission_commands) == 1
     assert len(portfolio_board_commands) == 1
+    assert len(single_lane_task_packet_commands) == 1
+    assert len(single_lane_task_packet_validator_commands) == 1
+    single_lane_command = single_lane_task_packet_commands[0]
+    assert "--daily-table-json" in single_lane_command
+    assert single_lane_command[
+        single_lane_command.index("--daily-table-json") + 1
+    ] == str(tmp_path / "daily-live-table.json")
+    assert single_lane_command[
+        single_lane_command.index("--output-json") + 1
+    ] == str(tmp_path / "single-lane-task-packet.json")
     portfolio_board_command = portfolio_board_commands[0]
     assert "--capture-gap-audit-json" in portfolio_board_command
     assert portfolio_board_command[

@@ -72,6 +72,8 @@ them through `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 | `owner_policy` | Owner risk acceptance, tier switches, capital scope, pauses, parks, kills | Future runtime/policy store; during pilot only explicit Owner decisions and bounded docs | Dynamic authorization state; should not live as narrative Markdown long-term |
 | `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher artifacts | Current operational truth, subject to freshness rules |
 | `generated_view` | Strategy Asset State evidence, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
+| `tracked_control_snapshot` | Small generated views that are allowed into routine Live Enablement commits | Paths listed in `config/output_control_snapshots.json` | Commit only with known source command, validator, and named task deliverable |
+| `volatile_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, and local runtime noise | `output/**` paths not listed as tracked control snapshots | Do not include in routine commits; regenerate or archive separately |
 | `archive` | Historical plans and obsolete evidence | `docs/history-archive-2026-06-15-pre-governance.tar.gz`, historical output | Recovery/provenance only |
 
 ## Authority Order
@@ -110,6 +112,7 @@ Owner decisions.
 | Goal-mode task handoff contract | `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` |
 | Runtime tier definitions | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md` |
 | Machine tier mapping | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` |
+| Output control snapshot whitelist | `config/output_control_snapshots.json` |
 | RequiredFacts classes | `docs/current/strategy-group-handoffs/main-control-required-facts-map.md` |
 | Strategy Asset State pre-live evidence compatibility path | `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` |
 | Tradeability Decision generated view | `output/runtime-monitor/latest-strategygroup-tradeability-decision.json` and `output/runtime-monitor/latest-strategygroup-tradeability-decision.md` |
@@ -181,6 +184,25 @@ generated view -> hand-edited source of truth
 If a generated view and a roadmap disagree, regenerate or update the roadmap to
 reference the generated source. Do not let the stale roadmap redefine current
 state.
+
+Routine commits must apply this stricter split:
+
+| Output class | Commit rule | Examples |
+| --- | --- | --- |
+| `tracked_control_snapshot` | May be committed only when listed in `config/output_control_snapshots.json`, produced by the named source command, and accepted by its validator | Daily Live Enablement Table, Tradeability Decision, Replay/Live Parity Audit, Action-Time Boundary, Local Monitor Sequence, Single Lane Task Packet |
+| `volatile_output_artifact` | Must not be committed by default; keep local, regenerate, or archive outside routine Live Enablement commits | public facts ticks, strategy runtime-signal facts, dry-run audit chains, deploy/session snapshots, replay labs |
+| `historical_evidence_output` | Commit only when the task explicitly requires provenance capture and the artifact has a bounded retention reason | dated audits, one-off migration/deploy evidence, historical strategy-capture reports |
+
+Before accepting output changes, run:
+
+```text
+python3 scripts/validate_output_artifact_scope.py --git-status
+```
+
+The validator checks the current output change set against
+`config/output_control_snapshots.json`. Existing tracked output files remain
+compatibility evidence, but their historical presence does not make them valid
+routine commit candidates.
 
 The Tradeability Decision generated view has one narrow role: it summarizes
 registry, policy, runtime, research-intake, and ledger inputs into a current

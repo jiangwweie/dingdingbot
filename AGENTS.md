@@ -31,6 +31,7 @@ docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
 docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 docs/current/strategy-group-handoffs/main-control-handoff-index.md
+config/output_control_snapshots.json
 ```
 
 Compressed historical docs live in:
@@ -70,6 +71,17 @@ direction becomes bounded execution work.
 Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,
 runtime state, or explicit Owner decisions disagree.
+
+`output/**` is not a single commit bucket. Routine StrategyGroup
+live-enablement commits may include only tracked control snapshots listed in
+`config/output_control_snapshots.json`, and only when they are the named task
+deliverable, have a known source command, and pass their validator. Volatile
+runtime facts, watcher refreshes, dry-run audit chains, deploy/session
+snapshots, replay labs, and historical evidence directories must not enter
+routine commits unless the task explicitly names them as deliverables and the
+output-scope validator is updated first. Use
+`python3 scripts/validate_output_artifact_scope.py --git-status` before
+accepting output changes.
 
 ## Product Objective
 
