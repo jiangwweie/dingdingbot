@@ -162,6 +162,7 @@ def _validate_local_monitor_sequence(artifact: dict[str, Any]) -> list[str]:
     if artifact.get("status") not in {
         "local_monitor_sequence_complete",
         "temporarily_unavailable_monitor_refresh_needed",
+        "waiting_for_market",
     }:
         errors.append("local_monitor_sequence.status is not accepted for deploy gate validation")
     steps = {

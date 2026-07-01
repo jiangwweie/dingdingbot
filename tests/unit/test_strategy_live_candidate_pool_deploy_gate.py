@@ -136,6 +136,23 @@ def test_deploy_gate_accepts_valid_non_authority_artifacts_when_ready():
     assert errors == []
 
 
+def test_deploy_gate_accepts_waiting_for_market_monitor_sequence():
+    module = _load_module()
+    monitor = _local_monitor_sequence()
+    monitor["status"] = "waiting_for_market"
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=_candidate_pool(deploy_ready=True),
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=monitor,
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert errors == []
+
+
 def test_deploy_gate_cli_reports_blocked_for_current_not_ready_pool(tmp_path: Path):
     candidate_pool = tmp_path / "candidate_pool.json"
     daily_table = tmp_path / "daily_table.json"
