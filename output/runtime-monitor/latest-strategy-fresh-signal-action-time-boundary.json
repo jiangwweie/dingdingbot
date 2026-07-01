@@ -12,7 +12,7 @@
     "public_facts_refresh_projected": true,
     "required_facts_readiness_projected": true
   },
-  "generated_at_utc": "2026-07-01T16:23:53.438145+00:00",
+  "generated_at_utc": "2026-07-01T16:47:07.827623+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -37,7 +37,7 @@
   "status": "strategy_fresh_signal_action_time_boundary_ready",
   "strategy_rows": [
     {
-      "action_time_path_ready": true,
+      "action_time_path_ready": false,
       "blocker_owner": "market",
       "calls_exchange_write": false,
       "calls_finalgate": false,
@@ -52,18 +52,105 @@
       "order_created": false,
       "path_id": "CPM-LONG",
       "places_order": false,
-      "post_action_expected_state": "action_time_finalgate_boundary_ready",
+      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
       "required_facts_readiness": {
         "private_action_time_fact_keys_pending": [
           "active_position_or_open_order_clear",
           "action_time_available_balance"
         ],
         "private_action_time_facts_ready": false,
-        "public_facts_ready": true
+        "public_facts_ready": false
       },
       "strategy_group_id": "CPM-RO-001",
       "symbol": "ETHUSDT",
-      "would_enter_finalgate_if_private_facts_ready": true
+      "would_enter_finalgate_if_private_facts_ready": false
+    },
+    {
+      "action_time_path_ready": false,
+      "blocker_owner": "market",
+      "calls_exchange_write": false,
+      "calls_finalgate": false,
+      "calls_operation_layer": false,
+      "candidate_evidence_shape_ready": true,
+      "current_signal_state": "fresh_signal_absent",
+      "dry_run_submit_rehearsal_ready": true,
+      "first_blocker": "fresh_cpm_long_signal_absent",
+      "fresh_signal_present": false,
+      "live_submit_allowed": false,
+      "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+      "order_created": false,
+      "path_id": "CPM-LONG",
+      "places_order": false,
+      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
+      "required_facts_readiness": {
+        "private_action_time_fact_keys_pending": [
+          "active_position_or_open_order_clear",
+          "action_time_available_balance"
+        ],
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SOLUSDT",
+      "would_enter_finalgate_if_private_facts_ready": false
+    },
+    {
+      "action_time_path_ready": false,
+      "blocker_owner": "market",
+      "calls_exchange_write": false,
+      "calls_finalgate": false,
+      "calls_operation_layer": false,
+      "candidate_evidence_shape_ready": true,
+      "current_signal_state": "fresh_signal_absent",
+      "dry_run_submit_rehearsal_ready": true,
+      "first_blocker": "fresh_cpm_long_signal_absent",
+      "fresh_signal_present": false,
+      "live_submit_allowed": false,
+      "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+      "order_created": false,
+      "path_id": "CPM-LONG",
+      "places_order": false,
+      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
+      "required_facts_readiness": {
+        "private_action_time_fact_keys_pending": [
+          "active_position_or_open_order_clear",
+          "action_time_available_balance"
+        ],
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "AVAXUSDT",
+      "would_enter_finalgate_if_private_facts_ready": false
+    },
+    {
+      "action_time_path_ready": false,
+      "blocker_owner": "market",
+      "calls_exchange_write": false,
+      "calls_finalgate": false,
+      "calls_operation_layer": false,
+      "candidate_evidence_shape_ready": true,
+      "current_signal_state": "fresh_signal_absent",
+      "dry_run_submit_rehearsal_ready": true,
+      "first_blocker": "fresh_cpm_long_signal_absent",
+      "fresh_signal_present": false,
+      "live_submit_allowed": false,
+      "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+      "order_created": false,
+      "path_id": "CPM-LONG",
+      "places_order": false,
+      "post_action_expected_state": "remain_non_authority_until_required_facts_close",
+      "required_facts_readiness": {
+        "private_action_time_fact_keys_pending": [
+          "active_position_or_open_order_clear",
+          "action_time_available_balance"
+        ],
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SUIUSDT",
+      "would_enter_finalgate_if_private_facts_ready": false
     },
     {
       "action_time_path_ready": true,
@@ -96,17 +183,17 @@
     },
     {
       "action_time_path_ready": true,
-      "blocker_owner": "runtime",
+      "blocker_owner": "market",
       "calls_exchange_write": false,
       "calls_finalgate": false,
       "calls_operation_layer": false,
       "candidate_evidence_shape_ready": true,
-      "current_signal_state": "fresh_signal_present",
+      "current_signal_state": "fresh_signal_absent",
       "dry_run_submit_rehearsal_ready": true,
-      "first_blocker": "private_action_time_facts_required",
-      "fresh_signal_present": true,
+      "first_blocker": "fresh_sor_session_range_signal_absent",
+      "fresh_signal_present": false,
       "live_submit_allowed": false,
-      "next_action": "refresh_private_action_time_facts_before_finalgate",
+      "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
       "order_created": false,
       "path_id": "SOR-SESSION-BREAKOUT",
       "places_order": false,
@@ -120,14 +207,14 @@
         "public_facts_ready": true
       },
       "strategy_group_id": "SOR-001",
-      "symbol": "AVAXUSDT",
+      "symbol": "SOLUSDT",
       "would_enter_finalgate_if_private_facts_ready": true
     }
   ],
   "summary": {
-    "fresh_signal_present_count": 1,
+    "fresh_signal_present_count": 0,
     "live_submit_allowed_count": 0,
-    "strategy_count": 3,
-    "would_enter_finalgate_if_private_facts_ready_count": 3
+    "strategy_count": 6,
+    "would_enter_finalgate_if_private_facts_ready_count": 2
   }
 }

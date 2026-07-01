@@ -1660,6 +1660,8 @@ def build_local_monitor_sequence_report(
         ),
         "--cpm-capture-json",
         str(cpm_runtime_signal_capture_json),
+        "--cpm-facts-json",
+        str(cpm_runtime_signal_facts_json),
         "--cpm-rehearsal-json",
         str(cpm_dry_run_submit_rehearsal_json),
         "--mpg-readiness-json",

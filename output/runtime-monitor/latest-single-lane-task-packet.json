@@ -1,7 +1,7 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-01T16:23:57.735674+00:00",
+  "generated_at_utc": "2026-07-01T16:47:12.075565+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {

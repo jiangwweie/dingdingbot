@@ -194,6 +194,78 @@ def test_candidate_pool_review_keeps_open_p0_items_visible():
     assert review["postdeploy_validation_script"]["status"] == "cleared"
 
 
+def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refresh_closed():
+    daily_table = json.loads(json.dumps(_daily_table()))
+    cpm_daily = next(
+        row
+        for row in daily_table["rows"]
+        if row["strategy_group_id"] == "CPM-RO-001"
+    )
+    cpm_daily["symbol"] = "AVAXUSDT"
+    cpm_daily["first_blocker"] = "action_time_boundary_not_reproduced"
+    cpm_daily["next_engineering_action"] = "prepare_cpm_candidate_authorization_evidence"
+    cpm_daily["first_blocker_evidence"] = (
+        "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+        "CPM-RO-001/AVAXUSDT blocker_class=action_time_boundary_not_reproduced"
+    )
+    cpm_daily["closest_to_live_rank"] = 1
+    action_time = _action_time()
+    action_time["strategy_rows"].extend(
+        [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "action_time_path_ready": False,
+                "first_blocker": "fresh_cpm_long_signal_absent",
+                "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+                "required_facts_readiness": {
+                    "public_facts_ready": True,
+                    "private_action_time_facts_ready": False,
+                },
+            },
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "AVAXUSDT",
+                "action_time_path_ready": True,
+                "first_blocker": "private_action_time_facts_required",
+                "next_action": "refresh_private_action_time_facts_before_finalgate",
+                "required_facts_readiness": {
+                    "public_facts_ready": True,
+                    "private_action_time_facts_ready": False,
+                },
+            },
+        ]
+    )
+    single_lane = _single_lane()
+    single_lane["active_lane"] = {
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "AVAXUSDT",
+        "side": "long",
+        "stage": "armed",
+    }
+    single_lane["first_blocker"] = "action_time_boundary_not_reproduced"
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=daily_table,
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=action_time,
+        single_lane_task_packet=single_lane,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in artifact["candidate_rows"]}
+    review = {row["item"]: row for row in artifact["p0_p1_review"]}
+    assert rows["CPM-RO-001"]["selected_symbol"] == "AVAXUSDT"
+    assert rows["CPM-RO-001"]["action_time_readiness"]["status"] == (
+        "ready_for_private_action_time_facts"
+    )
+    assert rows["CPM-RO-001"]["action_time_readiness"]["first_blocker"] == (
+        "private_action_time_facts_required"
+    )
+    assert review["cpm_computed_refresh"]["status"] == "cleared"
+
+
 def test_candidate_pool_validator_rejects_missing_required_candidate_field():
     artifact = _builder().build_strategy_live_candidate_pool(
         daily_table=_daily_table(),

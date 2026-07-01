@@ -25,6 +25,9 @@ from strategygroup_non_executing_projection import (  # noqa: E402
 DEFAULT_CPM_CAPTURE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-capture.json"
 )
+DEFAULT_CPM_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-cpm-runtime-signal-facts.json"
+)
 DEFAULT_CPM_REHEARSAL_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-cpm-dry-run-submit-rehearsal.json"
 )
@@ -51,6 +54,7 @@ DEFAULT_OUTPUT_MD = (
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpm-capture-json", default=str(DEFAULT_CPM_CAPTURE_JSON))
+    parser.add_argument("--cpm-facts-json", default=str(DEFAULT_CPM_FACTS_JSON))
     parser.add_argument("--cpm-rehearsal-json", default=str(DEFAULT_CPM_REHEARSAL_JSON))
     parser.add_argument("--mpg-readiness-json", default=str(DEFAULT_MPG_READINESS_JSON))
     parser.add_argument("--mpg-evidence-json", default=str(DEFAULT_MPG_EVIDENCE_JSON))
@@ -62,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
 
     artifact = build_strategy_fresh_signal_action_time_boundary(
         cpm_capture=_read_optional_json(Path(args.cpm_capture_json)),
+        cpm_facts=_read_optional_json(Path(args.cpm_facts_json)),
         cpm_rehearsal=_read_optional_json(Path(args.cpm_rehearsal_json)),
         mpg_readiness=_read_optional_json(Path(args.mpg_readiness_json)),
         mpg_evidence=_read_optional_json(Path(args.mpg_evidence_json)),
@@ -93,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 def build_strategy_fresh_signal_action_time_boundary(
     *,
     cpm_capture: dict[str, Any],
+    cpm_facts: dict[str, Any] | None = None,
     cpm_rehearsal: dict[str, Any],
     mpg_readiness: dict[str, Any],
     mpg_evidence: dict[str, Any],
@@ -102,7 +108,7 @@ def build_strategy_fresh_signal_action_time_boundary(
 ) -> dict[str, Any]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
     rows = [
-        _cpm_row(cpm_capture, cpm_rehearsal),
+        *_cpm_rows(cpm_capture, cpm_facts or {}, cpm_rehearsal),
         _evidence_row(
             strategy_group_id="MPG-001",
             path_id="MPG-STRONG-SYMBOL-ROTATION",
@@ -151,7 +157,61 @@ def build_strategy_fresh_signal_action_time_boundary(
     }
 
 
-def _cpm_row(capture: dict[str, Any], rehearsal: dict[str, Any]) -> dict[str, Any]:
+def _cpm_rows(
+    capture: dict[str, Any],
+    cpm_facts: dict[str, Any],
+    rehearsal: dict[str, Any],
+) -> list[dict[str, Any]]:
+    per_symbol = _cpm_per_symbol_signal_facts(cpm_facts)
+    if not per_symbol:
+        return [_cpm_row_from_capture(capture, rehearsal)]
+    public_source_ready = (
+        cpm_facts.get("status") == "cpm_runtime_signal_facts_ready"
+        and cpm_facts.get("watcher_tick_present") is True
+    )
+    candidate_shape = _as_dict(capture.get("shadow_candidate_shape")).get(
+        "shadow_candidate_ready"
+    ) is True or rehearsal.get("submit_rehearsal_shape_ready") is True
+    rows = []
+    for item in per_symbol:
+        fresh = item.get("fresh_signal_present") is True
+        public_ready = public_source_ready and item.get("candle_input_missing") is not True
+        first_blocker = (
+            "private_action_time_facts_required"
+            if fresh
+            else str(item.get("first_blocker_class") or "fresh_cpm_long_signal_absent")
+        )
+        rows.append(
+            _row(
+                strategy_group_id="CPM-RO-001",
+                symbol=str(item.get("symbol") or "ETHUSDT"),
+                path_id="CPM-LONG",
+                fresh_signal_present=fresh,
+                current_signal_state=(
+                    "fresh_signal_present" if fresh else "fresh_signal_absent"
+                ),
+                public_facts_ready=public_ready,
+                candidate_evidence_shape_ready=candidate_shape,
+                dry_run_submit_rehearsal_ready=(
+                    rehearsal.get("submit_rehearsal_shape_ready") is True
+                ),
+                would_enter_finalgate_if_private_facts_ready=(
+                    public_ready and candidate_shape
+                ),
+                first_blocker=first_blocker,
+                blocker_owner=(
+                    "runtime"
+                    if fresh
+                    else str(item.get("first_blocker_owner") or "market")
+                ),
+            )
+        )
+    return rows
+
+
+def _cpm_row_from_capture(
+    capture: dict[str, Any], rehearsal: dict[str, Any]
+) -> dict[str, Any]:
     preview = _as_dict(capture.get("signal_detector_preview"))
     fresh = preview.get("fresh_signal_present") is True
     public_ready = capture.get("status") == "cpm_runtime_signal_capture_ready"
@@ -177,6 +237,15 @@ def _cpm_row(capture: dict[str, Any], rehearsal: dict[str, Any]) -> dict[str, An
         ),
         blocker_owner="runtime" if fresh else str(preview.get("first_blocker_owner") or "market"),
     )
+
+
+def _cpm_per_symbol_signal_facts(cpm_facts: dict[str, Any]) -> list[dict[str, Any]]:
+    live_detector = _as_dict(cpm_facts.get("live_detector"))
+    return [
+        row
+        for row in live_detector.get("per_symbol_signal_facts") or []
+        if isinstance(row, dict)
+    ]
 
 
 def _evidence_row(

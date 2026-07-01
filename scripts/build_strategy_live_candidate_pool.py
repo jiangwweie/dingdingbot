@@ -150,16 +150,18 @@ def build_strategy_live_candidate_pool(
         str(row.get("strategy_group_id") or ""): row
         for row in _dict_rows(tradeability.get("decision_rows"))
     }
-    action_rows = {
-        str(row.get("strategy_group_id") or ""): row
-        for row in _dict_rows(action_time_boundary.get("strategy_rows"))
-    }
     candidate_rows = [
         _candidate_row(
             strategy_group_id=strategy_group_id,
             daily_row=daily_rows.get(strategy_group_id, {}),
             tradeability_row=tradeability_rows.get(strategy_group_id, {}),
-            action_row=action_rows.get(strategy_group_id, {}),
+            action_row=_action_time_row(
+                action_time_boundary=action_time_boundary,
+                strategy_group_id=strategy_group_id,
+                symbol=str(
+                    daily_rows.get(strategy_group_id, {}).get("symbol") or ""
+                ),
+            ),
         )
         for strategy_group_id in WIP_LANES
     ]
@@ -229,6 +231,23 @@ def build_strategy_live_candidate_pool(
             "order_sizing_changed": False,
         },
     }
+
+
+def _action_time_row(
+    *,
+    action_time_boundary: dict[str, Any],
+    strategy_group_id: str,
+    symbol: str,
+) -> dict[str, Any]:
+    fallback: dict[str, Any] = {}
+    for row in _dict_rows(action_time_boundary.get("strategy_rows")):
+        if str(row.get("strategy_group_id") or "") != strategy_group_id:
+            continue
+        if symbol and str(row.get("symbol") or "") == symbol:
+            return row
+        if not fallback:
+            fallback = row
+    return fallback
 
 
 def _candidate_row(
@@ -420,7 +439,12 @@ def _p0_p1_status(
         blocker = row.get("first_blocker")
         return (
             "cleared"
-            if blocker in {"computed_not_satisfied", "market_wait_validated"}
+            if blocker
+            in {
+                "computed_not_satisfied",
+                "market_wait_validated",
+                "action_time_boundary_not_reproduced",
+            }
             else "open",
             f"CPM-RO-001 first_blocker={blocker}",
             row.get("next_engineering_action") or "refresh CPM detector facts",

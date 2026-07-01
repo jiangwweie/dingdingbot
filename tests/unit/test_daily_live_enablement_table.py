@@ -289,6 +289,74 @@ def test_daily_table_uses_tradeability_canonical_lane_before_reselecting_symbol(
     assert rows["MPG-001"]["first_blocker"] == "watcher_tick_missing"
 
 
+def test_daily_table_matches_action_time_row_by_selected_symbol():
+    builder = _builder()
+    tradeability = _tradeability()
+    cpm = next(
+        row
+        for row in tradeability["decision_rows"]
+        if row["strategy_group_id"] == "CPM-RO-001"
+    )
+    cpm["first_blocker_class"] = "action_time_boundary_not_reproduced"
+    cpm["blocker_owner"] = "runtime"
+    cpm["next_action"] = "prepare_cpm_candidate_authorization_evidence"
+    parity = _parity()
+    parity["per_symbol_mismatch_table"].insert(
+        0,
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "AVAXUSDT",
+            "blocker_class": "action_time_boundary_not_reproduced",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 16,
+            "next_action": "repair_non_executing_action_time_rehearsal_path",
+        },
+    )
+    action_time = _action_time()
+    action_time["strategy_rows"].extend(
+        [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "path_id": "CPM-LONG",
+                "first_blocker": "fresh_cpm_long_signal_absent",
+                "action_time_path_ready": False,
+                "required_facts_readiness": {"public_facts_ready": True},
+            },
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "AVAXUSDT",
+                "path_id": "CPM-LONG",
+                "first_blocker": "private_action_time_facts_required",
+                "action_time_path_ready": True,
+                "required_facts_readiness": {"public_facts_ready": True},
+            },
+        ]
+    )
+
+    table = builder.build_daily_live_enablement_table(
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        mi_trial_admission=_mi(),
+        runtime_safety=_runtime_safety(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    cpm_row = next(
+        row for row in table["rows"] if row["strategy_group_id"] == "CPM-RO-001"
+    )
+    assert cpm_row["symbol"] == "AVAXUSDT"
+    assert (
+        cpm_row["first_blocker_evidence"]
+        == "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+        "CPM-RO-001/AVAXUSDT blocker_class=action_time_boundary_not_reproduced"
+    )
+
+
 def test_daily_table_validator_rejects_non_wip_lane():
     table = _valid_table()
     table["rows"][0]["strategy_group_id"] = "RBR-001"

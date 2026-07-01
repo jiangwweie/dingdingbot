@@ -48,6 +48,38 @@ def _cpm_rehearsal() -> dict:
     return {"submit_rehearsal_shape_ready": True}
 
 
+def _cpm_facts() -> dict:
+    return {
+        "status": "cpm_runtime_signal_facts_ready",
+        "watcher_tick_present": True,
+        "live_detector": {
+            "per_symbol_signal_facts": [
+                {
+                    "symbol": "ETHUSDT",
+                    "fresh_signal_present": True,
+                    "candle_input_missing": False,
+                    "first_blocker_class": "private_action_time_facts_required",
+                    "first_blocker_owner": "runtime",
+                },
+                {
+                    "symbol": "AVAXUSDT",
+                    "fresh_signal_present": True,
+                    "candle_input_missing": False,
+                    "first_blocker_class": "private_action_time_facts_required",
+                    "first_blocker_owner": "runtime",
+                },
+                {
+                    "symbol": "SOLUSDT",
+                    "fresh_signal_present": False,
+                    "candle_input_missing": False,
+                    "first_blocker_class": "fresh_cpm_long_signal_absent",
+                    "first_blocker_owner": "market",
+                },
+            ]
+        },
+    }
+
+
 def _mpg_readiness() -> dict:
     return {
         "checks": {"public_facts_ready_for_readonly_symbols": True},
@@ -163,6 +195,34 @@ def test_absent_signal_keeps_exact_first_blocker():
     assert cpm["first_blocker"] == "fresh_cpm_long_signal_absent"
     assert cpm["blocker_owner"] == "market"
     assert cpm["next_action"] == "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+
+
+def test_cpm_boundary_emits_per_symbol_action_time_rows_from_detector_facts():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=True),
+        cpm_facts=_cpm_facts(),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness(),
+        mpg_evidence=_evidence("MPG-001"),
+        sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    cpm_rows = [
+        row
+        for row in artifact["strategy_rows"]
+        if row["strategy_group_id"] == "CPM-RO-001"
+    ]
+    rows = {row["symbol"]: row for row in cpm_rows}
+    assert set(rows) == {"ETHUSDT", "AVAXUSDT", "SOLUSDT"}
+    assert rows["AVAXUSDT"]["fresh_signal_present"] is True
+    assert rows["AVAXUSDT"]["first_blocker"] == "private_action_time_facts_required"
+    assert rows["AVAXUSDT"]["action_time_path_ready"] is True
+    assert rows["SOLUSDT"]["fresh_signal_present"] is False
+    assert rows["SOLUSDT"]["first_blocker"] == "fresh_cpm_long_signal_absent"
 
 
 def test_sor_boundary_uses_session_detector_first_blocker():

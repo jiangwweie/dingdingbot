@@ -334,7 +334,7 @@
     "status": "four_candidate_scope_review_decision_ready",
     "tradeability_decision_source": false
   },
-  "generated_at_utc": "2026-07-01T16:23:57.984406+00:00",
+  "generated_at_utc": "2026-07-01T16:47:12.325385+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -901,12 +901,14 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
-          "failed_facts": [],
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
           "mismatch_count": 6,
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -987,8 +989,8 @@
     },
     "sor_session_detector_facts": {
       "active": true,
-      "first_blocker": "private_action_time_facts_required",
-      "fresh_session_signal_count": 1,
+      "first_blocker": "fresh_sor_session_range_signal_absent",
+      "fresh_session_signal_count": 0,
       "projection_role": "sor_session_detector_projection",
       "state_source": "sor_session_detector_facts",
       "status": "sor_session_detector_facts_ready"
@@ -1024,7 +1026,7 @@
       "active": true,
       "exchange_write_called": false,
       "finalgate_called": false,
-      "fresh_signal_present_count": 1,
+      "fresh_signal_present_count": 0,
       "live_submit_allowed_count": 0,
       "operation_layer_called": false,
       "order_created": false,
@@ -1034,7 +1036,7 @@
       "state_source": "strategy_fresh_signal_action_time_boundary",
       "status": "strategy_fresh_signal_action_time_boundary_ready",
       "tradeability_decision_source": false,
-      "would_enter_finalgate_if_private_facts_ready_count": 3
+      "would_enter_finalgate_if_private_facts_ready_count": 2
     },
     "strategy_research_intake": {
       "active": true,
@@ -1357,12 +1359,14 @@
         "watcher_tick_present": true
       },
       {
-        "blocker_class": "action_time_boundary_not_reproduced",
+        "blocker_class": "computed_not_satisfied",
         "computed": true,
         "detector_attached": true,
-        "failed_facts": [],
+        "failed_facts": [
+          "follow_through_confirmed"
+        ],
         "mismatch_count": 6,
-        "next_action": "repair_non_executing_action_time_rehearsal_path",
+        "next_action": "continue_observation_with_failed_fact_matrix",
         "strategy_group_id": "SOR-001",
         "symbol": "AVAXUSDT",
         "watcher_tick_present": true
@@ -1445,8 +1449,8 @@
   },
   "sor_session_detector_facts": {
     "active": true,
-    "first_blocker": "private_action_time_facts_required",
-    "fresh_session_signal_count": 1,
+    "first_blocker": "fresh_sor_session_range_signal_absent",
+    "fresh_session_signal_count": 0,
     "projection_role": "sor_session_detector_projection",
     "state_source": "sor_session_detector_facts",
     "status": "sor_session_detector_facts_ready"
@@ -2441,7 +2445,7 @@
     "active": true,
     "exchange_write_called": false,
     "finalgate_called": false,
-    "fresh_signal_present_count": 1,
+    "fresh_signal_present_count": 0,
     "live_submit_allowed_count": 0,
     "operation_layer_called": false,
     "order_created": false,
@@ -2451,7 +2455,7 @@
     "state_source": "strategy_fresh_signal_action_time_boundary",
     "status": "strategy_fresh_signal_action_time_boundary_ready",
     "tradeability_decision_source": false,
-    "would_enter_finalgate_if_private_facts_ready_count": 3
+    "would_enter_finalgate_if_private_facts_ready_count": 2
   },
   "strategy_research_intake": {
     "active": true,

@@ -3,12 +3,12 @@
   "candidate_rows": [
     {
       "action_time_readiness": {
-        "action_time_path_ready": true,
+        "action_time_path_ready": false,
         "first_blocker": "fresh_cpm_long_signal_absent",
         "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
         "private_action_time_facts_ready": false,
-        "public_facts_ready": true,
-        "status": "ready_for_private_action_time_facts"
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "blocker_owner": "market",
@@ -83,8 +83,8 @@
     {
       "action_time_readiness": {
         "action_time_path_ready": true,
-        "first_blocker": "private_action_time_facts_required",
-        "next_action": "refresh_private_action_time_facts_before_finalgate",
+        "first_blocker": "fresh_sor_session_range_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
         "private_action_time_facts_ready": false,
         "public_facts_ready": true,
         "status": "ready_for_private_action_time_facts"
@@ -147,7 +147,7 @@
     "places_order": false,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-01T16:23:57.735674+00:00",
+  "generated_at_utc": "2026-07-01T16:47:12.075565+00:00",
   "p0_p1_review": [
     {
       "evidence": "candidate_rows contain required fields for all active WIP lanes",

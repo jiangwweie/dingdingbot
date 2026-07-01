@@ -9,7 +9,7 @@
     "replay_signal_without_live_reproduction_marked_signal_capture_defect": true,
     "replay_treated_as_live_signal": false
   },
-  "generated_at_utc": "2026-07-01T16:23:53.492702+00:00",
+  "generated_at_utc": "2026-07-01T16:47:07.881361+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -171,17 +171,19 @@
       "watcher_tick_present": true
     },
     {
-      "blocker_class": "action_time_boundary_not_reproduced",
+      "blocker_class": "computed_not_satisfied",
       "computed": true,
       "detector_attached": true,
-      "failed_facts": [],
+      "failed_facts": [
+        "follow_through_confirmed"
+      ],
       "lane_scope": "readonly_watcher_scope",
       "live_submit_scope_priority": 10,
       "mismatch_count": 6,
       "mismatch_reasons": [
-        "action_time_boundary_not_reproduced"
+        "computed_not_satisfied"
       ],
-      "next_action": "repair_non_executing_action_time_rehearsal_path",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "strategy_group_id": "SOR-001",
       "symbol": "AVAXUSDT",
       "watcher_tick_present": true
@@ -1327,8 +1329,10 @@
           "AVAXUSDT": {
             "computed": true,
             "detector_attached": true,
-            "failed_facts": [],
-            "fresh_signal_present": true,
+            "failed_facts": [
+              "follow_through_confirmed"
+            ],
+            "fresh_signal_present": false,
             "live_fact_names": [
               "breakout_level_crossed",
               "follow_through_confirmed",
@@ -1377,17 +1381,19 @@
       "mismatch_count": 23,
       "mismatch_table": [
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -1443,17 +1449,19 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-26T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -1477,17 +1485,19 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -1545,17 +1555,19 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-17T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -1677,17 +1689,19 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-26T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true
@@ -1711,17 +1725,19 @@
           "watcher_tick_present": true
         },
         {
-          "blocker_class": "action_time_boundary_not_reproduced",
+          "blocker_class": "computed_not_satisfied",
           "computed": true,
           "detector_attached": true,
           "event_time_utc": "2026-06-29T15:30:00+00:00",
-          "failed_facts": [],
-          "first_blocker_class": "action_time_boundary_not_reproduced",
-          "first_blocker_owner": "runtime",
+          "failed_facts": [
+            "follow_through_confirmed"
+          ],
+          "first_blocker_class": "computed_not_satisfied",
+          "first_blocker_owner": "market",
           "lane_scope": "readonly_watcher_scope",
           "live_submit_scope_priority": 10,
-          "mismatch_reason": "action_time_boundary_not_reproduced",
-          "next_action": "repair_non_executing_action_time_rehearsal_path",
+          "mismatch_reason": "computed_not_satisfied",
+          "next_action": "continue_observation_with_failed_fact_matrix",
           "strategy_group_id": "SOR-001",
           "symbol": "AVAXUSDT",
           "watcher_tick_present": true

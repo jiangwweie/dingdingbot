@@ -278,7 +278,11 @@ def _daily_row(
         replay_live_parity=replay_live_parity,
         preferred_symbol=str(canonical_lane.get("symbol") or ""),
     )
-    action_row = _action_time_row(strategy_group_id, action_time_boundary)
+    action_row = _action_time_row(
+        strategy_group_id,
+        action_time_boundary,
+        preferred_symbol=str(parity_row.get("symbol") or ""),
+    )
     symbol = _lane_symbol(
         strategy_group_id=strategy_group_id,
         tradeability_row=tradeability_row,
@@ -374,11 +378,19 @@ def _best_parity_row(
 def _action_time_row(
     strategy_group_id: str,
     action_time_boundary: dict[str, Any],
+    preferred_symbol: str = "",
 ) -> dict[str, Any]:
+    fallback: dict[str, Any] = {}
     for row in _dict_rows(action_time_boundary.get("strategy_rows")):
         if str(row.get("strategy_group_id") or "") == strategy_group_id:
-            return row
-    return {}
+            if (
+                preferred_symbol
+                and str(row.get("symbol") or "") == preferred_symbol
+            ):
+                return row
+            if not fallback:
+                fallback = row
+    return fallback
 
 
 def _lane_symbol(
