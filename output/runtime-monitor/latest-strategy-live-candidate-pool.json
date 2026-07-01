@@ -227,18 +227,18 @@
       "status": "open"
     },
     {
-      "evidence": "P0/P1 review artifact must be produced after final refresh",
+      "evidence": "candidate pool includes machine-readable p0_p1_review rows",
       "item": "review_report",
-      "next_action": "run review",
+      "next_action": "rerun candidate pool after blocker refresh",
       "priority": "P1",
-      "status": "open"
+      "status": "cleared"
     },
     {
-      "evidence": "deployment not allowed until P0 is clear",
+      "evidence": "deploy gate validator checks candidate pool, Daily Table, Single Lane Packet, monitor sequence, output scope, and authority leakage",
       "item": "postdeploy_validation_script",
-      "next_action": "prepare deploy verifier",
+      "next_action": "run validate_strategy_live_candidate_pool_deploy_gate.py before deploy",
       "priority": "P1",
-      "status": "open"
+      "status": "cleared"
     }
   ],
   "safety_invariants": {

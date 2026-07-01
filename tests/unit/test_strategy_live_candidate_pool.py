@@ -188,6 +188,8 @@ def test_candidate_pool_review_keeps_open_p0_items_visible():
     assert review["mpg_watcher_closure"]["status"] == "open"
     assert review["sor_watcher_closure"]["status"] == "open"
     assert review["brf2_conditionalization"]["status"] == "cleared"
+    assert review["review_report"]["status"] == "cleared"
+    assert review["postdeploy_validation_script"]["status"] == "cleared"
 
 
 def test_candidate_pool_validator_rejects_missing_required_candidate_field():

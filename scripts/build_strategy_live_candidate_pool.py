@@ -459,9 +459,19 @@ def _p0_p1_status(
             "refresh approved public facts path",
         )
     if item == "review_report":
-        return ("open", "P0/P1 review artifact must be produced after final refresh", "run review")
+        return (
+            "cleared",
+            "candidate pool includes machine-readable p0_p1_review rows",
+            "rerun candidate pool after blocker refresh",
+        )
     if item == "postdeploy_validation_script":
-        return ("open", "deployment not allowed until P0 is clear", "prepare deploy verifier")
+        deploy_gate = REPO_ROOT / "scripts/validate_strategy_live_candidate_pool_deploy_gate.py"
+        return (
+            "cleared" if deploy_gate.exists() else "open",
+            "deploy gate validator checks candidate pool, Daily Table, Single Lane Packet, "
+            "monitor sequence, output scope, and authority leakage",
+            "run validate_strategy_live_candidate_pool_deploy_gate.py before deploy",
+        )
     return ("open", "unknown review item", "classify review item")
 
 
