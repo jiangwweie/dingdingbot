@@ -165,12 +165,12 @@
     "finalgate_called": false,
     "fresh_signal_present": false,
     "live_submit_allowed": false,
-    "next_blocker": "fresh_cpm_long_signal_absent",
+    "next_blocker": "binance_usdm_public_facts_stale_or_unavailable",
     "operation_layer_called": false,
     "primary_judgment_source": false,
     "private_action_time_facts_ready": false,
     "projection_role": "cpm_fresh_signal_live_path_readiness_projection",
-    "public_fact_path_ready": true,
+    "public_fact_path_ready": false,
     "runtime_truth_source": false,
     "state_source": "cpm_fresh_signal_live_path_readiness",
     "status": "cpm_fresh_signal_live_path_readiness_ready",
@@ -239,7 +239,7 @@
     "current_signal_state": "fresh_signal_absent",
     "execution_attempt_required_for_lifecycle_entry": true,
     "fact_input_present": true,
-    "fact_input_status": "cpm_runtime_signal_facts_ready",
+    "fact_input_status": "cpm_runtime_signal_facts_ready_from_fallback",
     "first_blocker_class": "fresh_cpm_long_signal_absent",
     "first_blocker_owner": "market",
     "fresh_signal_present": false,
@@ -261,7 +261,7 @@
   },
   "cpm_runtime_signal_facts": {
     "action_time_refresh_required": true,
-    "active": true,
+    "active": false,
     "fact_authority": "binance_usdm_public_candles_not_action_time_private_facts",
     "fact_input_present": true,
     "first_blocker_class": "fresh_cpm_long_signal_absent",
@@ -272,7 +272,7 @@
     "projection_role": "requiredfacts_input_health_projection",
     "runtime_truth_source": false,
     "state_source": "cpm_runtime_signal_facts",
-    "status": "cpm_runtime_signal_facts_ready",
+    "status": "cpm_runtime_signal_facts_ready_from_fallback",
     "strategy_group_id": "CPM-RO-001",
     "tradeability_decision_source": false,
     "watcher_tick_present": true
@@ -294,32 +294,32 @@
   },
   "daily_check_mode": "cache",
   "four_candidate_runtime_activation_closure": {
-    "action_time_boundary_ready_count": 3,
+    "action_time_boundary_ready_count": 1,
     "active": true,
-    "candidate_evidence_shape_ready_count": 3,
+    "candidate_evidence_shape_ready_count": 1,
     "contract_declared_count": 4,
     "execution_venue_match": false,
     "formal_replay_review_opened_count": 1,
-    "fresh_signal_rehearsal_ready_count": 3,
+    "fresh_signal_rehearsal_ready_count": 1,
     "live_submit_allowed_count": 0,
     "next_checkpoint": "attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols",
     "p0_contract_declared": true,
-    "p0_runtime_artifacts_ready": true,
-    "p0_tasks_closed": true,
+    "p0_runtime_artifacts_ready": false,
+    "p0_tasks_closed": false,
     "p1_contract_declared": true,
     "p1_runtime_artifacts_ready": false,
     "p1_tasks_closed": false,
     "primary_judgment_source": false,
     "projection_role": "expanded_readonly_watcher_scope_contract_projection",
-    "required_facts_contract_ready_count": 3,
-    "runtime_artifact_ready_count": 3,
+    "required_facts_contract_ready_count": 1,
+    "runtime_artifact_ready_count": 1,
     "runtime_truth_source": false,
     "scope_review_closed_count": 4,
     "state_source": "four_candidate_runtime_activation_closure",
     "status": "four_candidate_runtime_activation_contract_ready",
     "tradeability_decision_source": false,
     "venue_basis": "coinbase_spot_proxy",
-    "watcher_scope_contract_ready_count": 3
+    "watcher_scope_contract_ready_count": 1
   },
   "four_candidate_scope_review_decision": {
     "active": true,
@@ -334,7 +334,7 @@
     "status": "four_candidate_scope_review_decision_ready",
     "tradeability_decision_source": false
   },
-  "generated_at_utc": "2026-06-30T15:37:56.020422+00:00",
+  "generated_at_utc": "2026-07-01T15:04:49.410708+00:00",
   "interaction": {
     "approaches_real_order": false,
     "calls_exchange_write": false,
@@ -347,14 +347,14 @@
   },
   "mi_trial_admission_decision": {
     "active": true,
-    "blocker_owner": "owner_policy",
+    "blocker_owner": "engineering",
     "can_trade_now": false,
-    "first_blocker": "mi_owner_policy_and_required_facts_mapping_needed",
+    "first_blocker": "mi_replay_or_public_facts_insufficient",
     "projection_role": "mi_trial_admission_decision_projection",
     "promotion_scope": "trial_admission",
     "state_source": "mi_trial_admission_decision",
     "status": "mi_trial_admission_decision_ready",
-    "trial_admission_decision": "trial_asset_admission_candidate"
+    "trial_admission_decision": "park"
   },
   "monitor_status": "needs_refresh",
   "notification": {
@@ -541,12 +541,12 @@
       "finalgate_called": false,
       "fresh_signal_present": false,
       "live_submit_allowed": false,
-      "next_blocker": "fresh_cpm_long_signal_absent",
+      "next_blocker": "binance_usdm_public_facts_stale_or_unavailable",
       "operation_layer_called": false,
       "primary_judgment_source": false,
       "private_action_time_facts_ready": false,
       "projection_role": "cpm_fresh_signal_live_path_readiness_projection",
-      "public_fact_path_ready": true,
+      "public_fact_path_ready": false,
       "runtime_truth_source": false,
       "state_source": "cpm_fresh_signal_live_path_readiness",
       "status": "cpm_fresh_signal_live_path_readiness_ready",
@@ -615,7 +615,7 @@
       "current_signal_state": "fresh_signal_absent",
       "execution_attempt_required_for_lifecycle_entry": true,
       "fact_input_present": true,
-      "fact_input_status": "cpm_runtime_signal_facts_ready",
+      "fact_input_status": "cpm_runtime_signal_facts_ready_from_fallback",
       "first_blocker_class": "fresh_cpm_long_signal_absent",
       "first_blocker_owner": "market",
       "fresh_signal_present": false,
@@ -637,7 +637,7 @@
     },
     "cpm_runtime_signal_facts": {
       "action_time_refresh_required": true,
-      "active": true,
+      "active": false,
       "fact_authority": "binance_usdm_public_candles_not_action_time_private_facts",
       "fact_input_present": true,
       "first_blocker_class": "fresh_cpm_long_signal_absent",
@@ -648,7 +648,7 @@
       "projection_role": "requiredfacts_input_health_projection",
       "runtime_truth_source": false,
       "state_source": "cpm_runtime_signal_facts",
-      "status": "cpm_runtime_signal_facts_ready",
+      "status": "cpm_runtime_signal_facts_ready_from_fallback",
       "strategy_group_id": "CPM-RO-001",
       "tradeability_decision_source": false,
       "watcher_tick_present": true
@@ -669,32 +669,32 @@
       "strategy_group_id": "CPM-RO-001"
     },
     "four_candidate_runtime_activation_closure": {
-      "action_time_boundary_ready_count": 3,
+      "action_time_boundary_ready_count": 1,
       "active": true,
-      "candidate_evidence_shape_ready_count": 3,
+      "candidate_evidence_shape_ready_count": 1,
       "contract_declared_count": 4,
       "execution_venue_match": false,
       "formal_replay_review_opened_count": 1,
-      "fresh_signal_rehearsal_ready_count": 3,
+      "fresh_signal_rehearsal_ready_count": 1,
       "live_submit_allowed_count": 0,
       "next_checkpoint": "attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols",
       "p0_contract_declared": true,
-      "p0_runtime_artifacts_ready": true,
-      "p0_tasks_closed": true,
+      "p0_runtime_artifacts_ready": false,
+      "p0_tasks_closed": false,
       "p1_contract_declared": true,
       "p1_runtime_artifacts_ready": false,
       "p1_tasks_closed": false,
       "primary_judgment_source": false,
       "projection_role": "expanded_readonly_watcher_scope_contract_projection",
-      "required_facts_contract_ready_count": 3,
-      "runtime_artifact_ready_count": 3,
+      "required_facts_contract_ready_count": 1,
+      "runtime_artifact_ready_count": 1,
       "runtime_truth_source": false,
       "scope_review_closed_count": 4,
       "state_source": "four_candidate_runtime_activation_closure",
       "status": "four_candidate_runtime_activation_contract_ready",
       "tradeability_decision_source": false,
       "venue_basis": "coinbase_spot_proxy",
-      "watcher_scope_contract_ready_count": 3
+      "watcher_scope_contract_ready_count": 1
     },
     "four_candidate_scope_review_decision": {
       "active": true,
@@ -711,22 +711,267 @@
     },
     "mi_trial_admission_decision": {
       "active": true,
-      "blocker_owner": "owner_policy",
+      "blocker_owner": "engineering",
       "can_trade_now": false,
-      "first_blocker": "mi_owner_policy_and_required_facts_mapping_needed",
+      "first_blocker": "mi_replay_or_public_facts_insufficient",
       "projection_role": "mi_trial_admission_decision_projection",
       "promotion_scope": "trial_admission",
       "state_source": "mi_trial_admission_decision",
       "status": "mi_trial_admission_decision_ready",
-      "trial_admission_decision": "trial_asset_admission_candidate"
+      "trial_admission_decision": "park"
     },
     "non_authority_checkpoint": "刷新本地 runtime monitor 缓存",
     "owner_intervention_required": false,
     "replay_live_parity_audit": {
       "active": true,
-      "live_detector_reproduced_count": 26,
-      "mismatch_count": 105,
+      "cpm_first_blocker_class": "computed_not_satisfied",
+      "cpm_first_failed_facts": [
+        "htf_trend_intact",
+        "reclaim_confirmed"
+      ],
+      "cpm_first_next_action": "continue_observation_with_failed_fact_matrix",
+      "cpm_per_symbol_blocker_matrix": [
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 16,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 12,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 13,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 7,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        }
+      ],
+      "live_detector_reproduced_count": 5,
+      "mismatch_count": 126,
       "mismatch_reason_policy": "replay_signal_without_live_reproduction_is_signal_capture_defect_not_market_wait",
+      "per_symbol_blocker_matrix": [
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 16,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 12,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 13,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "computed_not_satisfied",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "htf_trend_intact",
+            "reclaim_confirmed"
+          ],
+          "mismatch_count": 7,
+          "next_action": "continue_observation_with_failed_fact_matrix",
+          "strategy_group_id": "CPM-RO-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": true
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "binance_usdm_public_facts_missing_or_stale",
+            "exchange_contract_exists",
+            "mark_price_fresh",
+            "funding_not_extreme",
+            "spread_ok",
+            "min_notional_ok",
+            "qty_step_ok",
+            "leverage_available"
+          ],
+          "mismatch_count": 13,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "MPG-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "binance_usdm_public_facts_missing_or_stale",
+            "exchange_contract_exists",
+            "mark_price_fresh",
+            "funding_not_extreme",
+            "spread_ok",
+            "min_notional_ok",
+            "qty_step_ok",
+            "leverage_available",
+            "not_in_current_readonly_watcher_batch"
+          ],
+          "mismatch_count": 10,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "MPG-001",
+          "symbol": "OPUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "binance_usdm_public_facts_missing_or_stale",
+            "exchange_contract_exists",
+            "mark_price_fresh",
+            "funding_not_extreme",
+            "spread_ok",
+            "min_notional_ok",
+            "qty_step_ok",
+            "leverage_available"
+          ],
+          "mismatch_count": 25,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": true,
+          "detector_attached": true,
+          "failed_facts": [
+            "binance_usdm_public_facts_missing_or_stale",
+            "exchange_contract_exists",
+            "mark_price_fresh",
+            "funding_not_extreme",
+            "spread_ok",
+            "min_notional_ok",
+            "qty_step_ok",
+            "leverage_available"
+          ],
+          "mismatch_count": 7,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "MPG-001",
+          "symbol": "SUIUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": false,
+          "detector_attached": true,
+          "failed_facts": [],
+          "mismatch_count": 6,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "SOR-001",
+          "symbol": "AVAXUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": false,
+          "detector_attached": true,
+          "failed_facts": [],
+          "mismatch_count": 2,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "SOR-001",
+          "symbol": "BTCUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": false,
+          "detector_attached": true,
+          "failed_facts": [],
+          "mismatch_count": 7,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "SOR-001",
+          "symbol": "ETHUSDT",
+          "watcher_tick_present": false
+        },
+        {
+          "blocker_class": "watcher_tick_missing",
+          "computed": false,
+          "detector_attached": true,
+          "failed_facts": [],
+          "mismatch_count": 8,
+          "next_action": "refresh_or_repair_watcher_public_fact_input",
+          "strategy_group_id": "SOR-001",
+          "symbol": "SOLUSDT",
+          "watcher_tick_present": false
+        }
+      ],
       "projection_role": "replay_live_parity_projection",
       "replay_signal_count": 131,
       "state_source": "replay_live_parity_audit",
@@ -814,7 +1059,7 @@
       "state_source": "strategy_fresh_signal_action_time_boundary",
       "status": "strategy_fresh_signal_action_time_boundary_ready",
       "tradeability_decision_source": false,
-      "would_enter_finalgate_if_private_facts_ready_count": 3
+      "would_enter_finalgate_if_private_facts_ready_count": 1
     },
     "strategy_research_intake": {
       "active": true,
@@ -883,10 +1128,10 @@
         "blocker_owner": "market",
         "capital_scope_source": "action_time_exchange_available_balance",
         "decision": "not_tradable_market_wait",
-        "first_blocker_class": "fresh_cpm_long_signal_absent",
+        "first_blocker_class": "computed_not_satisfied",
         "path_blocker_owner": "market",
         "path_can_trade_now": false,
-        "path_first_blocker": "fresh_cpm_long_signal_absent",
+        "path_first_blocker": "computed_not_satisfied",
         "path_id": "CPM-LONG",
         "path_required_facts_mapping_status": "ready",
         "required_facts_status": "ready",
@@ -919,7 +1164,7 @@
       "top_after_next_state": "live_submit_ready",
       "top_blocker_owner": "market",
       "top_decision": "not_tradable_market_wait",
-      "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
+      "top_first_blocker_class": "computed_not_satisfied",
       "top_strategy_group_id": "BRF2-001",
       "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
     },
@@ -960,9 +1205,254 @@
   },
   "replay_live_parity_audit": {
     "active": true,
-    "live_detector_reproduced_count": 26,
-    "mismatch_count": 105,
+    "cpm_first_blocker_class": "computed_not_satisfied",
+    "cpm_first_failed_facts": [
+      "htf_trend_intact",
+      "reclaim_confirmed"
+    ],
+    "cpm_first_next_action": "continue_observation_with_failed_fact_matrix",
+    "cpm_per_symbol_blocker_matrix": [
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 16,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "AVAXUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 12,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 13,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SOLUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 7,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SUIUSDT",
+        "watcher_tick_present": true
+      }
+    ],
+    "live_detector_reproduced_count": 5,
+    "mismatch_count": 126,
     "mismatch_reason_policy": "replay_signal_without_live_reproduction_is_signal_capture_defect_not_market_wait",
+    "per_symbol_blocker_matrix": [
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 16,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "AVAXUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 12,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 13,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SOLUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "computed_not_satisfied",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "mismatch_count": 7,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SUIUSDT",
+        "watcher_tick_present": true
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "mismatch_count": 13,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "MPG-001",
+        "symbol": "AVAXUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available",
+          "not_in_current_readonly_watcher_batch"
+        ],
+        "mismatch_count": 10,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "MPG-001",
+        "symbol": "OPUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "mismatch_count": 25,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SOLUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": true,
+        "detector_attached": true,
+        "failed_facts": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "mismatch_count": 7,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SUIUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": false,
+        "detector_attached": true,
+        "failed_facts": [],
+        "mismatch_count": 6,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "SOR-001",
+        "symbol": "AVAXUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": false,
+        "detector_attached": true,
+        "failed_facts": [],
+        "mismatch_count": 2,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "SOR-001",
+        "symbol": "BTCUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": false,
+        "detector_attached": true,
+        "failed_facts": [],
+        "mismatch_count": 7,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "watcher_tick_present": false
+      },
+      {
+        "blocker_class": "watcher_tick_missing",
+        "computed": false,
+        "detector_attached": true,
+        "failed_facts": [],
+        "mismatch_count": 8,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "strategy_group_id": "SOR-001",
+        "symbol": "SOLUSDT",
+        "watcher_tick_present": false
+      }
+    ],
     "projection_role": "replay_live_parity_projection",
     "replay_signal_count": 131,
     "state_source": "replay_live_parity_audit",
@@ -1031,6 +1521,7 @@
     "cpm_runtime_signal_facts_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-cpm-runtime-signal-facts.json",
     "cpm_shadow_candidate_evidence_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-cpm-shadow-candidate-evidence.json",
     "daily_check_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-check.json",
+    "daily_live_enablement_table_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json",
     "dry_run_audit_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-runtime-dry-run-audit-chain.json",
     "goal_progress_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-goal-progress.json",
     "l2_intake_dry_run_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-l2-intake-dry-run.json",
@@ -1310,8 +1801,8 @@
       },
       "name": "binance_usdm_public_facts",
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-binance-usdm-public-facts.json",
-      "returncode": 0,
-      "status": "binance_usdm_public_facts_ready"
+      "returncode": 2,
+      "status": "binance_usdm_public_facts_unavailable"
     },
     {
       "interaction": {
@@ -1319,7 +1810,7 @@
         "calls_exchange_write": false,
         "calls_finalgate": false,
         "calls_operation_layer": false,
-        "level": "L0_local_cpm_runtime_signal_facts",
+        "level": "L0_local_cpm_runtime_signal_facts_fallback",
         "mutates_remote_files": false,
         "places_order": false,
         "remote_interaction_count": 0
@@ -1327,7 +1818,7 @@
       "name": "cpm_runtime_signal_facts",
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-cpm-runtime-signal-facts.json",
       "returncode": 0,
-      "status": "cpm_runtime_signal_facts_ready"
+      "status": "cpm_runtime_signal_facts_ready_from_fallback"
     },
     {
       "interaction": {
@@ -1390,8 +1881,8 @@
       },
       "name": "four_candidate_runtime_activation_evidence",
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-mpg-runtime-activation-evidence.json",
-      "returncode": 0,
-      "status": "runtime_activation_evidence_ready"
+      "returncode": 2,
+      "status": "runtime_activation_evidence_public_facts_unavailable"
     },
     {
       "interaction": {
@@ -1914,6 +2405,30 @@
       "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
       "returncode": 0,
       "status": "tradeability_decision_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "level": "L0_local_daily_live_enablement_table",
+        "mutates_remote_files": false,
+        "remote_interaction_count": 0
+      },
+      "name": "daily_live_enablement_table",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json",
+      "returncode": 0,
+      "status": "daily_live_enablement_table_ready"
+    },
+    {
+      "interaction": {
+        "approaches_real_order": false,
+        "level": "L0_local_daily_live_enablement_table",
+        "mutates_remote_files": false,
+        "remote_interaction_count": 0
+      },
+      "name": "validate_daily_live_enablement_table",
+      "output_json": "/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json",
+      "returncode": 0,
+      "status": "daily_live_enablement_table_ready"
     }
   ],
   "strategy_experiment_candidate": {
@@ -1956,7 +2471,7 @@
     "state_source": "strategy_fresh_signal_action_time_boundary",
     "status": "strategy_fresh_signal_action_time_boundary_ready",
     "tradeability_decision_source": false,
-    "would_enter_finalgate_if_private_facts_ready_count": 3
+    "would_enter_finalgate_if_private_facts_ready_count": 1
   },
   "strategy_research_intake": {
     "active": true,
@@ -2059,10 +2574,10 @@
       "blocker_owner": "market",
       "capital_scope_source": "action_time_exchange_available_balance",
       "decision": "not_tradable_market_wait",
-      "first_blocker_class": "fresh_cpm_long_signal_absent",
+      "first_blocker_class": "computed_not_satisfied",
       "path_blocker_owner": "market",
       "path_can_trade_now": false,
-      "path_first_blocker": "fresh_cpm_long_signal_absent",
+      "path_first_blocker": "computed_not_satisfied",
       "path_id": "CPM-LONG",
       "path_required_facts_mapping_status": "ready",
       "required_facts_status": "ready",
@@ -2095,7 +2610,7 @@
     "top_after_next_state": "live_submit_ready",
     "top_blocker_owner": "market",
     "top_decision": "not_tradable_market_wait",
-    "top_first_blocker_class": "short_squeeze_risk_state_disable_active",
+    "top_first_blocker_class": "computed_not_satisfied",
     "top_strategy_group_id": "BRF2-001",
     "top_tradeability_checkpoint": "continue_brf2_armed_observation_until_disable_clears"
   }

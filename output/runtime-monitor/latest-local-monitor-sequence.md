@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-06-30T15:37:56.020422+00:00
+- 报告时间: 2026-07-01T15:04:49.410708+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -44,7 +44,7 @@
 - CPM capital source: `action_time_exchange_available_balance`
 - CPM RequiredFacts mapping: `cpm_required_facts_mapping_ready`
 - CPM fresh signal rule: `cpm_long_pullback_reclaim_signal_v1`
-- CPM runtime signal facts: `cpm_runtime_signal_facts_ready`
+- CPM runtime signal facts: `cpm_runtime_signal_facts_ready_from_fallback`
 - CPM fact input / watcher tick: `是` / `是`
 - CPM runtime signal capture: `cpm_runtime_signal_capture_ready`
 - CPM signal state: `fresh_signal_absent`
@@ -62,14 +62,15 @@
 - CPM synthetic authority fail-closed: `是`
 - Four-candidate activation contract: `four_candidate_runtime_activation_contract_ready`
 - P0/P1 contract declared: `是` / `是`
-- P0/P1 runtime artifacts ready: `是` / `否`
-- Contract/runtime/scope/watcher/facts/candidate/rehearsal/boundary ready: `4` / `3` / `4` / `3` / `3` / `3` / `3` / `3`
+- P0/P1 runtime artifacts ready: `否` / `否`
+- Contract/runtime/scope/watcher/facts/candidate/rehearsal/boundary ready: `4` / `1` / `4` / `1` / `1` / `1` / `1` / `1`
 - MI formal replay review opened: `1`
 - Scope review decision: `four_candidate_scope_review_decision_ready` / readonly expansions `3` / live-scope changes `0`
-- CPM fresh-path public facts / fresh signal / next blocker: `是` / `否` / `fresh_cpm_long_signal_absent`
-- Fresh-signal action-time boundary: `strategy_fresh_signal_action_time_boundary_ready` / fresh `0` / finalgate-if-private-facts `3` / live-submit `0`
-- Replay-live parity: `replay_live_parity_audit_ready` / replay `131` / reproduced `26` / mismatch `105`
-- MI trial admission: `trial_asset_admission_candidate` / scope `trial_admission` / blocker `mi_owner_policy_and_required_facts_mapping_needed`
+- CPM fresh-path public facts / fresh signal / next blocker: `否` / `否` / `binance_usdm_public_facts_stale_or_unavailable`
+- Fresh-signal action-time boundary: `strategy_fresh_signal_action_time_boundary_ready` / fresh `0` / finalgate-if-private-facts `1` / live-submit `0`
+- Replay-live parity: `replay_live_parity_audit_ready` / replay `131` / reproduced `5` / mismatch `126`
+- CPM replay-live first blocker: `computed_not_satisfied` / failed `htf_trend_intact, reclaim_confirmed` / next `continue_observation_with_failed_fact_matrix`
+- MI trial admission: `park` / scope `trial_admission` / blocker `mi_replay_or_public_facts_insufficient`
 - SOR session detector: `sor_session_detector_facts_ready` / fresh `0` / blocker `fresh_sor_session_range_signal_absent`
 - Activation venue basis/match: `coinbase_spot_proxy` / `否`
 - Activation next checkpoint: `attach_binance_usdm_readonly_watcher_facts_for_expanded_symbols`
@@ -82,10 +83,10 @@
 - 组合第一阻断统计 market/owner/engineering: `3` / `0` / `0`
 - Tradeability Decision 状态: `tradeability_decision_ready`
 - Tradeability Decision Top: `BRF2-001` / `not_tradable_market_wait`
-- 第一阻断: `short_squeeze_risk_state_disable_active` / `market`
+- 第一阻断: `computed_not_satisfied` / `market`
 - 下一检查点: `continue_brf2_armed_observation_until_disable_clears`
 - CPM Tradeability row: `armed_observation` / `not_tradable_market_wait`
-- CPM Tradeability blocker: `fresh_cpm_long_signal_absent` / `market`
+- CPM Tradeability blocker: `computed_not_satisfied` / `market`
 - CPM-LONG path readiness: `ready` / `否`
 - Tradeability trial-grade standby: `3`
 - Trial-grade signal audit: `trial_grade_signal_gate_audit_ready`
@@ -112,12 +113,12 @@
 | cpm_identity_routing_decision | cpm_identity_routing_decision_ready | 0 |
 | cpm_owner_trial_policy_scope | cpm_owner_trial_policy_scope_recorded | 0 |
 | cpm_required_facts_mapping | cpm_required_facts_mapping_ready | 0 |
-| binance_usdm_public_facts | binance_usdm_public_facts_ready | 0 |
-| cpm_runtime_signal_facts | cpm_runtime_signal_facts_ready | 0 |
+| binance_usdm_public_facts | binance_usdm_public_facts_unavailable | 2 |
+| cpm_runtime_signal_facts | cpm_runtime_signal_facts_ready_from_fallback | 0 |
 | cpm_runtime_signal_capture | cpm_runtime_signal_capture_ready | 0 |
 | cpm_shadow_candidate_evidence | cpm_shadow_candidate_evidence_waiting_for_fresh_signal | 0 |
 | cpm_dry_run_submit_rehearsal | cpm_dry_run_submit_rehearsal_shape_ready | 0 |
-| four_candidate_runtime_activation_evidence | runtime_activation_evidence_ready | 0 |
+| four_candidate_runtime_activation_evidence | runtime_activation_evidence_public_facts_unavailable | 2 |
 | sor_session_scope_detector | sor_session_detector_facts_ready | 0 |
 | mpg_high_beta_scope_readiness | mpg_action_time_facts_readiness_ready | 0 |
 | strategy_fresh_signal_action_time_boundary | strategy_fresh_signal_action_time_boundary_ready | 0 |
@@ -151,6 +152,8 @@
 | strategygroup_trial_grade_signal_gate_audit | trial_grade_signal_gate_audit_ready | 0 |
 | three_strategy_live_trial_portfolio | three_strategy_live_trial_portfolio_ready | 0 |
 | strategygroup_tradeability_decision | tradeability_decision_ready | 0 |
+| daily_live_enablement_table | daily_live_enablement_table_ready | 0 |
+| validate_daily_live_enablement_table | daily_live_enablement_table_ready | 0 |
 
 ## Owner Runtime Issues
 

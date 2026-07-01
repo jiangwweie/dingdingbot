@@ -1,0 +1,283 @@
+{
+  "checks": {
+    "active_wip_lanes_only": true,
+    "all_rows_have_blocker_evidence_action_stop": true,
+    "authority_boundary_preserved": true,
+    "exchange_write_called": false,
+    "finalgate_called": false,
+    "operation_layer_called": false,
+    "order_created": false,
+    "single_rank_1": true,
+    "source_validation_passed": true
+  },
+  "generated_at_utc": "2026-07-01T15:04:49.356568+00:00",
+  "interaction": {
+    "approaches_real_order": false,
+    "level": "L0_local_daily_live_enablement_table",
+    "mutates_remote_files": false,
+    "remote_interaction_count": 0
+  },
+  "rows": [
+    {
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "canonical_lane": {
+        "first_blocker": "computed_not_satisfied",
+        "lane_scope": "primary_live_submit_scope",
+        "live_submit_scope_priority": 30,
+        "mismatch_count": 12,
+        "next_action": "continue_observation_with_failed_fact_matrix",
+        "selection_rule": "first_blocker_priority->live_submit_scope_priority->mismatch_count->symbol",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT"
+      },
+      "chain_position": "replay_live_parity",
+      "closest_to_live_rank": 4,
+      "first_blocker": "computed_not_satisfied",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT blocker_class=computed_not_satisfied",
+      "live_detector": "computed_not_satisfied",
+      "market_wait_validation": {
+        "checks": {},
+        "not_applicable": true,
+        "valid": false
+      },
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
+      "owner_action_required": "no",
+      "rank_reason": "computed_not_satisfied tier 500 (WIP priority 20 only breaks same-tier ties)",
+      "replay_signal": "yes",
+      "runtime_safety_reference": {
+        "live_submit_ready": false,
+        "live_submit_ready_false_reason": "no_fresh_signal",
+        "state_source": "runtime_safety_state",
+        "strategy_group_id": "CPM-RO-001"
+      },
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "canonical_lane": {
+        "first_blocker": "watcher_tick_missing",
+        "lane_scope": "scoped_live_observation_proposal",
+        "live_submit_scope_priority": 20,
+        "mismatch_count": 25,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "selection_rule": "first_blocker_priority->live_submit_scope_priority->mismatch_count->symbol",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SOLUSDT"
+      },
+      "chain_position": "replay_live_parity",
+      "closest_to_live_rank": 1,
+      "first_blocker": "watcher_tick_missing",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT blocker_class=watcher_tick_missing",
+      "live_detector": "watcher_tick_missing",
+      "market_wait_validation": {
+        "checks": {},
+        "not_applicable": true,
+        "valid": false
+      },
+      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+      "owner_action_required": "no",
+      "rank_reason": "watcher_tick_missing tier 800 (WIP priority 20 only breaks same-tier ties)",
+      "replay_signal": "yes",
+      "runtime_safety_reference": {
+        "live_submit_ready": false,
+        "live_submit_ready_false_reason": "no_fresh_signal",
+        "state_source": "runtime_safety_state",
+        "strategy_group_id": "MPG-001"
+      },
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "strategy_group_id": "MPG-001",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "canonical_lane": {},
+      "chain_position": "symbol_scope_decision",
+      "closest_to_live_rank": 3,
+      "first_blocker": "scope_not_attached",
+      "first_blocker_evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=park",
+      "live_detector": "not_tested",
+      "market_wait_validation": {
+        "checks": {},
+        "not_applicable": true,
+        "valid": false
+      },
+      "next_engineering_action": "build_trial_asset_admission_proposal",
+      "owner_action_required": "no",
+      "rank_reason": "scope_not_attached tier 700 (WIP priority 10 only breaks same-tier ties)",
+      "replay_signal": "not_applicable",
+      "runtime_safety_reference": {
+        "live_submit_ready": false,
+        "live_submit_ready_false_reason": "no_fresh_signal",
+        "state_source": "runtime_safety_state",
+        "strategy_group_id": "MI-001"
+      },
+      "side": "long",
+      "stage": "admission",
+      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "strategy_group_id": "MI-001",
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "canonical_lane": {
+        "first_blocker": "watcher_tick_missing",
+        "lane_scope": "primary_live_submit_scope",
+        "live_submit_scope_priority": 30,
+        "mismatch_count": 7,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "selection_rule": "first_blocker_priority->live_submit_scope_priority->mismatch_count->symbol",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT"
+      },
+      "chain_position": "replay_live_parity",
+      "closest_to_live_rank": 2,
+      "first_blocker": "watcher_tick_missing",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT blocker_class=watcher_tick_missing",
+      "live_detector": "watcher_tick_missing",
+      "market_wait_validation": {
+        "checks": {},
+        "not_applicable": true,
+        "valid": false
+      },
+      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+      "owner_action_required": "no",
+      "rank_reason": "watcher_tick_missing tier 800 (WIP priority 10 only breaks same-tier ties)",
+      "replay_signal": "yes",
+      "runtime_safety_reference": {
+        "live_submit_ready": false,
+        "live_submit_ready_false_reason": "no_fresh_signal",
+        "state_source": "runtime_safety_state",
+        "strategy_group_id": "SOR-001"
+      },
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "strategy_group_id": "SOR-001",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "canonical_lane": {},
+      "chain_position": "replay_live_parity",
+      "closest_to_live_rank": 5,
+      "first_blocker": "computed_not_satisfied",
+      "first_blocker_evidence": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:BRF2-001 BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
+      "live_detector": "not_tested",
+      "market_wait_validation": {
+        "checks": {},
+        "not_applicable": true,
+        "valid": false
+      },
+      "next_engineering_action": "continue_brf2_armed_observation_until_disable_clears",
+      "owner_action_required": "no",
+      "rank_reason": "computed_not_satisfied tier 500 (WIP priority 0 only breaks same-tier ties)",
+      "replay_signal": "unknown_with_reason:no_replay_live_parity_row",
+      "runtime_safety_reference": {
+        "live_submit_ready": false,
+        "live_submit_ready_false_reason": "no_fresh_signal",
+        "state_source": "runtime_safety_state",
+        "strategy_group_id": "BRF2-001"
+      },
+      "side": "short",
+      "stage": "armed",
+      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "strategy_group_id": "BRF2-001",
+      "symbol": "brf2_research_supported_symbols_only"
+    }
+  ],
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "places_order": false
+  },
+  "schema": "brc.daily_live_enablement_table.v1",
+  "scope": "daily_live_enablement_table_non_authority",
+  "source_validation": {
+    "sources": {
+      "action_time_boundary": {
+        "actual_schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+        "actual_status": "strategy_fresh_signal_action_time_boundary_ready",
+        "expected_schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+        "expected_statuses": [
+          "strategy_fresh_signal_action_time_boundary_ready"
+        ],
+        "present": true,
+        "schema_valid": true,
+        "status_valid": true,
+        "valid": true
+      },
+      "mi_trial_admission": {
+        "actual_schema": "brc.mi_trial_admission_decision.v1",
+        "actual_status": "mi_trial_admission_decision_ready",
+        "expected_schema": "brc.mi_trial_admission_decision.v1",
+        "expected_statuses": [
+          "mi_trial_admission_decision_ready"
+        ],
+        "present": true,
+        "schema_valid": true,
+        "status_valid": true,
+        "valid": true
+      },
+      "replay_live_parity": {
+        "actual_schema": "brc.replay_live_parity_audit.v1",
+        "actual_status": "replay_live_parity_audit_ready",
+        "expected_schema": "brc.replay_live_parity_audit.v1",
+        "expected_statuses": [
+          "replay_live_parity_audit_ready"
+        ],
+        "present": true,
+        "schema_valid": true,
+        "status_valid": true,
+        "valid": true
+      },
+      "runtime_safety": {
+        "actual_schema": "brc.strategygroup_runtime_safety_state.v1",
+        "actual_status": "live_submit_standby_waiting_for_market",
+        "expected_schema": "brc.strategygroup_runtime_safety_state.v1",
+        "expected_statuses": [
+          "live_submit_ready",
+          "live_submit_standby_waiting_for_market",
+          "runtime_safety_state_ready"
+        ],
+        "present": true,
+        "schema_valid": true,
+        "status_valid": true,
+        "valid": true
+      },
+      "tradeability": {
+        "actual_schema": "brc.strategygroup_tradeability_decision.v1",
+        "actual_status": "tradeability_decision_ready",
+        "expected_schema": "brc.strategygroup_tradeability_decision.v1",
+        "expected_statuses": [
+          "tradeability_decision_ready"
+        ],
+        "present": true,
+        "schema_valid": true,
+        "status_valid": true,
+        "valid": true
+      }
+    },
+    "valid": true
+  },
+  "status": "daily_live_enablement_table_ready",
+  "summary": {
+    "non_authority": true,
+    "owner_action_required_count": 0,
+    "rank_1_first_blocker": "watcher_tick_missing",
+    "rank_1_lane": "MPG-001:SOLUSDT",
+    "rank_1_next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+    "row_count": 5,
+    "source_validation_valid": true,
+    "wip_lane_count": 5
+  }
+}
