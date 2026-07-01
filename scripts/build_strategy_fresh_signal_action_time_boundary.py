@@ -161,6 +161,7 @@ def _cpm_row(capture: dict[str, Any], rehearsal: dict[str, Any]) -> dict[str, An
     would_enter = public_ready and candidate_shape
     return _row(
         strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
         path_id="CPM-LONG",
         fresh_signal_present=fresh,
         current_signal_state=str(preview.get("current_signal_state") or "unknown"),
@@ -195,6 +196,7 @@ def _evidence_row(
     would_enter = public_ready and candidate_shape and rehearsal_ready
     return _row(
         strategy_group_id=strategy_group_id,
+        symbol=_first_symbol(readiness, evidence, default="SOLUSDT"),
         path_id=path_id,
         fresh_signal_present=False,
         current_signal_state="fresh_signal_absent",
@@ -211,6 +213,11 @@ def _evidence_row(
 
 def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, Any]:
     detector_summary = _as_dict(detector.get("summary"))
+    detector_rows = [
+        row
+        for row in detector.get("symbol_detector_rows") or []
+        if isinstance(row, dict)
+    ]
     fresh = int(detector_summary.get("fresh_session_signal_count") or 0) > 0
     public_ready = evidence.get("runtime_artifact_ready") is True
     candidate_shape = evidence.get("candidate_evidence_shape_ready") is True
@@ -227,6 +234,7 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
     )
     return _row(
         strategy_group_id="SOR-001",
+        symbol=_sor_selected_symbol(detector_rows),
         path_id="SOR-SESSION-BREAKOUT",
         fresh_signal_present=fresh,
         current_signal_state=(
@@ -244,6 +252,7 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
 def _row(
     *,
     strategy_group_id: str,
+    symbol: str,
     path_id: str,
     fresh_signal_present: bool,
     current_signal_state: str,
@@ -256,6 +265,7 @@ def _row(
 ) -> dict[str, Any]:
     return {
         "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
         "path_id": path_id,
         "fresh_signal_present": fresh_signal_present,
         "current_signal_state": current_signal_state,
@@ -269,6 +279,7 @@ def _row(
         },
         "candidate_evidence_shape_ready": candidate_evidence_shape_ready,
         "dry_run_submit_rehearsal_ready": dry_run_submit_rehearsal_ready,
+        "action_time_path_ready": would_enter_finalgate_if_private_facts_ready,
         "would_enter_finalgate_if_private_facts_ready": (
             would_enter_finalgate_if_private_facts_ready
         ),
@@ -291,6 +302,37 @@ def _row(
             else "remain_non_authority_until_required_facts_close"
         ),
     }
+
+
+def _first_symbol(*artifacts: dict[str, Any], default: str) -> str:
+    for artifact in artifacts:
+        watcher = _as_dict(artifact.get("watcher_scope"))
+        for key in (
+            "scoped_live_observation_proposal_symbols",
+            "expanded_readonly_watcher_symbols",
+            "primary_live_submit_symbol_scope",
+            "symbol_scope",
+        ):
+            symbols = watcher.get(key)
+            if isinstance(symbols, list):
+                for symbol in symbols:
+                    text = str(symbol or "")
+                    if text:
+                        return text
+    return default
+
+
+def _sor_selected_symbol(detector_rows: list[dict[str, Any]]) -> str:
+    for row in detector_rows:
+        if row.get("fresh_session_range_signal") is True:
+            symbol = str(row.get("symbol") or "")
+            if symbol:
+                return symbol
+    for row in detector_rows:
+        symbol = str(row.get("symbol") or "")
+        if symbol:
+            return symbol
+    return "SOLUSDT"
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:

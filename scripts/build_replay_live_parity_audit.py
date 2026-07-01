@@ -35,6 +35,9 @@ DEFAULT_MPG_WATCHER_JSON = (
 DEFAULT_SOR_EVIDENCE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-sor-runtime-activation-evidence.json"
 )
+DEFAULT_SOR_DETECTOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.json"
+)
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.json"
 DEFAULT_OUTPUT_MD = REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.md"
 
@@ -61,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cpm-facts-json", default=str(DEFAULT_CPM_FACTS_JSON))
     parser.add_argument("--mpg-watcher-json", default=str(DEFAULT_MPG_WATCHER_JSON))
     parser.add_argument("--sor-evidence-json", default=str(DEFAULT_SOR_EVIDENCE_JSON))
+    parser.add_argument("--sor-detector-json", default=str(DEFAULT_SOR_DETECTOR_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -70,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         cpm_facts=_read_optional_json(Path(args.cpm_facts_json)),
         mpg_watcher=_read_optional_json(Path(args.mpg_watcher_json)),
         sor_evidence=_read_optional_json(Path(args.sor_evidence_json)),
+        sor_detector=_read_optional_json(Path(args.sor_detector_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -98,13 +103,14 @@ def build_replay_live_parity_audit(
     cpm_facts: dict[str, Any],
     mpg_watcher: dict[str, Any],
     sor_evidence: dict[str, Any],
+    sor_detector: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
     coverage = {
         "CPM-RO-001": _cpm_coverage(cpm_facts),
         "MPG-001": _watcher_coverage(mpg_watcher),
-        "SOR-001": _watcher_coverage(sor_evidence),
+        "SOR-001": _sor_coverage(sor_evidence, sor_detector or {}),
     }
     strategy_rows = [
         _strategy_parity_row(row, coverage.get(str(row.get("strategy_group_id") or ""), {}))
@@ -199,6 +205,8 @@ def _event_reproduced(event: dict[str, Any], coverage: dict[str, Any]) -> bool:
             and gate.get("required_facts_replay_shape_present") is True
             and gate.get("would_reach_action_time_boundary") is True
         )
+    if coverage.get("requires_per_symbol_facts") is True:
+        return False
     return (
         coverage.get("detector_or_watcher_ready") is True
         and symbol in set(coverage.get("symbol_scope") or [])
@@ -229,6 +237,9 @@ def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str
     elif watcher_tick_present is not True:
         blocker_class = "watcher_tick_missing"
         owner = "runtime"
+    elif coverage.get("requires_per_symbol_facts") is True and not facts:
+        blocker_class = "artifact_missing"
+        owner = "engineering"
     elif facts and _replay_live_rule_mismatch(event, facts):
         blocker_class = "replay_live_rule_mismatch"
         owner = "engineering"
@@ -382,6 +393,48 @@ def _watcher_coverage(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sor_coverage(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, Any]:
+    watcher = _as_dict(evidence.get("watcher_scope"))
+    detector_rows = [
+        row
+        for row in detector.get("symbol_detector_rows") or []
+        if isinstance(row, dict)
+    ]
+    evidence_ready = (
+        evidence.get("runtime_artifact_ready") is True
+        or evidence.get("status") == "runtime_activation_evidence_ready"
+    )
+    detector_ready = detector.get("status") == "sor_session_detector_facts_ready"
+    ready = evidence_ready and detector_ready
+    symbol_scope = watcher.get("symbol_scope") or [
+        str(row.get("symbol") or "")
+        for row in detector_rows
+        if str(row.get("symbol") or "")
+    ]
+    per_symbol_facts = _sor_per_symbol_facts(
+        detector_rows=detector_rows,
+        detector_attached=ready,
+    )
+    return {
+        "detector_source": detector.get("detector_source_mode") or evidence.get("scope"),
+        "detector_attached": ready,
+        "watcher_tick_present": any(
+            row.get("watcher_tick_present") is True
+            for row in per_symbol_facts.values()
+        ),
+        "computed": any(row.get("computed") is True for row in per_symbol_facts.values()),
+        "detector_or_watcher_ready": ready,
+        "requires_per_symbol_facts": True,
+        "symbol_scope": symbol_scope,
+        "primary_live_submit_scope": watcher.get("primary_live_submit_symbol_scope") or [],
+        "readonly_symbols": watcher.get("expanded_readonly_watcher_symbols") or [],
+        "scoped_live_observation_proposal_symbols": (
+            watcher.get("scoped_live_observation_proposal_symbols") or []
+        ),
+        "per_symbol_facts": per_symbol_facts,
+    }
+
+
 def _cpm_per_symbol_facts(live_detector: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for row in live_detector.get("per_symbol_signal_facts") or []:
@@ -404,6 +457,41 @@ def _cpm_per_symbol_facts(live_detector: dict[str, Any]) -> dict[str, dict[str, 
             "failed_facts": failed_facts,
             "live_fact_names": sorted(trigger_facts.keys()),
             "timeframe": row.get("timeframe"),
+        }
+    return rows
+
+
+def _sor_per_symbol_facts(
+    *,
+    detector_rows: list[dict[str, Any]],
+    detector_attached: bool,
+) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in detector_rows:
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        failed_facts = _string_list(row.get("missing_required_trigger_facts"))
+        candle_tick_present = bool(row.get("latest_candle_close_time_utc")) and (
+            "opening_range_available" not in failed_facts
+        )
+        public_facts_ready = row.get("public_facts_ready") is True
+        watcher_tick_present = public_facts_ready and candle_tick_present
+        computed = watcher_tick_present
+        rows[symbol] = {
+            "detector_attached": detector_attached,
+            "watcher_tick_present": watcher_tick_present,
+            "computed": computed,
+            "fresh_signal_present": row.get("fresh_session_range_signal") is True,
+            "failed_facts": failed_facts if computed else [],
+            "live_fact_names": [
+                "breakout_level_crossed",
+                "follow_through_confirmed",
+                "invalidation_level_held",
+                "opening_range_available",
+                "public_facts_ready",
+            ],
+            "timeframe": row.get("timeframe") or "15m_closed",
         }
     return rows
 

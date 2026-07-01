@@ -73,6 +73,16 @@ def _sor_detector() -> dict:
             "fresh_session_signal_count": 0,
             "first_blocker": "fresh_sor_session_range_signal_absent",
         },
+        "symbol_detector_rows": [
+            {
+                "symbol": "SOLUSDT",
+                "fresh_session_range_signal": False,
+            },
+            {
+                "symbol": "AVAXUSDT",
+                "fresh_session_range_signal": False,
+            },
+        ],
     }
 
 
@@ -90,8 +100,10 @@ def test_fresh_signal_boundary_stops_before_finalgate_and_orders():
     )
 
     cpm = artifact["strategy_rows"][0]
+    assert cpm["symbol"] == "ETHUSDT"
     assert cpm["fresh_signal_present"] is True
     assert cpm["first_blocker"] == "private_action_time_facts_required"
+    assert cpm["action_time_path_ready"] is True
     assert cpm["would_enter_finalgate_if_private_facts_ready"] is True
     assert cpm["post_action_expected_state"] == "action_time_finalgate_boundary_ready"
     checks = artifact["checks"]
@@ -142,6 +154,8 @@ def test_sor_boundary_uses_session_detector_first_blocker():
     )
 
     sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
+    assert sor["symbol"] == "SOLUSDT"
     assert sor["fresh_signal_present"] is False
     assert sor["first_blocker"] == "fresh_sor_session_range_signal_absent"
     assert sor["blocker_owner"] == "market"
+    assert sor["action_time_path_ready"] is True

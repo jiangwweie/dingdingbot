@@ -1106,6 +1106,9 @@ def build_local_monitor_sequence_report(
         sor_runtime_activation_evidence_json = (
             cpm_parent / DEFAULT_SOR_RUNTIME_ACTIVATION_EVIDENCE_JSON.name
         )
+        sor_session_detector_facts_json = (
+            cpm_parent / DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON.name
+        )
     else:
         binance_usdm_public_facts_json = DEFAULT_BINANCE_USDM_PUBLIC_FACTS_JSON
         binance_usdm_public_facts_md = DEFAULT_BINANCE_USDM_PUBLIC_FACTS_MD
@@ -1115,6 +1118,7 @@ def build_local_monitor_sequence_report(
         sor_runtime_activation_evidence_json = (
             DEFAULT_SOR_RUNTIME_ACTIVATION_EVIDENCE_JSON
         )
+        sor_session_detector_facts_json = DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON
     runner = command_runner or _run_command
     steps: list[dict[str, Any]] = []
 
@@ -1552,7 +1556,7 @@ def build_local_monitor_sequence_report(
         _run_step(
             "sor_session_scope_detector",
             sor_session_scope_detector_command,
-            DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON,
+            sor_session_detector_facts_json,
             runner,
         )
     )
@@ -1593,7 +1597,7 @@ def build_local_monitor_sequence_report(
         "--sor-evidence-json",
         str(sor_runtime_activation_evidence_json),
         "--sor-detector-json",
-        str(DEFAULT_SOR_SESSION_DETECTOR_FACTS_JSON),
+        str(sor_session_detector_facts_json),
         "--output-json",
         str(strategy_fresh_signal_action_time_boundary_json),
         "--output-owner-progress",
@@ -1619,6 +1623,8 @@ def build_local_monitor_sequence_report(
         str(DEFAULT_MPG_EXPANDED_WATCHER_FACTS_JSON),
         "--sor-evidence-json",
         str(sor_runtime_activation_evidence_json),
+        "--sor-detector-json",
+        str(sor_session_detector_facts_json),
         "--output-json",
         str(replay_live_parity_audit_json),
         "--output-owner-progress",

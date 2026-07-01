@@ -39,6 +39,12 @@ def _event(symbol: str, *, boundary: bool = True) -> dict:
     }
 
 
+def _sor_event(symbol: str, *, boundary: bool = True) -> dict:
+    event = _event(symbol, boundary=boundary)
+    event["strategy_group_id"] = "SOR-001"
+    return event
+
+
 def _cpm_event(symbol: str, *, replay_required_facts: list[str] | None = None) -> dict:
     event = _event(symbol)
     event["strategy_group_id"] = "CPM-RO-001"
@@ -126,6 +132,55 @@ def _mpg_watcher_with_op_scope_proposal() -> dict:
         }
     ]
     return watcher
+
+
+def _sor_evidence() -> dict:
+    return {
+        "status": "runtime_activation_evidence_ready",
+        "runtime_artifact_ready": True,
+        "candidate_evidence_shape_ready": True,
+        "fresh_signal_rehearsal_ready": True,
+        "watcher_scope": {
+            "symbol_scope": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT"],
+            "primary_live_submit_symbol_scope": ["BTCUSDT", "ETHUSDT"],
+            "expanded_readonly_watcher_symbols": ["SOLUSDT", "AVAXUSDT"],
+            "source": "binance_usdm_public_facts_readonly",
+        },
+    }
+
+
+def _sor_detector_row(
+    symbol: str,
+    *,
+    latest_candle: bool = True,
+    fresh: bool = False,
+    failed: list[str] | None = None,
+) -> dict:
+    failed = failed if failed is not None else ([] if fresh else ["breakout_level_crossed"])
+    return {
+        "symbol": symbol,
+        "timeframe": "15m_closed",
+        "public_facts_ready": True,
+        "latest_candle_close_time_utc": (
+            "2026-06-30T01:59:59+00:00" if latest_candle else None
+        ),
+        "fresh_session_range_signal": fresh,
+        "missing_required_trigger_facts": failed,
+    }
+
+
+def _sor_detector(*rows: dict) -> dict:
+    return {
+        "status": "sor_session_detector_facts_ready",
+        "detector_source_mode": "binance_usdm_public_closed_candles",
+        "symbol_detector_rows": list(rows),
+        "summary": {
+            "fresh_session_signal_count": sum(
+                1 for row in rows if row.get("fresh_session_range_signal") is True
+            ),
+            "first_blocker": "fresh_sor_session_range_signal_absent",
+        },
+    }
 
 
 def _trigger_facts(*failed: str) -> dict:
@@ -230,6 +285,126 @@ def test_replay_live_parity_reclassifies_mpg_scope_proposal_without_public_tick(
     assert op_row["computed"] is True
     assert "binance_usdm_public_facts_missing_or_stale" in op_row["failed_facts"]
     assert op_row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_replay_live_parity_reclassifies_sor_missing_candles_as_watcher_tick_missing():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay={
+            "strategy_rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "path_id": "SOR-SESSION-BREAKOUT",
+                    "window_results": [
+                        {
+                            "window_days": 3,
+                            "counterfactual_events": [_sor_event("SOLUSDT")],
+                        }
+                    ],
+                }
+            ]
+        },
+        cpm_facts={},
+        mpg_watcher={},
+        sor_evidence=_sor_evidence(),
+        sor_detector=_sor_detector(
+            _sor_detector_row(
+                "SOLUSDT",
+                latest_candle=False,
+                failed=[
+                    "opening_range_available",
+                    "breakout_level_crossed",
+                ],
+            )
+        ),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    symbol_row = artifact["per_symbol_mismatch_table"][0]
+    assert symbol_row["strategy_group_id"] == "SOR-001"
+    assert symbol_row["symbol"] == "SOLUSDT"
+    assert symbol_row["blocker_class"] == "watcher_tick_missing"
+    assert symbol_row["detector_attached"] is True
+    assert symbol_row["watcher_tick_present"] is False
+    assert symbol_row["computed"] is False
+    assert symbol_row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_replay_live_parity_reclassifies_sor_false_session_facts_as_computed_not_satisfied():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay={
+            "strategy_rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "path_id": "SOR-SESSION-BREAKOUT",
+                    "window_results": [
+                        {
+                            "window_days": 3,
+                            "counterfactual_events": [_sor_event("SOLUSDT")],
+                        }
+                    ],
+                }
+            ]
+        },
+        cpm_facts={},
+        mpg_watcher={},
+        sor_evidence=_sor_evidence(),
+        sor_detector=_sor_detector(
+            _sor_detector_row(
+                "SOLUSDT",
+                failed=[
+                    "breakout_level_crossed",
+                    "follow_through_confirmed",
+                ],
+            )
+        ),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    symbol_row = artifact["per_symbol_mismatch_table"][0]
+    assert symbol_row["blocker_class"] == "computed_not_satisfied"
+    assert symbol_row["detector_attached"] is True
+    assert symbol_row["watcher_tick_present"] is True
+    assert symbol_row["computed"] is True
+    assert symbol_row["failed_facts"] == [
+        "breakout_level_crossed",
+        "follow_through_confirmed",
+    ]
+
+
+def test_replay_live_parity_requires_sor_per_symbol_detector_facts():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay={
+            "strategy_rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "path_id": "SOR-SESSION-BREAKOUT",
+                    "window_results": [
+                        {
+                            "window_days": 3,
+                            "counterfactual_events": [_sor_event("AVAXUSDT")],
+                        }
+                    ],
+                }
+            ]
+        },
+        cpm_facts={},
+        mpg_watcher={},
+        sor_evidence=_sor_evidence(),
+        sor_detector=_sor_detector(_sor_detector_row("SOLUSDT", fresh=True)),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    row = artifact["strategy_rows"][0]
+    assert row["live_detector_reproduced_count"] == 0
+    symbol_row = artifact["per_symbol_mismatch_table"][0]
+    assert symbol_row["symbol"] == "AVAXUSDT"
+    assert symbol_row["blocker_class"] == "artifact_missing"
 
 
 def test_replay_live_parity_never_marks_unreproduced_signal_as_market_wait():

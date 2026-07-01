@@ -3109,6 +3109,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert replay_live_parity_command[
         replay_live_parity_command.index("--output-owner-progress") + 1
     ] == str(tmp_path / "replay-live-parity.md")
+    assert "--sor-detector-json" in replay_live_parity_command
+    assert replay_live_parity_command[
+        replay_live_parity_command.index("--sor-detector-json") + 1
+    ] == str(tmp_path / "latest-sor-session-detector-facts.json")
     assert len(mi_trial_admission_commands) == 1
     mi_trial_admission_command = mi_trial_admission_commands[0]
     assert mi_trial_admission_command[
