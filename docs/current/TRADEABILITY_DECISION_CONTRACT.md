@@ -2,7 +2,7 @@
 title: TRADEABILITY_DECISION_CONTRACT
 status: CURRENT
 authority: docs/current/TRADEABILITY_DECISION_CONTRACT.md
-last_verified: 2026-06-23
+last_verified: 2026-07-01
 ---
 
 # Tradeability Decision Contract
@@ -33,6 +33,11 @@ experiment-worthy strategy asset
 The decision is a thin read model. It is not a ledger, strategy registry, policy
 store, FinalGate input, Operation Layer input, or exchange-write authority.
 
+Blocker classification follows
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. Tradeability rows may use
+product-level decisions such as `not_tradable_market_wait`, but the
+`first_blocker_class` must be a precise contract class.
+
 ## Core Rule
 
 Every active or newly absorbed StrategyGroup candidate must have exactly one
@@ -47,14 +52,15 @@ not_tradable with one first blocker
 The first blocker must be the earliest missing state on the path to trading. Do
 not collapse unrelated blockers into `waiting_for_market`. A missing fresh
 signal is the first blocker only after the strategy asset is admitted, scoped,
-armed, and facts can be assembled when a signal appears.
+armed, detector-attached, watcher-fed, fact-computed, blocker-classified, and
+ready to continue to action-time facts when a signal appears.
 
 ## Decision Values
 
 | Decision | Meaning | First owner |
 | --- | --- | --- |
 | `tradable_now` | Current fresh signal may continue through the official real-order chain | Runtime |
-| `not_tradable_market_wait` | Strategy is admitted, scoped, armed, and only lacks a fresh eligible signal | Market |
+| `not_tradable_market_wait` | Strategy is admitted, scoped, armed, detector-attached, watcher-fed, fact-computed, action-time-path ready, and only lacks a fresh eligible signal | Market |
 | `not_tradable_asset_admission` | Strategy is not yet a final-owned runtime asset or trial candidate | Engineering |
 | `not_tradable_policy` | Owner capital, profile, symbol/side, leverage scenario, risk unit, attempt cap, or stage policy is missing | Owner |
 | `not_tradable_facts` | RequiredFacts, source mapping, freshness, or fact validation is missing before action-time gating can be trusted | Engineering |
@@ -167,6 +173,25 @@ Promotion decisions must carry a scope:
 `promote` without scope is ambiguous and should be treated as invalid for new
 artifacts.
 
+## Blocker Mapping
+
+Tradeability product decisions must map to blocker classes before planning or
+task acceptance:
+
+| Decision | Valid blocker classes |
+| --- | --- |
+| `not_tradable_market_wait` | `market_wait_validated`, `computed_not_satisfied` |
+| `not_tradable_asset_admission` | `artifact_missing`, `schema_invalid`, `scope_not_attached` |
+| `not_tradable_policy` | `policy_scope_missing` |
+| `not_tradable_facts` | `artifact_missing`, `schema_invalid`, `detector_not_attached`, `watcher_tick_missing`, `computed_not_satisfied`, `replay_live_rule_mismatch` |
+| `not_tradable_execution_gate` | `runtime_profile_scope_missing`, `action_time_boundary_not_reproduced`, `active_position_resolution` |
+| `not_tradable_strategy_quality` | `review_only_warning`, `replay_live_rule_mismatch` |
+| `not_tradable_safety_stop` | `hard_safety_stop` |
+
+Do not emit a detector-missing class when the detector artifact exists, watcher
+input is present, and computed facts are false. That state is
+`computed_not_satisfied` unless replay/live rules disagree.
+
 ## Owner Boundary
 
 The Owner controls:
@@ -224,7 +249,8 @@ A Tradeability Decision implementation is accepted only when:
 | --- | --- |
 | One current decision | Every active selected, admitted, or intake candidate has exactly one current decision |
 | First blocker | Each non-tradable row names one first blocker and one owner |
-| Market wait precision | `not_tradable_market_wait` is used only after admission, scope, armed observation, and non-live readiness are closed |
+| Market wait precision | `not_tradable_market_wait` is used only after admission, scope, policy, detector, watcher input, facts, classification, and action-time path readiness are closed |
+| Blocker contract | `first_blocker_class` maps to `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Owner boundary | Owner intervention is true only for policy, risk, scope, promotion, downshift, pause, park, kill, or abnormal recovery |
 | No authority leakage | Research, replay, paper, decision, and policy rows never emit legacy `actionable_now` or `real_order_authority` mirror fields |
 | Monitor integration | Local monitor sequence surfaces the decision without turning internal gate names into the primary Owner interface |

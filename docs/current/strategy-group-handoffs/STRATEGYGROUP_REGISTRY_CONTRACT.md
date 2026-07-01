@@ -91,7 +91,7 @@ Each StrategyGroup registry row should define these fields:
 | `hard_blocks` | Mechanical or authority issues the Owner cannot override |
 | `required_facts_summary` | Human-readable RequiredFacts summary by market, strategy, derivatives, risk, account, exchange |
 | `promotion_gate` | Evidence needed to move to a higher tier |
-| `downshift_rule` | Conditions that downgrade tier or disable candidate preparation |
+| `downshift_rule` | Conditions that move a StrategyGroup to a lower tier or disable candidate preparation |
 | `park_rule` | Conditions that keep it inactive without deleting the idea |
 | `kill_condition` | Conditions that remove it from active strategy allocation |
 | `evidence_refs` | Links to handoff packs, replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |

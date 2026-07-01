@@ -83,11 +83,14 @@ def _replay() -> dict:
     }
 
 
-def _runtime_artifact(strategy_group_id: str, symbols: list[str]) -> dict:
+def _runtime_artifact(
+    strategy_group_id: str, symbols: list[str], next_blocker: str
+) -> dict:
     return {
         "schema": "brc.test.runtime_activation_evidence.v1",
         "status": "runtime_activation_evidence_ready",
         "strategy_group_id": strategy_group_id,
+        "next_blocker": next_blocker,
         "watcher_scope": {"symbol_scope": symbols},
         "watcher_scope_contract_ready": True,
         "required_facts_contract_ready": True,
@@ -181,10 +184,12 @@ def test_mpg_sor_count_only_when_runtime_artifacts_are_ready():
         mpg_runtime_artifact=_runtime_artifact(
             "MPG-001",
             ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "fresh_mpg_signal_or_private_action_time_facts",
         ),
         sor_runtime_artifact=_runtime_artifact(
             "SOR-001",
             ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT"],
+            "fresh_sor_signal_or_private_action_time_facts",
         ),
         generated_at_utc="2026-06-30T00:00:00+00:00",
     )
@@ -195,7 +200,13 @@ def test_mpg_sor_count_only_when_runtime_artifacts_are_ready():
     assert artifact["summary"]["action_time_boundary_ready_count"] == 3
     rows = {row["strategy_group_id"]: row for row in artifact["activation_rows"]}
     assert rows["MPG-001"]["runtime_artifact_ready"] is True
+    assert rows["MPG-001"]["exact_next_blocker"] == (
+        "fresh_mpg_signal_or_private_action_time_facts"
+    )
     assert rows["SOR-001"]["runtime_artifact_ready"] is True
+    assert rows["SOR-001"]["exact_next_blocker"] == (
+        "fresh_sor_signal_or_private_action_time_facts"
+    )
     assert rows["MI-001"]["formal_replay_review_opened"] is True
     assert rows["MI-001"]["runtime_artifact_ready"] is False
 

@@ -2,7 +2,7 @@
 title: GOAL_MODE_TASK_PACKET_CONTRACT
 status: CURRENT
 authority: docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
-last_verified: 2026-06-20
+last_verified: 2026-07-01
 ---
 
 # Goal Mode Task Packet Contract
@@ -15,6 +15,17 @@ bounded execution work for the main runtime window.
 The contract exists to reduce repeated Owner intervention. It does not replace
 current code, runtime gates, FinalGate, Operation Layer, live RequiredFacts, or
 Owner policy.
+
+Goal-mode work now uses the Live Enablement blocker model in
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. A task must move a selected
+StrategyGroup + symbol lane forward, or prove the exact blocker that prevents
+forward movement. Explanation-only, artifact-only, and no-trade narrative tasks
+are not complete.
+
+Goal-mode work must also obey
+`docs/current/WIP_AND_STOP_RULE_CONTRACT.md` and, when it affects daily status,
+must update the shape defined by
+`docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`.
 
 ## Operating Split
 
@@ -45,6 +56,12 @@ A Goal Packet must include:
 | `Goal` | One outcome the execution window must produce |
 | `Why` | Which project capability this advances |
 | `Problem class` | The engineering problem class this task closes |
+| `Chain position` | One of `replay_live_parity`, `tradeability_first_blocker`, `symbol_scope_decision`, `action_time_boundary`, or `daily_live_enablement_status` |
+| `Live Enablement State Before` | Current StrategyGroup + symbol lane state before work starts |
+| `Live Enablement State After` | Expected state after work succeeds |
+| `Blocker removed or reclassified` | Exact blocker class from `BLOCKER_CLASSIFICATION_CONTRACT.md` |
+| `Per-symbol / per-fact acceptance` | Required blocker matrix for detector, watcher, facts, scope, and replay/live parity when applicable |
+| `Stop condition` | Condition from `WIP_AND_STOP_RULE_CONTRACT.md` that exits or halts the lane |
 | `Capability unlocked` | The concrete system capability that must exist after the task |
 | `Next engineering bottleneck` | The next problem class expected after this task completes |
 | `Scope` | Included work and explicit non-goals |
@@ -73,6 +90,12 @@ The execution window must report:
 | `Validation` | Commands run and pass/fail result |
 | `Authority boundary` | Confirmation that no unauthorized live authority was introduced |
 | `Deploy state` | not deployed, local only, deployed, or deploy blocked |
+| `Chain position` | The chain-position lane the work served |
+| `Live Enablement state before` | Actual starting state of the lane |
+| `Live Enablement state after` | Actual resulting state of the lane |
+| `Blocker removed or reclassified` | Exact old blocker and exact new blocker/state |
+| `Per-symbol / per-fact evidence` | Matrix proving detector, watcher, computed facts, failed facts, scope, and next action when relevant |
+| `Stop condition` | Whether the lane continues, exits mainline, waits for Owner, or stops for safety |
 | `Decision impact` | Which StrategyGroup decision, runtime capability, or Owner surface changed |
 | `Capability unlocked` | The concrete capability now available and how it was verified |
 | `Closed engineering problem` | The engineering problem class closed by this task |
@@ -82,7 +105,8 @@ The execution window must report:
 
 ## Capability-First Goal Mode
 
-Goal-mode work must be capability-first, not artifact-first.
+Goal-mode work must be Live Enablement first, capability second, and artifact
+third.
 
 Every non-trivial Goal Packet must close one engineering problem class and move
 the system to the next problem class. A task that only explains why the project
@@ -108,11 +132,19 @@ Examples:
 | Submit lifecycle incomplete | Submit/reject/partial/timeout/protection branches are handled locally | Reconciliation and settlement |
 | Reconciliation unclear | Position, order, protection, budget, and PnL are reviewable | Review Ledger decision feedback |
 
-Do not use `waiting_for_market` as a generic answer for engineering gaps. Fresh
+Do not use `waiting_for_market`, `fresh_signal_absent`, `missing_fact`, or
+`live_detector_artifact_missing` as generic answers for engineering gaps. Fresh
 market signal, action-time facts, and live outcome calibration may remain
-market-dependent, but fact mapping, classifier repair, replay coverage, monitor
+market-dependent, but detector attachment, watcher input, fact mapping,
+classifier repair, replay/live rule parity, action-time rehearsal, monitor
 integration, lifecycle handling, reconciliation shape, and review feedback are
 engineering work.
+
+`market_wait_validated` is complete only when the Evidence Packet proves
+admission, scope, policy, detector, watcher input, computed facts, blocker
+classification, and action-time path readiness for the selected lane. If facts
+were computed and failed, the blocker is `computed_not_satisfied`, not missing
+detector.
 
 Small-capital execution frictions such as fill probability, slippage, reject,
 partial fill, protection acceptance, and PnL calculation should be handled as
@@ -178,7 +210,10 @@ promote/downshift/park/kill, production transition, or abnormal intervention.
 | Work type | Accepted when |
 | --- | --- |
 | `P0 live-path work` | It advances fresh-signal closure, RequiredFacts, candidate/auth, FinalGate, Operation Layer, protection, reconciliation, settlement, or review |
-| `Signal Observation grade strategy-learning work` | It changes Strategy Asset State pre-live evidence, replay-to-review evidence, no-action attribution, or monitor sequence |
+| `Live Enablement blocker work` | It removes or precisely reclassifies detector, watcher, facts, replay/live parity, scope, policy, runtime-profile, action-time, or safety blockers for a selected lane |
+| `Daily Live Enablement table work` | It updates the one-row-per-WIP-lane table with first blocker, evidence, next action, and stop condition |
+| `WIP stop-rule work` | It exits, replaces, or narrows a lane under the WIP contract |
+| `Signal Observation grade strategy-learning work` | It changes Strategy Asset State pre-live evidence only when that evidence produces a scoped live-enable proposal, a revise/park/kill/go-live decision, or a precise blocker |
 | `P1 governance work` | It clarifies tier movement, StrategyGroup registry state, Owner policy, or promotion/downshift/park/kill decisions |
 | `docs work` | It changes a real decision, source authority, task boundary, or Owner interpretation burden |
 
@@ -187,6 +222,11 @@ artifacts is not mainline unless it replaces and reduces an older surface.
 
 Work that only identifies a missing capability without closing it or converting
 it into a machine-checkable next bottleneck is `partial`, not `completed`.
+
+Read-only watcher expansion is not a completion milestone by itself. It must
+produce a live-scope proposal, prove `scope_not_attached`, prove
+`computed_not_satisfied`, prove `replay_live_rule_mismatch`, or be explicitly
+kept outside the current live-submit advancement lane.
 
 ## Fresh Signal Interrupt
 

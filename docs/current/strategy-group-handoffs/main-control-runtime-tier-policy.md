@@ -1,7 +1,7 @@
 # Main-Control Runtime Tier Policy
 
 Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-23
+Last updated: 2026-07-01
 
 ## Purpose
 
@@ -19,7 +19,10 @@ Tradeability evaluation follows
 `docs/current/TRADEABILITY_DECISION_CONTRACT.md`: a candidate that is not yet in
 the registry or runtime tier policy is blocked by asset admission, not by the
 market. `waiting_for_market` is only accurate after final-owned admission,
-scoped policy, armed observation, and non-live readiness are closed.
+scoped policy, armed observation, detector attachment, watcher input, fact
+computation, blocker classification, and non-live action-time path readiness are
+closed. Blocker names follow
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 
 ## Tier Definitions
 
@@ -97,9 +100,9 @@ StrategyGroup tiers do not bypass:
 
 ## StrategyGroup Decision Review
 
-StrategyGroup tier movement should now be driven by Strategy Asset State
-pre-live evidence plus replay-to-review evidence. Isolated reports do not drive
-tier movement.
+StrategyGroup tier movement should now be driven by Live Enablement blocker
+closure, Strategy Asset State pre-live evidence, and replay/live rule evidence.
+Isolated reports do not drive tier movement.
 
 | Tier decision | Required pre-live evidence |
 | --- | --- |

@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-23
+last_verified: 2026-07-01
 ---
 
 # AI Agent Constraints
@@ -58,6 +58,10 @@ unit, attempt cap, protection, and pause rules. Runtime leverage authority still
 comes only from the selected profile and action-time exchange facts.
 
 Strategy tradeability uses `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
+Blocker naming uses `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
+Daily management uses
+`docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`, and active
+lane limits use `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 Agents must not stop at "research absorbed", "artifact ready", or
 "waiting_for_market" when a strategy still cannot trade. Every active selected,
 admitted, or newly absorbed candidate must expose:
@@ -69,11 +73,13 @@ admitted, or newly absorbed candidate must expose:
 - the exact next action;
 - the state expected after that action.
 
-Do not classify a candidate as `not_tradable_market_wait` unless asset
-admission, scoped Owner policy, runtime observation scope, and non-live
-readiness are already closed. A strategy such as a research-side short
-candidate may be `tiny_live_intake_candidate` and still have the first blocker
-`asset_admission`.
+Do not classify a candidate as `not_tradable_market_wait` or
+`market_wait_validated` unless asset admission, scoped Owner policy, runtime
+observation scope, detector attachment, watcher input, fact computation,
+blocker classification, and non-live action-time path readiness are already
+closed. A strategy such as a research-side short candidate may be
+`tiny_live_intake_candidate` and still have an earlier admission or scope
+blocker.
 
 ## Global Authority Model
 
@@ -103,21 +109,27 @@ the Owner to manually judge RequiredFacts, fresh signal, candidate/auth,
 FinalGate, Operation Layer, replay samples, no-action rows, or ordinary
 in-boundary execution steps.
 
-If the remaining gap is engineering work, fact mapping, classifier repair,
-replay coverage, monitor integration, or runtime readiness, continue the
-engineering path. Escalate only for Owner policy, tier, capital/profile/scope,
-pause/resume, promote/downshift/park/kill, production transition, or abnormal
-intervention.
+If the remaining gap is engineering work, detector attachment, watcher input,
+fact mapping, classifier repair, replay/live rule parity, action-time rehearsal,
+monitor integration, or runtime readiness, continue the engineering path.
+Escalate only for Owner policy, tier, capital/profile/scope, pause/resume,
+promote/downshift/park/kill, production transition, or abnormal intervention.
 
 ## Capability-Closure Discipline
 
-Goal-mode tasks must not stop at explanation. Each task must close one
-engineering problem class, unlock one concrete capability, and expose the next
-engineering bottleneck.
+Goal-mode tasks must not stop at explanation. Each task must remove or
+reclassify one Live Enablement blocker, close one engineering problem class,
+unlock one concrete capability, and expose the next engineering bottleneck.
 
 Required evidence fields for non-trivial work:
 
+- `chain_position`;
 - `closed_engineering_problem`;
+- `live_enablement_state_before`;
+- `live_enablement_state_after`;
+- `blocker_removed_or_reclassified`;
+- `per_symbol_per_fact_evidence`;
+- `stop_condition`;
 - `capability_unlocked`;
 - `next_engineering_bottleneck`;
 - validation proving the capability works or the bottleneck is
@@ -125,8 +137,9 @@ Required evidence fields for non-trivial work:
 
 Do not mark a task complete when it only says a capability is missing. Convert
 the missing capability into code, tests, generated checks, monitor integration,
-or a precise next bottleneck. Use `partial` if the task only produced an artifact,
-summary, or diagnosis.
+or a precise next bottleneck. Use `partial` if the task only produced an
+artifact, summary, diagnosis, no-trade narrative, or read-only expansion without
+moving a lane forward.
 
 For strategy-admission work, the capability unlocked must be stated in
 tradeability language. Examples:
@@ -166,22 +179,25 @@ engineering bottleneck, but it must not grant runtime trade/order authority,
 fabricate live RequiredFacts, bypass FinalGate or Operation Layer, or create
 exchange writes.
 
-When the system is healthy but waiting for market opportunity, agents should
-not treat `waiting_for_market` as a blocker. Non-market-dependent progress
-should happen through replay, synthetic signal fixtures, paper/simulator
-operation-layer lifecycle tests, post-submit simulation, and cost/slippage
-review inputs. Synthetic and replay signals must never be represented as live
-market signals and must never feed a real Operation Layer submit.
+When the system is healthy but waiting for market opportunity, agents may use
+`market_wait_validated` only after the blocker contract checklist is satisfied.
+Non-market-dependent progress should happen through detector attachment,
+watcher integration, per-symbol / per-fact classification, replay/live rule
+calibration, synthetic signal fixtures, paper/simulator operation-layer
+lifecycle tests, post-submit simulation, and cost/slippage review inputs.
+Synthetic and replay signals must never be represented as live market signals
+and must never feed a real Operation Layer submit.
 
-After the P0 runtime path is live-ready, the main non-market work is
-StrategyGroup learning, not report decoration. Agents should turn high-priority
-no-action and would-enter observations into replay-to-review decisions:
+The main non-market work is Live Enablement blocker removal, not report
+decoration. Agents should turn high-priority no-action and would-enter
+observations into blocker-classified decisions:
 
 ```text
 observation
--> reason codes
--> replay coverage
--> classifier / facts / freshness / cost / tier gap
+-> per-symbol / per-fact blocker matrix
+-> detector / watcher / scope / policy / runtime-profile closure
+-> replay/live rule or computed-not-satisfied classification
+-> action-time rehearsal readiness
 -> StrategyGroup keep / revise / promote / park / kill / go-live boundary decision
 ```
 
@@ -240,14 +256,15 @@ Agents must obey these constraints:
 | --- | --- |
 | Fresh signal preempts local work | If a real fresh selected StrategyGroup signal appears, pause Signal Observation grade work and return to RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer |
 | Local/deployed/planned split | Every status summary must distinguish deployed Tokyo capability, local committed capability, and planned work |
-| Strategy Asset State evidence requirement | Signal Observation grade artifacts are useful only if they change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| Strategy Asset State evidence requirement | Signal Observation grade artifacts are useful only if they move a lane forward, prove a precise blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
 | Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
 | Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity review work loop, or opportunity ledger producer over adding permanent standalone scripts |
 
 New Signal Observation grade scripts or artifacts must satisfy at least one of:
 
-- produce or consume Strategy Asset State pre-live evidence rows;
+- remove or precisely reclassify a Live Enablement blocker;
+- produce or consume Strategy Asset State pre-live evidence rows that change a lane decision;
 - feed the local monitor sequence;
 - replace and reduce older entry points;
 - create a bounded one-time migration or validation artifact with no long-term
@@ -361,20 +378,17 @@ transfers, exchange submit actions, or Operation Layer bypasses.
 
 ## Gate Behavior
 
-Every blocker must classify itself as one of:
+Every blocker must classify itself through
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 
-| Class | Meaning |
-| --- | --- |
-| `waiting_for_market` | No fresh signal exists |
-| `missing_fact` | Required fact or evidence is absent or stale |
-| `deployment_issue` | Tokyo or local deployment is behind current code |
-| `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
-| `active_position_resolution` | Position, open order, or protection state needs resolution |
-| `hard_safety_stop` | Execution would violate the safety boundary |
-| `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
+Coarse legacy labels must be translated before planning, task acceptance, code
+review, or Owner-facing summaries. `waiting_for_market`,
+`fresh_signal_absent`, `missing_fact`, and `live_detector_artifact_missing` are
+valid only when the blocker contract permits them.
 
 Gates exist to preserve bounded real-funds safety. They must not become opaque
-all-AND project blockers.
+all-AND project blockers, and they must not let explanation artifacts replace
+Live Enablement progress.
 
 Gate scope must be explicit. A live-submit gate may block only real exchange
 write or live actionability. It must not block local dry-run, simulation,
@@ -388,6 +402,10 @@ as `monitor_refresh_needed`. These states may emit `NOTIFY` to trigger a local
 or one-shot L1 refresh, but they must not populate `checks.blockers`, must not
 be reported as `hard_safety_stop`, and must not flip P0 from
 `waiting_for_market` to blocked when the runtime chain itself remains ready.
+
+When a detector artifact exists, watcher input is present, and facts were
+computed but false, classify the lane as `computed_not_satisfied`. Do not report
+it as missing detector or missing artifact.
 
 Gate classes are internal safety classifications. The main Owner surface should map
 them to one terse product sentence, for example:

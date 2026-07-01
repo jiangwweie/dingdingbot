@@ -25,9 +25,10 @@ def _load_module():
     return module
 
 
-def _public_facts() -> dict:
+def _public_facts(generated_at_utc: str = "2026-06-30T00:00:00+00:00") -> dict:
     return {
         "status": "binance_usdm_public_facts_ready",
+        "generated_at_utc": generated_at_utc,
         "symbols": [
             _symbol("BTCUSDT"),
             _symbol("ETHUSDT"),
@@ -44,6 +45,9 @@ def _symbol(symbol: str) -> dict:
         "public_facts_ready": True,
         "exchange_contract_exists": True,
         "mark_price_fresh": True,
+        "mark_price_observed_at_utc": "2026-06-29T23:59:30+00:00",
+        "mark_price_age_seconds": 30,
+        "max_mark_price_age_seconds": 300,
         "funding_not_extreme": True,
         "spread_ok": True,
         "min_notional_ok": True,
@@ -149,3 +153,26 @@ def test_scope_decision_and_cpm_path_remain_non_authority():
     assert cpm["finalgate_called"] is False
     assert cpm["operation_layer_called"] is False
     assert cpm["live_submit_allowed"] is False
+
+
+def test_stale_public_facts_do_not_make_runtime_artifacts_ready():
+    module = _load_module()
+
+    artifacts = module.build_four_candidate_runtime_activation_evidence(
+        public_facts=_public_facts(
+            generated_at_utc="2026-06-29T23:00:00+00:00"
+        ),
+        replay=_replay(),
+        cpm_capture={"current_signal_state": "fresh_signal_absent"},
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    mpg = artifacts["mpg"]
+    sor = artifacts["sor"]
+    cpm = artifacts["cpm_fresh_path"]
+    assert mpg["runtime_artifact_ready"] is False
+    assert sor["runtime_artifact_ready"] is False
+    assert mpg["checks"]["public_facts_artifact_fresh"] is False
+    assert mpg["next_blocker"] == "binance_usdm_public_facts_stale_or_unavailable"
+    assert cpm["public_fact_path_ready"] is False
+    assert cpm["next_blocker"] == "binance_usdm_public_facts_stale_or_unavailable"

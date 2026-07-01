@@ -1,7 +1,7 @@
 # CLAUDE.md - BRC Claude Worker Guide
 
-Last updated: 2026-06-20
-Current phase: StrategyGroup runtime-governance pilot
+Last updated: 2026-07-01
+Current phase: StrategyGroup live-enablement pilot
 
 ## Role
 
@@ -21,6 +21,9 @@ AGENTS.md
 docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
+docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
+docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
 docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
@@ -44,14 +47,14 @@ policy, Decision Ledger, or an explicit Codex-issued task card.
 
 ## Current Product Direction
 
-The current target is a StrategyGroup runtime-governance pilot:
+The current target is a StrategyGroup live-enablement pilot:
 
 ```text
-Owner selects a StrategyGroup
--> runtime admission
--> armed observation
--> fresh strategy signal
--> RequiredFacts readiness
+select StrategyGroup + symbol lane
+-> classify the earliest blocker precisely
+-> remove detector / watcher / facts / scope / policy / runtime-profile blockers
+-> reach market_wait_validated only after non-market blockers are closed
+-> on fresh signal refresh action-time facts
 -> candidate / authorization evidence
 -> action-time FinalGate
 -> official Operation Layer
@@ -71,14 +74,13 @@ into lower leverage, lower exposure, smaller notional, or slower eligible
 submits for caution. Stop only for explicit authority or mechanical boundaries
 listed below.
 
-Current mainline work after the P0 live path is ready is StrategyGroup learning:
-turn high-priority no-action and would-enter observations into replay-to-review
-decisions, then into minimal StrategyGroup Decision Ledger rows. The ledger
-contract remains at `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` for
-compatibility. Claude tasks in this area must keep all rows non-executing and
-must not treat replay, synthetic fixtures, or observe-only evidence as live
-signals, live RequiredFacts, FinalGate input, Operation Layer evidence, or
-real-order authority.
+Current mainline work is Live Enablement. Claude tasks must remove or precisely
+reclassify the earliest blocker on a selected StrategyGroup + symbol lane.
+Replay, synthetic fixtures, observe-only evidence, no-action rows, and read-only
+watcher expansion are valid only when they produce per-symbol / per-fact blocker
+evidence or a scoped live-enable proposal. They must not become live signals,
+live RequiredFacts, FinalGate input, Operation Layer evidence, or real-order
+authority.
 
 ## Authority Model For Worker Tasks
 
@@ -96,8 +98,9 @@ park/kill, scoped risk acceptance, capital/profile/scope changes, and
 production-stage transition.
 
 Claude task execution should keep engineering progress moving when the remaining
-gap is fact mapping, classifier repair, replay coverage, monitor integration,
-runtime readiness, or another non-authority implementation defect.
+gap is detector attachment, watcher tick/input, fact mapping, classifier repair,
+replay/live rule parity, action-time rehearsal, monitor integration, runtime
+readiness, or another non-authority implementation defect.
 
 Do not reinterpret those engineering gaps as a request for the Owner to manually
 judge RequiredFacts, fresh signal validity, candidate/auth evidence, FinalGate,
@@ -146,6 +149,12 @@ Allowed files
 Forbidden files
 Requirements
 Global Authority Model
+Chain Position
+Live Enablement State Before
+Live Enablement State After
+Blocker Removed Or Reclassified
+Per-Symbol / Per-Fact Acceptance
+Stop Condition
 Capability Unlocked
 Next Engineering Bottleneck
 Rehearsal/Simulation Boundary

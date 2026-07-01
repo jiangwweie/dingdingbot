@@ -117,7 +117,7 @@ path risk known
 -> review required
 ```
 
-Hard safety and authority gates are not downgradable by trial-grade status.
+Hard safety and authority gates cannot be weakened by trial-grade status.
 Examples include wrong account or profile, stale action-time facts, missing
 protection, duplicate-submit risk, conflicting exposure, FinalGate bypass,
 Operation Layer bypass, exchange-write bypass, withdrawal or transfer,

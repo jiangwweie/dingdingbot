@@ -486,6 +486,7 @@ def _runtime_artifact_readiness(
     runtime_ready = all(
         [watcher_ready, required_ready, candidate_ready, rehearsal_ready]
     )
+    artifact_next_blocker = str(artifact.get("next_blocker") or "").strip()
     return {
         "source": source,
         "runtime_artifact_ready": runtime_ready,
@@ -494,7 +495,7 @@ def _runtime_artifact_readiness(
         "candidate_evidence_shape_ready": candidate_ready,
         "fresh_signal_rehearsal_ready": rehearsal_ready,
         "next_blocker": (
-            "binance_usdm_runtime_artifact_ready"
+            artifact_next_blocker or "fresh_signal_or_private_action_time_facts"
             if runtime_ready
             else "runtime_watcher_facts_rehearsal_artifact_missing_or_incomplete"
         ),

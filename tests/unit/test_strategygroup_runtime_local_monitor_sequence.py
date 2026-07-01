@@ -434,6 +434,29 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
             },
         )
         return True
+    if script == "fetch_binance_usdm_public_facts.py":
+        _write_output(
+            command,
+            {
+                "status": "binance_usdm_public_facts_ready",
+                "generated_at_utc": "2026-06-30T00:00:00+00:00",
+                "summary": {
+                    "symbol_count": 5,
+                    "ready_symbol_count": 5,
+                    "public_fact_max_age_seconds": 300,
+                },
+                "checks": {
+                    "public_facts_ready": True,
+                    "exchange_write": False,
+                    "order_created": False,
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_binance_usdm_public_facts",
+                },
+            },
+        )
+        return True
     if script == "build_four_candidate_runtime_activation_evidence.py":
         output_dir = Path(command[command.index("--output-dir") + 1])
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -495,6 +518,120 @@ def _write_ready_cpm_artifact(command: list[str], script: str) -> bool:
                 }
             ),
             encoding="utf-8",
+        )
+        return True
+    if script == "build_sor_session_scope_detector.py":
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "latest-sor-session-detector-facts.json").write_text(
+            json.dumps(
+                {
+                    "status": "sor_session_detector_facts_ready",
+                    "fresh_session_signal_count": 0,
+                    "first_blocker": "computed_not_satisfied",
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_sor_session_detector",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return True
+    if script == "build_mpg_high_beta_scope_readiness.py":
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "latest-mpg-action-time-facts-readiness.json").write_text(
+            json.dumps(
+                {
+                    "status": "mpg_action_time_facts_readiness_ready",
+                    "interaction": {
+                        **base_interaction,
+                        "level": "L0_local_mpg_high_beta_scope_readiness",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return True
+    if script == "build_strategy_fresh_signal_action_time_boundary.py":
+        _write_output(
+            command,
+            {
+                "status": "strategy_fresh_signal_action_time_boundary_ready",
+                "summary": {
+                    "fresh_signal_present_count": 0,
+                    "would_enter_finalgate_if_private_facts_ready_count": 0,
+                    "live_submit_allowed_count": 0,
+                },
+                "checks": {
+                    "calls_finalgate": False,
+                    "calls_operation_layer": False,
+                    "calls_exchange_write": False,
+                    "order_created": False,
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_strategy_fresh_signal_action_time_boundary",
+                },
+            },
+        )
+        return True
+    if script == "build_replay_live_parity_audit.py":
+        _write_output(
+            command,
+            {
+                "status": "replay_live_parity_audit_ready",
+                "summary": {
+                    "replay_signal_count": 4,
+                    "live_detector_reproduced_count": 0,
+                    "mismatch_count": 4,
+                    "mismatch_reason_policy": (
+                        "replay_signal_without_live_reproduction_is_not_market_wait"
+                    ),
+                },
+                "per_symbol_mismatch_table": [
+                    {
+                        "strategy_group_id": "CPM-RO-001",
+                        "symbol": "ETHUSDT",
+                        "detector_attached": True,
+                        "watcher_tick_present": True,
+                        "computed": True,
+                        "failed_facts": [
+                            "htf_trend_intact",
+                            "reclaim_confirmed",
+                        ],
+                        "blocker_class": "computed_not_satisfied",
+                        "next_action": (
+                            "continue_observation_with_failed_fact_matrix"
+                        ),
+                        "mismatch_count": 1,
+                    }
+                ],
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_replay_live_parity_audit",
+                },
+            },
+        )
+        return True
+    if script == "build_mi_trial_admission_decision.py":
+        _write_output(
+            command,
+            {
+                "status": "mi_trial_admission_decision_ready",
+                "trial_admission_decision": "trial_asset_admission_candidate",
+                "promotion_scope": "trial_admission",
+                "tradeability": {
+                    "can_trade_now": False,
+                    "first_blocker": "trial_admission_fact_not_integrated",
+                    "blocker_owner": "engineering",
+                },
+                "interaction": {
+                    **base_interaction,
+                    "level": "L0_local_mi_trial_admission_decision",
+                },
+            },
         )
         return True
     if script == "build_four_candidate_runtime_activation_closure.py":
@@ -2417,11 +2554,17 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_cpm_identity_routing_decision.py",
         "build_cpm_owner_trial_policy_scope.py",
         "build_cpm_required_facts_mapping.py",
+        "fetch_binance_usdm_public_facts.py",
         "build_cpm_runtime_signal_facts.py",
         "build_cpm_runtime_signal_capture.py",
         "build_cpm_shadow_candidate_evidence.py",
         "build_cpm_dry_run_submit_rehearsal.py",
         "build_four_candidate_runtime_activation_evidence.py",
+        "build_sor_session_scope_detector.py",
+        "build_mpg_high_beta_scope_readiness.py",
+        "build_strategy_fresh_signal_action_time_boundary.py",
+        "build_replay_live_parity_audit.py",
+        "build_mi_trial_admission_decision.py",
         "build_four_candidate_runtime_activation_closure.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
@@ -2685,6 +2828,32 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
+    replay_parity = report["replay_live_parity_audit"]
+    assert replay_parity["status"] == "replay_live_parity_audit_ready"
+    assert replay_parity["cpm_first_blocker_class"] == "computed_not_satisfied"
+    assert replay_parity["cpm_first_failed_facts"] == [
+        "htf_trend_intact",
+        "reclaim_confirmed",
+    ]
+    assert replay_parity["cpm_first_next_action"] == (
+        "continue_observation_with_failed_fact_matrix"
+    )
+    assert replay_parity["cpm_per_symbol_blocker_matrix"] == [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "ETHUSDT",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": ["htf_trend_intact", "reclaim_confirmed"],
+            "blocker_class": "computed_not_satisfied",
+            "next_action": "continue_observation_with_failed_fact_matrix",
+            "mismatch_count": 1,
+        }
+    ]
+    assert report["owner_summary"]["replay_live_parity_audit"][
+        "cpm_first_blocker_class"
+    ] == "computed_not_satisfied"
     assert report["strategy_research_intake"]["active"] is True
     assert report["strategy_research_intake"]["strategy_group_ids"] == [
         "BRF2-001",
@@ -5512,6 +5681,43 @@ def test_local_monitor_sequence_does_not_default_monitor_refresh_to_market_wait(
 
     assert status == "temporarily_unavailable_monitor_refresh_needed"
     assert runtime_status == "temporarily_unavailable"
+
+
+def test_local_monitor_sequence_classifies_binance_public_facts_gap_as_refresh() -> None:
+    module = _load_module()
+    artifacts = {
+        "daily_check": {
+            "status": "waiting_for_market",
+            "runtime_status": "waiting_for_market",
+            "owner_runtime_state": {"monitor_status": "fresh"},
+        },
+        "goal_progress": {
+            "status": "waiting_for_market",
+            "runtime_status": "waiting_for_market",
+        },
+        "binance_usdm_public_facts": {
+            "status": "binance_usdm_public_facts_unavailable",
+            "checks": {"public_facts_ready": False},
+        },
+        "completion_audit": {"status": "not_complete_waiting_for_market"},
+        "signal_coverage": {
+            "status": "mainline_no_signal_low_priority_broader_would_enter"
+        },
+    }
+    steps = [
+        {
+            "name": "binance_usdm_public_facts",
+            "returncode": 2,
+            "artifact": artifacts["binance_usdm_public_facts"],
+        }
+    ]
+
+    status = module._sequence_status(steps=steps, artifacts=artifacts)
+
+    assert module._step_returncode_is_allowed_monitor_refresh(
+        steps[0], artifacts
+    ) is True
+    assert status == "temporarily_unavailable_monitor_refresh_needed"
 
 
 def test_local_monitor_sequence_fresh_signal_processing_beats_cache_refresh() -> None:
