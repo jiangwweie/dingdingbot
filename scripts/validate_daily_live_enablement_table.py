@@ -19,6 +19,7 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
     CONTRACT_BLOCKER_CLASSES,
     OWNER_BLOCKERS,
     SCHEMA,
+    SOURCE_EXPECTATIONS,
     WIP_LANES,
 )
 
@@ -71,6 +72,7 @@ def validate_daily_live_enablement_table(artifact: dict[str, Any]) -> list[str]:
         errors.append(f"schema must be {SCHEMA}")
     if artifact.get("status") != "daily_live_enablement_table_ready":
         errors.append("status must be daily_live_enablement_table_ready")
+    errors.extend(_validate_source_validation(artifact))
     rows = _dict_rows(artifact.get("rows"))
     if len(rows) != len(WIP_LANES):
         errors.append(f"row count must be {len(WIP_LANES)}")
@@ -88,6 +90,32 @@ def validate_daily_live_enablement_table(artifact: dict[str, Any]) -> list[str]:
     for index, row in enumerate(rows):
         errors.extend(_validate_row(row, index))
     errors.extend(_forbidden_true_paths(artifact))
+    return errors
+
+
+def _validate_source_validation(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    source_validation = _as_dict(artifact.get("source_validation"))
+    if source_validation.get("valid") is not True:
+        errors.append("source_validation.valid must be true")
+    sources = _as_dict(source_validation.get("sources"))
+    for name in SOURCE_EXPECTATIONS:
+        row = _as_dict(sources.get(name))
+        if not row:
+            errors.append(f"source_validation.sources.{name} is required")
+            continue
+        if row.get("valid") is not True:
+            errors.append(f"source_validation.sources.{name}.valid must be true")
+        if row.get("present") is not True:
+            errors.append(f"source_validation.sources.{name}.present must be true")
+        if row.get("schema_valid") is not True:
+            errors.append(
+                f"source_validation.sources.{name}.schema_valid must be true"
+            )
+        if row.get("status_valid") is not True:
+            errors.append(
+                f"source_validation.sources.{name}.status_valid must be true"
+            )
     return errors
 
 

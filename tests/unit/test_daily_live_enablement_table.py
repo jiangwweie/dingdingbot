@@ -41,7 +41,7 @@ def _tradeability() -> dict:
         ("CPM-RO-001", "armed_observation", "computed_not_satisfied", "market", "continue_observation_with_failed_fact_matrix"),
         ("MPG-001", "armed_observation", "scope_not_attached", "engineering", "produce_scoped_live_observation_or_scope_proposal"),
         ("MI-001", "trial_asset_admission_candidate", "scope_not_attached", "engineering", "build_trial_asset_admission_proposal"),
-        ("SOR-001", "armed_observation", "detector_not_attached", "engineering", "attach_live_detector_to_selected_lane"),
+        ("SOR-001", "armed_observation", "action_time_boundary_not_reproduced", "runtime", "repair_non_executing_action_time_rehearsal_path"),
         ("BRF2-001", "armed_observation", "computed_not_satisfied", "market", "continue_brf2_armed_observation_until_disable_clears"),
     ]
     for strategy_group_id, stage, blocker, owner, next_action in rows:
@@ -109,13 +109,13 @@ def _parity() -> dict:
             {
                 "strategy_group_id": "SOR-001",
                 "symbol": "AVAXUSDT",
-                "blocker_class": "detector_not_attached",
-                "detector_attached": False,
-                "watcher_tick_present": False,
-                "computed": False,
+                "blocker_class": "action_time_boundary_not_reproduced",
+                "detector_attached": True,
+                "watcher_tick_present": True,
+                "computed": True,
                 "failed_facts": [],
                 "mismatch_count": 10,
-                "next_action": "attach_live_detector_to_selected_lane",
+                "next_action": "repair_non_executing_action_time_rehearsal_path",
             },
         ],
     }
@@ -141,7 +141,7 @@ def _action_time() -> dict:
             {
                 "strategy_group_id": "SOR-001",
                 "path_id": "SOR-LONG",
-                "first_blocker": "detector_not_attached",
+                "first_blocker": "action_time_boundary_not_reproduced",
                 "dry_run_submit_rehearsal_ready": False,
             },
         ],
@@ -200,9 +200,12 @@ def test_daily_table_generator_emits_five_wip_rows_and_rank_one():
         "BRF2-001",
     ]
     assert sum(row["closest_to_live_rank"] == 1 for row in table["rows"]) == 1
-    assert next(
+    rank_1 = next(
         row for row in table["rows"] if row["closest_to_live_rank"] == 1
-    )["strategy_group_id"] == "MPG-001"
+    )
+    assert rank_1["strategy_group_id"] == "SOR-001"
+    assert rank_1["first_blocker"] == "action_time_boundary_not_reproduced"
+    assert table["source_validation"]["valid"] is True
     assert _errors(table) == []
 
 
@@ -289,6 +292,36 @@ def test_daily_table_validator_rejects_missing_authority_boundary():
     assert any("authority_boundary" in error for error in _errors(table))
 
 
+def test_daily_table_validator_rejects_invalid_source_validation():
+    table = _valid_table()
+    table["source_validation"]["valid"] = False
+    table["source_validation"]["sources"]["tradeability"]["valid"] = False
+    table["source_validation"]["sources"]["tradeability"]["status_valid"] = False
+
+    errors = _errors(table)
+
+    assert any("source_validation.valid" in error for error in errors)
+    assert any("tradeability.valid" in error for error in errors)
+
+
+def test_daily_table_builder_marks_missing_sources_invalid():
+    builder = _builder()
+
+    table = builder.build_daily_live_enablement_table(
+        tradeability={},
+        replay_live_parity={},
+        action_time_boundary={},
+        mi_trial_admission={},
+        runtime_safety={},
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    assert table["status"] == "daily_live_enablement_table_source_invalid"
+    assert table["source_validation"]["valid"] is False
+    assert table["source_validation"]["sources"]["tradeability"]["present"] is False
+    assert any("source_validation.valid" in error for error in _errors(table))
+
+
 def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path):
     tradeability = tmp_path / "tradeability.json"
     parity = tmp_path / "parity.json"
@@ -337,3 +370,44 @@ def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path):
         check=False,
     )
     assert validate.returncode == 0, validate.stdout + validate.stderr
+
+
+def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path):
+    output_json = tmp_path / "daily.json"
+    output_md = tmp_path / "daily.md"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            "--tradeability-json",
+            str(tmp_path / "missing-tradeability.json"),
+            "--replay-live-parity-json",
+            str(tmp_path / "missing-parity.json"),
+            "--action-time-boundary-json",
+            str(tmp_path / "missing-action-time.json"),
+            "--mi-trial-admission-json",
+            str(tmp_path / "missing-mi.json"),
+            "--runtime-safety-json",
+            str(tmp_path / "missing-runtime-safety.json"),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    table = json.loads(output_json.read_text(encoding="utf-8"))
+    assert table["status"] == "daily_live_enablement_table_source_invalid"
+
+    validate = subprocess.run(
+        [sys.executable, str(VALIDATOR_PATH), str(output_json)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert validate.returncode == 1
+    assert "source_validation.valid" in validate.stderr

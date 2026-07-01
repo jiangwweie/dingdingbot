@@ -2219,6 +2219,73 @@ def _write_ready_daily_live_enablement_table(command: list[str]) -> None:
                 },
             }
         )
+    source_validation = {
+        "valid": True,
+        "sources": {
+            "tradeability": {
+                "present": True,
+                "valid": True,
+                "schema_valid": True,
+                "status_valid": True,
+                "expected_schema": "brc.strategygroup_tradeability_decision.v1",
+                "actual_schema": "brc.strategygroup_tradeability_decision.v1",
+                "expected_statuses": ["tradeability_decision_ready"],
+                "actual_status": "tradeability_decision_ready",
+            },
+            "replay_live_parity": {
+                "present": True,
+                "valid": True,
+                "schema_valid": True,
+                "status_valid": True,
+                "expected_schema": "brc.replay_live_parity_audit.v1",
+                "actual_schema": "brc.replay_live_parity_audit.v1",
+                "expected_statuses": ["replay_live_parity_audit_ready"],
+                "actual_status": "replay_live_parity_audit_ready",
+            },
+            "action_time_boundary": {
+                "present": True,
+                "valid": True,
+                "schema_valid": True,
+                "status_valid": True,
+                "expected_schema": (
+                    "brc.strategy_fresh_signal_action_time_boundary.v1"
+                ),
+                "actual_schema": (
+                    "brc.strategy_fresh_signal_action_time_boundary.v1"
+                ),
+                "expected_statuses": [
+                    "strategy_fresh_signal_action_time_boundary_ready"
+                ],
+                "actual_status": (
+                    "strategy_fresh_signal_action_time_boundary_ready"
+                ),
+            },
+            "mi_trial_admission": {
+                "present": True,
+                "valid": True,
+                "schema_valid": True,
+                "status_valid": True,
+                "expected_schema": "brc.mi_trial_admission_decision.v1",
+                "actual_schema": "brc.mi_trial_admission_decision.v1",
+                "expected_statuses": ["mi_trial_admission_decision_ready"],
+                "actual_status": "mi_trial_admission_decision_ready",
+            },
+            "runtime_safety": {
+                "present": True,
+                "valid": True,
+                "schema_valid": True,
+                "status_valid": True,
+                "expected_schema": "brc.strategygroup_runtime_safety_state.v1",
+                "actual_schema": "brc.strategygroup_runtime_safety_state.v1",
+                "expected_statuses": [
+                    "live_submit_ready",
+                    "live_submit_standby_waiting_for_market",
+                    "runtime_safety_state_ready",
+                ],
+                "actual_status": "runtime_safety_state_ready",
+            },
+        },
+    }
     _write_output(
         command,
         {
@@ -2226,16 +2293,25 @@ def _write_ready_daily_live_enablement_table(command: list[str]) -> None:
             "scope": "daily_live_enablement_table_non_authority",
             "status": "daily_live_enablement_table_ready",
             "generated_at_utc": "2026-07-01T00:00:00+00:00",
+            "source_validation": source_validation,
             "rows": rows,
             "summary": {
                 "row_count": 5,
                 "wip_lane_count": 5,
                 "rank_1_lane": "CPM-RO-001:SOLUSDT",
+                "rank_1_first_blocker": "computed_not_satisfied",
+                "rank_1_next_engineering_action": (
+                    "continue_observation_with_failed_fact_matrix"
+                ),
+                "owner_action_required_count": 0,
+                "source_validation_valid": True,
                 "non_authority": True,
             },
             "checks": {
+                "source_validation_passed": True,
                 "active_wip_lanes_only": True,
                 "single_rank_1": True,
+                "all_rows_have_blocker_evidence_action_stop": True,
                 "authority_boundary_preserved": True,
                 "finalgate_called": False,
                 "operation_layer_called": False,
@@ -2289,7 +2365,19 @@ def _maybe_write_strategygroup_closure_step(
         _write_ready_daily_live_enablement_table(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     if script == "validate_daily_live_enablement_table.py":
-        return subprocess.CompletedProcess(command, 0, "", "")
+        from scripts.validate_daily_live_enablement_table import (  # noqa: PLC0415
+            validate_daily_live_enablement_table,
+        )
+
+        table_path = Path(command[-1])
+        table = json.loads(table_path.read_text(encoding="utf-8"))
+        errors = validate_daily_live_enablement_table(table)
+        return subprocess.CompletedProcess(
+            command,
+            1 if errors else 0,
+            "",
+            "\n".join(errors),
+        )
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
         return subprocess.CompletedProcess(command, 0, "", "")

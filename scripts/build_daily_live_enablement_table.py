@@ -70,18 +70,44 @@ OWNER_BLOCKERS = {"policy_scope_missing"}
 AUTHORITY_BOUNDARY = (
     "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write"
 )
-BLOCKER_RANK_SCORE = {
-    "scope_not_attached": 95,
-    "action_time_boundary_not_reproduced": 90,
-    "detector_not_attached": 80,
-    "watcher_tick_missing": 75,
-    "replay_live_rule_mismatch": 70,
-    "runtime_profile_scope_missing": 65,
-    "active_position_resolution": 60,
-    "artifact_missing": 55,
-    "schema_invalid": 50,
-    "market_wait_validated": 45,
-    "computed_not_satisfied": 40,
+SOURCE_EXPECTATIONS = {
+    "tradeability": {
+        "schema": "brc.strategygroup_tradeability_decision.v1",
+        "statuses": {"tradeability_decision_ready"},
+    },
+    "replay_live_parity": {
+        "schema": "brc.replay_live_parity_audit.v1",
+        "statuses": {"replay_live_parity_audit_ready"},
+    },
+    "action_time_boundary": {
+        "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
+        "statuses": {"strategy_fresh_signal_action_time_boundary_ready"},
+    },
+    "mi_trial_admission": {
+        "schema": "brc.mi_trial_admission_decision.v1",
+        "statuses": {"mi_trial_admission_decision_ready"},
+    },
+    "runtime_safety": {
+        "schema": "brc.strategygroup_runtime_safety_state.v1",
+        "statuses": {
+            "runtime_safety_state_ready",
+            "live_submit_standby_waiting_for_market",
+            "live_submit_ready",
+        },
+    },
+}
+BLOCKER_STAGE_TIER = {
+    "market_wait_validated": 1000,
+    "action_time_boundary_not_reproduced": 900,
+    "runtime_profile_scope_missing": 890,
+    "active_position_resolution": 880,
+    "watcher_tick_missing": 800,
+    "detector_not_attached": 790,
+    "replay_live_rule_mismatch": 780,
+    "scope_not_attached": 700,
+    "artifact_missing": 600,
+    "schema_invalid": 590,
+    "computed_not_satisfied": 500,
     "policy_scope_missing": 30,
     "hard_safety_stop": 0,
     "review_only_warning": 0,
@@ -140,6 +166,13 @@ def build_daily_live_enablement_table(
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
+    source_validation = _source_validation(
+        tradeability=tradeability,
+        replay_live_parity=replay_live_parity,
+        action_time_boundary=action_time_boundary,
+        mi_trial_admission=mi_trial_admission,
+        runtime_safety=runtime_safety,
+    )
     tradeability_rows = {
         str(row.get("strategy_group_id") or ""): row
         for row in _dict_rows(tradeability.get("decision_rows"))
@@ -160,8 +193,13 @@ def build_daily_live_enablement_table(
     return {
         "schema": SCHEMA,
         "scope": "daily_live_enablement_table_non_authority",
-        "status": "daily_live_enablement_table_ready",
+        "status": (
+            "daily_live_enablement_table_ready"
+            if source_validation["valid"]
+            else "daily_live_enablement_table_source_invalid"
+        ),
         "generated_at_utc": generated,
+        "source_validation": source_validation,
         "rows": ranked_rows,
         "summary": {
             "row_count": len(ranked_rows),
@@ -174,9 +212,11 @@ def build_daily_live_enablement_table(
             "owner_action_required_count": sum(
                 row["owner_action_required"] == "yes" for row in ranked_rows
             ),
+            "source_validation_valid": source_validation["valid"],
             "non_authority": True,
         },
         "checks": {
+            "source_validation_passed": source_validation["valid"],
             "active_wip_lanes_only": {
                 row["strategy_group_id"] for row in ranked_rows
             }
@@ -539,11 +579,56 @@ def _runtime_safety_reference(
     }
 
 
+def _source_validation(
+    *,
+    tradeability: dict[str, Any],
+    replay_live_parity: dict[str, Any],
+    action_time_boundary: dict[str, Any],
+    mi_trial_admission: dict[str, Any],
+    runtime_safety: dict[str, Any],
+) -> dict[str, Any]:
+    sources = {
+        "tradeability": tradeability,
+        "replay_live_parity": replay_live_parity,
+        "action_time_boundary": action_time_boundary,
+        "mi_trial_admission": mi_trial_admission,
+        "runtime_safety": runtime_safety,
+    }
+    source_rows = {
+        name: _validate_source(name, artifact)
+        for name, artifact in sources.items()
+    }
+    return {
+        "valid": all(row["valid"] for row in source_rows.values()),
+        "sources": source_rows,
+    }
+
+
+def _validate_source(name: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    expectation = SOURCE_EXPECTATIONS[name]
+    actual_schema = str(artifact.get("schema") or "")
+    actual_status = str(artifact.get("status") or "")
+    present = bool(artifact)
+    schema_valid = actual_schema == expectation["schema"]
+    status_valid = actual_status in expectation["statuses"]
+    return {
+        "present": present,
+        "valid": present and schema_valid and status_valid,
+        "schema_valid": schema_valid,
+        "status_valid": status_valid,
+        "expected_schema": expectation["schema"],
+        "actual_schema": actual_schema,
+        "expected_statuses": sorted(expectation["statuses"]),
+        "actual_status": actual_status,
+    }
+
+
 def _rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ordered = sorted(
         rows,
         key=lambda row: (
-            -_rank_score(row),
+            -_rank_stage_tier(row),
+            -_rank_wip_priority(row),
             WIP_LANES.index(row["strategy_group_id"]),
         ),
     )
@@ -552,18 +637,19 @@ def _rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ranked = dict(row)
         ranked["closest_to_live_rank"] = rank
         ranked["rank_reason"] = (
-            f"{row['first_blocker']} score {_rank_score(row)} "
-            f"(blocker {BLOCKER_RANK_SCORE.get(row['first_blocker'], 0)} + "
-            f"WIP priority {WIP_PRIORITY_BONUS.get(row['strategy_group_id'], 0)})"
+            f"{row['first_blocker']} tier {_rank_stage_tier(row)} "
+            f"(WIP priority {_rank_wip_priority(row)} only breaks same-tier ties)"
         )
         ranked_by_id[row["strategy_group_id"]] = ranked
     return [ranked_by_id[strategy_group_id] for strategy_group_id in WIP_LANES]
 
 
-def _rank_score(row: dict[str, Any]) -> int:
-    return BLOCKER_RANK_SCORE.get(
-        str(row.get("first_blocker") or ""), 0
-    ) + WIP_PRIORITY_BONUS.get(str(row.get("strategy_group_id") or ""), 0)
+def _rank_stage_tier(row: dict[str, Any]) -> int:
+    return BLOCKER_STAGE_TIER.get(str(row.get("first_blocker") or ""), 0)
+
+
+def _rank_wip_priority(row: dict[str, Any]) -> int:
+    return WIP_PRIORITY_BONUS.get(str(row.get("strategy_group_id") or ""), 0)
 
 
 def _read_optional_json(path: Path) -> dict[str, Any]:
