@@ -97,6 +97,7 @@ Owner decisions.
 | --- | --- |
 | Product objective and Owner role | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
 | Strategy experiment evaluation semantics | `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` |
+| Strategy engineering intake filter | `docs/current/STRATEGY_ENGINEERING_INTAKE_CONTRACT.md` |
 | Tradeability Decision semantics | `docs/current/TRADEABILITY_DECISION_CONTRACT.md` |
 | Blocker classification and Live Enablement completion rules | `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
