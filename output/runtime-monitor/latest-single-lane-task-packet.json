@@ -1,0 +1,49 @@
+{
+  "schema": "brc.single_lane_task_packet.v1",
+  "status": "single_lane_task_packet_ready",
+  "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
+  "source_rank": 1,
+  "task_id": "P0-MPG-WATCHER-TICK-CLOSURE",
+  "active_lane": {
+    "strategy_group_id": "MPG-001",
+    "symbol": "SOLUSDT",
+    "side": "long",
+    "stage": "armed"
+  },
+  "chain_position": "replay_live_parity",
+  "first_blocker": "watcher_tick_missing",
+  "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT blocker_class=watcher_tick_missing",
+  "expected_state_change": "MPG-001/SOLUSDT watcher/public facts tick becomes present and the lane advances to the next precise blocker or market_wait_validated if all non-market blockers close.",
+  "next_action": "refresh_or_repair_watcher_public_fact_input",
+  "allowed_files": [
+    "scripts/build_replay_live_parity_audit.py",
+    "scripts/build_daily_live_enablement_table.py",
+    "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+    "tests/unit/test_replay_live_parity_audit.py",
+    "tests/unit/test_daily_live_enablement_table.py",
+    "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
+    "output/runtime-monitor/latest-*.json",
+    "output/runtime-monitor/latest-*.md"
+  ],
+  "forbidden_files": [
+    "src/application/execution_orchestrator.py",
+    "src/application/order_lifecycle_service.py",
+    "src/infrastructure/exchange_gateway.py",
+    "live profile files",
+    "order sizing defaults",
+    "credential or secret files",
+    "FinalGate bypass paths",
+    "Operation Layer bypass paths"
+  ],
+  "stop_condition": "MPG-001/SOLUSDT no longer has watcher_tick_missing, or the refreshed evidence proves a different earlier blocker class.",
+  "tests": [
+    "python3 -m py_compile scripts/build_replay_live_parity_audit.py scripts/build_daily_live_enablement_table.py scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+    "pytest -q tests/unit/test_replay_live_parity_audit.py tests/unit/test_daily_live_enablement_table.py tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
+    "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py --json",
+    "python3 scripts/validate_daily_live_enablement_table.py output/runtime-monitor/latest-daily-live-enablement-table.json",
+    "git diff --check"
+  ],
+  "done_when": "Daily Table rank 1 either moves past MPG-001/SOLUSDT watcher_tick_missing or reclassifies it into a more precise first blocker with Tradeability and Daily Table agreeing on the same lane.",
+  "authority_boundary": "non-executing read model only; no FinalGate bypass, no Operation Layer bypass, no exchange write, no live profile expansion, no order sizing expansion",
+  "owner_action_required": "no"
+}
