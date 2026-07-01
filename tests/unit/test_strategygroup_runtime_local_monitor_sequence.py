@@ -6216,6 +6216,63 @@ def test_local_monitor_sequence_classifies_deployment_returncodes_without_owner_
     ) is False
 
 
+def test_local_monitor_sequence_allows_runtime_activation_public_fact_refresh_returncode() -> None:
+    module = _load_module()
+    artifacts = {
+        "daily_check": {
+            "status": module.MONITOR_REFRESH_STATUS,
+            "runtime_status": "waiting_for_market",
+            "monitor_status": "needs_refresh",
+            "owner_runtime_state": {
+                "runtime_status": "waiting_for_market",
+                "monitor_status": "needs_refresh",
+                "owner_intervention_required": False,
+                "monitor_refresh_needed": True,
+            },
+            "owner_runtime_issues": {"blockers": [], "non_market_gaps": []},
+        },
+        "goal_progress": {"status": "not_complete_waiting_for_market"},
+        "completion_audit": {"status": "not_complete_waiting_for_market"},
+        "four_candidate_runtime_activation_evidence": {
+            "status": "runtime_activation_evidence_public_facts_unavailable",
+            "runtime_artifact_ready": False,
+            "checks": {"public_facts_artifact_fresh": False},
+        },
+        "binance_usdm_public_facts": {
+            "status": "binance_usdm_public_facts_unavailable",
+            "checks": {"public_facts_ready": False},
+        },
+    }
+    steps = [
+        {"name": "daily_check", "returncode": 2},
+        {"name": "binance_usdm_public_facts", "returncode": 2},
+        {"name": "four_candidate_runtime_activation_evidence", "returncode": 2},
+        {"name": "completion_audit", "returncode": 0},
+    ]
+
+    execution_blockers = [
+        f"{step['name']}:returncode:{step['returncode']}"
+        for step in steps
+        if int(step.get("returncode") or 0) not in (0,)
+        and not module._step_returncode_is_allowed_monitor_refresh(step, artifacts)
+        and not module._step_returncode_is_allowed_deployment_issue(step, artifacts)
+    ]
+
+    assert execution_blockers == []
+    assert module._sequence_status(steps=steps, artifacts=artifacts) == (
+        module.TEMPORARILY_UNAVAILABLE_MONITOR_REFRESH_STATUS
+    )
+    assert module._sequence_report_is_success(
+        {
+            "status": module.TEMPORARILY_UNAVAILABLE_MONITOR_REFRESH_STATUS,
+            "runtime_status": "temporarily_unavailable",
+            "monitor_status": "needs_refresh",
+            "owner_runtime_issues": {"blockers": [], "non_market_gaps": []},
+            "owner_runtime_state": {"owner_intervention_required": False},
+        }
+    ) is True
+
+
 def test_local_monitor_sequence_owner_decision_reads_owner_state() -> None:
     module = _load_module()
 

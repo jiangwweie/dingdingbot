@@ -842,6 +842,7 @@ def _decision_row(
         "stage": stage,
         "decision": classifier["decision"],
         "can_trade_now": classifier["decision"] == "tradable_now",
+        "canonical_lane": _as_dict(classifier.get("canonical_lane")),
         "first_blocker_class": classifier["first_blocker_class"],
         "first_blocker_detail": classifier["first_blocker_detail"],
         "legacy_blocker_raw": classifier["legacy_blocker_raw"],
@@ -1694,10 +1695,7 @@ def _external_first_blocker(
         return {}
     row = sorted(
         rows,
-        key=lambda item: (
-            BLOCKER_PRIORITY.get(str(item.get("blocker_class") or ""), 999),
-            str(item.get("symbol") or ""),
-        ),
+        key=_canonical_lane_sort_key,
     )[0]
     blocker_class = str(row.get("blocker_class") or "")
     failed_facts = _string_list(row.get("failed_facts"))
@@ -1716,7 +1714,7 @@ def _external_first_blocker(
             )
         )
     next_action = str(row.get("next_action") or _next_action_for_contract(blocker_class))
-    return _classifier(
+    classifier = _classifier(
         BLOCKER_DECISION_BY_CLASS.get(blocker_class, "not_tradable_facts"),
         blocker_class,
         detail,
@@ -1724,6 +1722,20 @@ def _external_first_blocker(
         next_action,
         str(row.get("after_next_state") or _after_next_state_for_contract(blocker_class)),
     )
+    classifier["canonical_lane"] = {
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "first_blocker": blocker_class,
+        "next_action": next_action,
+        "mismatch_count": _int(row.get("mismatch_count")),
+        "live_submit_scope_priority": _int(row.get("live_submit_scope_priority")),
+        "lane_scope": str(row.get("lane_scope") or "unknown"),
+        "selection_rule": (
+            "first_blocker_priority->live_submit_scope_priority->"
+            "mismatch_count->symbol"
+        ),
+    }
+    return classifier
 
 
 def _external_blocker_rows(
@@ -1756,6 +1768,11 @@ def _external_blocker_rows(
                 "symbol": str(row.get("symbol") or ""),
                 "blocker_class": blocker_class,
                 "failed_facts": _string_list(row.get("failed_facts")),
+                "mismatch_count": _int(row.get("mismatch_count")),
+                "live_submit_scope_priority": _int(
+                    row.get("live_submit_scope_priority")
+                ),
+                "lane_scope": str(row.get("lane_scope") or "unknown"),
                 "next_action": str(
                     row.get("next_action") or _next_action_for_contract(blocker_class)
                 ),
@@ -1794,6 +1811,11 @@ def _external_blocker_rows(
             {
                 "symbol": str(row.get("symbol") or ""),
                 "blocker_class": blocker_class,
+                "mismatch_count": _int(row.get("mismatch_count")),
+                "live_submit_scope_priority": _int(
+                    row.get("live_submit_scope_priority")
+                ),
+                "lane_scope": str(row.get("lane_scope") or "action_time_boundary"),
                 "detail": str(
                     row.get("first_blocker_detail")
                     or row.get("detail")
@@ -1808,6 +1830,15 @@ def _external_blocker_rows(
             }
         )
     return rows
+
+
+def _canonical_lane_sort_key(row: dict[str, Any]) -> tuple[int, int, int, str]:
+    return (
+        BLOCKER_PRIORITY.get(str(row.get("blocker_class") or ""), 999),
+        -_int(row.get("live_submit_scope_priority")),
+        -_int(row.get("mismatch_count")),
+        str(row.get("symbol") or ""),
+    )
 
 
 def _market_wait_external_lane_checks(

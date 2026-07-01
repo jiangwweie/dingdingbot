@@ -149,6 +149,15 @@ def _sor_evidence() -> dict:
     }
 
 
+def _sor_public_facts_unavailable_evidence() -> dict:
+    evidence = _sor_evidence()
+    evidence["status"] = "runtime_activation_evidence_public_facts_unavailable"
+    evidence["runtime_artifact_ready"] = False
+    evidence["candidate_evidence_shape_ready"] = False
+    evidence["fresh_signal_rehearsal_ready"] = False
+    return evidence
+
+
 def _sor_detector_row(
     symbol: str,
     *,
@@ -329,6 +338,50 @@ def test_replay_live_parity_reclassifies_sor_missing_candles_as_watcher_tick_mis
     assert symbol_row["watcher_tick_present"] is False
     assert symbol_row["computed"] is False
     assert symbol_row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_replay_live_parity_keeps_sor_detector_attached_when_public_facts_unavailable():
+    module = _load_module()
+
+    artifact = module.build_replay_live_parity_audit(
+        replay={
+            "strategy_rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "path_id": "SOR-SESSION-BREAKOUT",
+                    "window_results": [
+                        {
+                            "window_days": 3,
+                            "counterfactual_events": [_sor_event("SOLUSDT")],
+                        }
+                    ],
+                }
+            ]
+        },
+        cpm_facts={},
+        mpg_watcher={},
+        sor_evidence=_sor_public_facts_unavailable_evidence(),
+        sor_detector=_sor_detector(
+            _sor_detector_row(
+                "SOLUSDT",
+                latest_candle=False,
+                failed=[
+                    "public_facts_ready",
+                    "opening_range_available",
+                    "breakout_level_crossed",
+                ],
+            )
+        ),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    symbol_row = artifact["per_symbol_mismatch_table"][0]
+    assert symbol_row["strategy_group_id"] == "SOR-001"
+    assert symbol_row["symbol"] == "SOLUSDT"
+    assert symbol_row["blocker_class"] == "watcher_tick_missing"
+    assert symbol_row["detector_attached"] is True
+    assert symbol_row["watcher_tick_present"] is False
+    assert symbol_row["computed"] is False
 
 
 def test_replay_live_parity_reclassifies_sor_false_session_facts_as_computed_not_satisfied():

@@ -271,10 +271,12 @@ def _daily_row(
     first_blocker = str(
         tradeability_row.get("first_blocker_class") or "artifact_missing"
     )
+    canonical_lane = _as_dict(tradeability_row.get("canonical_lane"))
     parity_row = _best_parity_row(
         strategy_group_id=strategy_group_id,
         first_blocker=first_blocker,
         replay_live_parity=replay_live_parity,
+        preferred_symbol=str(canonical_lane.get("symbol") or ""),
     )
     action_row = _action_time_row(strategy_group_id, action_time_boundary)
     symbol = _lane_symbol(
@@ -282,6 +284,7 @@ def _daily_row(
         tradeability_row=tradeability_row,
         parity_row=parity_row,
         action_row=action_row,
+        canonical_lane=canonical_lane,
         mi_trial_admission=mi_trial_admission,
     )
     side = _lane_side(
@@ -311,6 +314,7 @@ def _daily_row(
     return {
         "strategy_group_id": strategy_group_id,
         "symbol": symbol,
+        "canonical_lane": canonical_lane,
         "side": side,
         "stage": stage,
         "chain_position": chain_position,
@@ -338,6 +342,7 @@ def _best_parity_row(
     strategy_group_id: str,
     first_blocker: str,
     replay_live_parity: dict[str, Any],
+    preferred_symbol: str = "",
 ) -> dict[str, Any]:
     rows = [
         row
@@ -350,9 +355,16 @@ def _best_parity_row(
         row for row in rows if str(row.get("blocker_class") or "") == first_blocker
     ]
     candidates = matching or rows
+    if preferred_symbol:
+        exact = [
+            row for row in candidates if str(row.get("symbol") or "") == preferred_symbol
+        ]
+        if exact:
+            candidates = exact
     return sorted(
         candidates,
         key=lambda row: (
+            -int(row.get("live_submit_scope_priority") or 0),
             -int(row.get("mismatch_count") or 0),
             str(row.get("symbol") or ""),
         ),
@@ -375,8 +387,11 @@ def _lane_symbol(
     tradeability_row: dict[str, Any],
     parity_row: dict[str, Any],
     action_row: dict[str, Any],
+    canonical_lane: dict[str, Any],
     mi_trial_admission: dict[str, Any],
 ) -> str:
+    if canonical_lane.get("symbol"):
+        return str(canonical_lane["symbol"])
     if parity_row.get("symbol"):
         return str(parity_row["symbol"])
     if action_row.get("symbol"):

@@ -56,6 +56,13 @@ BLOCKER_PRIORITY = {
     "action_time_boundary_not_reproduced": 60,
     "computed_not_satisfied": 70,
 }
+LIVE_SUBMIT_SCOPE_PRIORITY = {
+    "primary_live_submit_scope": 30,
+    "scoped_live_observation_proposal": 20,
+    "readonly_watcher_scope": 10,
+    "runtime_observation_scope": 5,
+    "out_of_scope": 0,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,6 +270,8 @@ def _mismatch_event(event: dict[str, Any], coverage: dict[str, Any]) -> dict[str
         "strategy_group_id": event.get("strategy_group_id"),
         "symbol": symbol,
         "event_time_utc": event.get("event_time_utc"),
+        "lane_scope": _symbol_scope_role(coverage, symbol),
+        "live_submit_scope_priority": _symbol_scope_priority(coverage, symbol),
         "detector_attached": detector_attached is True,
         "watcher_tick_present": watcher_tick_present is True,
         "computed": computed is True,
@@ -292,6 +301,10 @@ def _per_symbol_rows(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                     "blocker_class": mismatch.get("blocker_class")
                     or mismatch.get("first_blocker_class"),
                     "next_action": mismatch.get("next_action"),
+                    "lane_scope": mismatch.get("lane_scope") or "out_of_scope",
+                    "live_submit_scope_priority": int(
+                        mismatch.get("live_submit_scope_priority") or 0
+                    ),
                     "blocker_priority": _blocker_priority(
                         str(
                             mismatch.get("blocker_class")
@@ -324,6 +337,10 @@ def _per_symbol_rows(strategy_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                     mismatch.get("watcher_tick_present") is True
                 )
                 bucket["computed"] = mismatch.get("computed") is True
+                bucket["lane_scope"] = mismatch.get("lane_scope") or "out_of_scope"
+                bucket["live_submit_scope_priority"] = int(
+                    mismatch.get("live_submit_scope_priority") or 0
+                )
                 bucket["blocker_priority"] = priority
     for bucket in buckets.values():
         bucket.pop("blocker_priority", None)
@@ -400,17 +417,15 @@ def _sor_coverage(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[st
         for row in detector.get("symbol_detector_rows") or []
         if isinstance(row, dict)
     ]
-    evidence_ready = (
-        evidence.get("runtime_artifact_ready") is True
-        or evidence.get("status") == "runtime_activation_evidence_ready"
-    )
     detector_ready = detector.get("status") == "sor_session_detector_facts_ready"
-    ready = evidence_ready and detector_ready
-    symbol_scope = watcher.get("symbol_scope") or [
+    ready = detector_ready
+    detector_symbols = [
         str(row.get("symbol") or "")
         for row in detector_rows
         if str(row.get("symbol") or "")
     ]
+    readonly_symbols = watcher.get("expanded_readonly_watcher_symbols") or []
+    symbol_scope = list(dict.fromkeys(detector_symbols + list(readonly_symbols)))
     per_symbol_facts = _sor_per_symbol_facts(
         detector_rows=detector_rows,
         detector_attached=ready,
@@ -537,6 +552,22 @@ def _watcher_public_fact_names(row: dict[str, Any]) -> list[str]:
     names.update(str(key) for key in liquidity if str(key).endswith("_ok"))
     names.update(str(key) for key in funding if str(key).endswith("_extreme"))
     return sorted(name for name in names if name)
+
+
+def _symbol_scope_role(coverage: dict[str, Any], symbol: str) -> str:
+    if symbol in set(coverage.get("primary_live_submit_scope") or []):
+        return "primary_live_submit_scope"
+    if symbol in set(coverage.get("scoped_live_observation_proposal_symbols") or []):
+        return "scoped_live_observation_proposal"
+    if symbol in set(coverage.get("readonly_symbols") or []):
+        return "readonly_watcher_scope"
+    if symbol in set(coverage.get("symbol_scope") or []):
+        return "runtime_observation_scope"
+    return "out_of_scope"
+
+
+def _symbol_scope_priority(coverage: dict[str, Any], symbol: str) -> int:
+    return LIVE_SUBMIT_SCOPE_PRIORITY[_symbol_scope_role(coverage, symbol)]
 
 
 def _fact_failed(value: Any) -> bool:

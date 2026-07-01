@@ -223,6 +223,72 @@ def test_daily_table_generator_prefers_per_symbol_parity_evidence():
     ]
 
 
+def test_daily_table_uses_tradeability_canonical_lane_before_reselecting_symbol():
+    builder = _builder()
+    tradeability = _tradeability()
+    mpg = next(
+        row
+        for row in tradeability["decision_rows"]
+        if row["strategy_group_id"] == "MPG-001"
+    )
+    mpg["first_blocker_class"] = "watcher_tick_missing"
+    mpg["next_action"] = "refresh_or_repair_watcher_public_fact_input"
+    mpg["canonical_lane"] = {
+        "strategy_group_id": "MPG-001",
+        "symbol": "OPUSDT",
+        "first_blocker": "watcher_tick_missing",
+        "mismatch_count": 3,
+        "live_submit_scope_priority": 20,
+        "selection_rule": (
+            "first_blocker_priority->live_submit_scope_priority->"
+            "mismatch_count->symbol"
+        ),
+    }
+    parity = _parity()
+    parity["per_symbol_mismatch_table"].extend(
+        [
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "SOLUSDT",
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "failed_facts": [],
+                "mismatch_count": 25,
+                "live_submit_scope_priority": 0,
+                "next_action": "refresh_or_repair_watcher_public_fact_input",
+            },
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "failed_facts": [],
+                "mismatch_count": 3,
+                "live_submit_scope_priority": 20,
+                "next_action": "refresh_or_repair_watcher_public_fact_input",
+            },
+        ]
+    )
+
+    table = builder.build_daily_live_enablement_table(
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=_action_time(),
+        mi_trial_admission=_mi(),
+        runtime_safety=_runtime_safety(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in table["rows"]}
+    assert rows["MPG-001"]["symbol"] == "OPUSDT"
+    assert rows["MPG-001"]["canonical_lane"]["symbol"] == "OPUSDT"
+    assert rows["MPG-001"]["first_blocker"] == "watcher_tick_missing"
+
+
 def test_daily_table_validator_rejects_non_wip_lane():
     table = _valid_table()
     table["rows"][0]["strategy_group_id"] = "RBR-001"

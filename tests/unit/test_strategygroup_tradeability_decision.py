@@ -1570,6 +1570,59 @@ def test_tradeability_consumes_action_time_boundary_artifact_without_parity():
     )
 
 
+def test_tradeability_external_blocker_uses_canonical_lane_selection_rule():
+    module = _load_module()
+
+    packet = module.build_tradeability_decision(
+        capital_trial_envelope_projection=_capital_trial_envelope_projection(),
+        registry=_registry(),
+        tier_policy=_tier_policy(),
+        signal_coverage=_signal_coverage(),
+        runtime_safety_state=_runtime_safety_state(),
+        replay_live_parity_audit=_valid_replay_live_parity_audit(
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "SOLUSDT",
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "failed_facts": [],
+                "mismatch_count": 25,
+                "live_submit_scope_priority": 0,
+                "lane_scope": "out_of_scope",
+                "next_action": "refresh_or_repair_watcher_public_fact_input",
+            },
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "failed_facts": [],
+                "mismatch_count": 3,
+                "live_submit_scope_priority": 20,
+                "lane_scope": "scoped_live_observation_proposal",
+                "next_action": "refresh_or_repair_watcher_public_fact_input",
+            },
+        ),
+        generated_at_utc="2026-06-29T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    mpg = rows["MPG-001"]
+
+    assert mpg["first_blocker_class"] == "watcher_tick_missing"
+    assert mpg["canonical_lane"]["symbol"] == "OPUSDT"
+    assert mpg["canonical_lane"]["mismatch_count"] == 3
+    assert mpg["canonical_lane"]["live_submit_scope_priority"] == 20
+    assert mpg["canonical_lane"]["selection_rule"] == (
+        "first_blocker_priority->live_submit_scope_priority->"
+        "mismatch_count->symbol"
+    )
+
+
 def test_tradeability_rejects_cross_symbol_mpg_market_wait_evidence():
     module = _load_module()
 

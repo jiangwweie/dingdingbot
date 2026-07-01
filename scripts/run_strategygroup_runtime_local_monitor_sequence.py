@@ -21,6 +21,7 @@ try:
     from scripts.runtime_monitor_refresh import (
         DEPLOYMENT_ISSUE_STATUS,
         MONITOR_REFRESH_STATUS,
+        TEMPORARILY_UNAVAILABLE_MONITOR_REFRESH_STATUS,
         combined_artifact_monitor_status,
         combined_artifact_monitor_refresh_reasons,
         monitor_owner_runtime_state,
@@ -46,6 +47,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution fallba
     from runtime_monitor_refresh import (
         DEPLOYMENT_ISSUE_STATUS,
         MONITOR_REFRESH_STATUS,
+        TEMPORARILY_UNAVAILABLE_MONITOR_REFRESH_STATUS,
         combined_artifact_monitor_status,
         combined_artifact_monitor_refresh_reasons,
         monitor_owner_runtime_state,
@@ -736,6 +738,9 @@ def _sequence_report_is_success(report: dict[str, Any]) -> bool:
     return status in {"waiting_for_market", "processing", "complete"} or (
         status == MONITOR_REFRESH_STATUS
         and runtime_status == "waiting_for_market"
+    ) or (
+        status == TEMPORARILY_UNAVAILABLE_MONITOR_REFRESH_STATUS
+        and runtime_status == "temporarily_unavailable"
     )
 
 
@@ -2996,6 +3001,13 @@ def _step_returncode_is_allowed_monitor_refresh(
         return _binance_usdm_public_facts_refresh_needed(
             artifacts.get(step_name, {})
         )
+    if (
+        step_name == "four_candidate_runtime_activation_evidence"
+        and int(step.get("returncode") or 0) != 0
+    ):
+        return _runtime_activation_evidence_refresh_needed(
+            artifacts.get(step_name, {})
+        )
     return monitor_step_returncode_is_refresh(
         step_name=step_name,
         returncode=int(step.get("returncode") or 0),
@@ -3029,6 +3041,15 @@ def _binance_usdm_public_facts_refresh_needed(artifact: dict[str, Any]) -> bool:
     ):
         return True
     return False
+
+
+def _runtime_activation_evidence_refresh_needed(artifact: dict[str, Any]) -> bool:
+    if not isinstance(artifact, dict):
+        return False
+    if _status(artifact) == "runtime_activation_evidence_public_facts_unavailable":
+        return True
+    checks = _as_dict(artifact.get("checks"))
+    return checks.get("public_facts_artifact_fresh") is False
 
 
 def _signal_coverage_non_market_gap(artifact: dict[str, Any]) -> dict[str, Any] | None:
