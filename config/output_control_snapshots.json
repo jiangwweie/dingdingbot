@@ -49,6 +49,13 @@
       "source_command": "python3 scripts/build_single_lane_task_packet.py",
       "validator": "python3 scripts/validate_single_lane_task_packet.py output/runtime-monitor/latest-single-lane-task-packet.json",
       "consumed_by": "single_lane_task_packet_gate"
+    },
+    {
+      "path": "output/runtime-monitor/latest-strategy-live-candidate-pool.json",
+      "paired_path": "output/runtime-monitor/latest-strategy-live-candidate-pool.md",
+      "source_command": "python3 scripts/build_strategy_live_candidate_pool.py",
+      "validator": "python3 scripts/validate_strategy_live_candidate_pool.py output/runtime-monitor/latest-strategy-live-candidate-pool.json",
+      "consumed_by": "live_candidate_pool_deploy_gate"
     }
   ],
   "volatile_output_globs": [

@@ -1,7 +1,7 @@
 # Daily Live Enablement Table
 
 - Source JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json`
-- Generated: `2026-07-01T15:04:49.356568+00:00`
+- Generated: `2026-07-01T16:00:06.217340+00:00`
 - Rank 1 lane: `MPG-001:SOLUSDT`
 
 | Rank | StrategyGroup | Symbol | Stage | First blocker | Owner action | Next action | Stop condition |

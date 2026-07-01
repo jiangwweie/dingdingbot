@@ -2408,6 +2408,43 @@ def _maybe_write_strategygroup_closure_step(
             "",
             "\n".join(errors),
         )
+    if script == "build_strategy_live_candidate_pool.py":
+        from scripts.build_strategy_live_candidate_pool import (  # noqa: PLC0415
+            build_strategy_live_candidate_pool,
+        )
+
+        daily_table_path = Path(command[command.index("--daily-table-json") + 1])
+        tradeability_path = Path(command[command.index("--tradeability-json") + 1])
+        parity_path = Path(command[command.index("--replay-live-parity-json") + 1])
+        action_time_path = Path(command[command.index("--action-time-boundary-json") + 1])
+        packet_path = Path(command[command.index("--single-lane-task-packet-json") + 1])
+        output_json = Path(command[command.index("--output-json") + 1])
+        output_md = Path(command[command.index("--output-owner-progress") + 1])
+        artifact = build_strategy_live_candidate_pool(
+            daily_table=json.loads(daily_table_path.read_text(encoding="utf-8")),
+            tradeability=json.loads(tradeability_path.read_text(encoding="utf-8")),
+            replay_live_parity=json.loads(parity_path.read_text(encoding="utf-8")),
+            action_time_boundary=json.loads(action_time_path.read_text(encoding="utf-8")),
+            single_lane_task_packet=json.loads(packet_path.read_text(encoding="utf-8")),
+            generated_at_utc="2026-07-01T00:00:00+00:00",
+        )
+        output_json.write_text(json.dumps(artifact), encoding="utf-8")
+        output_md.write_text("## Strategy Live Candidate Pool\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+    if script == "validate_strategy_live_candidate_pool.py":
+        from scripts.validate_strategy_live_candidate_pool import (  # noqa: PLC0415
+            validate_strategy_live_candidate_pool,
+        )
+
+        artifact_path = Path(command[-1])
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        errors = validate_strategy_live_candidate_pool(artifact)
+        return subprocess.CompletedProcess(
+            command,
+            1 if errors else 0,
+            "",
+            "\n".join(errors),
+        )
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -2458,6 +2495,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     daily_table_validator_commands: list[list[str]] = []
     single_lane_task_packet_commands: list[list[str]] = []
     single_lane_task_packet_validator_commands: list[list[str]] = []
+    strategy_live_candidate_pool_commands: list[list[str]] = []
+    strategy_live_candidate_pool_validator_commands: list[list[str]] = []
     action_time_boundary_commands: list[list[str]] = []
     replay_live_parity_commands: list[list[str]] = []
     mi_trial_admission_commands: list[list[str]] = []
@@ -2504,6 +2543,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             single_lane_task_packet_commands.append(command)
         if script == "validate_single_lane_task_packet.py":
             single_lane_task_packet_validator_commands.append(command)
+        if script == "build_strategy_live_candidate_pool.py":
+            strategy_live_candidate_pool_commands.append(command)
+        if script == "validate_strategy_live_candidate_pool.py":
+            strategy_live_candidate_pool_validator_commands.append(command)
         if script == "build_strategy_fresh_signal_action_time_boundary.py":
             action_time_boundary_commands.append(command)
         if script == "build_replay_live_parity_audit.py":
@@ -2911,12 +2954,16 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "validate_daily_live_enablement_table.py",
         "build_single_lane_task_packet.py",
         "validate_single_lane_task_packet.py",
+        "build_strategy_live_candidate_pool.py",
+        "validate_strategy_live_candidate_pool.py",
     ]
     assert len(decision_loop_commands) == 2
     assert len(trial_admission_commands) == 1
     assert len(portfolio_board_commands) == 1
     assert len(single_lane_task_packet_commands) == 1
     assert len(single_lane_task_packet_validator_commands) == 1
+    assert len(strategy_live_candidate_pool_commands) == 1
+    assert len(strategy_live_candidate_pool_validator_commands) == 1
     single_lane_command = single_lane_task_packet_commands[0]
     assert "--daily-table-json" in single_lane_command
     assert single_lane_command[
@@ -2924,6 +2971,13 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     ] == str(tmp_path / "daily-live-table.json")
     assert single_lane_command[
         single_lane_command.index("--output-json") + 1
+    ] == str(tmp_path / "single-lane-task-packet.json")
+    candidate_pool_command = strategy_live_candidate_pool_commands[0]
+    assert candidate_pool_command[
+        candidate_pool_command.index("--daily-table-json") + 1
+    ] == str(tmp_path / "daily-live-table.json")
+    assert candidate_pool_command[
+        candidate_pool_command.index("--single-lane-task-packet-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
     portfolio_board_command = portfolio_board_commands[0]
     assert "--capture-gap-audit-json" in portfolio_board_command

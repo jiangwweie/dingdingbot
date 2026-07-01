@@ -1,6 +1,6 @@
 ## StrategyGroup Runtime Local Monitor Sequence
 
-- 报告时间: 2026-07-01T15:04:49.410708+00:00
+- 报告时间: 2026-07-01T16:00:06.467355+00:00
 - 当前阶段: 监控状态需刷新
 - 当前检查点: 刷新本地 runtime monitor 缓存
 - 风险等级: L0_local_monitor_sequence
@@ -154,6 +154,10 @@
 | strategygroup_tradeability_decision | tradeability_decision_ready | 0 |
 | daily_live_enablement_table | daily_live_enablement_table_ready | 0 |
 | validate_daily_live_enablement_table | daily_live_enablement_table_ready | 0 |
+| single_lane_task_packet | single_lane_task_packet_ready | 0 |
+| validate_single_lane_task_packet | single_lane_task_packet_ready | 0 |
+| strategy_live_candidate_pool | strategy_live_candidate_pool_ready | 0 |
+| validate_strategy_live_candidate_pool | strategy_live_candidate_pool_ready | 0 |
 
 ## Owner Runtime Issues
 

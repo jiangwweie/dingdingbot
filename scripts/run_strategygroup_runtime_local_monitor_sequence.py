@@ -475,6 +475,12 @@ DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
 DEFAULT_SINGLE_LANE_TASK_PACKET_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.md"
 )
+DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
+)
+DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -703,6 +709,10 @@ def main(argv: list[str] | None = None) -> int:
         daily_live_enablement_table_md=Path(args.daily_live_enablement_table_md),
         single_lane_task_packet_json=Path(args.single_lane_task_packet_json),
         single_lane_task_packet_md=Path(args.single_lane_task_packet_md),
+        strategy_live_candidate_pool_json=Path(
+            args.strategy_live_candidate_pool_json
+        ),
+        strategy_live_candidate_pool_md=Path(args.strategy_live_candidate_pool_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -988,6 +998,8 @@ def build_local_monitor_sequence_report(
     daily_live_enablement_table_md: Path = DEFAULT_DAILY_LIVE_ENABLEMENT_TABLE_MD,
     single_lane_task_packet_json: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_JSON,
     single_lane_task_packet_md: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_MD,
+    strategy_live_candidate_pool_json: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON,
+    strategy_live_candidate_pool_md: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     if (
@@ -1101,6 +1113,17 @@ def build_local_monitor_sequence_report(
         if single_lane_task_packet_md == DEFAULT_SINGLE_LANE_TASK_PACKET_MD:
             single_lane_task_packet_md = (
                 cpm_parent / DEFAULT_SINGLE_LANE_TASK_PACKET_MD.name
+            )
+        if (
+            strategy_live_candidate_pool_json
+            == DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON
+        ):
+            strategy_live_candidate_pool_json = (
+                cpm_parent / DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON.name
+            )
+        if strategy_live_candidate_pool_md == DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD:
+            strategy_live_candidate_pool_md = (
+                cpm_parent / DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD.name
             )
         if (
             four_candidate_runtime_activation_closure_json
@@ -2445,6 +2468,47 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    strategy_live_candidate_pool_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategy_live_candidate_pool.py"),
+        "--daily-table-json",
+        str(daily_live_enablement_table_json),
+        "--tradeability-json",
+        str(strategygroup_tradeability_decision_json),
+        "--replay-live-parity-json",
+        str(replay_live_parity_audit_json),
+        "--action-time-boundary-json",
+        str(strategy_fresh_signal_action_time_boundary_json),
+        "--single-lane-task-packet-json",
+        str(single_lane_task_packet_json),
+        "--output-json",
+        str(strategy_live_candidate_pool_json),
+        "--output-owner-progress",
+        str(strategy_live_candidate_pool_md),
+    ]
+    steps.append(
+        _run_step(
+            "strategy_live_candidate_pool",
+            strategy_live_candidate_pool_command,
+            strategy_live_candidate_pool_json,
+            runner,
+        )
+    )
+
+    validate_strategy_live_candidate_pool_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/validate_strategy_live_candidate_pool.py"),
+        str(strategy_live_candidate_pool_json),
+    ]
+    steps.append(
+        _run_step(
+            "validate_strategy_live_candidate_pool",
+            validate_strategy_live_candidate_pool_command,
+            strategy_live_candidate_pool_json,
+            runner,
+        )
+    )
+
     artifacts = {
         step["name"]: step.get("artifact") if isinstance(step.get("artifact"), dict) else {}
         for step in steps
@@ -2799,6 +2863,7 @@ def build_local_monitor_sequence_report(
             ),
             "daily_live_enablement_table_json": str(daily_live_enablement_table_json),
             "single_lane_task_packet_json": str(single_lane_task_packet_json),
+            "strategy_live_candidate_pool_json": str(strategy_live_candidate_pool_json),
             "strategygroup_portfolio_board_json": str(strategygroup_portfolio_board_json),
             "strategygroup_review_only_deep_dive_wave_json": str(
                 strategygroup_review_only_deep_dive_wave_json
@@ -5594,6 +5659,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--single-lane-task-packet-md",
         default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_MD),
+    )
+    parser.add_argument(
+        "--strategy-live-candidate-pool-json",
+        default=str(DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON),
+    )
+    parser.add_argument(
+        "--strategy-live-candidate-pool-md",
+        default=str(DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

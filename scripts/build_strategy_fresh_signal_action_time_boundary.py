@@ -194,6 +194,15 @@ def _evidence_row(
     candidate_shape = evidence.get("candidate_evidence_shape_ready") is True
     rehearsal_ready = evidence.get("fresh_signal_rehearsal_ready") is True
     would_enter = public_ready and candidate_shape and rehearsal_ready
+    first_blocker = (
+        "watcher_tick_missing"
+        if not public_ready
+        else str(
+            readiness.get("first_blocker")
+            or evidence.get("next_blocker")
+            or signal_absent_blocker
+        )
+    )
     return _row(
         strategy_group_id=strategy_group_id,
         symbol=_first_symbol(readiness, evidence, default="SOLUSDT"),
@@ -204,10 +213,12 @@ def _evidence_row(
         candidate_evidence_shape_ready=candidate_shape,
         dry_run_submit_rehearsal_ready=rehearsal_ready,
         would_enter_finalgate_if_private_facts_ready=would_enter,
-        first_blocker=(
-            str(readiness.get("first_blocker") or evidence.get("next_blocker") or signal_absent_blocker)
+        first_blocker=first_blocker,
+        blocker_owner=(
+            "runtime"
+            if first_blocker == "watcher_tick_missing"
+            else str(readiness.get("blocker_owner") or "market")
         ),
-        blocker_owner=str(readiness.get("blocker_owner") or "market"),
     )
 
 

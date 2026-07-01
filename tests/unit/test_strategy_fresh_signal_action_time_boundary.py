@@ -56,6 +56,14 @@ def _mpg_readiness() -> dict:
     }
 
 
+def _mpg_readiness_public_gap() -> dict:
+    return {
+        "checks": {"public_facts_ready_for_readonly_symbols": False},
+        "first_blocker": "mpg_high_beta_public_facts_gap",
+        "blocker_owner": "runtime",
+    }
+
+
 def _evidence(strategy_group_id: str) -> dict:
     return {
         "strategy_group_id": strategy_group_id,
@@ -205,3 +213,30 @@ def test_sor_boundary_requires_selected_detector_public_facts_and_candle_tick():
     assert sor["first_blocker"] == "watcher_tick_missing"
     assert sor["blocker_owner"] == "runtime"
     assert sor["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_mpg_boundary_maps_public_facts_gap_to_watcher_tick_missing():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=False),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness_public_gap(),
+        mpg_evidence={
+            **_evidence("MPG-001"),
+            "runtime_artifact_ready": False,
+            "candidate_evidence_shape_ready": False,
+            "fresh_signal_rehearsal_ready": False,
+        },
+        sor_evidence=_evidence("SOR-001"),
+        sor_detector=_sor_detector(),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    mpg = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "MPG-001")
+    assert mpg["symbol"] == "SOLUSDT"
+    assert mpg["required_facts_readiness"]["public_facts_ready"] is False
+    assert mpg["action_time_path_ready"] is False
+    assert mpg["first_blocker"] == "watcher_tick_missing"
+    assert mpg["blocker_owner"] == "runtime"
+    assert mpg["next_action"] == "refresh_or_repair_watcher_public_fact_input"
