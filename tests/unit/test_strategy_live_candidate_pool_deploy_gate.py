@@ -230,6 +230,47 @@ def test_deploy_gate_blocks_blocked_public_facts_without_waiver():
     assert any("blocked_public_facts prevents deploy_ready" in error for error in errors)
 
 
+def test_deploy_gate_blocks_action_time_boundary_not_reproduced():
+    module = _load_module()
+    candidate_pool = _deploy_ready_candidate_pool()
+    candidate_pool["candidate_rows"][0]["first_blocker"] = (
+        "action_time_boundary_not_reproduced"
+    )
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=candidate_pool,
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=_local_monitor_sequence(),
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert any(
+        "residual blocker action_time_boundary_not_reproduced" in error
+        for error in errors
+    )
+
+
+def test_deploy_gate_blocks_replay_live_rule_mismatch():
+    module = _load_module()
+    candidate_pool = _deploy_ready_candidate_pool()
+    candidate_pool["candidate_rows"][0]["first_blocker"] = "replay_live_rule_mismatch"
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=candidate_pool,
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=_local_monitor_sequence(),
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert any(
+        "residual blocker replay_live_rule_mismatch" in error for error in errors
+    )
+
+
 def test_deploy_gate_cli_reports_blocked_for_current_not_ready_pool(tmp_path: Path):
     candidate_pool = tmp_path / "candidate_pool.json"
     daily_table = tmp_path / "daily_table.json"

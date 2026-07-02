@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Standing-authorization Tokyo runtime-governance deployment executor.
+"""Retired archive-upload Tokyo runtime-governance deploy executor.
 
-Default behavior is dry-run only: build the deployment plan and report the
-commands that would run. Remote mutation requires `--apply`; during the current
-development-stage pilot it uses the Owner standing authorization unless
-`--require-confirmation-phrase` is explicitly set. When applied, this script can
-run SSH/scp, transfer release artifacts, stop/start the backend service, create
-a PG backup, run Alembic migrations, repoint the release symlink, and run
-read-only smoke checks. It does not create execution records, create orders,
-call OrderLifecycle, or call exchange APIs.
+This command is a fail-closed tombstone. The archive/scp release-package deploy
+path is disabled to avoid large release uploads and stale deployment semantics.
+Use scripts/execute_tokyo_runtime_governance_git_deploy.py for Tokyo deploys.
+All invocations of this legacy executor return ``blocked`` and do not run SSH,
+scp, migrations, service restarts, FinalGate, Operation Layer, or exchange
+writes.
 """
 
 from __future__ import annotations
@@ -66,11 +64,6 @@ ShellRunner = Callable[[str], ShellResult]
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
-    owner_deploy_artifact = (
-        _load_owner_deploy_artifact(Path(args.owner_deploy_artifact_path))
-        if args.owner_deploy_artifact_path
-        else None
-    )
     plan = build_deploy_plan(
         repo_root=repo_root,
         archive_path=Path(args.archive_path) if args.archive_path else None,
@@ -92,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         plan,
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
-        owner_deploy_artifact=owner_deploy_artifact,
+        owner_deploy_artifact=None,
         require_confirmation_phrase=args.require_confirmation_phrase,
     )
     if args.json:
@@ -111,181 +104,24 @@ def execute_deploy_plan(
     require_confirmation_phrase: bool = False,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
-    """Execute or dry-run a generated deploy plan."""
+    """Reject the retired archive-upload deploy path.
+
+    The Tokyo deploy path is git-based only. This legacy executor remains as a
+    tombstone so older commands fail closed without transferring release
+    archives or running remote mutation commands.
+    """
 
     blockers = list(plan.get("checks", {}).get("blockers") or [])
     if ARCHIVE_UPLOAD_DEPLOY_BLOCKER not in blockers:
         blockers.append(ARCHIVE_UPLOAD_DEPLOY_BLOCKER)
-    if blockers:
-        return _execution_report(
-            plan=plan,
-            status="blocked",
-            apply=apply,
-            blockers=["deploy_plan_blocked", *blockers],
-            command_results=[],
-        )
-
-    if not apply:
-        return _execution_report(
-            plan=plan,
-            status="dry_run_ready",
-            apply=False,
-            blockers=[],
-            command_results=[],
-        )
-
-    required_phrase = plan.get("checks", {}).get(
-        "remote_mutation_requires_confirmation_phrase"
-    )
-    confirmation_phrase_matches = (
-        confirmation_phrase == required_phrase
-        and required_phrase == CONFIRMATION_PHRASE
-    )
-    if require_confirmation_phrase and not confirmation_phrase_matches:
-        return _execution_report(
-            plan=plan,
-            status="blocked",
-            apply=True,
-            blockers=["owner_confirmation_phrase_missing_or_mismatch"],
-            command_results=[],
-            confirmation_phrase_required=True,
-            confirmation_phrase_matches=confirmation_phrase_matches,
-        )
-
-    artifact_blockers = _owner_deploy_artifact_blockers(
-        plan,
-        owner_deploy_artifact,
-        require_confirmation_phrase=require_confirmation_phrase,
-    )
-    if artifact_blockers:
-        return _execution_report(
-            plan=plan,
-            status="blocked",
-            apply=True,
-            blockers=artifact_blockers,
-            command_results=[],
-            confirmation_phrase_required=require_confirmation_phrase,
-            confirmation_phrase_matches=confirmation_phrase_matches,
-        )
-
-    command_runner = runner or _run_shell
-    command_results: list[dict[str, Any]] = []
-    for phase in plan.get("plan_phases", []):
-        if phase.get("remote_mutation") and not _remote_mutation_phase_authorized(
-            phase,
-            required_phrase=required_phrase,
-            require_confirmation_phrase=require_confirmation_phrase,
-        ):
-            return _execution_report(
-                plan=plan,
-                status="blocked",
-                apply=True,
-                blockers=[
-                    "remote_mutation_phase_missing_authorization_marker:"
-                    f"{phase.get('phase')}"
-                ],
-                command_results=command_results,
-                confirmation_phrase_required=require_confirmation_phrase,
-                confirmation_phrase_matches=confirmation_phrase_matches,
-            )
-        for command in phase.get("commands") or []:
-            result = command_runner(str(command))
-            command_results.append(
-                {
-                    "phase": phase.get("phase"),
-                    "command": result.command,
-                    "returncode": result.returncode,
-                    "stdout_tail": _tail(result.stdout),
-                    "stderr_tail": _tail(result.stderr),
-                }
-            )
-            if result.returncode != 0:
-                return _execution_report(
-                    plan=plan,
-                    status="failed",
-                    apply=True,
-                    blockers=[f"command_failed:{phase.get('phase')}"],
-                    command_results=command_results,
-                    confirmation_phrase_required=require_confirmation_phrase,
-                    confirmation_phrase_matches=confirmation_phrase_matches,
-                )
 
     return _execution_report(
         plan=plan,
-        status="applied",
-        apply=True,
-        blockers=[],
-        command_results=command_results,
+        status="blocked",
+        apply=apply,
+        blockers=["deploy_plan_blocked", *blockers],
+        command_results=[],
         confirmation_phrase_required=require_confirmation_phrase,
-        confirmation_phrase_matches=confirmation_phrase_matches,
-    )
-
-
-def _owner_deploy_artifact_blockers(
-    plan: dict[str, Any],
-    artifact: dict[str, Any] | None,
-    *,
-    require_confirmation_phrase: bool = False,
-) -> list[str]:
-    if artifact is None:
-        return []
-
-    blockers: list[str] = []
-    checks = artifact.get("checks") if isinstance(artifact.get("checks"), dict) else {}
-    owner_gate = (
-        artifact.get("owner_gate") if isinstance(artifact.get("owner_gate"), dict) else {}
-    )
-    candidate = (
-        artifact.get("candidate") if isinstance(artifact.get("candidate"), dict) else {}
-    )
-    safety_invariants = (
-        artifact.get("safety_invariants")
-        if isinstance(artifact.get("safety_invariants"), dict)
-        else {}
-    )
-    plan_release = plan.get("release") if isinstance(plan.get("release"), dict) else {}
-    plan_inputs = plan.get("inputs") if isinstance(plan.get("inputs"), dict) else {}
-
-    if artifact.get("status") != "ready_for_owner_deploy_decision":
-        blockers.append("owner_deploy_confirmation_record_not_ready")
-    if checks.get("ready_for_owner_deploy_decision") is not True:
-        blockers.append("owner_deploy_decision_check_not_ready")
-    if checks.get("blockers"):
-        blockers.append("owner_deploy_artifact_has_blockers")
-    if checks.get("forbidden_effects"):
-        blockers.append("owner_deploy_artifact_contains_forbidden_effects")
-    if (
-        require_confirmation_phrase
-        and owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE
-    ):
-        blockers.append("owner_deploy_artifact_confirmation_phrase_mismatch")
-    if candidate.get("head") != plan_release.get("head"):
-        blockers.append("owner_deploy_artifact_head_mismatch")
-    if candidate.get("archive_path") != plan_inputs.get("archive_path"):
-        blockers.append("owner_deploy_artifact_archive_path_mismatch")
-    if candidate.get("manifest_path") != plan_inputs.get("manifest_path"):
-        blockers.append("owner_deploy_artifact_manifest_path_mismatch")
-    if safety_invariants.get("deploy_apply_requested") is True:
-        blockers.append("owner_deploy_artifact_was_built_from_apply")
-    return blockers
-
-
-def _remote_mutation_phase_authorized(
-    phase: dict[str, Any],
-    *,
-    required_phrase: str | None,
-    require_confirmation_phrase: bool,
-) -> bool:
-    phase_confirmation_gate_matches = (
-        bool(required_phrase)
-        and phase.get("requires_confirmation_phrase") == required_phrase
-    )
-    if require_confirmation_phrase:
-        return phase_confirmation_gate_matches
-    return (
-        phase.get("remote_mutation_authorization")
-        == OWNER_STANDING_AUTHORIZATION_REFERENCE
-        or phase_confirmation_gate_matches
     )
 
 
@@ -378,29 +214,6 @@ def _effects_from_command_results(
     }
 
 
-def _run_shell(command: str) -> ShellResult:
-    completed = subprocess.run(
-        command,
-        shell=True,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    return ShellResult(
-        command=command,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-        returncode=completed.returncode,
-    )
-
-
-def _tail(value: str, *, max_chars: int = 2000) -> str:
-    if len(value) <= max_chars:
-        return value
-    return value[-max_chars:]
-
-
 def _repo_root() -> Path:
     completed = subprocess.run(
         ("git", "rev-parse", "--show-toplevel"),
@@ -414,21 +227,12 @@ def _repo_root() -> Path:
     return Path(completed.stdout.strip())
 
 
-def _load_owner_deploy_artifact(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text())
-    except OSError as exc:
-        raise DeployExecutionError(f"owner deploy confirmation record unreadable: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise DeployExecutionError(f"owner deploy confirmation record is not JSON: {path}") from exc
-    if not isinstance(payload, dict):
-        raise DeployExecutionError("owner deploy confirmation record must be a JSON object")
-    return payload
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Dry-run or apply an owner-gated Tokyo runtime-governance deploy plan."
+        description=(
+            "Retired archive-upload deploy executor. Always returns blocked; "
+            "use scripts/execute_tokyo_runtime_governance_git_deploy.py."
+        )
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
     parser.add_argument("--archive-path", required=True)
@@ -455,28 +259,33 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Run remote-mutating commands. Uses standing authorization by default.",
+        help=(
+            "Accepted for legacy CLI compatibility only; archive upload deploy "
+            "remains blocked and no remote commands run."
+        ),
     )
     parser.add_argument(
         "--confirmation-phrase",
         default=None,
         help=(
-            "Legacy phrase, required only with --require-confirmation-phrase: "
+            "Ignored legacy phrase for the retired archive deploy path: "
             f"{CONFIRMATION_PHRASE}"
         ),
     )
     parser.add_argument(
         "--require-confirmation-phrase",
         action="store_true",
-        help="Require the legacy exact confirmation phrase even during apply.",
+        help=(
+            "Accepted for legacy CLI compatibility only; the retired executor "
+            "still returns blocked."
+        ),
     )
     parser.add_argument(
         "--owner-deploy-artifact-path",
         default=None,
         help=(
-            "Optional with --apply: JSON output from "
-            "build_tokyo_runtime_governance_owner_deploy_policy_artifact.py for the same "
-            "archive, manifest, and HEAD."
+            "Ignored legacy archive-deploy policy artifact path; git deploy "
+            "uses its own gate."
         ),
     )
     return parser.parse_args(argv)
