@@ -49,6 +49,8 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env" in text
+    assert "--candidate-universe-json" in text
+    assert "latest-strategy-live-candidate-pool.json" in text
     for strategy_family_id in (
         "CPM-RO-001",
         "MPG-001",

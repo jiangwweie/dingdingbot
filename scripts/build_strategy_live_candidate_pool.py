@@ -39,6 +39,9 @@ DEFAULT_ACTION_TIME_BOUNDARY_JSON = (
 DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
 )
+DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-active-observation-status.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
 )
@@ -114,6 +117,14 @@ def main(argv: list[str] | None = None) -> int:
         "--single-lane-task-packet-json",
         default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_JSON),
     )
+    parser.add_argument(
+        "--runtime-active-monitor-json",
+        default=str(DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON),
+        help=(
+            "Optional runtime active monitor/status artifact with "
+            "candidate_universe_coverage."
+        ),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -124,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         replay_live_parity=_read_json(Path(args.replay_live_parity_json)),
         action_time_boundary=_read_json(Path(args.action_time_boundary_json)),
         single_lane_task_packet=_read_json(Path(args.single_lane_task_packet_json)),
+        runtime_active_monitor=_read_json(Path(args.runtime_active_monitor_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -154,8 +166,10 @@ def build_strategy_live_candidate_pool(
     replay_live_parity: dict[str, Any],
     action_time_boundary: dict[str, Any],
     single_lane_task_packet: dict[str, Any],
+    runtime_active_monitor: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
+    runtime_active_monitor = runtime_active_monitor or {}
     generated = (
         generated_at_utc
         or str(daily_table.get("generated_at_utc") or "")
@@ -197,6 +211,7 @@ def build_strategy_live_candidate_pool(
         replay_live_parity=replay_live_parity,
         action_time_boundary=action_time_boundary,
         tradeability_rows=tradeability_rows,
+        runtime_active_monitor=runtime_active_monitor,
     )
     promotion_candidates = [
         row
@@ -265,6 +280,7 @@ def build_strategy_live_candidate_pool(
             },
         },
         "candidate_universe": _candidate_universe(symbol_readiness_rows),
+        "server_runtime_coverage": _runtime_coverage(runtime_active_monitor),
         "candidate_rows": candidate_rows,
         "symbol_readiness_rows": symbol_readiness_rows,
         "promotion_candidates": promotion_candidates,
@@ -365,9 +381,13 @@ def _symbol_readiness_rows(
     replay_live_parity: dict[str, Any],
     action_time_boundary: dict[str, Any],
     tradeability_rows: dict[str, dict[str, Any]],
+    runtime_active_monitor: dict[str, Any],
 ) -> list[dict[str, Any]]:
     parity_rows = _dict_rows(replay_live_parity.get("per_symbol_mismatch_table"))
     action_rows = _dict_rows(action_time_boundary.get("strategy_rows"))
+    runtime_coverage_rows = _dict_rows(
+        _runtime_coverage(runtime_active_monitor).get("rows")
+    )
     result: list[dict[str, Any]] = []
     for candidate in candidate_rows:
         strategy_group_id = str(candidate.get("strategy_group_id") or "")
@@ -381,6 +401,11 @@ def _symbol_readiness_rows(
         for symbol in symbols:
             parity_row = _matching_symbol_row(parity_rows, strategy_group_id, symbol)
             action_row = _matching_symbol_row(action_rows, strategy_group_id, symbol)
+            runtime_coverage_row = _matching_symbol_row(
+                runtime_coverage_rows,
+                strategy_group_id,
+                symbol,
+            )
             result.append(
                 _symbol_readiness_row(
                     strategy_group_id=strategy_group_id,
@@ -390,6 +415,7 @@ def _symbol_readiness_rows(
                     tradeability_row=tradeability_rows.get(strategy_group_id, {}),
                     parity_row=parity_row,
                     action_row=action_row,
+                    runtime_coverage_row=runtime_coverage_row,
                 )
             )
     return result
@@ -446,9 +472,14 @@ def _symbol_readiness_row(
     tradeability_row: dict[str, Any],
     parity_row: dict[str, Any],
     action_row: dict[str, Any],
+    runtime_coverage_row: dict[str, Any],
 ) -> dict[str, Any]:
+    runtime_scope_missing = (
+        runtime_coverage_row.get("blocker_class") == "runtime_profile_scope_missing"
+    )
+    runtime_active = str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
     detector_ready = parity_row.get("detector_attached") is True
-    watcher_present = parity_row.get("watcher_tick_present") is True
+    watcher_present = parity_row.get("watcher_tick_present") is True or runtime_active
     computed = parity_row.get("computed") is True
     failed_facts = [
         str(item)
@@ -479,6 +510,7 @@ def _symbol_readiness_row(
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
+        runtime_scope_missing=runtime_scope_missing,
     )
     promotion_state = _promotion_state(
         public_facts_state=public_facts_state,
@@ -512,8 +544,10 @@ def _symbol_readiness_row(
             first_blocker=first_blocker,
             parity_row=parity_row,
             action_row=action_row,
+            runtime_coverage_row=runtime_coverage_row,
         ),
         "action_time": _action_time_readiness(action_row),
+        "server_runtime_coverage": runtime_coverage_row or {},
         "authority_boundary": AUTHORITY_BOUNDARY,
     }
 
@@ -621,7 +655,10 @@ def _symbol_first_blocker(
     signal_state: str,
     scope_state: str,
     risk_state: str,
+    runtime_scope_missing: bool = False,
 ) -> str:
+    if runtime_scope_missing:
+        return "runtime_profile_scope_missing"
     if not detector_ready:
         return "detector_not_attached"
     if not watcher_present:
@@ -693,7 +730,13 @@ def _symbol_evidence_ref(
     first_blocker: str,
     parity_row: dict[str, Any],
     action_row: dict[str, Any],
+    runtime_coverage_row: dict[str, Any] | None = None,
 ) -> str:
+    if runtime_coverage_row and runtime_coverage_row.get("blocker_class") == first_blocker:
+        return (
+            "runtime_active_observation_status:candidate_universe_coverage:"
+            f"{strategy_group_id}/{symbol} first_blocker={first_blocker}"
+        )
     if parity_row:
         source_blocker = str(parity_row.get("blocker_class") or "")
         source_detail = (
@@ -712,6 +755,18 @@ def _symbol_evidence_ref(
             f"{strategy_group_id}/{symbol} first_blocker={action_row.get('first_blocker')}"
         )
     return f"default_candidate_universe:{strategy_group_id}/{symbol}"
+
+
+def _runtime_coverage(runtime_active_monitor: dict[str, Any]) -> dict[str, Any]:
+    coverage = runtime_active_monitor.get("candidate_universe_coverage")
+    if isinstance(coverage, dict):
+        return coverage
+    latest = runtime_active_monitor.get("latest_summary")
+    if isinstance(latest, dict):
+        coverage = latest.get("candidate_universe_coverage")
+        if isinstance(coverage, dict):
+            return coverage
+    return {}
 
 
 def _candidate_role(strategy_group_id: str, symbol: str) -> str:

@@ -24,6 +24,7 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --max-iterations 1 \
   --cycle-timeout-seconds 180 \
   --status-stale-after-seconds 900 \
+  --candidate-universe-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json \
   --allow-prepare-records \
   --allow-arm-preview \
   --allow-attempt-policy-prepare \

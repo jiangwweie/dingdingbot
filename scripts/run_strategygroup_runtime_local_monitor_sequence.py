@@ -481,6 +481,9 @@ DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON = (
 DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.md"
 )
+DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-active-observation-status.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -713,6 +716,7 @@ def main(argv: list[str] | None = None) -> int:
             args.strategy_live_candidate_pool_json
         ),
         strategy_live_candidate_pool_md=Path(args.strategy_live_candidate_pool_md),
+        runtime_active_monitor_json=Path(args.runtime_active_monitor_json),
         binance_public_facts_ssh_host=args.binance_public_facts_ssh_host,
     )
     owner_progress_text = _owner_progress_text(report)
@@ -1001,6 +1005,7 @@ def build_local_monitor_sequence_report(
     single_lane_task_packet_md: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_MD,
     strategy_live_candidate_pool_json: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON,
     strategy_live_candidate_pool_md: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD,
+    runtime_active_monitor_json: Path = DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON,
     binance_public_facts_ssh_host: str = "",
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -2493,6 +2498,8 @@ def build_local_monitor_sequence_report(
         str(strategy_fresh_signal_action_time_boundary_json),
         "--single-lane-task-packet-json",
         str(single_lane_task_packet_json),
+        "--runtime-active-monitor-json",
+        str(runtime_active_monitor_json),
         "--output-json",
         str(strategy_live_candidate_pool_json),
         "--output-owner-progress",
@@ -5679,6 +5686,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategy-live-candidate-pool-md",
         default=str(DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD),
+    )
+    parser.add_argument(
+        "--runtime-active-monitor-json",
+        default=str(DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON),
     )
     parser.add_argument(
         "--binance-public-facts-ssh-host",

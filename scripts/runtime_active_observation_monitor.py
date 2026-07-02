@@ -45,6 +45,13 @@ OBSERVE_ONLY_REVIEW_BLOCKERS = {
 WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
+DEFAULT_CANDIDATE_UNIVERSE = {
+    "CPM-RO-001": ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
+    "MPG-001": ("OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
+    "MI-001": ("AVAXUSDT", "SOLUSDT", "ETHUSDT"),
+    "SOR-001": ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"),
+    "BRF2-001": ("BTCUSDT", "ETHUSDT", "AVAXUSDT"),
+}
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -118,6 +125,138 @@ def _selected_active_runtimes(
     }
     missing = [runtime_id for runtime_id in requested if runtime_id not in found]
     return selected[: max(max_runtimes, 0)], missing
+
+
+def _read_candidate_universe(path_value: str | None) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    if not path_value:
+        return {}, {"source": "not_configured", "path": None, "loaded": False}
+    path = Path(path_value).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        return {}, {
+            "source": "candidate_universe_json",
+            "path": str(path),
+            "loaded": False,
+            "error": type(exc).__name__,
+        }
+    universe = payload.get("candidate_universe")
+    if not isinstance(universe, dict):
+        universe = payload
+    parsed: dict[str, list[str]] = {}
+    if isinstance(universe, dict):
+        for strategy_group_id, symbols in universe.items():
+            parsed[str(strategy_group_id)] = [
+                _compact_symbol(symbol)
+                for symbol in (symbols or [])
+                if _compact_symbol(symbol)
+            ]
+    return parsed, {
+        "source": "candidate_universe_json",
+        "path": str(path),
+        "loaded": bool(parsed),
+        "strategy_group_count": len(parsed),
+    }
+
+
+def _compact_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    if "/" in text:
+        base, rest = text.split("/", 1)
+        quote = rest.split(":", 1)[0]
+        return f"{base}{quote}"
+    return text.replace(":", "").replace("-", "")
+
+
+def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    loaded, source = _read_candidate_universe(
+        getattr(args, "candidate_universe_json", None)
+    )
+    if loaded:
+        return loaded, source
+    requested = [
+        str(item).strip()
+        for item in (getattr(args, "strategy_family_id", None) or [])
+        if str(item or "").strip()
+    ]
+    if not requested and not getattr(args, "candidate_universe_json", None):
+        return {}, source
+    fallback = {
+        strategy_group_id: list(symbols)
+        for strategy_group_id, symbols in DEFAULT_CANDIDATE_UNIVERSE.items()
+        if not requested or strategy_group_id in set(requested)
+    }
+    source = {
+        **source,
+        "fallback": "default_pretrade_candidate_universe",
+        "strategy_group_count": len(fallback),
+    }
+    return fallback, source
+
+
+def _candidate_universe_coverage(
+    *,
+    candidate_universe: dict[str, list[str]],
+    source: dict[str, Any],
+    active: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_pairs: dict[tuple[str, str], list[str]] = {}
+    active_pairs: dict[tuple[str, str], list[str]] = {}
+    for bucket, runtimes in ((active_pairs, active), (selected_pairs, selected)):
+        for runtime in runtimes:
+            strategy_group_id = str(
+                _runtime_value(runtime, "strategy_family_id", "family") or ""
+            )
+            symbol = _compact_symbol(_runtime_value(runtime, "symbol"))
+            runtime_id = str(
+                _runtime_value(runtime, "runtime_instance_id", "runtime_id") or ""
+            )
+            if strategy_group_id and symbol:
+                bucket.setdefault((strategy_group_id, symbol), []).append(runtime_id)
+    rows: list[dict[str, Any]] = []
+    for strategy_group_id in sorted(candidate_universe):
+        for symbol in sorted(set(candidate_universe[strategy_group_id])):
+            selected_matches = selected_pairs.get((strategy_group_id, symbol), [])
+            active_matches = active_pairs.get((strategy_group_id, symbol), [])
+            if selected_matches:
+                state = "active_watcher_scope"
+                blocker_class = "none"
+                next_action = "continue_pretrade_observation"
+            elif active_matches:
+                state = "active_runtime_filtered_out"
+                blocker_class = "runtime_profile_scope_missing"
+                next_action = "include_candidate_runtime_in_watcher_scope"
+            else:
+                state = "runtime_profile_scope_missing"
+                blocker_class = "runtime_profile_scope_missing"
+                next_action = "bind_or_start_pretrade_runtime_for_candidate_symbol"
+            rows.append(
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "symbol": symbol,
+                    "state": state,
+                    "blocker_class": blocker_class,
+                    "active_runtime_instance_ids": active_matches,
+                    "selected_runtime_instance_ids": selected_matches,
+                    "next_action": next_action,
+                }
+            )
+    missing_rows = [row for row in rows if row["blocker_class"] != "none"]
+    return {
+        "status": "complete" if not missing_rows else "incomplete",
+        "source": source,
+        "expected_row_count": len(rows),
+        "active_matched_row_count": len(rows) - len(missing_rows),
+        "missing_row_count": len(missing_rows),
+        "rows": rows,
+        "authority_boundary": (
+            "candidate_universe_coverage_is_read_only; "
+            "does_not_create_runtime_or_expand_live_submit"
+        ),
+    }
 
 
 def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
@@ -380,6 +519,13 @@ def _build_monitor_artifact(
         strategy_family_ids=requested_strategy_family_ids,
         max_runtimes=int(args.max_runtimes or 100),
     )
+    candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
+    candidate_universe_coverage = _candidate_universe_coverage(
+        candidate_universe=candidate_universe,
+        source=candidate_universe_source,
+        active=active,
+        selected=selected,
+    )
 
     runtime_artifacts: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
@@ -415,6 +561,12 @@ def _build_monitor_artifact(
         warnings.append(
             "observation_timeout_seconds_clamped_to_api_max_60"
         )
+    for row in candidate_universe_coverage["rows"]:
+        if row["blocker_class"] == "runtime_profile_scope_missing":
+            warnings.append(
+                "candidate_universe_runtime_profile_scope_missing:"
+                f"{row['strategy_group_id']}:{row['symbol']}"
+            )
 
     return {
         "scope": "runtime_active_observation_monitor",
@@ -427,6 +579,7 @@ def _build_monitor_artifact(
             str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
             for runtime in selected
         ],
+        "candidate_universe_coverage": candidate_universe_coverage,
         "allow_prepare_records": args.allow_prepare_records,
         "max_cycles_per_runtime": args.max_cycles_per_runtime,
         "requested_timeout_seconds": args.timeout_seconds,
@@ -452,6 +605,9 @@ def _build_monitor_artifact(
             "requires_official_final_gate": True,
             "uses_standing_runtime_authorization": True,
             "requires_official_operation_layer": True,
+            "candidate_universe_coverage_status": candidate_universe_coverage[
+                "status"
+            ],
         },
         "safety_invariants": _safety(
             allow_prepare_records=args.allow_prepare_records,
@@ -573,6 +729,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Limit monitoring to ACTIVE runtimes belonging to this strategy "
             "family. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-universe-json",
+        help=(
+            "Optional Strategy Live Candidate Pool JSON. When present, emit "
+            "read-only per-symbol runtime scope coverage."
         ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)

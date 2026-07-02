@@ -2418,6 +2418,9 @@ def _maybe_write_strategygroup_closure_step(
         parity_path = Path(command[command.index("--replay-live-parity-json") + 1])
         action_time_path = Path(command[command.index("--action-time-boundary-json") + 1])
         packet_path = Path(command[command.index("--single-lane-task-packet-json") + 1])
+        runtime_active_monitor_path = Path(
+            command[command.index("--runtime-active-monitor-json") + 1]
+        )
         output_json = Path(command[command.index("--output-json") + 1])
         output_md = Path(command[command.index("--output-owner-progress") + 1])
         artifact = build_strategy_live_candidate_pool(
@@ -2426,6 +2429,11 @@ def _maybe_write_strategygroup_closure_step(
             replay_live_parity=json.loads(parity_path.read_text(encoding="utf-8")),
             action_time_boundary=json.loads(action_time_path.read_text(encoding="utf-8")),
             single_lane_task_packet=json.loads(packet_path.read_text(encoding="utf-8")),
+            runtime_active_monitor=(
+                json.loads(runtime_active_monitor_path.read_text(encoding="utf-8"))
+                if runtime_active_monitor_path.exists()
+                else {}
+            ),
             generated_at_utc="2026-07-01T00:00:00+00:00",
         )
         output_json.write_text(json.dumps(artifact), encoding="utf-8")
@@ -2992,6 +3000,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert candidate_pool_command[
         candidate_pool_command.index("--single-lane-task-packet-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
+    assert "--runtime-active-monitor-json" in candidate_pool_command
     portfolio_board_command = portfolio_board_commands[0]
     assert "--capture-gap-audit-json" in portfolio_board_command
     assert portfolio_board_command[

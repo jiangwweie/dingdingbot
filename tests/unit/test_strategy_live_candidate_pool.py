@@ -280,6 +280,62 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
     assert review["cpm_computed_refresh"]["status"] == "cleared"
 
 
+def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "incomplete",
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "state": "runtime_profile_scope_missing",
+                    "blocker_class": "runtime_profile_scope_missing",
+                    "active_runtime_instance_ids": [],
+                    "selected_runtime_instance_ids": [],
+                    "next_action": (
+                        "bind_or_start_pretrade_runtime_for_candidate_symbol"
+                    ),
+                },
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "SOLUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-mpg-sol"],
+                    "selected_runtime_instance_ids": ["runtime-mpg-sol"],
+                    "next_action": "continue_pretrade_observation",
+                },
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = {
+        (row["strategy_group_id"], row["symbol"]): row
+        for row in artifact["symbol_readiness_rows"]
+    }
+    op = rows[("MPG-001", "OPUSDT")]
+    sol = rows[("MPG-001", "SOLUSDT")]
+    assert op["first_blocker"] == "runtime_profile_scope_missing"
+    assert op["evidence_ref"].startswith(
+        "runtime_active_observation_status:candidate_universe_coverage:"
+    )
+    assert op["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
+    assert sol["observation_scope"] == "active_observation"
+    assert sol["watcher_state"] == "fresh"
+    assert artifact["server_runtime_coverage"]["status"] == "incomplete"
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_promotes_readonly_fresh_signal_without_action_time_input():
     daily_table = json.loads(json.dumps(_daily_table()))
     mpg_daily = next(
