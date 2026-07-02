@@ -109,9 +109,13 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
 
     assert "build_mi_trial_admission_decision.py" in text
     assert "build_strategygroup_runtime_safety_state.py" in text
+    assert "validate_runtime_candidate_universe_coverage.py \"$STATUS\"" in text
     assert "build_strategy_live_candidate_pool.py" in text
     assert "--runtime-active-monitor-json \"$STATUS\"" in text
     assert "latest-status.json" in text
+    assert text.index("validate_runtime_candidate_universe_coverage.py") < text.index(
+        "build_strategy_live_candidate_pool.py"
+    )
     assert "validate_strategy_live_candidate_pool.py" in text
     assert "build_daily_live_enablement_table.py" in text
     assert "--candidate-pool-json output/runtime-monitor/latest-strategy-live-candidate-pool.json" in text
