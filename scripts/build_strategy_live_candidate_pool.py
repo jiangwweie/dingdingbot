@@ -23,6 +23,7 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
 
 
 SCHEMA = "brc.strategy_live_candidate_pool.v1"
+OWNER_AUTHORIZATION_SCHEMA = "brc.owner_pretrade_runtime_authorization.v0"
 DEFAULT_DAILY_TABLE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
 )
@@ -50,6 +51,10 @@ DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
 )
 DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-runtime-active-observation-status.json"
+)
+DEFAULT_OWNER_PRETRADE_AUTHORIZATION_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/owner-pretrade-runtime-authorization-v0.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
@@ -116,6 +121,16 @@ ACTION_TIME_BLOCKED_STATUSES = {
     "blocked_public_facts",
     "blocked_action_time_rehearsal",
 }
+ACTION_TIME_SCOPE_STATES = {
+    "live_submit_allowed",
+    "conditional_action_time_rehearsal_allowed",
+}
+SCOPED_LIVE_SUBMIT_STRATEGIES = {
+    "CPM-RO-001",
+    "MPG-001",
+    "MI-001",
+    "SOR-001",
+}
 P0_P1_ITEMS = (
     ("P0", "five_strategy_candidate_pool_control_surface"),
     ("P0", "mpg_watcher_closure"),
@@ -162,6 +177,11 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_universe_coverage."
         ),
     )
+    parser.add_argument(
+        "--owner-pretrade-authorization-json",
+        default=str(DEFAULT_OWNER_PRETRADE_AUTHORIZATION_JSON),
+        help="Machine-readable Owner pre-trade runtime authorization.",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -178,6 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         single_lane_task_packet=_read_json(Path(args.single_lane_task_packet_json)),
         runtime_active_monitor=_read_json(Path(args.runtime_active_monitor_json)),
+        owner_pretrade_authorization=_read_json(
+            Path(args.owner_pretrade_authorization_json)
+        ),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -212,9 +235,15 @@ def build_strategy_live_candidate_pool(
     mi_trial_admission: dict[str, Any] | None = None,
     brf2_runtime_signal_facts: dict[str, Any] | None = None,
     runtime_active_monitor: dict[str, Any] | None = None,
+    owner_pretrade_authorization: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     runtime_active_monitor = runtime_active_monitor or {}
+    owner_pretrade_authorization = (
+        owner_pretrade_authorization
+        if owner_pretrade_authorization is not None
+        else _read_json(DEFAULT_OWNER_PRETRADE_AUTHORIZATION_JSON)
+    )
     generated = (
         generated_at_utc
         or str(daily_table.get("generated_at_utc") or "")
@@ -260,6 +289,7 @@ def build_strategy_live_candidate_pool(
         brf2_runtime_signal_facts=brf2_runtime_signal_facts or {},
         tradeability_rows=tradeability_rows,
         runtime_active_monitor=runtime_active_monitor,
+        owner_pretrade_authorization=owner_pretrade_authorization,
     )
     candidate_rows = _sync_candidate_rows_with_symbol_readiness(
         candidate_rows,
@@ -334,6 +364,9 @@ def build_strategy_live_candidate_pool(
                 )
                 for strategy_group_id in WIP_LANES
             },
+            "owner_authorization": _owner_authorization_summary(
+                owner_pretrade_authorization
+            ),
         },
         "candidate_universe": _candidate_universe(symbol_readiness_rows),
         "server_runtime_coverage": _runtime_coverage(runtime_active_monitor),
@@ -436,6 +469,7 @@ def _symbol_readiness_rows(
     brf2_runtime_signal_facts: dict[str, Any],
     tradeability_rows: dict[str, dict[str, Any]],
     runtime_active_monitor: dict[str, Any],
+    owner_pretrade_authorization: dict[str, Any],
 ) -> list[dict[str, Any]]:
     parity_rows = _dict_rows(replay_live_parity.get("per_symbol_mismatch_table"))
     sor_facts = _sor_detector_symbol_facts(sor_detector)
@@ -493,6 +527,7 @@ def _symbol_readiness_rows(
                     parity_row=parity_row,
                     action_row=action_row,
                     runtime_coverage_row=runtime_coverage_row,
+                    owner_pretrade_authorization=owner_pretrade_authorization,
                 )
             )
     return result
@@ -735,6 +770,116 @@ def _symbol_authorized(strategy_group_id: str, symbol: str) -> bool:
     return symbol in authorized
 
 
+def _owner_authorization_summary(
+    authorization: dict[str, Any],
+) -> dict[str, Any]:
+    valid = _owner_authorization_valid(authorization)
+    strategy_groups = _as_dict(authorization.get("strategy_groups"))
+    return {
+        "schema": str(authorization.get("schema") or ""),
+        "status": str(authorization.get("status") or ""),
+        "valid": valid,
+        "pretrade_candidate_allowed": authorization.get(
+            "pretrade_candidate_allowed"
+        )
+        is True,
+        "action_time_rehearsal_allowed": authorization.get(
+            "action_time_rehearsal_allowed"
+        )
+        is True,
+        "v0_single_action_time_lane": authorization.get(
+            "v0_single_action_time_lane"
+        )
+        is True,
+        "v0_single_real_submit_intent": authorization.get(
+            "v0_single_real_submit_intent"
+        )
+        is True,
+        "scoped_live_submit_strategy_groups": sorted(
+            strategy_group_id
+            for strategy_group_id in WIP_LANES
+            if _as_dict(strategy_groups.get(strategy_group_id)).get(
+                "live_submit_allowed"
+            )
+            == "scoped"
+        ),
+        "conditional_hard_gated_strategy_groups": sorted(
+            strategy_group_id
+            for strategy_group_id in WIP_LANES
+            if _as_dict(strategy_groups.get(strategy_group_id)).get(
+                "live_submit_allowed"
+            )
+            == "conditional_hard_gated"
+        ),
+        "authority_boundary": str(authorization.get("authority_boundary") or ""),
+    }
+
+
+def _owner_authorization_valid(authorization: dict[str, Any]) -> bool:
+    if authorization.get("schema") != OWNER_AUTHORIZATION_SCHEMA:
+        return False
+    if authorization.get("status") != "owner_pretrade_runtime_authorization_recorded":
+        return False
+    if authorization.get("pretrade_candidate_allowed") is not True:
+        return False
+    if authorization.get("action_time_rehearsal_allowed") is not True:
+        return False
+    if authorization.get("v0_single_action_time_lane") is not True:
+        return False
+    if authorization.get("v0_single_real_submit_intent") is not True:
+        return False
+    strategy_groups = _as_dict(authorization.get("strategy_groups"))
+    for strategy_group_id, symbols in DEFAULT_CANDIDATE_UNIVERSE.items():
+        row = _as_dict(strategy_groups.get(strategy_group_id))
+        if row.get("pretrade_candidate_allowed") is not True:
+            return False
+        if row.get("action_time_rehearsal_allowed") is not True:
+            return False
+        if set(str(item) for item in row.get("candidate_symbols") or []) != set(
+            symbols
+        ):
+            return False
+    return True
+
+
+def _symbol_owner_authorization(
+    authorization: dict[str, Any],
+    strategy_group_id: str,
+    symbol: str,
+) -> dict[str, Any]:
+    if not _owner_authorization_valid(authorization):
+        return {
+            "pretrade_candidate_allowed": False,
+            "action_time_rehearsal_allowed": False,
+            "live_submit_allowed": "none",
+            "real_submit_required_gates": [],
+            "authority_boundary": "owner_pretrade_authorization_missing_or_invalid",
+        }
+    strategy_groups = _as_dict(authorization.get("strategy_groups"))
+    row = _as_dict(strategy_groups.get(strategy_group_id))
+    symbols = {str(item) for item in row.get("candidate_symbols") or []}
+    symbol_allowed = symbol in symbols and _symbol_authorized(strategy_group_id, symbol)
+    return {
+        "pretrade_candidate_allowed": bool(
+            symbol_allowed and row.get("pretrade_candidate_allowed") is True
+        ),
+        "action_time_rehearsal_allowed": bool(
+            symbol_allowed and row.get("action_time_rehearsal_allowed") is True
+        ),
+        "live_submit_allowed": (
+            str(row.get("live_submit_allowed") or "none")
+            if symbol_allowed
+            else "none"
+        ),
+        "real_submit_required_gates": [
+            str(item) for item in row.get("real_submit_required_gates") or []
+        ]
+        if symbol_allowed
+        else [],
+        "authority_boundary": str(authorization.get("authority_boundary") or ""),
+    }
+
+
 def _matching_symbol_row(
     rows: list[dict[str, Any]], strategy_group_id: str, symbol: str
 ) -> dict[str, Any]:
@@ -788,6 +933,7 @@ def _symbol_readiness_row(
     parity_row: dict[str, Any],
     action_row: dict[str, Any],
     runtime_coverage_row: dict[str, Any],
+    owner_pretrade_authorization: dict[str, Any],
 ) -> dict[str, Any]:
     runtime_active = _server_runtime_scope_ready(runtime_coverage_row)
     detector_ready = parity_row.get("detector_attached") is True
@@ -814,11 +960,17 @@ def _symbol_readiness_row(
         candidate=candidate,
         daily_row=daily_row,
         tradeability_row=tradeability_row,
+        owner_pretrade_authorization=owner_pretrade_authorization,
+    )
+    owner_authorization = _symbol_owner_authorization(
+        owner_pretrade_authorization,
+        strategy_group_id,
+        symbol,
     )
     risk_state = _risk_state(parity_row)
     action_time_scope_missing = (
         signal_state == "fresh"
-        and scope_state == "live_submit_allowed"
+        and scope_state in ACTION_TIME_SCOPE_STATES
         and public_facts_state["state"] == "satisfied"
         and not runtime_active
     )
@@ -857,6 +1009,7 @@ def _symbol_readiness_row(
         "signal_state": signal_state,
         "risk_state": risk_state,
         "scope_state": scope_state,
+        "owner_authorization": owner_authorization,
         "promotion_state": promotion_state,
         "first_blocker": first_blocker,
         "next_action": _symbol_next_action(first_blocker, candidate),
@@ -931,7 +1084,28 @@ def _scope_state(
     candidate: dict[str, Any],
     daily_row: dict[str, Any],
     tradeability_row: dict[str, Any],
+    owner_pretrade_authorization: dict[str, Any],
 ) -> str:
+    owner_authorization = _symbol_owner_authorization(
+        owner_pretrade_authorization,
+        strategy_group_id,
+        symbol,
+    )
+    if (
+        owner_authorization.get("pretrade_candidate_allowed") is True
+        and owner_authorization.get("action_time_rehearsal_allowed") is True
+        and owner_authorization.get("live_submit_allowed") == "scoped"
+        and strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES
+    ):
+        return "live_submit_allowed"
+    if (
+        strategy_group_id == "BRF2-001"
+        and owner_authorization.get("pretrade_candidate_allowed") is True
+        and owner_authorization.get("action_time_rehearsal_allowed") is True
+        and owner_authorization.get("live_submit_allowed")
+        == "conditional_hard_gated"
+    ):
+        return "conditional_action_time_rehearsal_allowed"
     policy = _as_dict(tradeability_row.get("policy_scope"))
     live_symbols = (
         policy.get("live_submit_symbols")
@@ -996,7 +1170,7 @@ def _symbol_first_blocker(
         return "hard_safety_stop"
     if signal_state == "fresh" and scope_state == "readonly_only":
         return "scope_not_attached"
-    if signal_state == "fresh" and scope_state == "live_submit_allowed":
+    if signal_state == "fresh" and scope_state in ACTION_TIME_SCOPE_STATES:
         return _fresh_action_time_blocker(action_row)
     if signal_state == "fresh":
         return "runtime_profile_scope_missing"
@@ -1026,7 +1200,7 @@ def _promotion_state(
         return "idle"
     if risk_state == "disable":
         return "blocked"
-    if scope_state == "live_submit_allowed":
+    if scope_state in ACTION_TIME_SCOPE_STATES:
         return "action_time_lane"
     return "promotion_candidate"
 
@@ -1148,6 +1322,7 @@ def _action_time_lane_input(row: dict[str, Any]) -> dict[str, Any]:
         "server_runtime_coverage": server_runtime_coverage,
         "runtime_profile": "selected_profile_required_at_action_time",
         "scope_state": row["scope_state"],
+        "owner_authorization": row["owner_authorization"],
         "signal_state": row["signal_state"],
         "public_facts_state": row["public_facts_state"],
         "risk_state": row["risk_state"],

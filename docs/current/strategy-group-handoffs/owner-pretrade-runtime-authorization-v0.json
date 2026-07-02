@@ -1,0 +1,127 @@
+{
+  "schema": "brc.owner_pretrade_runtime_authorization.v0",
+  "status": "owner_pretrade_runtime_authorization_recorded",
+  "scope": "multi_strategy_multi_symbol_pretrade_runtime_v0",
+  "recorded_at": "2026-07-02",
+  "source": "owner_explicit_authorization",
+  "pretrade_candidate_allowed": true,
+  "action_time_rehearsal_allowed": true,
+  "v0_single_action_time_lane": true,
+  "v0_single_real_submit_intent": true,
+  "strategy_groups": {
+    "CPM-RO-001": {
+      "candidate_symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+      "side_scope": ["long"],
+      "pretrade_candidate_allowed": true,
+      "action_time_rehearsal_allowed": true,
+      "live_submit_allowed": "scoped",
+      "real_submit_required_gates": [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation"
+      ]
+    },
+    "MPG-001": {
+      "candidate_symbols": ["OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+      "side_scope": ["long"],
+      "pretrade_candidate_allowed": true,
+      "action_time_rehearsal_allowed": true,
+      "live_submit_allowed": "scoped",
+      "real_submit_required_gates": [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation"
+      ]
+    },
+    "MI-001": {
+      "candidate_symbols": ["AVAXUSDT", "ETHUSDT", "SOLUSDT"],
+      "side_scope": ["long"],
+      "pretrade_candidate_allowed": true,
+      "action_time_rehearsal_allowed": true,
+      "live_submit_allowed": "scoped",
+      "real_submit_required_gates": [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation"
+      ]
+    },
+    "SOR-001": {
+      "candidate_symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"],
+      "side_scope": ["long"],
+      "pretrade_candidate_allowed": true,
+      "action_time_rehearsal_allowed": true,
+      "live_submit_allowed": "scoped",
+      "real_submit_required_gates": [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation"
+      ]
+    },
+    "BRF2-001": {
+      "candidate_symbols": ["BTCUSDT", "AVAXUSDT", "ETHUSDT"],
+      "side_scope": ["short"],
+      "pretrade_candidate_allowed": true,
+      "action_time_rehearsal_allowed": true,
+      "live_submit_allowed": "conditional_hard_gated",
+      "real_submit_required_gates": [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation",
+        "short_side_disable_clear",
+        "squeeze_clear",
+        "liquidity_clear"
+      ]
+    }
+  },
+  "automatic_promotion": {
+    "promotion_candidate_allowed": true,
+    "action_time_lane_input_allowed": true,
+    "selection_rule": "first_fresh_satisfied_server_covered_candidate_under_v0_single_lane_arbitration"
+  },
+  "forbidden_actions": [
+    "finalgate_bypass",
+    "operation_layer_bypass",
+    "exchange_write_bypass",
+    "live_profile_expansion",
+    "order_sizing_expansion",
+    "withdrawal",
+    "transfer",
+    "credential_mutation"
+  ],
+  "safety_invariants": {
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "calls_exchange_write": false,
+    "places_order": false,
+    "live_profile_changed": false,
+    "order_sizing_changed": false,
+    "withdrawal_or_transfer_created": false,
+    "credential_mutation_created": false
+  },
+  "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change"
+}

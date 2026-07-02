@@ -19,10 +19,13 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
     WIP_LANES,
 )
 from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
+    ACTION_TIME_SCOPE_STATES,
     AUTHORITY_BOUNDARY,
     DEFAULT_CANDIDATE_UNIVERSE,
+    OWNER_AUTHORIZATION_SCHEMA,
     PLACEHOLDER_SYMBOLS,
     SCHEMA,
+    SCOPED_LIVE_SUBMIT_STRATEGIES,
 )
 
 
@@ -104,6 +107,7 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
         errors.append("summary.candidate_count must match active WIP lanes")
     if summary.get("symbol_readiness_count") != len(symbol_rows):
         errors.append("summary.symbol_readiness_count must match readiness rows")
+    errors.extend(_validate_owner_authorization_summary(artifact))
     if artifact.get("authority_boundary") != AUTHORITY_BOUNDARY:
         errors.append("authority_boundary is invalid")
     errors.extend(_forbidden_true_paths(artifact))
@@ -174,6 +178,7 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         "signal_state",
         "risk_state",
         "scope_state",
+        "owner_authorization",
         "promotion_state",
         "first_blocker",
         "next_action",
@@ -213,8 +218,10 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         "readonly_only",
         "trial_scope_proposed",
         "live_submit_allowed",
+        "conditional_action_time_rehearsal_allowed",
     }:
         errors.append(f"{prefix}.scope_state is invalid")
+    errors.extend(_validate_row_owner_authorization(prefix, row))
     if row.get("promotion_state") not in {
         "idle",
         "promotion_candidate",
@@ -224,9 +231,9 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         errors.append(f"{prefix}.promotion_state is invalid")
     if (
         row.get("promotion_state") == "action_time_lane"
-        and row.get("scope_state") != "live_submit_allowed"
+        and row.get("scope_state") not in ACTION_TIME_SCOPE_STATES
     ):
-        errors.append(f"{prefix}.action_time_lane requires live_submit_allowed")
+        errors.append(f"{prefix}.action_time_lane requires action-time scope")
     if (
         row.get("promotion_state") == "action_time_lane"
         and not _server_runtime_scope_ready(
@@ -290,6 +297,10 @@ def _validate_pretrade_runtime(
             errors.append(
                 f"action_time_lane_inputs[{index}] must not be readonly_only"
             )
+        errors.extend(_validate_row_owner_authorization(
+            f"action_time_lane_inputs[{index}]",
+            row,
+        ))
         if "no_finalgate" not in str(row.get("authority_boundary") or ""):
             errors.append(f"action_time_lane_inputs[{index}].authority_boundary is invalid")
         if not _server_runtime_scope_ready(
@@ -338,6 +349,113 @@ def _validate_authorized_candidate_universe(
                 f"{strategy_group_id}: expected={sorted(expected_symbols)} "
                 f"actual={sorted(actual_symbols)}"
             )
+    return errors
+
+
+def _validate_owner_authorization_summary(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    summary = _as_dict(_as_dict(artifact.get("pretrade_runtime")).get("owner_authorization"))
+    if not summary:
+        return ["pretrade_runtime.owner_authorization is required"]
+    if summary.get("schema") != OWNER_AUTHORIZATION_SCHEMA:
+        errors.append("pretrade_runtime.owner_authorization.schema is invalid")
+    if summary.get("status") != "owner_pretrade_runtime_authorization_recorded":
+        errors.append("pretrade_runtime.owner_authorization.status is invalid")
+    if summary.get("valid") is not True:
+        errors.append("pretrade_runtime.owner_authorization.valid must be true")
+    if summary.get("pretrade_candidate_allowed") is not True:
+        errors.append(
+            "pretrade_runtime.owner_authorization.pretrade_candidate_allowed must be true"
+        )
+    if summary.get("action_time_rehearsal_allowed") is not True:
+        errors.append(
+            "pretrade_runtime.owner_authorization.action_time_rehearsal_allowed must be true"
+        )
+    if summary.get("v0_single_action_time_lane") is not True:
+        errors.append(
+            "pretrade_runtime.owner_authorization.v0_single_action_time_lane must be true"
+        )
+    if summary.get("v0_single_real_submit_intent") is not True:
+        errors.append(
+            "pretrade_runtime.owner_authorization.v0_single_real_submit_intent must be true"
+        )
+    if set(summary.get("scoped_live_submit_strategy_groups") or []) != set(
+        SCOPED_LIVE_SUBMIT_STRATEGIES
+    ):
+        errors.append(
+            "pretrade_runtime.owner_authorization.scoped_live_submit_strategy_groups is invalid"
+        )
+    if set(summary.get("conditional_hard_gated_strategy_groups") or []) != {
+        "BRF2-001"
+    }:
+        errors.append(
+            "pretrade_runtime.owner_authorization.conditional_hard_gated_strategy_groups is invalid"
+        )
+    boundary = str(summary.get("authority_boundary") or "")
+    if "no_exchange_write_bypass" not in boundary:
+        errors.append("pretrade_runtime.owner_authorization.authority_boundary is invalid")
+    return errors
+
+
+def _validate_row_owner_authorization(
+    prefix: str,
+    row: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    authorization = _as_dict(row.get("owner_authorization"))
+    strategy_group_id = str(row.get("strategy_group_id") or "")
+    symbol = str(row.get("symbol") or "")
+    if not authorization:
+        return [f"{prefix}.owner_authorization is required"]
+    if authorization.get("pretrade_candidate_allowed") is not True:
+        errors.append(f"{prefix}.owner_authorization.pretrade_candidate_allowed must be true")
+    if authorization.get("action_time_rehearsal_allowed") is not True:
+        errors.append(
+            f"{prefix}.owner_authorization.action_time_rehearsal_allowed must be true"
+        )
+    mode = str(authorization.get("live_submit_allowed") or "")
+    gates = {
+        str(item)
+        for item in authorization.get("real_submit_required_gates") or []
+    }
+    common_gates = {
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation",
+    }
+    if not common_gates.issubset(gates):
+        errors.append(f"{prefix}.owner_authorization.real_submit_required_gates incomplete")
+    if strategy_group_id == "BRF2-001":
+        if mode != "conditional_hard_gated":
+            errors.append(
+                f"{prefix}.owner_authorization.live_submit_allowed must be conditional_hard_gated"
+            )
+        if row.get("scope_state") != "conditional_action_time_rehearsal_allowed":
+            errors.append(
+                f"{prefix}.scope_state must be conditional_action_time_rehearsal_allowed"
+            )
+        if not {"short_side_disable_clear", "squeeze_clear", "liquidity_clear"}.issubset(gates):
+            errors.append(f"{prefix}.owner_authorization.brf2_hard_gates incomplete")
+    else:
+        if strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES and mode != "scoped":
+            errors.append(
+                f"{prefix}.owner_authorization.live_submit_allowed must be scoped"
+            )
+        if (
+            strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES
+            and row.get("scope_state") != "live_submit_allowed"
+        ):
+            errors.append(f"{prefix}.scope_state must be live_submit_allowed")
+    if symbol not in set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())):
+        errors.append(f"{prefix}.owner_authorization.symbol is outside authorized universe")
+    boundary = str(authorization.get("authority_boundary") or "")
+    if "no_exchange_write_bypass" not in boundary:
+        errors.append(f"{prefix}.owner_authorization.authority_boundary is invalid")
     return errors
 
 

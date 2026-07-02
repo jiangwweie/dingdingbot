@@ -750,13 +750,15 @@ def test_candidate_pool_promotes_fresh_sor_detector_signal():
     )
     assert row["signal_state"] == "fresh"
     assert row["public_facts_state"]["state"] == "satisfied"
-    assert row["promotion_state"] == "promotion_candidate"
-    assert artifact["promotion_candidates"][0]["strategy_group_id"] == "SOR-001"
-    assert artifact["action_time_lane_inputs"] == []
+    assert row["scope_state"] == "live_submit_allowed"
+    assert row["promotion_state"] == "action_time_lane"
+    assert artifact["promotion_candidates"] == []
+    assert artifact["action_time_lane_inputs"][0]["strategy_group_id"] == "SOR-001"
+    assert artifact["action_time_lane_inputs"][0]["symbol"] == "ETHUSDT"
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
-def test_candidate_pool_promotes_readonly_fresh_signal_without_action_time_input():
+def test_candidate_pool_blocks_authorized_fresh_signal_without_server_runtime_scope():
     daily_table = json.loads(json.dumps(_daily_table()))
     mpg_daily = next(
         row for row in daily_table["rows"] if row["strategy_group_id"] == "MPG-001"
@@ -810,14 +812,15 @@ def test_candidate_pool_promotes_readonly_fresh_signal_without_action_time_input
         if row["strategy_group_id"] == "MPG-001" and row["symbol"] == "OPUSDT"
     )
     assert row["signal_state"] == "fresh"
-    assert row["scope_state"] == "readonly_only"
-    assert row["promotion_state"] == "promotion_candidate"
+    assert row["scope_state"] == "live_submit_allowed"
+    assert row["first_blocker"] == "runtime_profile_scope_missing"
+    assert row["promotion_state"] == "idle"
     assert artifact["action_time_lane_inputs"] == []
     assert artifact["checks"]["readonly_signal_cannot_order"] is True
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
-def test_candidate_pool_does_not_treat_symbol_scope_as_live_submit_scope():
+def test_candidate_pool_uses_owner_authorization_for_live_submit_scope():
     tradeability = _tradeability()
     mpg = next(
         row
@@ -868,8 +871,10 @@ def test_candidate_pool_does_not_treat_symbol_scope_as_live_submit_scope():
         for row in artifact["symbol_readiness_rows"]
         if row["strategy_group_id"] == "MPG-001" and row["symbol"] == "OPUSDT"
     )
-    assert row["scope_state"] == "readonly_only"
-    assert row["promotion_state"] == "promotion_candidate"
+    assert row["scope_state"] == "live_submit_allowed"
+    assert row["owner_authorization"]["live_submit_allowed"] == "scoped"
+    assert row["first_blocker"] == "runtime_profile_scope_missing"
+    assert row["promotion_state"] == "idle"
     assert artifact["action_time_lane_inputs"] == []
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
@@ -1009,6 +1014,153 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         }
     ]
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "BRF2-001",
+            "symbol": "BTCUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "private_action_time_facts_required",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "BRF2-001",
+            "symbol": "BTCUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 3,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        }
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "symbol": "BTCUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "selected_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "BRF2-001" and item["symbol"] == "BTCUSDT"
+    )
+    assert row["scope_state"] == "conditional_action_time_rehearsal_allowed"
+    assert row["owner_authorization"]["live_submit_allowed"] == "conditional_hard_gated"
+    assert {"short_side_disable_clear", "squeeze_clear", "liquidity_clear"}.issubset(
+        set(row["owner_authorization"]["real_submit_required_gates"])
+    )
+    assert row["promotion_state"] == "action_time_lane"
+    assert artifact["action_time_lane_inputs"][0]["strategy_group_id"] == "BRF2-001"
+    assert (
+        artifact["action_time_lane_inputs"][0]["scope_state"]
+        == "conditional_action_time_rehearsal_allowed"
+    )
+    assert artifact["checks"]["calls_exchange_write"] is False
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "BRF2-001",
+            "symbol": "BTCUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "private_action_time_facts_required",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "BRF2-001",
+            "symbol": "BTCUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 3,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        }
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "symbol": "BTCUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "selected_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    row = artifact["action_time_lane_inputs"][0]
+    row["scope_state"] = "live_submit_allowed"
+    row["owner_authorization"]["live_submit_allowed"] = "scoped"
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any(
+        "owner_authorization.live_submit_allowed must be conditional_hard_gated"
+        in error
+        for error in errors
+    )
+    assert any(
+        "scope_state must be conditional_action_time_rehearsal_allowed" in error
+        for error in errors
+    )
 
 
 def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():

@@ -98,7 +98,7 @@ Each row must expose:
 | `public_facts_state` | `missing`, `computed_not_satisfied`, or `satisfied` with fact details |
 | `signal_state` | `absent`, `fresh`, `stale`, or `invalidated` |
 | `risk_state` | `acceptable`, `warning`, or `disable` |
-| `scope_state` | `readonly_only`, `trial_scope_proposed`, or `live_submit_allowed` |
+| `scope_state` | `readonly_only`, `trial_scope_proposed`, `live_submit_allowed`, or `conditional_action_time_rehearsal_allowed` |
 | `promotion_state` | `idle`, `promotion_candidate`, `action_time_lane`, or `blocked` |
 | `first_blocker` | One blocker class from `BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | `next_action` | One action that moves or reclassifies the row |
@@ -114,6 +114,7 @@ Fresh-signal promotion is deterministic and non-executing:
 | `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=readonly_only` | `promotion_candidate` with scope decision required |
 | `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=trial_scope_proposed` | `promotion_candidate` awaiting action-time scope closure |
 | `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=live_submit_allowed` | `action_time_lane` input may be generated |
+| `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=conditional_action_time_rehearsal_allowed` | non-executing `action_time_lane` rehearsal input may be generated, but real submit remains blocked until the strategy-specific hard gates are satisfied |
 | stale or absent signal | no promotion |
 | missing or failed public facts | no promotion |
 | `risk_state=disable` | blocked |

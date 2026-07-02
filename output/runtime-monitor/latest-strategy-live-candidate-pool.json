@@ -185,7 +185,7 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T15:02:43.201124+00:00",
+  "generated_at_utc": "2026-07-02T15:07:40.034099+00:00",
   "no_trade_audit": {
     "blocker_counts": {
       "computed_not_satisfied": 16,
@@ -297,6 +297,25 @@
       "SOR-001": 4
     },
     "name": "Multi-Strategy Multi-Symbol Pre-Trade Runtime V0",
+    "owner_authorization": {
+      "action_time_rehearsal_allowed": true,
+      "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+      "conditional_hard_gated_strategy_groups": [
+        "BRF2-001"
+      ],
+      "pretrade_candidate_allowed": true,
+      "schema": "brc.owner_pretrade_runtime_authorization.v0",
+      "scoped_live_submit_strategy_groups": [
+        "CPM-RO-001",
+        "MI-001",
+        "MPG-001",
+        "SOR-001"
+      ],
+      "status": "owner_pretrade_runtime_authorization_recorded",
+      "v0_single_action_time_lane": true,
+      "v0_single_real_submit_intent": true,
+      "valid": true
+    },
     "principle": "wide_observation_medium_candidate_narrow_action_time_single_intent_submit"
   },
   "promotion_candidates": [],
@@ -611,6 +630,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -622,7 +657,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-CPM-RO-001-ETHUSDT"
@@ -662,6 +697,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -673,7 +724,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-CPM-RO-001-AVAXUSDT"
@@ -713,6 +764,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -723,7 +790,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-CPM-RO-001-SOLUSDT"
@@ -763,6 +830,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -774,7 +857,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-CPM-RO-001-SUIUSDT"
@@ -812,6 +895,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -830,7 +929,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "warning",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MPG-001-OPUSDT"
@@ -868,6 +967,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -885,7 +1000,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "warning",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MPG-001-AVAXUSDT"
@@ -925,6 +1040,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -942,7 +1073,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "warning",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MPG-001-SOLUSDT"
@@ -980,6 +1111,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -997,7 +1144,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "warning",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MPG-001-SUIUSDT"
@@ -1035,6 +1182,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1046,7 +1209,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MI-001-AVAXUSDT"
@@ -1084,6 +1247,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1095,7 +1274,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MI-001-ETHUSDT"
@@ -1133,6 +1312,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1144,7 +1339,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-MI-001-SOLUSDT"
@@ -1182,6 +1377,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1192,7 +1403,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-SOR-001-ETHUSDT"
@@ -1230,6 +1441,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1240,7 +1467,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-SOR-001-AVAXUSDT"
@@ -1278,6 +1505,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1288,7 +1531,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-SOR-001-BTCUSDT"
@@ -1328,6 +1571,22 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "scoped",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1338,7 +1597,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "trial_scope_proposed",
+      "scope_state": "live_submit_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-SOR-001-SOLUSDT"
@@ -1376,6 +1635,25 @@
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "conditional_hard_gated",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation",
+          "short_side_disable_clear",
+          "squeeze_clear",
+          "liquidity_clear"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
@@ -1388,7 +1666,7 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "conditional_action_time_rehearsal_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-BRF2-001-BTCUSDT"
@@ -1426,6 +1704,25 @@
       "first_blocker": "watcher_tick_missing",
       "next_action": "refresh_readonly_watcher_for_candidate_symbol",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "conditional_hard_gated",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation",
+          "short_side_disable_clear",
+          "squeeze_clear",
+          "liquidity_clear"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -1436,7 +1733,7 @@
         "state": "missing"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "conditional_action_time_rehearsal_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-BRF2-001-AVAXUSDT"
@@ -1474,6 +1771,25 @@
       "first_blocker": "watcher_tick_missing",
       "next_action": "refresh_readonly_watcher_for_candidate_symbol",
       "observation_scope": "readonly",
+      "owner_authorization": {
+        "action_time_rehearsal_allowed": true,
+        "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
+        "live_submit_allowed": "conditional_hard_gated",
+        "pretrade_candidate_allowed": true,
+        "real_submit_required_gates": [
+          "fresh_signal",
+          "required_facts",
+          "server_runtime_coverage",
+          "action_time_facts",
+          "finalgate",
+          "operation_layer",
+          "protection",
+          "reconciliation",
+          "short_side_disable_clear",
+          "squeeze_clear",
+          "liquidity_clear"
+        ]
+      },
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -1484,7 +1800,7 @@
         "state": "missing"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "conditional_action_time_rehearsal_allowed",
       "server_runtime_coverage": {
         "active_runtime_instance_ids": [
           "runtime-BRF2-001-ETHUSDT"

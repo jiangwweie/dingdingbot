@@ -1,7 +1,7 @@
 # Daily Live Enablement Table
 
 - Source JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json`
-- Generated: `2026-07-02T15:07:40.034099+00:00`
+- Generated: `2026-07-02T15:37:32.343666+00:00`
 - Rank 1 lane: `BRF2-001:AVAXUSDT`
 
 | Rank | StrategyGroup | Symbol | Stage | First blocker | Owner action | Next action | Stop condition |
