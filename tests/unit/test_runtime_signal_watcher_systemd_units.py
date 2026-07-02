@@ -107,6 +107,17 @@ def test_signal_watcher_goal_status_dropin_is_read_only_summary():
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
+    assert "build_mi_trial_admission_decision.py" in text
+    assert "build_strategygroup_runtime_safety_state.py" in text
+    assert "build_strategy_live_candidate_pool.py" in text
+    assert "--runtime-active-monitor-json \"$STATUS\"" in text
+    assert "latest-status.json" in text
+    assert "validate_strategy_live_candidate_pool.py" in text
+    assert "build_daily_live_enablement_table.py" in text
+    assert "--candidate-pool-json output/runtime-monitor/latest-strategy-live-candidate-pool.json" in text
+    assert "validate_daily_live_enablement_table.py" in text
+    assert "build_single_lane_task_packet.py" in text
+    assert "validate_single_lane_task_packet.py" in text
     assert "refresh_strategygroup_runtime_product_state_artifacts.py" in text
     assert "--collect-live-facts-before-refresh" in text
     assert "--live-facts-output" in text
