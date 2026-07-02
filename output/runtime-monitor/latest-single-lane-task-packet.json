@@ -1,7 +1,7 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-02T14:11:15.917193+00:00",
+  "generated_at_utc": "2026-07-02T14:33:35.111132+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {
@@ -20,7 +20,7 @@
   },
   "chain_position": "replay_live_parity",
   "first_blocker": "watcher_tick_missing",
-  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing server_runtime_coverage=runtime_profile_scope_missing",
+  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
   "expected_state_change": "MPG-001/OPUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
   "next_action": "refresh_readonly_watcher_for_candidate_symbol",
   "allowed_files": [

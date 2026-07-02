@@ -24,7 +24,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "reclaim / pullback recovery long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 4,
+      "daily_rank": 5,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -34,36 +34,34 @@
       "selected_symbol": "ETHUSDT",
       "side": "long",
       "stage": "armed",
-      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
       "strategy_group_id": "CPM-RO-001",
       "trigger_condition": "ETHUSDT pullback reclaim signal with htf_trend_intact and reclaim_confirmed"
     },
     {
       "action_time_readiness": {
         "action_time_path_ready": false,
-        "first_blocker": "watcher_tick_missing",
-        "next_action": "refresh_or_repair_watcher_public_fact_input",
         "private_action_time_facts_ready": false,
         "public_facts_ready": false,
-        "status": "blocked_public_facts"
+        "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "blocker_owner": "runtime",
       "candidate_positioning": "selective leader continuation long candidate",
       "candidate_status": "candidate_runtime_input_blocked",
       "daily_rank": 1,
-      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
       "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
       "first_blocker": "watcher_tick_missing",
       "market_condition": "public market facts must refresh before market condition can be trusted",
-      "next_engineering_action": "refresh_or_repair_watcher_fact_source",
+      "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol",
       "owner_action_required": "no",
-      "selected_symbol": "SOLUSDT",
+      "selected_symbol": "OPUSDT",
       "side": "long",
       "stage": "armed",
-      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
       "strategy_group_id": "MPG-001",
-      "trigger_condition": "SOLUSDT selective leader continuation signal with fresh public facts"
+      "trigger_condition": "OPUSDT selective leader continuation signal with fresh public facts"
     },
     {
       "action_time_readiness": {
@@ -75,47 +73,20 @@
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "blocker_owner": "engineering",
       "candidate_positioning": "relative strength / cross-asset candidate",
-      "candidate_status": "candidate_scope_decision_pending",
+      "candidate_status": "candidate_engineering_blocked",
       "daily_rank": 3,
-      "evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=park",
-      "exit_condition": "exit or support-only if scoped admission is rejected",
-      "first_blocker": "scope_not_attached",
-      "market_condition": "market condition is secondary until scope/admission is attached",
-      "next_engineering_action": "build_trial_asset_admission_proposal",
+      "evidence": "default_candidate_universe:MI-001/AVAXUSDT",
+      "exit_condition": "exit under WIP stop rule if blocker does not move",
+      "first_blocker": "detector_not_attached",
+      "market_condition": "selected lane must satisfy its fresh eligible signal contract",
+      "next_engineering_action": "attach_detector_for_candidate_symbol",
       "owner_action_required": "no",
       "selected_symbol": "AVAXUSDT",
       "side": "long",
       "stage": "admission",
-      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
       "strategy_group_id": "MI-001",
       "trigger_condition": "AVAXUSDT relative strength admission and scoped observation lane accepted"
-    },
-    {
-      "action_time_readiness": {
-        "action_time_path_ready": false,
-        "first_blocker": "watcher_tick_missing",
-        "next_action": "refresh_or_repair_watcher_public_fact_input",
-        "private_action_time_facts_ready": false,
-        "public_facts_ready": false,
-        "status": "blocked_public_facts"
-      },
-      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "runtime",
-      "candidate_positioning": "session / flow confirmation candidate",
-      "candidate_status": "candidate_runtime_input_blocked",
-      "daily_rank": 2,
-      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/SOLUSDT first_blocker=watcher_tick_missing watcher_tick_present=False",
-      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
-      "first_blocker": "watcher_tick_missing",
-      "market_condition": "public market facts must refresh before market condition can be trusted",
-      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
-      "owner_action_required": "no",
-      "selected_symbol": "SOLUSDT",
-      "side": "long",
-      "stage": "armed",
-      "stop_condition": "watcher/public facts tick is present for the selected lane",
-      "strategy_group_id": "SOR-001",
-      "trigger_condition": "SOLUSDT session opening range plus breakout and follow-through confirmation"
     },
     {
       "action_time_readiness": {
@@ -125,20 +96,45 @@
         "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "market",
-      "candidate_positioning": "conditional failed-rebound short candidate",
-      "candidate_status": "candidate_conditional_observation",
-      "daily_rank": 5,
-      "evidence": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:BRF2-001 BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
-      "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
-      "first_blocker": "computed_not_satisfied",
-      "market_condition": "conditional short only when bullish/squeeze disable state clears",
-      "next_engineering_action": "continue_brf2_armed_observation_until_disable_clears",
+      "blocker_owner": "runtime",
+      "candidate_positioning": "session / flow confirmation candidate",
+      "candidate_status": "candidate_runtime_input_blocked",
+      "daily_rank": 2,
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
+      "first_blocker": "watcher_tick_missing",
+      "market_condition": "public market facts must refresh before market condition can be trusted",
+      "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol",
       "owner_action_required": "no",
-      "selected_symbol": "brf2_research_supported_symbols_only",
+      "selected_symbol": "ETHUSDT",
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "SOR-001",
+      "trigger_condition": "ETHUSDT session opening range plus breakout and follow-through confirmation"
+    },
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "engineering",
+      "candidate_positioning": "conditional failed-rebound short candidate",
+      "candidate_status": "candidate_engineering_blocked",
+      "daily_rank": 4,
+      "evidence": "default_candidate_universe:BRF2-001/BTCUSDT",
+      "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
+      "first_blocker": "detector_not_attached",
+      "market_condition": "conditional short only when bullish/squeeze disable state clears",
+      "next_engineering_action": "attach_detector_for_candidate_symbol",
+      "owner_action_required": "no",
+      "selected_symbol": "BTCUSDT",
       "side": "short",
       "stage": "armed",
-      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
       "strategy_group_id": "BRF2-001",
       "trigger_condition": "failed-rebound short setup after squeeze / strong-uptrend disable clears"
     }
@@ -189,7 +185,7 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T08:03:53.998977+00:00",
+  "generated_at_utc": "2026-07-02T14:30:23.125970+00:00",
   "no_trade_audit": {
     "blocker_counts": {
       "computed_not_satisfied": 4,
@@ -211,23 +207,23 @@
     {
       "evidence": "MPG-001 first_blocker=watcher_tick_missing",
       "item": "mpg_watcher_closure",
-      "next_action": "refresh_or_repair_watcher_fact_source",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
       "priority": "P0",
       "status": "open"
     },
     {
       "evidence": "SOR-001 first_blocker=watcher_tick_missing",
       "item": "sor_watcher_closure",
-      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
       "priority": "P0",
       "status": "open"
     },
     {
-      "evidence": "MI-001 first_blocker=scope_not_attached",
+      "evidence": "MI-001 first_blocker=detector_not_attached",
       "item": "mi_scope_closure",
-      "next_action": "build_trial_asset_admission_proposal",
+      "next_action": "attach_detector_for_candidate_symbol",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "CPM-RO-001 first_blocker=computed_not_satisfied",
@@ -237,11 +233,11 @@
       "status": "cleared"
     },
     {
-      "evidence": "BRF2-001 candidate_status=candidate_conditional_observation",
+      "evidence": "BRF2-001 candidate_status=candidate_engineering_blocked",
       "item": "brf2_conditionalization",
       "next_action": "keep BRF2 conditional or exit under stop review",
       "priority": "P0",
-      "status": "cleared"
+      "status": "open"
     },
     {
       "evidence": "candidate pool is non-executing",
@@ -316,7 +312,266 @@
   },
   "schema": "brc.strategy_live_candidate_pool.v1",
   "scope": "five_strategy_live_candidate_pool_non_authority",
-  "server_runtime_coverage": {},
+  "server_runtime_coverage": {
+    "active_matched_row_count": 18,
+    "expected_row_count": 18,
+    "missing_row_count": 0,
+    "rows": [
+      {
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "AVAXUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-BTCUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-BTCUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "AVAXUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SUIUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SUIUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SUIUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MI-001",
+        "symbol": "AVAXUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MI-001",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MI-001",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MPG-001",
+        "symbol": "AVAXUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-OPUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-OPUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MPG-001",
+        "symbol": "OPUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-SUIUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-SUIUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SUIUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "SOR-001",
+        "symbol": "AVAXUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-BTCUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-BTCUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "SOR-001",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
+        "strategy_group_id": "SOR-001",
+        "symbol": "SOLUSDT"
+      }
+    ],
+    "status": "complete"
+  },
   "source_validation": {
     "sources": {
       "action_time_boundary": true,
@@ -370,12 +625,16 @@
       "risk_state": "acceptable",
       "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "CPM-RO-001",
         "symbol": "ETHUSDT"
       },
@@ -417,12 +676,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "CPM-RO-001",
         "symbol": "AVAXUSDT"
       },
@@ -463,12 +726,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "CPM-RO-001",
         "symbol": "SOLUSDT"
       },
@@ -510,12 +777,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SUIUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-CPM-RO-001-SUIUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "CPM-RO-001",
         "symbol": "SUIUSDT"
       },
@@ -560,14 +831,18 @@
         "state": "computed_not_satisfied"
       },
       "risk_state": "warning",
-      "scope_state": "readonly_only",
+      "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-OPUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-OPUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MPG-001",
         "symbol": "OPUSDT"
       },
@@ -613,12 +888,16 @@
       "risk_state": "warning",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MPG-001",
         "symbol": "AVAXUSDT"
       },
@@ -666,12 +945,16 @@
       "risk_state": "warning",
       "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MPG-001",
         "symbol": "SOLUSDT"
       },
@@ -717,12 +1000,16 @@
       "risk_state": "warning",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MPG-001-SUIUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MPG-001-SUIUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MPG-001",
         "symbol": "SUIUSDT"
       },
@@ -748,7 +1035,7 @@
       "evidence_ref": "default_candidate_universe:MI-001/AVAXUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -759,14 +1046,18 @@
         "state": "missing"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MI-001",
         "symbol": "AVAXUSDT"
       },
@@ -776,7 +1067,7 @@
       "strategy_group_id": "MI-001",
       "symbol": "AVAXUSDT",
       "symbol_or_basket": "AVAXUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -792,7 +1083,7 @@
       "evidence_ref": "default_candidate_universe:MI-001/ETHUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -805,12 +1096,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MI-001",
         "symbol": "ETHUSDT"
       },
@@ -820,7 +1115,7 @@
       "strategy_group_id": "MI-001",
       "symbol": "ETHUSDT",
       "symbol_or_basket": "ETHUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -836,7 +1131,7 @@
       "evidence_ref": "default_candidate_universe:MI-001/SOLUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -849,12 +1144,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-MI-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-MI-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "MI-001",
         "symbol": "SOLUSDT"
       },
@@ -864,7 +1163,7 @@
       "strategy_group_id": "MI-001",
       "symbol": "SOLUSDT",
       "symbol_or_basket": "SOLUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -891,14 +1190,18 @@
         "state": "missing"
       },
       "risk_state": "acceptable",
-      "scope_state": "readonly_only",
+      "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "SOR-001",
         "symbol": "ETHUSDT"
       },
@@ -937,12 +1240,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "SOR-001",
         "symbol": "AVAXUSDT"
       },
@@ -981,12 +1288,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-BTCUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-BTCUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "SOR-001",
         "symbol": "BTCUSDT"
       },
@@ -1027,12 +1338,16 @@
       "risk_state": "acceptable",
       "scope_state": "trial_scope_proposed",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-SOR-001-SOLUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-SOR-001-SOLUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "SOR-001",
         "symbol": "SOLUSDT"
       },
@@ -1058,7 +1373,7 @@
       "evidence_ref": "default_candidate_universe:BRF2-001/BTCUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -1071,12 +1386,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-BTCUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-BTCUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "BRF2-001",
         "symbol": "BTCUSDT"
       },
@@ -1086,7 +1405,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "BTCUSDT",
       "symbol_or_basket": "BTCUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -1102,7 +1421,7 @@
       "evidence_ref": "default_candidate_universe:BRF2-001/AVAXUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -1115,12 +1434,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-AVAXUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-AVAXUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "BRF2-001",
         "symbol": "AVAXUSDT"
       },
@@ -1130,7 +1453,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "AVAXUSDT",
       "symbol_or_basket": "AVAXUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -1146,7 +1469,7 @@
       "evidence_ref": "default_candidate_universe:BRF2-001/ETHUSDT",
       "first_blocker": "detector_not_attached",
       "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
@@ -1159,12 +1482,16 @@
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
       "server_runtime_coverage": {
-        "active_runtime_instance_ids": [],
-        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
-        "blocker_class": "runtime_profile_scope_missing",
-        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
-        "selected_runtime_instance_ids": [],
-        "state": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [
+          "runtime-BRF2-001-ETHUSDT"
+        ],
+        "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "blocker_class": "none",
+        "next_action": "continue_pretrade_observation",
+        "selected_runtime_instance_ids": [
+          "runtime-BRF2-001-ETHUSDT"
+        ],
+        "state": "active_watcher_scope",
         "strategy_group_id": "BRF2-001",
         "symbol": "ETHUSDT"
       },
@@ -1174,7 +1501,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "ETHUSDT",
       "symbol_or_basket": "ETHUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     }
   ]
 }

@@ -13,10 +13,10 @@
 | StrategyGroup | Symbol | Status | First blocker | Next action |
 | --- | --- | --- | --- | --- |
 | CPM-RO-001 | ETHUSDT | candidate_market_condition_wait | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
-| MPG-001 | SOLUSDT | candidate_runtime_input_blocked | watcher_tick_missing | refresh_or_repair_watcher_fact_source |
-| MI-001 | AVAXUSDT | candidate_scope_decision_pending | scope_not_attached | build_trial_asset_admission_proposal |
-| SOR-001 | SOLUSDT | candidate_runtime_input_blocked | watcher_tick_missing | refresh_or_repair_watcher_public_fact_input |
-| BRF2-001 | brf2_research_supported_symbols_only | candidate_conditional_observation | computed_not_satisfied | continue_brf2_armed_observation_until_disable_clears |
+| MPG-001 | OPUSDT | candidate_runtime_input_blocked | watcher_tick_missing | refresh_readonly_watcher_for_candidate_symbol |
+| MI-001 | AVAXUSDT | candidate_engineering_blocked | detector_not_attached | attach_detector_for_candidate_symbol |
+| SOR-001 | ETHUSDT | candidate_runtime_input_blocked | watcher_tick_missing | refresh_readonly_watcher_for_candidate_symbol |
+| BRF2-001 | BTCUSDT | candidate_engineering_blocked | detector_not_attached | attach_detector_for_candidate_symbol |
 
 ## Per-Symbol Readiness
 
@@ -26,14 +26,14 @@
 | CPM-RO-001 | AVAXUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | CPM-RO-001 | SOLUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | CPM-RO-001 | SUIUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
-| MPG-001 | OPUSDT | computed_not_satisfied | absent | readonly_only | idle | watcher_tick_missing |
+| MPG-001 | OPUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | watcher_tick_missing |
 | MPG-001 | AVAXUSDT | computed_not_satisfied | absent | readonly_only | idle | watcher_tick_missing |
 | MPG-001 | SOLUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | watcher_tick_missing |
 | MPG-001 | SUIUSDT | computed_not_satisfied | absent | readonly_only | idle | watcher_tick_missing |
-| MI-001 | AVAXUSDT | missing | absent | readonly_only | idle | detector_not_attached |
+| MI-001 | AVAXUSDT | missing | absent | trial_scope_proposed | idle | detector_not_attached |
 | MI-001 | ETHUSDT | missing | absent | readonly_only | idle | detector_not_attached |
 | MI-001 | SOLUSDT | missing | absent | readonly_only | idle | detector_not_attached |
-| SOR-001 | ETHUSDT | missing | absent | readonly_only | idle | watcher_tick_missing |
+| SOR-001 | ETHUSDT | missing | absent | trial_scope_proposed | idle | watcher_tick_missing |
 | SOR-001 | AVAXUSDT | missing | absent | readonly_only | idle | watcher_tick_missing |
 | SOR-001 | BTCUSDT | missing | absent | readonly_only | idle | watcher_tick_missing |
 | SOR-001 | SOLUSDT | missing | absent | trial_scope_proposed | idle | watcher_tick_missing |

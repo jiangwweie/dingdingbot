@@ -355,6 +355,60 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
+def test_candidate_pool_does_not_treat_server_scope_as_watcher_tick():
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "blocker_class": "watcher_tick_missing",
+            "detector_attached": True,
+            "watcher_tick_present": False,
+            "computed": False,
+            "failed_facts": [],
+            "mismatch_count": 4,
+            "next_action": "refresh_or_repair_watcher_public_fact_input",
+        }
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-sor-eth"],
+                    "selected_runtime_instance_ids": ["runtime-sor-eth"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=parity,
+        action_time_boundary=_action_time(),
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "SOR-001" and item["symbol"] == "ETHUSDT"
+    )
+    assert row["server_runtime_coverage"]["state"] == "active_watcher_scope"
+    assert row["watcher_state"] == "missing"
+    assert row["first_blocker"] == "watcher_tick_missing"
+    assert "first_blocker=watcher_tick_missing" in row["evidence_ref"]
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_promotes_readonly_fresh_signal_without_action_time_input():
     daily_table = json.loads(json.dumps(_daily_table()))
     mpg_daily = next(

@@ -4,7 +4,7 @@
 - Active lane: `MPG-001 / OPUSDT / long`
 - Chain position: `replay_live_parity`
 - First blocker: `watcher_tick_missing`
-- Evidence: `output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing server_runtime_coverage=runtime_profile_scope_missing`
+- Evidence: `output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope`
 - Expected state change: `MPG-001/OPUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.`
 - Next action: `refresh_readonly_watcher_for_candidate_symbol`
 - Stop condition: `blocker moves, repeats through stop review, or symbol exits candidate universe`

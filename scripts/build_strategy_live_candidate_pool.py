@@ -216,6 +216,10 @@ def build_strategy_live_candidate_pool(
         tradeability_rows=tradeability_rows,
         runtime_active_monitor=runtime_active_monitor,
     )
+    candidate_rows = _sync_candidate_rows_with_symbol_readiness(
+        candidate_rows,
+        symbol_readiness_rows,
+    )
     promotion_candidates = [
         row
         for row in symbol_readiness_rows
@@ -517,7 +521,11 @@ def _symbol_readiness_row(
 ) -> dict[str, Any]:
     runtime_active = _server_runtime_scope_ready(runtime_coverage_row)
     detector_ready = parity_row.get("detector_attached") is True
-    watcher_present = parity_row.get("watcher_tick_present") is True or runtime_active
+    watcher_present = (
+        parity_row.get("watcher_tick_present") is True
+        if parity_row
+        else runtime_active
+    )
     computed = parity_row.get("computed") is True
     failed_facts = [
         str(item)
@@ -1001,6 +1009,80 @@ def _candidate_row(
         "owner_action_required": str(daily_row.get("owner_action_required") or "no"),
         "authority_boundary": DAILY_AUTHORITY_BOUNDARY,
     }
+
+
+def _sync_candidate_rows_with_symbol_readiness(
+    candidate_rows: list[dict[str, Any]],
+    symbol_readiness_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_strategy: dict[str, list[dict[str, Any]]] = {}
+    for row in symbol_readiness_rows:
+        by_strategy.setdefault(str(row.get("strategy_group_id") or ""), []).append(row)
+
+    synced: list[dict[str, Any]] = []
+    for candidate in candidate_rows:
+        strategy_group_id = str(candidate.get("strategy_group_id") or "")
+        summary = _strategy_summary_symbol_row(
+            strategy_group_id,
+            by_strategy.get(strategy_group_id, []),
+        )
+        if not summary or not _server_runtime_scope_ready(
+            _as_dict(summary.get("server_runtime_coverage"))
+        ):
+            synced.append(candidate)
+            continue
+        first_blocker = str(summary.get("first_blocker") or candidate["first_blocker"])
+        selected_symbol = str(summary.get("symbol") or candidate["selected_symbol"])
+        updated = dict(candidate)
+        updated.update(
+            {
+                "candidate_status": _candidate_status(strategy_group_id, first_blocker),
+                "selected_symbol": selected_symbol,
+                "side": str(summary.get("side") or candidate["side"]),
+                "first_blocker": first_blocker,
+                "blocker_owner": _blocker_owner(first_blocker),
+                "evidence": str(summary.get("evidence_ref") or candidate["evidence"]),
+                "next_engineering_action": str(
+                    summary.get("next_action")
+                    or candidate["next_engineering_action"]
+                ),
+                "trigger_condition": _trigger_condition(
+                    strategy_group_id,
+                    selected_symbol,
+                ),
+                "market_condition": _market_condition(strategy_group_id, first_blocker),
+                "action_time_readiness": summary.get("action_time")
+                or candidate["action_time_readiness"],
+                "stop_condition": str(
+                    summary.get("stop_condition") or candidate["stop_condition"]
+                ),
+                "exit_condition": _exit_condition(strategy_group_id, first_blocker),
+            }
+        )
+        synced.append(updated)
+    return synced
+
+
+def _strategy_summary_symbol_row(
+    strategy_group_id: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not rows:
+        return {}
+    promotion_priority = {
+        "action_time_lane": 0,
+        "promotion_candidate": 1,
+        "blocked": 2,
+        "idle": 3,
+    }
+    return sorted(
+        rows,
+        key=lambda row: (
+            promotion_priority.get(str(row.get("promotion_state") or ""), 9),
+            _symbol_role(strategy_group_id, str(row.get("symbol") or "")),
+            str(row.get("symbol") or ""),
+        ),
+    )[0]
 
 
 def _candidate_status(strategy_group_id: str, first_blocker: str) -> str:
