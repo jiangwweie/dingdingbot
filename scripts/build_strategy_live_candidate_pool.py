@@ -714,12 +714,12 @@ def _symbol_first_blocker(
         return "runtime_profile_scope_missing"
     if not detector_ready:
         return "detector_not_attached"
+    if public_facts_state["state"] == "computed_not_satisfied":
+        return "computed_not_satisfied"
     if not watcher_present:
         return "watcher_tick_missing"
     if public_facts_state["state"] == "missing":
         return "artifact_missing"
-    if public_facts_state["state"] == "computed_not_satisfied":
-        return "computed_not_satisfied"
     if risk_state == "disable":
         return "hard_safety_stop"
     if signal_state == "fresh" and scope_state == "readonly_only":

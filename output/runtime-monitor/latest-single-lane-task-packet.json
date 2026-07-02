@@ -1,27 +1,27 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-02T14:33:35.111132+00:00",
+  "generated_at_utc": "2026-07-02T14:42:09.077702+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {
-    "strategy_group_id": "MPG-001",
-    "symbol": "OPUSDT",
+    "strategy_group_id": "SOR-001",
+    "symbol": "ETHUSDT",
     "first_blocker": "watcher_tick_missing",
     "closest_to_live_rank": 1,
     "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol"
   },
-  "task_id": "P0-MPG-001-WATCHER-TICK-MISSING-CLOSURE",
+  "task_id": "P0-SOR-001-WATCHER-TICK-MISSING-CLOSURE",
   "active_lane": {
-    "strategy_group_id": "MPG-001",
-    "symbol": "OPUSDT",
+    "strategy_group_id": "SOR-001",
+    "symbol": "ETHUSDT",
     "side": "long",
     "stage": "armed"
   },
   "chain_position": "replay_live_parity",
   "first_blocker": "watcher_tick_missing",
-  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
-  "expected_state_change": "MPG-001/OPUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
+  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:SOR-001/ETHUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
+  "expected_state_change": "SOR-001/ETHUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
   "next_action": "refresh_readonly_watcher_for_candidate_symbol",
   "allowed_files": [
     "scripts/build_single_lane_task_packet.py",
@@ -62,7 +62,7 @@
     "python3 scripts/validate_output_artifact_scope.py --git-status",
     "git diff --check"
   ],
-  "done_when": "MPG-001/OPUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
+  "done_when": "SOR-001/ETHUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
   "authority_boundary": "single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
   "source_authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
   "owner_action_required": "no",

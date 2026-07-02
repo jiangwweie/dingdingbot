@@ -46,15 +46,15 @@
         "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "runtime",
+      "blocker_owner": "market",
       "candidate_positioning": "selective leader continuation long candidate",
-      "candidate_status": "candidate_runtime_input_blocked",
+      "candidate_status": "candidate_market_condition_wait",
       "daily_rank": 1,
-      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
-      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
-      "first_blocker": "watcher_tick_missing",
-      "market_condition": "public market facts must refresh before market condition can be trusted",
-      "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
+      "first_blocker": "computed_not_satisfied",
+      "market_condition": "strategy fact matrix must clear on the next detector tick",
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
       "owner_action_required": "no",
       "selected_symbol": "OPUSDT",
       "side": "long",
@@ -185,12 +185,12 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T14:30:23.125970+00:00",
+  "generated_at_utc": "2026-07-02T14:33:35.111132+00:00",
   "no_trade_audit": {
     "blocker_counts": {
-      "computed_not_satisfied": 4,
+      "computed_not_satisfied": 8,
       "detector_not_attached": 6,
-      "watcher_tick_missing": 8
+      "watcher_tick_missing": 4
     },
     "reason": "candidate_pool_has_no_live_submit_allowed_fresh_satisfied_symbol",
     "selected_action_time_candidate": "none",
@@ -205,11 +205,11 @@
       "status": "cleared"
     },
     {
-      "evidence": "MPG-001 first_blocker=watcher_tick_missing",
+      "evidence": "MPG-001 first_blocker=computed_not_satisfied",
       "item": "mpg_watcher_closure",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "SOR-001 first_blocker=watcher_tick_missing",
@@ -261,7 +261,7 @@
       "status": "cleared"
     },
     {
-      "evidence": "watcher_tick_missing rows prove public facts are not current: MPG-001,SOR-001",
+      "evidence": "watcher_tick_missing rows prove public facts are not current: SOR-001",
       "item": "no_stale_facts",
       "next_action": "refresh approved public facts path",
       "priority": "P1",
@@ -809,9 +809,9 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "primary",
       "detector_state": "ready",
-      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
@@ -865,9 +865,9 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "secondary",
       "detector_state": "ready",
-      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/AVAXUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/AVAXUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
@@ -922,9 +922,9 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "secondary",
       "detector_state": "ready",
-      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
@@ -977,9 +977,9 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "secondary",
       "detector_state": "ready",
-      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SUIUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SUIUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
