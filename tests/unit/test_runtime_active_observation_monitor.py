@@ -286,6 +286,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
             {
                 "candidate_universe": {
                     "MPG-001": ["OPUSDT", "SOLUSDT"],
+                    "BRF2-001": ["brf2_research_supported_symbols_only"],
                     "SOR-001": ["ETHUSDT"],
                 }
             }

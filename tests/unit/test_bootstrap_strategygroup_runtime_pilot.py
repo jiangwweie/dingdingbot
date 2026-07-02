@@ -344,6 +344,7 @@ def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
         "candidate_universe": {
             "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
             "MPG-001": ["OPUSDT"],
+            "SOR-001": ["ETHUSDT"],
             "BRF2-001": [
                 "BTCUSDT",
                 "brf2_research_supported_symbols_only",
@@ -352,12 +353,14 @@ def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
         "candidate_rows": [
             {"strategy_group_id": "MPG-001", "daily_rank": 1, "side": "long"},
             {"strategy_group_id": "CPM-RO-001", "daily_rank": 2, "side": "long"},
-            {"strategy_group_id": "BRF2-001", "daily_rank": 3, "side": "short"},
+            {"strategy_group_id": "SOR-001", "daily_rank": 3, "side": "long"},
+            {"strategy_group_id": "BRF2-001", "daily_rank": 4, "side": "short"},
         ],
         "symbol_readiness_rows": [
             {"strategy_group_id": "CPM-RO-001", "symbol": "ETHUSDT", "side": "long"},
             {"strategy_group_id": "CPM-RO-001", "symbol": "SOLUSDT", "side": "long"},
             {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "long"},
+            {"strategy_group_id": "SOR-001", "symbol": "ETHUSDT", "side": "long"},
             {"strategy_group_id": "BRF2-001", "symbol": "BTCUSDT", "side": "short"},
         ],
     }
@@ -382,6 +385,7 @@ def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
                 for strategy_group_id, symbols in {
                     "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
                     "MPG-001": ["OPUSDT"],
+                    "SOR-001": ["ETHUSDT"],
                     "BRF2-001": ["BTCUSDT"],
                 }.items()
             ]
@@ -398,11 +402,12 @@ def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
         ("MPG-001", "OPUSDT", "long"),
         ("CPM-RO-001", "ETHUSDT", "long"),
         ("CPM-RO-001", "SOLUSDT", "long"),
+        ("SOR-001", "ETHUSDT", "short"),
         ("BRF2-001", "BTCUSDT", "short"),
     ]
     assert not any("RESEARCH" in item["exchange_symbol"] for item in artifact["targets"])
     assert artifact["runtime_scope"]["candidate_universe_source"] == "candidate-pool.json"
-    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 4
+    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 5
     assert artifact["safety_invariants"]["creates_candidate"] is False
     assert artifact["safety_invariants"]["creates_execution_intent"] is False
     assert artifact["safety_invariants"]["creates_order"] is False

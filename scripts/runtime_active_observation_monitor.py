@@ -146,11 +146,15 @@ def _read_candidate_universe(path_value: str | None) -> tuple[dict[str, list[str
     parsed: dict[str, list[str]] = {}
     if isinstance(universe, dict):
         for strategy_group_id, symbols in universe.items():
-            parsed[str(strategy_group_id)] = [
-                _compact_symbol(symbol)
-                for symbol in (symbols or [])
-                if _compact_symbol(symbol)
-            ]
+            selected: list[str] = []
+            for symbol in symbols or []:
+                compact = _compact_symbol(symbol)
+                if not compact.endswith("USDT"):
+                    continue
+                if compact not in selected:
+                    selected.append(compact)
+            if selected:
+                parsed[str(strategy_group_id)] = selected
     return parsed, {
         "source": "candidate_universe_json",
         "path": str(path),
