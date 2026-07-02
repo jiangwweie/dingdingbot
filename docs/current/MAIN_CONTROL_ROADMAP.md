@@ -112,13 +112,11 @@ The next phase is governed by eight execution constraints:
 | Strategy Asset State evidence gate | New Signal Observation grade artifacts must move a lane forward, prove a precise blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
 | Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
-| Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / Strategy Asset State evidence surfaces and replace or reduce older entry points |
+| Entry-point compression | New scripts are temporary unless they feed the standard Tokyo server-side monitor, development diagnostic monitor, replay, or Strategy Asset State evidence surfaces and replace or reduce older entry points |
 
 Production recurring monitoring is moving to the server-side ownership model in
 `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`: Tokyo server-side
-readonly timer plus Feishu notification is the production path. Local heartbeat
-and local monitor sequence are development diagnostics only and must not remain
-production notification sources or production fallbacks.
+readonly timer plus Feishu notification is the production path.
 
 The deploy-worthy checkpoint for the current Pre-Trade Runtime V0 phase is:
 
@@ -446,13 +444,13 @@ readiness are not the earliest missing state.
 
 ## Server Interaction and Deploy Discipline
 
-Routine review should prefer local cache and local progress artifacts. Tokyo
-deploys are intentionally less frequent now.
+Production recurring monitoring is owned by the Tokyo server-side readonly
+monitor timer. Tokyo deploys are intentionally less frequent now.
 
 | Action | Default policy |
 | --- | --- |
-| Routine monitor review | Use L0 cache/local progress first |
-| Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is missing, stale, schema-stale, or tied to an old runtime head |
+| Routine production monitor | Run `brc-runtime-monitor.timer` on Tokyo; classify quiet / notify server-side and push Feishu only when useful |
+| Fresh status refresh | Use server-side current runtime facts for production monitoring |
 | Bounded Tokyo deploy apply | Only after a stage-worthy fix, deployable milestone, or explicit Owner request |
 | Real order path | Only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
 | Static product-client work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
@@ -460,13 +458,10 @@ deploys are intentionally less frequent now.
 Do not deploy for every small documentation change, planning adjustment, or
 local-only replay/simulation improvement.
 
-Monitor freshness states are not trading blockers. If the only issue is
-`runtime_progress_cache_missing`, `runtime_progress_cache_stale`,
-`runtime_progress_cache_schema_stale`, or
-`runtime_progress_cache_runtime_head_stale`, classify the state as
-`monitor_refresh_needed`: notify automation to refresh, keep `checks.blockers`
-empty, keep Owner intervention false, and preserve P0 as waiting for market
-when the runtime chain itself remains ready.
+Server-side monitor source failures are runtime data gaps, not trading safety
+authority. The server monitor records public-facts, account-safe-facts,
+watcher, systemd, deploy, and readiness failures as notify-worthy monitor
+states without creating live-submit authority.
 
 ## Current Audit Surface
 
@@ -491,7 +486,7 @@ market-dependent first real-order proof.
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | Signal Observation Grade Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion/L2 readiness/tier-policy review ready | Use `latest-signal-coverage-diagnostic.json`, `latest-signal-coverage-expansion-review.json`, `latest-l2-readiness-review.json`, `latest-l2-intake-dry-run.json`, and `latest-l2-tier-policy-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs these artifacts after completion audit; current expansion review promotes `BTPC-001` to L2 non-executing shadow-candidate observation only, keeps `BRF-001`/`LSR-001`/`RBR-001`/`VCB-001` blocked from L2, reports each broader would-enter row with tier, suggested next tier, action, confidence, execution boundary, readiness gaps, and no-candidate reason, and does not treat broader preview signals as real-submit authority or L4 promotion authority |
-| SIGNAL-OBSERVATION-STATE-001 Strategy Asset State pre-live evidence | High-priority no-action and would-enter observations become Strategy Asset State evidence before they influence StrategyGroup tier decisions | Main runtime window | local ready; monitor-sequence integrated; direct Strategy Asset State path active | `scripts/build_strategygroup_strategy_asset_state.py` produces Strategy Asset State evidence from signal coverage and opportunity review work loop inputs, and `run_strategygroup_runtime_local_monitor_sequence.py` runs it as the final Signal Observation grade learning step. Current local output status is `strategy_asset_state_ready`. The output carries current Strategy Asset State rows for active groups and preserves no raw replay samples, FinalGate calls, Operation Layer calls, exchange-write, real-order authority, L4 expansion, profile mutation, leverage mutation, or sizing-default mutation |
+| SIGNAL-OBSERVATION-STATE-001 Strategy Asset State pre-live evidence | High-priority no-action and would-enter observations become Strategy Asset State evidence before they influence StrategyGroup tier decisions | Main runtime window | direct Strategy Asset State path active | `scripts/build_strategygroup_strategy_asset_state.py` produces Strategy Asset State evidence from signal coverage and opportunity review work loop inputs. The output carries current Strategy Asset State rows for active groups and preserves no raw replay samples, FinalGate calls, Operation Layer calls, exchange-write, real-order authority, L4 expansion, profile mutation, leverage mutation, or sizing-default mutation |
 | Signal Observation Grade Opportunity Review Work Loop | Observed would-enter opportunities become repeatable local recommendations by joining signal coverage, replay verification, blocking gaps, L2 tier state, and strategy-asset recommendation | Main runtime window | local review work loop + LSR/VCB local revision execution + post-revision replay review + BTPC fact-quality/proxy/proxy-replay keep-revise/live-source mapping/classifier-rule review ready | Use `latest-opportunity-review-work-loop.json` to turn broader observations into per-StrategyGroup actions and scheduled work items: continue L2 shadow quality review, repair RequiredFacts/classifier/economic gaps, build missing replay corpus, park low-quality vocabulary, or prepare future L2 intake without L4 scope change; current queue separates `local_replay_coverage_ready`, `fact_source_pending`, `strategy_asset_recommendation_pending`, `strategy_review_pending`, and `parked`; covered LSR/VCB classifier/economic replay items can roll up into `strategy_asset_recommendations` with `revise_before_l2`, concrete `revision_tasks`, `revision_completion.status=local_revision_completion_ready`, `revision_execution.status=local_revision_execution_complete`, and passed post-revision replay review when those rows are active; `latest-btpc-l2-shadow-fact-quality-review.json` classifies all five BTPC fact gaps, `latest-btpc-local-fact-proxy-review.json` attaches review-only derivatives/margin proxy coverage, and the local monitor sequence now reruns a final opportunity review work loop after `latest-btpc-proxy-replay-quality-review.json`; `latest-btpc-l2-keep-revise-fact-source-review.json` freezes BTPC into keep L2 shadow + revise fact/classifier inputs, `latest-btpc-live-derivatives-fact-source-mapping.json` maps the future live derivatives/margin source routes, and `latest-btpc-classifier-rule-review.json` records the BTPC v1 strong-uptrend and stale-signal disable rules while keeping live RequiredFacts, L4 scope, FinalGate, Operation Layer, exchange-write, and real-order authority false; RBR remains parked |
 | Signal Observation Grade Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready; `BTPC-001` L2 shadow replay plus `BRF-001` / `VCB-001` / `LSR-001` L1 observe replay added | Keep MPG-001 eight-window corpus wired into local dry-run audit; use BTPC-001 L2 shadow replay and BRF/VCB/LSR L1 observe replay for no-action / would-enter diagnostics without expanding L4 real-order scope |
 | Signal Observation Grade Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |
@@ -504,7 +499,7 @@ market-dependent first real-order proof.
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only status artifact | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
-| Signal Observation Grade Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active, low-frequency retuned | Healthy waiting-for-market heartbeat is 2 hours / L0 cache-first; fresh-signal short window remains high-priority |
+| Signal Observation Grade Runtime Interaction Optimization | Owner receives useful server-side monitor notifications without reading local heartbeat/cache artifacts | Main runtime window | active, server-side monitor activation | Healthy waiting-for-market is quiet under `brc-runtime-monitor.timer`; fresh-signal / action-time / runtime-data-gap states notify through Feishu with dedupe |
 | P1 Owner Runtime Readmodel Stabilization | External clients can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain external client release checks in this worktree |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
@@ -703,16 +698,16 @@ L1 read-only snapshot
 -> next safe action
 ```
 
-### 2026-06-18 Quiet Monitor Frequency Retune
+### 2026-07-02 Server-Side Runtime Monitor Activation
 
 | Item | Result |
 | --- | --- |
-| Healthy waiting frequency | `tokyo-runtime-quiet-monitor` heartbeat retuned from `30` minutes to `2` hours |
-| Baseline policy | `docs/current/RUNTIME_MONITOR_BASELINE.json` records `healthy_waiting_for_market_interval_minutes=120` |
-| Routine interaction level | Healthy waiting uses `L0_local_cache_read` and `remote_interaction_count=0` when cache is fresh |
-| Fresh signal behavior | Fresh-signal short window remains enabled at `5` minutes for event-driven escalation |
+| Production monitor owner | `brc-runtime-monitor.timer` runs `scripts/run_tokyo_runtime_server_monitor.py` on Tokyo |
+| Baseline policy | `docs/current/RUNTIME_MONITOR_BASELINE.json` records the server-side monitor entrypoint/service/timer |
+| Routine interaction level | Production monitoring uses `L1_tokyo_server_readonly_monitor` |
+| Fresh signal behavior | Fresh-signal and action-time boundary states notify through Feishu with dedupe |
 | Non-quiet summary | Any non-quiet output must state interaction level, remote interaction count, server mutation, and real-order proximity |
-| Safety | Retune changes automation frequency and local baseline only; it does not deploy, call FinalGate, call Operation Layer, exchange write, or create orders |
+| Safety | Server monitor remains readonly; it does not call FinalGate, call Operation Layer, exchange write, or create orders |
 
 ### 2026-06-17 Checkpoint
 
@@ -728,37 +723,25 @@ L1 read-only snapshot
 | Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
 | Tokyo verification | L1 snapshot reports the runtime head, watcher/backend active state, source-readiness, dry-run audit, execution-chain closure status, and safety invariants; it no longer reads nginx or external client release files |
 | Daily check | `scripts/run_strategygroup_runtime_daily_check.py` consumes one L1 snapshot and returns `waiting_for_market`, `degraded`, or `blocked` with Owner-readable current action and safety invariants |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime head, low-interaction check modes, and the server-side signal-detection source, so heartbeat automation can run without hardcoded deployment SHAs or accidental extra probes |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for server-side runtime monitor ownership, systemd timer identity, and local diagnostic boundaries |
 | Interaction budget | Daily check defaults to `--max-remote-interactions 1`; if the source snapshot exceeds the budget, the report becomes a `NOTIFY` engineering blocker instead of silently becoming chatty |
 | Notification result | Daily check now emits `notification.notification_result` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
-| Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat` renders the same notification result as Codex heartbeat XML; fresh cache stays `L0` / 0 remote interactions, while stale cache may refresh one `L1` snapshot |
-| Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` renders the same one-shot check as a concise Owner-readable progress summary, so manual status reviews do not require extra SSH probes or raw JSON/XML inspection |
+| Server-side monitor output | `scripts/run_tokyo_runtime_server_monitor.py` classifies quiet / notify on Tokyo from server-side runtime facts, records dedupe state, and sends Feishu only when useful |
+| Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` remains available for manual development diagnostics and postdeploy verification; it is not the production Owner notification path |
 | Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 14` instead of a vague green label |
 | Execution-chain closure visibility | L1 snapshot and daily-check read `runtime-execution-chain-closure-status.json`, so healthy non-market closure appears as `非市场链路已收口` without rereading raw audit artifacts |
 | Closure segment projection | `runtime-execution-chain-closure-status.json` now projects key dry-run segments such as fresh-signal fast auto-chain, scoped Operation Layer handoff, submit-blocker matrix, shared runtime pipe, and post-submit guards into `projected_checks`, `ready_segments`, and `missing_or_failed_segments` |
 | Goal-chain segment projection | Closure status now also maps lower-level checks into six objective-aligned segments: `fresh_or_mock_signal`, `required_facts_readiness`, `candidate_authorization_evidence`, `action_time_finalgate`, `official_operation_layer_evidence_relay_projection`, and `disabled_dry_run_proof` |
 | Closure segment Owner progress | L1 snapshot and daily-check can carry closure segment counts into Owner progress; older deployed artifacts without segment fields render `链路段: unknown` instead of falsely reporting `0 ready / 0 missing` |
-| Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
-| Auto cache mode | `--auto-cache --owner-progress` first uses a fresh local cache with `L0` / 0 remote interactions; only missing, stale, or schema-stale cache triggers one `L1` snapshot and refreshes the local cache/progress files |
-| Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
-| Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into `monitor_refresh_needed` instead of triggering an extra Tokyo probe |
-| Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become `monitor_refresh_needed` instead of mixing new code with stale cached fields |
-| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should start from `local_monitor_sequence_check`: daily-check, live-cutover readiness refresh, goal-progress, and P0 completion-audit run in strict local/cache order; explicit signal or regression investigation may still force one L1 refresh through the daily-check step |
-| Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `local_monitor_sequence_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
-| Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including the local sequence command and its quiet/noise boundary, using `L0` / 0 remote interactions |
-| Quiet-monitor drift cache | The same audit writes `output/runtime-monitor/latest-quiet-monitor-audit.json` and `output/runtime-monitor/latest-quiet-monitor-audit.md`, keeping automation drift review local and reusable |
-| Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
-| Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0 plus Signal Observation grade status with `L0` / 0 remote interactions |
-| Goal progress cache | The same audit writes `output/runtime-monitor/latest-goal-progress.json` and `output/runtime-monitor/latest-goal-progress.md`, so status reviews can reuse the latest local progress artifact |
+| Server monitor SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` records `server_side_runtime_monitor_check`, `brc-runtime-monitor.service`, and `brc-runtime-monitor.timer` as the production monitor path |
+| Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` remains a development diagnostic and now checks for the server-side monitor baseline |
 | Goal progress evidence table | Goal progress output now includes a compact Evidence table, including dry-run scenario count, closure segment readiness count, missing closure segment count, interaction source, notification state, and forbidden-effect count |
-| Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check` accepts `--daily-check-mode fresh`, `auto-cache`, or `cache`; postdeploy acceptance stays fresh, while routine reviews can reuse cache |
-| Deploy-session cache clarity | Cache-only deploy-session reviews report `interaction.level=L0_local_cache_read` and keep the original `collected_interaction_level` inside the step for audit context |
-| Deploy-session Owner progress | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress` renders a Markdown progress table with current stage, action, risk, interaction count, server mutation, and real-order proximity |
+| Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode fresh --json` remains the postdeploy verification path |
 | Engineering rehearsal check | L1 snapshot now requires the dry-run audit artifact to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
 | Owner visibility classification | The daily check emits `owner_summary.visibility.category` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names as the primary Owner state |
 | Owner language guard | Owner readmodels map internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the primary Owner state |
 | Monitor Owner language guard | Healthy waiting notifications say `当前没有可用市场机会`; internal signal terms remain audit/detail concepts instead of the default Owner heartbeat text |
-| Signal detection source | Fresh opportunity detection remains Tokyo watcher / Feishu notification driven; local `--auto-cache` status checks are not the only market-opportunity detector |
+| Signal detection source | Fresh opportunity detection and Owner notification are Tokyo server-side watcher / runtime-monitor / Feishu responsibilities |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ### Deploy Interaction Rule
@@ -794,19 +777,16 @@ safety state:
 
 | Step | Preferred shape | Interaction budget |
 | --- | --- | --- |
-| Routine status review | `--auto-cache --owner-progress` | `L0` if cache is fresh; otherwise one `L1` refresh |
-| Strict no-server status review | `--from-cache --require-fresh-cache --owner-progress` | `L0`, 0 remote interactions |
+| Production monitor | `brc-runtime-monitor.timer` -> `scripts/run_tokyo_runtime_server_monitor.py` | Server-side readonly, quiet when healthy, Feishu notify with dedupe when useful |
 | Explicit signal/regression investigation | `--json` or one direct L1 snapshot | `L1`, 1 remote interaction |
 | Fresh runtime status | One `probe_tokyo_runtime_snapshot.py` collection | `L1`, 1 remote interaction |
 | Runtime deploy apply | Batched git deploy phases with explicit remote count | `L3`, 4 direct SSH commands, 7 counted remote interactions |
 | Postdeploy acceptance | One daily-check snapshot plus one deploy-session summary | `L1` snapshot, summary local |
-| Routine deploy-session review | `--run-daily-check --daily-check-mode auto-cache` | `L0` if cache is fresh; otherwise one `L1` refresh |
-| Owner-readable deploy-session review | `--run-daily-check --daily-check-mode cache --owner-progress` | `L0`, 0 remote interactions when cache is fresh |
-| Goal progress review | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` | Local cache/baseline only, 0 Tokyo interactions |
-| Quiet-monitor drift review | `audit_tokyo_runtime_quiet_monitor.py --owner-progress` | Local automation/config files only, 0 Tokyo interactions |
-When a tool can reuse a fresh cache or a single snapshot, it must not run extra
-Tokyo probes only to restate the same state. When a deploy is necessary, the
-report should summarize the whole session instead of narrating each command.
+
+When a tool can reuse a server-side monitor artifact or a single snapshot, it
+must not run extra Tokyo probes only to restate the same state. When a deploy is
+necessary, the report should summarize the whole session instead of narrating
+each command.
 
 ### 2026-06-17 Batched Deploy Interaction Checkpoint
 
@@ -2034,40 +2014,6 @@ healthy waiting-for-market semantics.
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Local Monitor Sequence Checkpoint
-
-The goal-mode status tools now have a cache-only sequence runner that refreshes
-daily-check, live-cutover readiness, goal-progress, and P0 completion-audit in
-strict order. This keeps the completion audit strict about stale input sources
-while avoiding false `goal_progress:generated_before_daily_check` gaps caused by
-parallel local commands.
-
-| Item | Result |
-| --- | --- |
-| New local entrypoint | `scripts/run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache` |
-| Baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records `local_monitor_sequence_check` with `local_monitor_sequence_remote_interaction_count=0` |
-| Quiet-monitor audit | `audit_tokyo_runtime_quiet_monitor.py` checks that the heartbeat automation prompt uses the registered local sequence command and that the baseline command contains no remote probe command |
-| Local validation | `py_compile` passed; related monitor/audit tests: `90 passed` |
-| Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
-| Deployment | Not deployed; this is a local goal-mode/automation tooling improvement only |
-| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
-
-### 2026-06-18 Local Sequence Live-Cutover Refresh Checkpoint
-
-The local monitor sequence now refreshes the live-cutover readiness artifact
-before goal-progress and P0 completion audit. This prevents stale
-`latest-live-cutover-readiness.json` artifacts from hiding or inventing
-first-live-order closure gaps after the live-closure contract gains stricter
-proof requirements.
-
-| Item | Result |
-| --- | --- |
-| Local sequence order | `daily_check -> live_cutover_readiness -> goal_progress -> completion_audit` |
-| Completion audit strictness | `runtime_first_bounded_live_order_completion_audit.py` now requires all 13 first-live closure evidence keys and all first-order live proof guards from the cutover contract |
-| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover artifacts to `tmp_path`, not the runtime-monitor cache |
-| Automation prompt | `tokyo-runtime-quiet-monitor` describes live-cutover readiness refresh inside the local zero-remote sequence |
-| Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
-| Deployment | Not deployed; this is local monitor/audit hardening only |
-| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Standing First-Real-Submit Authorization Checkpoint
 

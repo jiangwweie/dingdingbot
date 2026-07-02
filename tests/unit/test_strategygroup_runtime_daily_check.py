@@ -1770,71 +1770,36 @@ def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
     }
 
 
-def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
+def test_runtime_monitor_baseline_contains_only_server_side_production_monitor():
     baseline = json.loads(RUNTIME_MONITOR_BASELINE_PATH.read_text(encoding="utf-8"))
 
-    assert baseline["default_check"].endswith(
-        "run_strategygroup_runtime_daily_check.py --auto-cache --json"
+    assert baseline["server_side_runtime_monitor_check"].startswith(
+        "python3 scripts/run_tokyo_runtime_server_monitor.py "
     )
-    assert baseline["heartbeat_check"].endswith(
-        "run_strategygroup_runtime_daily_check.py "
-        "--auto-cache --heartbeat "
-        "--output-json output/runtime-monitor/latest-daily-check.json "
-        "--output-owner-progress output/runtime-monitor/latest-owner-progress.md"
+    assert baseline["server_side_runtime_monitor_service"] == (
+        "brc-runtime-monitor.service"
     )
-    assert baseline["routine_status_check"].endswith(
-        "run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress"
-    )
-    assert baseline["strict_no_server_check"].endswith(
-        "run_strategygroup_runtime_daily_check.py "
-        "--from-cache --require-fresh-cache --owner-progress"
-    )
-    assert baseline["forced_refresh_check"].endswith(
-        "run_strategygroup_runtime_daily_check.py --json"
-    )
-    assert baseline["deploy_session_postdeploy_check"].endswith(
-        "run_tokyo_runtime_deploy_session.py "
-        "--run-daily-check --daily-check-mode fresh --json"
-    )
-    assert baseline["deploy_session_routine_check"].endswith(
-        "run_tokyo_runtime_deploy_session.py "
-        "--run-daily-check --daily-check-mode auto-cache --json"
-    )
-    assert baseline["deploy_session_owner_progress_check"].endswith(
-        "run_tokyo_runtime_deploy_session.py "
-        "--run-daily-check --daily-check-mode cache --owner-progress"
-    )
-    assert baseline["goal_progress_audit_check"].endswith(
-        "run_strategygroup_runtime_goal_progress_audit.py "
-        "--owner-progress "
-        "--output-json output/runtime-monitor/latest-goal-progress.json "
-        "--output-owner-progress output/runtime-monitor/latest-goal-progress.md"
-    )
-    assert baseline["local_monitor_sequence_check"].endswith(
-        "run_strategygroup_runtime_local_monitor_sequence.py "
-        "--daily-check-mode cache "
-        "--owner-progress "
-        "--output-json output/runtime-monitor/latest-local-monitor-sequence.json "
-        "--output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md"
-    )
-    assert baseline["quiet_monitor_audit_check"].endswith(
-        "audit_tokyo_runtime_quiet_monitor.py "
-        "--owner-progress "
-        "--output-json output/runtime-monitor/latest-quiet-monitor-audit.json "
-        "--output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md"
+    assert baseline["server_side_runtime_monitor_timer"] == (
+        "brc-runtime-monitor.timer"
     )
     assert baseline["signal_detection_source"] == (
-        "tokyo_runtime_signal_watcher_feishu_webhook"
+        "tokyo_server_side_runtime_monitor_feishu"
     )
-    assert baseline["interaction_policy"]["default_level"] == "L0_local_cache_read"
+    assert baseline["interaction_policy"]["default_level"] == (
+        "L1_tokyo_server_readonly_monitor"
+    )
     assert baseline["interaction_policy"]["remote_interaction_count"] == 0
-    assert baseline["interaction_policy"]["refresh_level"] == (
-        "L1_daily_check_from_snapshot"
-    )
-    assert baseline["interaction_policy"]["refresh_remote_interaction_count"] == 1
-    assert baseline["interaction_policy"][
-        "deploy_postdeploy_daily_check_remote_interaction_count"
-    ] == 1
-    assert baseline["interaction_policy"]["goal_progress_audit_remote_interaction_count"] == 0
-    assert baseline["interaction_policy"]["local_monitor_sequence_remote_interaction_count"] == 0
-    assert baseline["interaction_policy"]["quiet_monitor_audit_remote_interaction_count"] == 0
+    assert baseline["interaction_policy"]["server_side_runtime_monitor_remote_interaction_count"] == 0
+    for removed_key in [
+        "default_check",
+        "heartbeat_check",
+        "routine_status_check",
+        "strict_no_server_check",
+        "forced_refresh_check",
+        "deploy_session_routine_check",
+        "deploy_session_owner_progress_check",
+        "goal_progress_audit_check",
+        "local_monitor_sequence_check",
+        "quiet_monitor_audit_check",
+    ]:
+        assert removed_key not in baseline

@@ -1323,11 +1323,9 @@ def _runtime_interaction_track(
 ) -> dict[str, Any]:
     blockers: list[str] = []
     required_keys = [
-        "default_check",
-        "heartbeat_check",
-        "routine_status_check",
-        "strict_no_server_check",
-        "deploy_session_owner_progress_check",
+        "server_side_runtime_monitor_check",
+        "server_side_runtime_monitor_service",
+        "server_side_runtime_monitor_timer",
     ]
     missing = [key for key in required_keys if not baseline.get(key)]
     if missing:
@@ -1347,9 +1345,11 @@ def _runtime_interaction_track(
             f"remote_interaction_count={interaction.get('remote_interaction_count', 0)}",
             f"collected_interaction={collected_interaction.get('level')}",
             f"collected_remote_interaction_count={collected_interaction.get('remote_interaction_count', 0)}",
-            "baseline_low_noise_commands=present" if not missing else "baseline_low_noise_commands=missing",
+            "server_side_monitor_baseline=present"
+            if not missing
+            else "server_side_monitor_baseline=missing",
         ],
-        progress_checkpoint="使用 L0 本地缓存进度，必要时才刷新一次 L1 快照",
+        progress_checkpoint="生产监控由 Tokyo server-side readonly timer 负责",
     )
 
 

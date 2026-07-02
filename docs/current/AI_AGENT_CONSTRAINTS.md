@@ -273,13 +273,13 @@ Agents must obey these constraints:
 | Strategy Asset State evidence requirement | Signal Observation grade artifacts are useful only if they move a lane forward, prove a precise blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
 | Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
-| Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity review work loop, or opportunity ledger producer over adding permanent standalone scripts |
+| Entry-point control | For production monitoring, extend the server-side runtime monitor contract path; for development diagnostics, prefer extending the local monitor sequence, replay lab, opportunity review work loop, or opportunity ledger producer over adding unrelated standalone scripts |
 
 New Signal Observation grade scripts or artifacts must satisfy at least one of:
 
 - remove or precisely reclassify a Live Enablement blocker;
 - produce or consume Strategy Asset State pre-live evidence rows that change a lane decision;
-- feed the local monitor sequence;
+- feed the server-side runtime monitor for production notification, or the local monitor sequence for development diagnostics;
 - replace and reduce older entry points;
 - create a bounded one-time migration or validation artifact with no long-term
   mainline role.
@@ -368,9 +368,8 @@ current official profile, agents should preserve and use it rather than reduce
 it for caution. Changes to those defaults still require explicit Owner
 direction because they are authority changes, not routine safety fixes.
 
-Do not deploy to Tokyo for every small local change. Routine status review
-should use local cache or local goal-progress artifacts first, then at most one
-L1 read-only Tokyo snapshot when cache is missing, stale, or schema-stale.
+Do not deploy to Tokyo for every small local change. Production recurring
+monitoring is owned by the Tokyo server-side readonly runtime monitor timer.
 Bounded Tokyo deploy apply should be reserved for a stage-worthy fix,
 deployable milestone, fresh-signal unblock, safety regression repair, or
 explicit Owner request.
@@ -410,12 +409,11 @@ paper/simulator Operation Layer, post-submit lifecycle rehearsal, rough
 cost/PnL estimation, or monitor/review shape work when those artifacts remain
 non-executing and non-authoritative.
 
-Monitor cache freshness is not a live-trading safety blocker. Cache missing,
-stale cache age, stale cache schema, or runtime-head mismatch must be classified
-as `monitor_refresh_needed`. These states may emit `NOTIFY` to trigger a local
-or one-shot L1 refresh, but they must not populate `checks.blockers`, must not
-be reported as `hard_safety_stop`, and must not flip P0 from
-`waiting_for_market` to blocked when the runtime chain itself remains ready.
+Production monitor source health is classified by the Tokyo server-side
+readonly monitor. Runtime status, watcher status, public facts,
+account-safe facts, systemd state, deploy health, and readiness-chain failures
+must be surfaced as server-side monitor decisions without creating live-submit
+authority.
 
 When a detector artifact exists, watcher input is present, and facts were
 computed but false, classify the lane as `computed_not_satisfied`. Do not report
