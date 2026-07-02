@@ -42,7 +42,7 @@
       "paired_path": "output/runtime-monitor/latest-local-monitor-sequence.md",
       "source_command": "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py --json",
       "validator": "python3 -m py_compile scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-      "consumed_by": "main_control_refresh"
+      "consumed_by": "development_diagnostic_refresh"
     },
     {
       "path": "output/runtime-monitor/latest-single-lane-task-packet.json",

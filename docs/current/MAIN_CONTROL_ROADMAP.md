@@ -75,27 +75,28 @@ cannot trade because first blocker X remains
 
 Blocker naming is governed by
 `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. The current planning phase is
-Live Enablement: choose a StrategyGroup + symbol lane, classify the earliest
-blocker, remove it where engineering can remove it, and reach
-`market_wait_validated` only when the lane is genuinely waiting for a current or
-future fresh signal.
+Pre-Trade Runtime V0: maintain five active StrategyGroups with bounded
+candidate symbol sets, classify per-symbol readiness blockers, promote fresh
+satisfied candidates without authority leakage, and narrow at most one
+candidate into action-time lane input before the official path.
 
+Pre-trade runtime is governed by `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
 Daily management is governed by
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`. Active work
 limits and seven-day stop rules are governed by
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 
-P0 remains ready for the first selected StrategyGroup allocated-subaccount live
-closure. Signal Observation grade work must now turn market observations into
-Live Enablement blocker decisions:
+P0 now targets the multi-StrategyGroup, multi-symbol pre-trade runtime needed to
+avoid missing opportunities while preserving the single-intent submit boundary.
+Signal Observation grade work must now turn market observations into
+machine-checkable per-symbol readiness and promotion decisions:
 
 ```text
-select StrategyGroup + symbol lane
--> classify detector / watcher / scope / policy / facts / runtime profile
--> repair or validate the earliest non-market blocker
--> use replay only for rule calibration and future live capture
--> reach market_wait_validated only after the blocker contract checklist passes
--> stage-worthy decisions deploy once, not continuously
+active StrategyGroup candidate symbol set
+-> per-symbol detector / watcher / facts / scope / risk readiness
+-> fresh-signal promotion candidate
+-> action-time lane input only after scope and facts allow it
+-> candidate/auth, FinalGate, Operation Layer only for one explicit intent
 ```
 
 ## Current Execution Constraints
@@ -104,7 +105,7 @@ The next phase is governed by eight execution constraints:
 
 | Constraint | Meaning |
 | --- | --- |
-| P0 preemption | A real fresh `MPG-001`/selected StrategyGroup signal immediately interrupts lower-priority Signal Observation grade work |
+| P0 preemption | Any real fresh satisfied candidate in the active pre-trade runtime may interrupt lower-priority work, then must narrow through promotion and action-time checks |
 | Authority split | Owner controls policy and tier/risk scope; the system continues normal process execution inside selected boundaries |
 | Capability closure | Every goal-mode task must close one engineering problem class, unlock a concrete capability, and expose the next engineering bottleneck |
 | Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
@@ -113,17 +114,24 @@ The next phase is governed by eight execution constraints:
 | Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
 | Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / Strategy Asset State evidence surfaces and replace or reduce older entry points |
 
-The deploy-worthy checkpoint for the current Live Enablement phase is:
+Production recurring monitoring is moving to the server-side ownership model in
+`docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`: Tokyo server-side
+readonly timer plus Feishu notification is the production path. Local heartbeat
+and local monitor sequence are development diagnostics only and must not remain
+production notification sources or production fallbacks.
+
+The deploy-worthy checkpoint for the current Pre-Trade Runtime V0 phase is:
 
 ```text
-selected StrategyGroup + symbol lane
+five active StrategyGroups
+-> multiple candidate symbols per StrategyGroup
 -> blocker matrix per symbol / per fact
--> detector / watcher / scope / policy / runtime-profile closure
--> market_wait_validated or a concrete next blocker
--> one current decision per lane
--> daily table row updated
+-> fresh-signal promotion rules
+-> at most one action-time lane input
+-> daily table summary updated
 -> stop condition named
--> local monitor sequence
+-> server-side monitor status
+-> local diagnostic snapshot only when needed for development verification
 -> targeted tests pass
 ```
 

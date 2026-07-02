@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-07-01
-Current phase: StrategyGroup live-enablement pilot
+Last updated: 2026-07-02
+Current phase: Pre-Trade Runtime V0
 
 ## Current Document Authority
 
@@ -23,6 +23,8 @@ docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
 docs/current/STRATEGY_ENGINEERING_INTAKE_CONTRACT.md
 docs/current/TRADEABILITY_DECISION_CONTRACT.md
 docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
+docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
+docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
@@ -63,6 +65,15 @@ authority order. `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CO
 defines the StrategyGroup asset layer.
 `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` defines blocker classes and
 Live Enablement completion rules.
+`docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` defines the current
+multi-StrategyGroup, multi-symbol pre-trade runtime: wide observation, bounded
+candidate readiness, fresh-signal promotion, single action-time lane narrowing,
+and single-intent protected submit.
+`docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` defines the production
+monitor ownership boundary: Tokyo server-side readonly timer and Feishu
+notification are the target production path; local heartbeat and local monitor
+sequence are development diagnostic paths only, not production fallback and not
+the source of production Owner notification decisions.
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
 single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop
@@ -81,7 +92,7 @@ runtime facts, watcher refreshes, dry-run audit chains, deploy/session
 snapshots, replay labs, and historical evidence directories must not enter
 routine commits unless the task explicitly names them as deliverables and the
 output-scope validator is updated first. Use
-`python3 scripts/validate_output_artifact_scope.py --git-status` before
+`python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked` before
 accepting output changes.
 
 ## Product Objective
@@ -127,11 +138,11 @@ generic `waiting_for_market`.
 Current planning must use this Live Enablement loop:
 
 ```text
-select StrategyGroup + symbol lane
--> classify the earliest blocker with the Blocker Classification Contract
--> attach detector / watcher / facts / scope / policy / runtime profile
--> reach market_wait_validated only after non-market blockers are closed
--> on fresh signal refresh action-time facts
+maintain active StrategyGroup candidate symbol sets
+-> compute per-symbol readiness and first blocker
+-> promote fresh satisfied candidates without exchange-write authority
+-> narrow at most one promoted candidate into an action-time lane input
+-> refresh action-time facts
 -> candidate / authorization evidence
 -> FinalGate
 -> Operation Layer
@@ -141,18 +152,20 @@ select StrategyGroup + symbol lane
 Current WIP is limited by `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 Daily status must collapse into
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`.
-The daily management unit is:
+Before action-time, the pre-trade management unit is:
 
 ```text
-StrategyGroup + symbol + first blocker + evidence + next action + stop condition
+StrategyGroup + symbol + readiness state + first blocker + evidence + next action + stop condition
 ```
 
-The main bottleneck is no longer a general explanation of no-trade periods. The
-main bottleneck is removing or precisely proving the earliest Live Enablement
-blocker for the selected StrategyGroup + symbol lane. Reports, markdown,
-read-only watcher expansion, replay outputs, and daily status reports are mainline
-only when they move a lane forward or replace a broad blocker with a precise
-per-symbol / per-fact blocker and next action.
+The main bottleneck is no longer a general explanation of no-trade periods or a
+single fixed daily lane. The main bottleneck is keeping the active
+StrategyGroups in a multi-symbol pre-trade candidate pool, proving per-symbol
+readiness, and allowing a fresh satisfied symbol to become the single
+action-time lane. Reports, markdown, read-only watcher expansion, replay
+outputs, and daily status reports are mainline only when they move a candidate
+symbol forward or replace a broad blocker with a precise per-symbol / per-fact
+blocker and next action.
 
 `StrategyGroup Decision Ledger` is the minimal pre-live strategy-learning
 ledger. For compatibility, its active contract lives at
