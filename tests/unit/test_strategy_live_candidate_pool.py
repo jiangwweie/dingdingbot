@@ -662,6 +662,7 @@ def test_candidate_pool_marks_brf2_uncovered_symbols_as_watcher_input_gap():
     assert rows["BTCUSDT"]["public_facts_state"]["computed_not_satisfied"] == [
         "rally_context",
         "rally_failure_trigger_state",
+        "short_squeeze_risk_state",
     ]
     assert rows["ETHUSDT"]["detector_state"] == "ready"
     assert rows["ETHUSDT"]["first_blocker"] == "watcher_tick_missing"
@@ -670,6 +671,34 @@ def test_candidate_pool_marks_brf2_uncovered_symbols_as_watcher_input_gap():
         in rows["ETHUSDT"]["evidence_ref"]
     )
     assert rows["AVAXUSDT"]["first_blocker"] == "watcher_tick_missing"
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_fails_closed_when_brf2_ready_fact_symbol_is_unknown():
+    brf2_facts = _brf2_ready_runtime_signal_facts()
+    brf2_facts["signal_context"] = {"symbol": ""}
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        brf2_runtime_signal_facts=brf2_facts,
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = [
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "BRF2-001"
+    ]
+    assert {row["first_blocker"] for row in rows} == {"watcher_tick_missing"}
+    assert all(row["detector_state"] == "ready" for row in rows)
+    assert all(
+        "brf2_runtime_signal_facts:missing_symbol_fact_input" in row["evidence_ref"]
+        for row in rows
+    )
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 

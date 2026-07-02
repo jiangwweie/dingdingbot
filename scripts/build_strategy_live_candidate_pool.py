@@ -623,10 +623,11 @@ def _brf2_runtime_signal_symbol_facts(
         _as_dict(facts_artifact.get("signal_context")).get("symbol")
         or _as_dict(facts_artifact.get("source_signal_context")).get("symbol")
     )
+    observed_symbol_authorized = _symbol_authorized("BRF2-001", observed_symbol)
     failed = _brf2_failed_facts(_as_dict(facts_artifact.get("facts")))
     rows: dict[str, dict[str, Any]] = {}
     for symbol in symbols:
-        if observed_symbol and symbol != observed_symbol:
+        if not observed_symbol_authorized or symbol != observed_symbol:
             rows[symbol] = {
                 "blocker_class": "watcher_tick_missing",
                 "detector_attached": True,
@@ -666,16 +667,27 @@ def _brf2_failed_facts(facts: dict[str, Any]) -> list[str]:
         "closed_5m_ohlcv": {"fresh", "present", "ready"},
         "rally_context": {"bear_or_weak_reclaim", "ready", "weak_rally"},
         "rally_failure_trigger_state": {"active", "confirmed", "ready"},
-        "short_squeeze_risk_state": {"bounded", "clear", "clear_or_bounded"},
+        "short_squeeze_risk_state": {"clear", "clear_or_bounded"},
         "strong_reclaim_disable_state": {"clear", "false", "inactive"},
         "liquidity_downshift_state": {"clear", "false", "inactive"},
         "spread_liquidity_state": {"acceptable", "normal", "ready"},
+    }
+    disable_active = {
+        "short_squeeze_risk_state": {"bounded", "red", "unbounded", "unknown"},
+        "strong_reclaim_disable_state": {"active", "true"},
+        "rally_extension_invalidates_failure_state": {"active", "true"},
+        "liquidity_downshift_state": {"active", "true"},
+        "spread_liquidity_state": {"missing", "wide_spread", "thin_volume", "unknown"},
     }
     for fact_key, accepted_statuses in accepted.items():
         status = str(_as_dict(facts.get(fact_key)).get("status") or "").lower()
         if status not in accepted_statuses:
             failed.append(fact_key)
-    return failed
+    for fact_key, active_statuses in disable_active.items():
+        status = str(_as_dict(facts.get(fact_key)).get("status") or "").lower()
+        if status in active_statuses:
+            failed.append(fact_key)
+    return sorted(set(failed))
 
 
 def _normalize_symbol(value: Any) -> str:

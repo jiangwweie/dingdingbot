@@ -185,7 +185,7 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T15:01:34.689102+00:00",
+  "generated_at_utc": "2026-07-02T15:02:43.201124+00:00",
   "no_trade_audit": {
     "blocker_counts": {
       "computed_not_satisfied": 16,
@@ -1380,7 +1380,8 @@
       "public_facts_state": {
         "computed_not_satisfied": [
           "rally_context",
-          "rally_failure_trigger_state"
+          "rally_failure_trigger_state",
+          "short_squeeze_risk_state"
         ],
         "missing": [],
         "satisfied": [],
