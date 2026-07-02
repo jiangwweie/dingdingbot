@@ -1,28 +1,28 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-02T14:42:09.077702+00:00",
+  "generated_at_utc": "2026-07-02T14:49:16.953694+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {
-    "strategy_group_id": "SOR-001",
-    "symbol": "ETHUSDT",
-    "first_blocker": "watcher_tick_missing",
+    "strategy_group_id": "MI-001",
+    "symbol": "AVAXUSDT",
+    "first_blocker": "detector_not_attached",
     "closest_to_live_rank": 1,
-    "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol"
+    "next_engineering_action": "attach_detector_for_candidate_symbol"
   },
-  "task_id": "P0-SOR-001-WATCHER-TICK-MISSING-CLOSURE",
+  "task_id": "P0-MI-001-DETECTOR-NOT-ATTACHED-CLOSURE",
   "active_lane": {
-    "strategy_group_id": "SOR-001",
-    "symbol": "ETHUSDT",
+    "strategy_group_id": "MI-001",
+    "symbol": "AVAXUSDT",
     "side": "long",
-    "stage": "armed"
+    "stage": "admission"
   },
   "chain_position": "replay_live_parity",
-  "first_blocker": "watcher_tick_missing",
-  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:SOR-001/ETHUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
-  "expected_state_change": "SOR-001/ETHUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
-  "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+  "first_blocker": "detector_not_attached",
+  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MI-001/AVAXUSDT first_blocker=detector_not_attached server_runtime_coverage=active_watcher_scope",
+  "expected_state_change": "MI-001/AVAXUSDT first_blocker changes from detector_not_attached to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
+  "next_action": "attach_detector_for_candidate_symbol",
   "allowed_files": [
     "scripts/build_single_lane_task_packet.py",
     "scripts/validate_single_lane_task_packet.py",
@@ -62,7 +62,7 @@
     "python3 scripts/validate_output_artifact_scope.py --git-status",
     "git diff --check"
   ],
-  "done_when": "SOR-001/ETHUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
+  "done_when": "MI-001/AVAXUSDT no longer has detector_not_attached, or the Daily Table reclassifies the same lane to a more precise first blocker.",
   "authority_boundary": "single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
   "source_authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
   "owner_action_required": "no",

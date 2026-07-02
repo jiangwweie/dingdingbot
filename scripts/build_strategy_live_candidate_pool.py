@@ -36,6 +36,9 @@ DEFAULT_ACTION_TIME_BOUNDARY_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
 )
+DEFAULT_SOR_DETECTOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.json"
+)
 DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
 )
@@ -116,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--action-time-boundary-json", default=str(DEFAULT_ACTION_TIME_BOUNDARY_JSON)
     )
+    parser.add_argument("--sor-detector-json", default=str(DEFAULT_SOR_DETECTOR_JSON))
     parser.add_argument(
         "--single-lane-task-packet-json",
         default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_JSON),
@@ -137,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         tradeability=_read_json(Path(args.tradeability_json)),
         replay_live_parity=_read_json(Path(args.replay_live_parity_json)),
         action_time_boundary=_read_json(Path(args.action_time_boundary_json)),
+        sor_detector=_read_json(Path(args.sor_detector_json)),
         single_lane_task_packet=_read_json(Path(args.single_lane_task_packet_json)),
         runtime_active_monitor=_read_json(Path(args.runtime_active_monitor_json)),
     )
@@ -169,6 +174,7 @@ def build_strategy_live_candidate_pool(
     replay_live_parity: dict[str, Any],
     action_time_boundary: dict[str, Any],
     single_lane_task_packet: dict[str, Any],
+    sor_detector: dict[str, Any] | None = None,
     runtime_active_monitor: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -213,6 +219,7 @@ def build_strategy_live_candidate_pool(
         daily_rows=daily_rows,
         replay_live_parity=replay_live_parity,
         action_time_boundary=action_time_boundary,
+        sor_detector=sor_detector or {},
         tradeability_rows=tradeability_rows,
         runtime_active_monitor=runtime_active_monitor,
     )
@@ -382,10 +389,12 @@ def _symbol_readiness_rows(
     daily_rows: dict[str, dict[str, Any]],
     replay_live_parity: dict[str, Any],
     action_time_boundary: dict[str, Any],
+    sor_detector: dict[str, Any],
     tradeability_rows: dict[str, dict[str, Any]],
     runtime_active_monitor: dict[str, Any],
 ) -> list[dict[str, Any]]:
     parity_rows = _dict_rows(replay_live_parity.get("per_symbol_mismatch_table"))
+    sor_facts = _sor_detector_symbol_facts(sor_detector)
     action_rows = _dict_rows(action_time_boundary.get("strategy_rows"))
     runtime_coverage_rows = _dict_rows(
         _runtime_coverage(runtime_active_monitor).get("rows")
@@ -402,6 +411,11 @@ def _symbol_readiness_rows(
         )
         for symbol in symbols:
             parity_row = _matching_symbol_row(parity_rows, strategy_group_id, symbol)
+            if strategy_group_id == "SOR-001":
+                parity_row = _merge_symbol_fact_row(
+                    parity_row,
+                    sor_facts.get(symbol, {}),
+                )
             action_row = _matching_symbol_row(action_rows, strategy_group_id, symbol)
             runtime_coverage_row = _matching_symbol_row(
                 runtime_coverage_rows,
@@ -426,6 +440,57 @@ def _symbol_readiness_rows(
                 )
             )
     return result
+
+
+def _merge_symbol_fact_row(
+    base: dict[str, Any],
+    override: dict[str, Any],
+) -> dict[str, Any]:
+    if not override:
+        return base
+    merged = dict(base)
+    merged.update(override)
+    return merged
+
+
+def _sor_detector_symbol_facts(detector: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if detector.get("status") != "sor_session_detector_facts_ready":
+        return {}
+    rows: dict[str, dict[str, Any]] = {}
+    for row in _dict_rows(detector.get("symbol_detector_rows")):
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        missing = [
+            str(item)
+            for item in row.get("missing_required_trigger_facts") or []
+            if str(item or "")
+        ]
+        candle_tick_present = bool(row.get("latest_candle_close_time_utc")) and (
+            "opening_range_available" not in missing
+        )
+        public_facts_ready = row.get("public_facts_ready") is True
+        watcher_tick_present = public_facts_ready and candle_tick_present
+        rows[symbol] = {
+            "blocker_class": (
+                "computed_not_satisfied"
+                if watcher_tick_present and missing
+                else "market_wait_validated"
+                if watcher_tick_present
+                else "watcher_tick_missing"
+            ),
+            "detector_attached": True,
+            "watcher_tick_present": watcher_tick_present,
+            "computed": watcher_tick_present,
+            "fresh_signal_present": row.get("fresh_session_range_signal") is True,
+            "failed_facts": missing if watcher_tick_present else [],
+            "next_action": (
+                "continue_observation_with_failed_fact_matrix"
+                if watcher_tick_present
+                else "refresh_or_repair_watcher_public_fact_input"
+            ),
+        }
+    return rows
 
 
 def _candidate_symbols(
@@ -537,7 +602,7 @@ def _symbol_readiness_row(
         computed=computed,
         failed_facts=failed_facts,
     )
-    signal_state = _signal_state(action_row)
+    signal_state = _signal_state(action_row, parity_row)
     scope_state = _scope_state(
         strategy_group_id=strategy_group_id,
         symbol=symbol,
@@ -637,7 +702,9 @@ def _public_facts_state(
     }
 
 
-def _signal_state(action_row: dict[str, Any]) -> str:
+def _signal_state(action_row: dict[str, Any], parity_row: dict[str, Any] | None = None) -> str:
+    if _as_dict(parity_row).get("fresh_signal_present") is True:
+        return "fresh"
     blocker = str(action_row.get("first_blocker") or "")
     if not action_row:
         return "absent"

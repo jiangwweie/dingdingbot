@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build SOR SOL/AVAX scope and session breakout detector facts."""
+"""Build SOR authorized-symbol scope and session breakout detector facts."""
 
 from __future__ import annotations
 
@@ -30,8 +30,9 @@ DEFAULT_PUBLIC_FACTS_JSON = (
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "output/runtime-monitor"
 BASE_URL = "https://fapi.binance.com"
-SYMBOLS = ("SOLUSDT", "AVAXUSDT")
 PRIMARY_LIVE_SCOPE = ("BTCUSDT", "ETHUSDT")
+READONLY_EXPANSION_SCOPE = ("SOLUSDT", "AVAXUSDT")
+SYMBOLS = ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,7 +105,11 @@ def build_sor_session_scope_detector(
 
 
 def _scope_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[str, Any]:
-    ready_symbols = [row["symbol"] for row in rows if row["public_facts_ready"]]
+    ready_symbols = [
+        row["symbol"]
+        for row in rows
+        if row["symbol"] in READONLY_EXPANSION_SCOPE and row["public_facts_ready"]
+    ]
     return {
         "schema": "brc.sor_expanded_scope.v1",
         "scope": "sor_sol_avax_readonly_scope_non_authority",

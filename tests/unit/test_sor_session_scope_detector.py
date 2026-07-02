@@ -38,7 +38,14 @@ def _public_symbol(symbol: str) -> dict:
 
 
 def _public_facts() -> dict:
-    return {"symbols": [_public_symbol("SOLUSDT"), _public_symbol("AVAXUSDT")]}
+    return {
+        "symbols": [
+            _public_symbol("ETHUSDT"),
+            _public_symbol("SOLUSDT"),
+            _public_symbol("BTCUSDT"),
+            _public_symbol("AVAXUSDT"),
+        ]
+    }
 
 
 def _row(open_time_ms: int, close: str, high: str, low: str) -> list:
@@ -76,13 +83,15 @@ def _candles(*, breakout: bool) -> list[list]:
     return rows
 
 
-def test_sor_session_detector_builds_sol_avax_readonly_scope():
+def test_sor_session_detector_builds_authorized_symbol_scope():
     module = _load_module()
 
     artifacts = module.build_sor_session_scope_detector(
         public_facts=_public_facts(),
         candle_payloads={
+            "ETHUSDT": _candles(breakout=False),
             "SOLUSDT": _candles(breakout=True),
+            "BTCUSDT": _candles(breakout=False),
             "AVAXUSDT": _candles(breakout=False),
         },
         generated_at_utc="2026-06-30T02:00:00+00:00",
@@ -92,6 +101,13 @@ def test_sor_session_detector_builds_sol_avax_readonly_scope():
     detector = artifacts["detector"]
     assert scope["expanded_readonly_watcher_symbols"] == ["SOLUSDT", "AVAXUSDT"]
     assert scope["primary_live_submit_symbol_scope"] == ["BTCUSDT", "ETHUSDT"]
+    assert scope["reviewed_symbols"] == ["ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"]
+    assert {row["symbol"] for row in detector["symbol_detector_rows"]} == {
+        "ETHUSDT",
+        "SOLUSDT",
+        "BTCUSDT",
+        "AVAXUSDT",
+    }
     sol = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "SOLUSDT")
     avax = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "AVAXUSDT")
     assert sol["opening_range"]["high"] == 101.0
@@ -119,7 +135,12 @@ def test_sor_session_detector_fails_closed_without_candles():
 
     artifacts = module.build_sor_session_scope_detector(
         public_facts=_public_facts(),
-        candle_payloads={"SOLUSDT": [], "AVAXUSDT": []},
+        candle_payloads={
+            "ETHUSDT": [],
+            "SOLUSDT": [],
+            "BTCUSDT": [],
+            "AVAXUSDT": [],
+        },
         generated_at_utc="2026-06-30T02:00:00+00:00",
     )
 
@@ -135,9 +156,11 @@ def test_sor_session_detector_can_fetch_candles_via_readonly_ssh(monkeypatch):
 
     def fake_fetch(host: str, symbols: tuple[str, ...]) -> dict[str, list[list]]:
         assert host == "tokyo"
-        assert symbols == ("SOLUSDT", "AVAXUSDT")
+        assert symbols == ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT")
         return {
+            "ETHUSDT": _candles(breakout=False),
             "SOLUSDT": _candles(breakout=True),
+            "BTCUSDT": _candles(breakout=False),
             "AVAXUSDT": _candles(breakout=False),
         }
 
