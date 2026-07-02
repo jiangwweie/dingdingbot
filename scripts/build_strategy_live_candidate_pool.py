@@ -474,10 +474,8 @@ def _symbol_readiness_row(
     action_row: dict[str, Any],
     runtime_coverage_row: dict[str, Any],
 ) -> dict[str, Any]:
-    runtime_scope_missing = (
-        runtime_coverage_row.get("blocker_class") == "runtime_profile_scope_missing"
-    )
     runtime_active = str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
+    runtime_scope_missing = bool(runtime_coverage_row) and not runtime_active
     detector_ready = parity_row.get("detector_attached") is True
     watcher_present = parity_row.get("watcher_tick_present") is True or runtime_active
     computed = parity_row.get("computed") is True
@@ -517,6 +515,7 @@ def _symbol_readiness_row(
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
+        runtime_scope_missing=runtime_scope_missing,
     )
     return {
         "strategy_group_id": strategy_group_id,
@@ -693,7 +692,10 @@ def _promotion_state(
     signal_state: str,
     scope_state: str,
     risk_state: str,
+    runtime_scope_missing: bool = False,
 ) -> str:
+    if runtime_scope_missing:
+        return "idle"
     if signal_state != "fresh" or public_facts_state["state"] != "satisfied":
         return "idle"
     if risk_state == "disable":
@@ -782,10 +784,18 @@ def _symbol_role(strategy_group_id: str, symbol: str) -> int:
 
 
 def _action_time_lane_input(row: dict[str, Any]) -> dict[str, Any]:
+    server_runtime_coverage = _as_dict(row.get("server_runtime_coverage"))
     return {
         "strategy_group_id": row["strategy_group_id"],
         "symbol": row["symbol"],
         "side": row["side"],
+        "active_runtime_instance_ids": list(
+            server_runtime_coverage.get("active_runtime_instance_ids") or []
+        ),
+        "selected_runtime_instance_ids": list(
+            server_runtime_coverage.get("selected_runtime_instance_ids") or []
+        ),
+        "server_runtime_coverage": server_runtime_coverage,
         "runtime_profile": "selected_profile_required_at_action_time",
         "scope_state": row["scope_state"],
         "signal_state": row["signal_state"],
