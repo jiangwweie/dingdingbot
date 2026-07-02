@@ -76,6 +76,44 @@ def test_brf_short_profile_proposal_uses_conservative_short_budget():
     assert proposal.exchange_called is False
 
 
+def test_mainline_mi_and_brf2_profile_proposals_have_semantics_bindings():
+    mi = build_experimental_runtime_profile_proposal(
+        strategy_family_id="MI-001",
+        strategy_family_version_id="MI-001-v0",
+        symbol="AVAX/USDT:USDT",
+        side="long",
+        capital_base=Decimal("30"),
+    )
+    brf2 = build_experimental_runtime_profile_proposal(
+        strategy_family_id="BRF2-001",
+        strategy_family_version_id="BRF2-001-v0",
+        symbol="BTC/USDT:USDT",
+        side="short",
+        capital_base=Decimal("30"),
+    )
+
+    assert mi.status == (
+        ExperimentalRuntimeProfileProposalStatus.READY_FOR_OWNER_CODEX_CONFIRMATION
+    )
+    assert "strategy_semantics_binding_not_found" not in mi.blockers
+    assert mi.profile_kind == ExperimentalRuntimeProfileKind.SMALL_CAPITAL_RIGHT_TAIL_LONG
+    assert mi.not_execution_authority is True
+    assert mi.order_created is False
+    assert mi.exchange_called is False
+
+    assert brf2.status == (
+        ExperimentalRuntimeProfileProposalStatus.READY_FOR_OWNER_CODEX_CONFIRMATION
+    )
+    assert "strategy_semantics_binding_not_found" not in brf2.blockers
+    assert brf2.profile_kind == ExperimentalRuntimeProfileKind.SMALL_CAPITAL_CONSERVATIVE_SHORT
+    assert "short_side_conservative_profile_confirmed" in (
+        brf2.owner_confirmation_keys
+    )
+    assert brf2.not_execution_authority is True
+    assert brf2.order_created is False
+    assert brf2.exchange_called is False
+
+
 def test_mean_reversion_profile_proposal_uses_tighter_budget():
     proposal = build_experimental_runtime_profile_proposal(
         strategy_family_id="LSR-001",
