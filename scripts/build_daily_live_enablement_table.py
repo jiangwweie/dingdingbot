@@ -488,10 +488,18 @@ def _evidence(
     mi_trial_admission: dict[str, Any],
 ) -> str:
     if parity_row:
+        source_blocker = str(parity_row.get("blocker_class") or "")
+        source_detail = (
+            f"source_blocker_class={source_blocker} "
+            if source_blocker != first_blocker
+            else ""
+        )
         return (
             "output/runtime-monitor/latest-replay-live-parity-audit.json:"
             f"{strategy_group_id}/{parity_row.get('symbol') or 'strategy_scope'} "
-            f"blocker_class={parity_row.get('blocker_class')}"
+            f"first_blocker={first_blocker} "
+            f"{source_detail}"
+            f"watcher_tick_present={parity_row.get('watcher_tick_present')}"
         )
     if action_row:
         return (

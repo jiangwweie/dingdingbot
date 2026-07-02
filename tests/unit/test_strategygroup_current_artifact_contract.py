@@ -855,9 +855,8 @@ def test_current_tradeability_brf2_resolves_old_owner_policy_blockers():
     assert brf2["runtime_scope_status"]["owner_policy_scope_missing"] is False
     assert brf2["stage"] == "armed_observation"
     assert brf2["decision"] == "not_tradable_market_wait"
-    assert brf2["first_blocker_class"] == (
-        "short_squeeze_risk_state_disable_active"
-    )
+    assert brf2["first_blocker_class"] == "computed_not_satisfied"
+    assert brf2["legacy_blocker_raw"] == "short_squeeze_risk_state_disable_active"
     assert brf2["blocker_owner"] == "market"
     assert brf2["next_action"] == (
         "continue_brf2_armed_observation_until_disable_clears"

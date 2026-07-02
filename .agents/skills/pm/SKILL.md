@@ -30,8 +30,9 @@ Do not default to broad parallel implementation. Identify possible parallel work
 Use current-doc scoped planning:
 
 - Treat `docs/current/MAIN_CONTROL_ROADMAP.md` as the current roadmap surface.
-- Treat Live Enablement blocker closure as the current planning unit:
-  selected StrategyGroup + symbol lane -> exact blocker -> next state.
+- Treat Pre-Trade Runtime blocker closure as the current planning unit:
+  active StrategyGroup + candidate symbol readiness -> exact blocker -> next state,
+  then narrow to one action-time lane only after fresh-signal promotion.
 - Enforce the daily table and WIP contracts before adding or sequencing work.
 - Treat `docs/current/strategy-group-handoffs/` as StrategyGroup handoff intake.
 - Do not recreate removed `docs/ops/*` tracking files.

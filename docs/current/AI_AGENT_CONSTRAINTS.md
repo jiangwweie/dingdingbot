@@ -59,19 +59,26 @@ comes only from the selected profile and action-time exchange facts.
 
 Strategy tradeability uses `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
 Blocker naming uses `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
+Pre-trade runtime uses `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
 Daily management uses
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`, and active
 lane limits use `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 Agents must not stop at "research absorbed", "artifact ready", or
 "waiting_for_market" when a strategy still cannot trade. Every active selected,
-admitted, or newly absorbed candidate must expose:
+admitted, or newly absorbed candidate symbol must expose:
 
-- whether it can trade now;
+- whether it can be observed, promoted, or trade now;
 - if not, the first blocker;
 - whether the blocker is engineering, Owner policy, market, runtime,
   strategy-review, or safety;
 - the exact next action;
 - the state expected after that action.
+
+The active pre-trade posture is multi-StrategyGroup and multi-symbol. Agents
+must not interpret the Daily Table rank 1 row as the only market opportunity the
+system may respond to. A fresh satisfied candidate symbol may preempt lower
+work by becoming a promotion candidate, but it must still narrow to one
+action-time lane and pass all official gates before any real submit.
 
 Do not classify a candidate as `not_tradable_market_wait` or
 `market_wait_validated` unless asset admission, scoped Owner policy, runtime
@@ -80,6 +87,12 @@ blocker classification, and non-live action-time path readiness are already
 closed. A strategy such as a research-side short candidate may be
 `tiny_live_intake_candidate` and still have an earlier admission or scope
 blocker.
+
+Runtime recovery and monitor classes that may appear in current generated
+surfaces include `waiting_for_market`, `missing_fact`, `deployment_issue`,
+`active_position_resolution`, `hard_safety_stop`, and `review_only_warning`.
+Planning must map them to the relevant blocker contract or recovery surface
+before treating them as Owner-facing state.
 
 ## Global Authority Model
 
@@ -96,8 +109,9 @@ Owner policy includes StrategyGroup enable/pause/resume, promote/downshift,
 park/kill, scoped risk acceptance, capital/profile/scope changes, and
 production-stage transition.
 
-System process includes observation, RequiredFacts mapping, fresh signal
-detection, candidate/auth evidence, action-time FinalGate, official Operation
+System process includes wide read-only observation, per-symbol RequiredFacts
+mapping, fresh signal detection, non-executing promotion, action-time lane
+narrowing, candidate/auth evidence, action-time FinalGate, official Operation
 Layer, protection, reconciliation, settlement, and review capture.
 
 Owner scoped risk acceptance may advance `trial_eligible` or tier eligibility.

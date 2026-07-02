@@ -76,6 +76,7 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
     if source_validation.get("valid") is not True:
         errors.append("source_validation.valid must be true")
     rows = _dict_rows(artifact.get("candidate_rows"))
+    symbol_rows = _dict_rows(artifact.get("symbol_readiness_rows"))
     if len(rows) != len(WIP_LANES):
         errors.append(f"candidate_rows must contain {len(WIP_LANES)} rows")
     strategy_ids = {str(row.get("strategy_group_id") or "") for row in rows}
@@ -83,9 +84,16 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
         errors.append("candidate_rows must contain exactly active WIP lanes")
     for index, row in enumerate(rows):
         errors.extend(_validate_candidate_row(index, row))
+    if not symbol_rows:
+        errors.append("symbol_readiness_rows are required")
+    for index, row in enumerate(symbol_rows):
+        errors.extend(_validate_symbol_readiness_row(index, row))
+    errors.extend(_validate_pretrade_runtime(artifact, symbol_rows))
     summary = _as_dict(artifact.get("summary"))
     if summary.get("candidate_count") != len(WIP_LANES):
         errors.append("summary.candidate_count must match active WIP lanes")
+    if summary.get("symbol_readiness_count") != len(symbol_rows):
+        errors.append("summary.symbol_readiness_count must match readiness rows")
     if artifact.get("authority_boundary") != AUTHORITY_BOUNDARY:
         errors.append("authority_boundary is invalid")
     errors.extend(_forbidden_true_paths(artifact))
@@ -136,6 +144,121 @@ def _validate_candidate_row(index: int, row: dict[str, Any]) -> list[str]:
         boundary = str(row.get("authority_boundary"))
         if "no_finalgate" not in boundary or "no_operation_layer" not in boundary:
             errors.append(f"{prefix}.authority_boundary is invalid")
+    return errors
+
+
+def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    prefix = f"symbol_readiness_rows[{index}]"
+    required = (
+        "strategy_group_id",
+        "symbol",
+        "symbol_or_basket",
+        "asset_class",
+        "side",
+        "candidate_role",
+        "observation_scope",
+        "detector_state",
+        "watcher_state",
+        "public_facts_state",
+        "signal_state",
+        "risk_state",
+        "scope_state",
+        "promotion_state",
+        "first_blocker",
+        "next_action",
+        "stop_condition",
+        "evidence_ref",
+    )
+    for key in required:
+        value = row.get(key)
+        if value is None or value == "":
+            errors.append(f"{prefix}.{key} is required")
+    if row.get("strategy_group_id") not in WIP_LANES:
+        errors.append(f"{prefix}.strategy_group_id must be an active StrategyGroup")
+    if row.get("first_blocker") not in CONTRACT_BLOCKER_CLASSES:
+        errors.append(f"{prefix}.first_blocker must be a contract blocker")
+    if row.get("observation_scope") not in {
+        "none",
+        "readonly",
+        "active_observation",
+    }:
+        errors.append(f"{prefix}.observation_scope is invalid")
+    if row.get("detector_state") not in {"missing", "ready", "running", "stale"}:
+        errors.append(f"{prefix}.detector_state is invalid")
+    if row.get("watcher_state") not in {"missing", "fresh", "stale"}:
+        errors.append(f"{prefix}.watcher_state is invalid")
+    public_facts = _as_dict(row.get("public_facts_state"))
+    if public_facts.get("state") not in {
+        "missing",
+        "computed_not_satisfied",
+        "satisfied",
+    }:
+        errors.append(f"{prefix}.public_facts_state.state is invalid")
+    if row.get("signal_state") not in {"absent", "fresh", "stale", "invalidated"}:
+        errors.append(f"{prefix}.signal_state is invalid")
+    if row.get("risk_state") not in {"acceptable", "warning", "disable"}:
+        errors.append(f"{prefix}.risk_state is invalid")
+    if row.get("scope_state") not in {
+        "readonly_only",
+        "trial_scope_proposed",
+        "live_submit_allowed",
+    }:
+        errors.append(f"{prefix}.scope_state is invalid")
+    if row.get("promotion_state") not in {
+        "idle",
+        "promotion_candidate",
+        "action_time_lane",
+        "blocked",
+    }:
+        errors.append(f"{prefix}.promotion_state is invalid")
+    if (
+        row.get("promotion_state") == "action_time_lane"
+        and row.get("scope_state") != "live_submit_allowed"
+    ):
+        errors.append(f"{prefix}.action_time_lane requires live_submit_allowed")
+    if row.get("authority_boundary") and "no_finalgate" not in str(
+        row.get("authority_boundary")
+    ):
+        errors.append(f"{prefix}.authority_boundary is invalid")
+    return errors
+
+
+def _validate_pretrade_runtime(
+    artifact: dict[str, Any], symbol_rows: list[dict[str, Any]]
+) -> list[str]:
+    errors: list[str] = []
+    runtime = _as_dict(artifact.get("pretrade_runtime"))
+    if not runtime:
+        errors.append("pretrade_runtime is required")
+    counts = runtime.get("candidate_symbols_per_strategy_group")
+    if not isinstance(counts, dict):
+        errors.append("pretrade_runtime.candidate_symbols_per_strategy_group is required")
+        counts = {}
+    for strategy_group_id in WIP_LANES:
+        count = int(counts.get(strategy_group_id) or 0)
+        if count < 2:
+            errors.append(
+                f"pretrade_runtime requires at least two symbols for {strategy_group_id}"
+            )
+    promotion_candidates = _dict_rows(artifact.get("promotion_candidates"))
+    action_time_inputs = _dict_rows(artifact.get("action_time_lane_inputs"))
+    if len(action_time_inputs) > 1:
+        errors.append("action_time_lane_inputs must contain at most one real-submit candidate")
+    for index, row in enumerate(action_time_inputs):
+        if row.get("scope_state") == "readonly_only":
+            errors.append(
+                f"action_time_lane_inputs[{index}] must not be readonly_only"
+            )
+        if "no_finalgate" not in str(row.get("authority_boundary") or ""):
+            errors.append(f"action_time_lane_inputs[{index}].authority_boundary is invalid")
+    arbitration = _as_dict(artifact.get("arbitration"))
+    if arbitration.get("single_real_submit_candidate") is not True:
+        errors.append("arbitration.single_real_submit_candidate must be true")
+    if len(promotion_candidates) != sum(
+        row.get("promotion_state") == "promotion_candidate" for row in symbol_rows
+    ):
+        errors.append("promotion_candidates must match symbol readiness rows")
     return errors
 
 

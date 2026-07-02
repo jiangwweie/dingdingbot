@@ -25,10 +25,12 @@ Allowed chain positions:
 | Chain position | Only question it answers |
 | --- | --- |
 | `replay_live_parity` | Did replay-observed signal reproduce in live/current detector under the same symbol, timeframe, venue, and fact rules? |
-| `tradeability_first_blocker` | What is the current first blocker for this StrategyGroup + symbol lane? |
-| `symbol_scope_decision` | Should a symbol move from observed to read-only matched to trial-scope proposal? |
-| `action_time_boundary` | If a fresh live signal appears, can it reach candidate/auth, FinalGate, and Operation Layer without manual operation? |
-| `daily_live_enablement_status` | Which WIP lane moved closer to live submit today, and what is the next single action? |
+| `pretrade_candidate_readiness` | What is the current readiness and first blocker for this StrategyGroup + candidate symbol? |
+| `tradeability_first_blocker` | What is the current first blocker for this StrategyGroup or candidate symbol? |
+| `symbol_scope_decision` | Should a symbol move from observed/read-only to scoped promotion or explicit deferral? |
+| `fresh_signal_promotion` | Can a fresh satisfied candidate become a promotion candidate or action-time lane input? |
+| `action_time_boundary` | If a fresh live signal appears, can one narrowed lane reach candidate/auth, FinalGate, and Operation Layer without manual operation? |
+| `daily_live_enablement_status` | Which active StrategyGroup/candidate symbol moved closer to promotion or live submit today, and what is the next single action? |
 
 Do not answer broad strategy, architecture, governance, or documentation
 questions inside this skill. Route those only after the chain-position output
@@ -90,7 +92,7 @@ active lane and admits a replacement under the WIP contract.
 A chain-position task is accepted only when it:
 
 - names one chain position;
-- names one StrategyGroup + symbol lane;
+- names one StrategyGroup + symbol candidate when symbol-specific;
 - names one first blocker;
 - provides one evidence reference;
 - provides one next engineering or policy action;

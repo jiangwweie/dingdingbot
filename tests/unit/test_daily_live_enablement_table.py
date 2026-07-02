@@ -353,7 +353,8 @@ def test_daily_table_matches_action_time_row_by_selected_symbol():
     assert (
         cpm_row["first_blocker_evidence"]
         == "output/runtime-monitor/latest-replay-live-parity-audit.json:"
-        "CPM-RO-001/AVAXUSDT blocker_class=action_time_boundary_not_reproduced"
+        "CPM-RO-001/AVAXUSDT first_blocker=action_time_boundary_not_reproduced "
+        "watcher_tick_present=True"
     )
 
 
