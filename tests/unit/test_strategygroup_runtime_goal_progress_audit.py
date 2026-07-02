@@ -27,11 +27,9 @@ def _load_module():
 
 def _baseline(**overrides):
     base = {
-        "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
-        "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat",
-        "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
-        "strict_no_server_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress",
-        "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
+        "server_side_runtime_monitor_check": "python3 scripts/run_tokyo_runtime_server_monitor.py",
+        "server_side_runtime_monitor_service": "brc-runtime-monitor.service",
+        "server_side_runtime_monitor_timer": "brc-runtime-monitor.timer",
     }
     base.update(overrides)
     return base

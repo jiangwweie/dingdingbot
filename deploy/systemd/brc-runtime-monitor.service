@@ -1,0 +1,29 @@
+[Unit]
+Description=BRC server-side readonly runtime monitor
+Wants=network-online.target
+After=network-online.target brc-owner-console-backend.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/app/current
+EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-monitor.env
+ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_tokyo_runtime_server_monitor.py \
+  --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json \
+  --dedupe-state-json /home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json \
+  --daily-table-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json \
+  --candidate-pool-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json \
+  --public-facts-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-binance-usdm-public-facts.json \
+  --account-safe-facts-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json \
+  --watcher-status-json /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json \
+  --deploy-health-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json \
+  --systemd-unit brc-owner-console-backend.service \
+  --systemd-unit brc-runtime-signal-watcher.timer \
+  --systemd-unit brc-runtime-signal-watcher.service
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor
