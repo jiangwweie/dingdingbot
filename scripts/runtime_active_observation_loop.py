@@ -94,6 +94,8 @@ def _summary(
         "signal_input_json": _signal_input_json(artifact),
         "prepared_authorization_id": _prepared_authorization_id(artifact),
         "runtime_signal_summaries": _runtime_signal_summaries(artifact),
+        "candidate_universe_coverage": artifact.get("candidate_universe_coverage")
+        or {},
     }
 
 

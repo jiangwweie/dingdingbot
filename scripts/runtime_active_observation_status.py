@@ -264,6 +264,13 @@ def _runtime_signal_summaries(summary: dict[str, Any] | None) -> list[dict[str, 
     return result
 
 
+def _candidate_universe_coverage(summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not summary:
+        return {}
+    coverage = summary.get("candidate_universe_coverage")
+    return coverage if isinstance(coverage, dict) else {}
+
+
 def build_status_artifact(
     output_dir: str | Path,
     *,
@@ -447,6 +454,7 @@ def build_status_artifact(
             else None
         ),
         "runtime_signal_summaries": _runtime_signal_summaries(latest_summary),
+        "candidate_universe_coverage": _candidate_universe_coverage(latest_summary),
         "blockers": blockers,
         "warnings": warnings,
         "forbidden_effects": forbidden_effects,

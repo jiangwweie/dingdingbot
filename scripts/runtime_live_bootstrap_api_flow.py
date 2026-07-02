@@ -316,7 +316,7 @@ class RuntimeLiveBootstrapApiFlow:
             "trial_constraint_snapshot_id",
             admission_body.get("trial_constraint_snapshot_id"),
         )
-        admission_result = admission_body.get("admission_result")
+        admission_result = _admission_result(admission_body)
         if admission_result not in {"admit", "admit_with_constraints"}:
             self.state.add_blockers([f"admission_result_{admission_result or 'missing'}"])
         acceptance = self._step(
@@ -724,10 +724,17 @@ def _step_result(name: str, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(body, dict):
         return {}
     if name == "evaluate_admission_request":
-        return {"admission_result": body.get("admission_result")}
+        return {"admission_result": _admission_result(body)}
     if name == "preflight_create_gated_trial":
         return {"preflight_result": body.get("preflight_result")}
     return {}
+
+
+def _admission_result(body: dict[str, Any]) -> str | None:
+    value = body.get("admission_result") or body.get("decision")
+    if value is None:
+        return None
+    return str(value)
 
 
 def _id_summary(value: Any) -> dict[str, Any]:

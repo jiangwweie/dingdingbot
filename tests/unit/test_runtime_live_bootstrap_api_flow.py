@@ -12,10 +12,12 @@ class _FakeClient:
         *,
         profile_status: str = "ready_for_owner_codex_confirmation",
         runtime_draft_status: int = 200,
+        admission_result_field: str = "admission_result",
     ) -> None:
         self.calls: list[dict] = []
         self.profile_status = profile_status
         self.runtime_draft_status = runtime_draft_status
+        self.admission_result_field = admission_result_field
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -56,13 +58,14 @@ class _FakeClient:
         if path.endswith("/admissions/requests"):
             return {"http_status": 200, "body": {"admission_request_id": "req-1"}}
         if path.endswith("/admissions/requests/req-1/evaluate"):
+            body = {
+                "admission_decision_id": "decision-1",
+                "trial_constraint_snapshot_id": "constraint-1",
+            }
+            body[self.admission_result_field] = "admit_with_constraints"
             return {
                 "http_status": 200,
-                "body": {
-                    "admission_decision_id": "decision-1",
-                    "trial_constraint_snapshot_id": "constraint-1",
-                    "admission_result": "admit_with_constraints",
-                },
+                "body": body,
             }
         if path.endswith("/admissions/risk-acceptances"):
             return {
@@ -341,3 +344,27 @@ def test_inspect_only_reads_current_inventory():
 
     assert report["blockers"] == []
     assert [call["method"] for call in client.calls] == ["GET", "GET", "GET", "GET"]
+
+
+def test_bootstrap_accepts_current_admission_decision_field_name():
+    client = _FakeClient(admission_result_field="decision")
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    admission_steps = [
+        step
+        for step in report["steps"]
+        if step["name"] == "evaluate_admission_request"
+    ]
+    assert admission_steps[0]["step_result"] == {
+        "admission_result": "admit_with_constraints"
+    }

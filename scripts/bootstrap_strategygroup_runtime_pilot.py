@@ -78,6 +78,7 @@ class RuntimePilotBootstrapConfig:
     output_json: str | None = None
     renew_exhausted_runtimes: bool = False
     renewal_batch_id: str | None = None
+    candidate_universe_source: str | None = None
 
 
 def _read_json(path: str | Path | None) -> dict[str, Any]:
@@ -224,6 +225,152 @@ def _readiness_by_group(readiness_artifact: dict[str, Any]) -> dict[str, dict[st
         str(item.get("strategy_group_id")): item
         for item in readiness_artifact.get("readiness") or []
         if isinstance(item, dict) and item.get("strategy_group_id")
+    }
+
+
+def _candidate_pool_symbols(candidate_pool: dict[str, Any]) -> dict[str, list[str]]:
+    if not candidate_pool:
+        return {}
+    if candidate_pool.get("status") != "strategy_live_candidate_pool_ready":
+        return {}
+    universe = candidate_pool.get("candidate_universe")
+    if not isinstance(universe, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for group_id, symbols in universe.items():
+        strategy_group_id = str(group_id or "").strip()
+        if not strategy_group_id or not isinstance(symbols, list):
+            continue
+        selected: list[str] = []
+        for symbol in symbols:
+            exchange_symbol = _exchange_symbol(symbol)
+            if not exchange_symbol.endswith("USDT"):
+                continue
+            if exchange_symbol not in selected:
+                selected.append(exchange_symbol)
+        if selected:
+            result[strategy_group_id] = selected
+    return result
+
+
+def _candidate_pool_side_by_group(candidate_pool: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for row in candidate_pool.get("symbol_readiness_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        group_id = str(row.get("strategy_group_id") or "").strip()
+        side = str(row.get("side") or "").strip().lower()
+        if group_id and side in {"long", "short"} and group_id not in result:
+            result[group_id] = side
+    for row in candidate_pool.get("candidate_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        group_id = str(row.get("strategy_group_id") or "").strip()
+        side = str(row.get("side") or "").strip().lower()
+        if group_id and side in {"long", "short"} and group_id not in result:
+            result[group_id] = side
+    return result
+
+
+def _candidate_pool_rank_by_group(candidate_pool: dict[str, Any]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for row in candidate_pool.get("candidate_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        group_id = str(row.get("strategy_group_id") or "").strip()
+        if not group_id:
+            continue
+        try:
+            result[group_id] = int(row.get("daily_rank"))
+        except Exception:
+            continue
+    return result
+
+
+def _groups_from_candidate_pool(
+    *,
+    intake_artifact: dict[str, Any],
+    candidate_pool: dict[str, Any],
+) -> list[dict[str, Any]]:
+    symbols_by_group = _candidate_pool_symbols(candidate_pool)
+    if not symbols_by_group:
+        return [
+            item
+            for item in intake_artifact.get("strategy_picker") or []
+            if isinstance(item, dict)
+        ]
+    base_by_group = {
+        _group_id(item): item
+        for item in intake_artifact.get("strategy_picker") or []
+        if isinstance(item, dict) and _group_id(item)
+    }
+    side_by_group = _candidate_pool_side_by_group(candidate_pool)
+    rank_by_group = _candidate_pool_rank_by_group(candidate_pool)
+    groups: list[dict[str, Any]] = []
+    for strategy_group_id, symbols in symbols_by_group.items():
+        base = dict(base_by_group.get(strategy_group_id) or {})
+        base_side = _side(base) if base else ""
+        side = base_side or side_by_group.get(strategy_group_id) or "long"
+        picker = dict(base.get("picker") or {})
+        picker["rank"] = rank_by_group.get(strategy_group_id, picker.get("rank", 999))
+        picker["default_mode"] = picker.get("default_mode") or "armed_observation"
+        risk_defaults = (
+            base.get("risk_defaults")
+            if isinstance(base.get("risk_defaults"), dict)
+            else {}
+        )
+        groups.append(
+            {
+                **base,
+                "strategy_group_id": strategy_group_id,
+                "name": base.get("name") or f"{strategy_group_id} Candidate Pool",
+                "intake_status": base.get("intake_status")
+                or "armed_observation_intake_ready",
+                "supported_symbols": symbols,
+                "supported_sides": [side],
+                "signal_ready_rule": {
+                    **(
+                        base.get("signal_ready_rule")
+                        if isinstance(base.get("signal_ready_rule"), dict)
+                        else {}
+                    ),
+                    "side": side,
+                },
+                "risk_defaults": {
+                    "max_notional_per_action_usdt": str(
+                        risk_defaults.get("max_notional_per_action_usdt")
+                        or risk_defaults.get("max_notional_usdt")
+                        or "8"
+                    ),
+                    "max_leverage": str(risk_defaults.get("max_leverage") or "1"),
+                    **risk_defaults,
+                },
+                "picker": picker,
+                "candidate_universe_source": "strategy_live_candidate_pool",
+            }
+        )
+    return groups
+
+
+def _candidate_pool_readiness(candidate_pool: dict[str, Any]) -> dict[str, Any]:
+    symbols_by_group = _candidate_pool_symbols(candidate_pool)
+    if not symbols_by_group:
+        return {}
+    return {
+        "readiness": [
+            {
+                "strategy_group_id": strategy_group_id,
+                "readiness_status": "candidate_universe_runtime_scope_ready",
+                "observe_ready": True,
+                "armed_candidate_prepare_ready": False,
+                "exchange_rules": {
+                    "ready_symbols": symbols,
+                    "blocked_symbols": [],
+                },
+                "blockers": [],
+            }
+            for strategy_group_id, symbols in symbols_by_group.items()
+        ]
     }
 
 
@@ -460,6 +607,7 @@ def build_artifact(
     active_inventory_blockers: list[str] | None = None,
     active_inventory_counts: dict[str, Any] | None = None,
     client: Any | None = None,
+    candidate_pool: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generated_at_ms = int(time.time() * 1000)
     selected_ids = {item.strip() for item in config.strategy_group_ids if item.strip()}
@@ -476,10 +624,11 @@ def build_artifact(
     new_runtime_ids: list[str] = []
     total_new = 0
 
-    groups = [
-        item for item in intake_artifact.get("strategy_picker") or []
-        if isinstance(item, dict)
-    ]
+    groups = _groups_from_candidate_pool(
+        intake_artifact=intake_artifact,
+        candidate_pool=candidate_pool or {},
+    )
+    candidate_pool_symbols = _candidate_pool_symbols(candidate_pool or {})
     groups.sort(
         key=lambda item: (
             (item.get("picker") or {}).get("rank", 999),
@@ -708,6 +857,15 @@ def build_artifact(
             "selected_runtime_instance_ids": selected_runtime_instance_ids,
             "new_runtime_instance_ids": new_runtime_ids,
             "watcher_scope_update_needed": bool(new_runtime_ids),
+            "candidate_universe_source": (
+                config.candidate_universe_source
+                if candidate_pool_symbols
+                else None
+            ),
+            "candidate_universe_strategy_groups": sorted(candidate_pool_symbols),
+            "candidate_universe_symbol_count": sum(
+                len(symbols) for symbols in candidate_pool_symbols.values()
+            ),
             "watcher_scope_note": (
                 "The default systemd watcher monitors all ACTIVE runtimes when "
                 "no --runtime-instance-id filter is present; server env/drop-in "
@@ -784,6 +942,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--intake-json")
     parser.add_argument("--live-facts-readiness-json")
     parser.add_argument("--active-runtimes-json")
+    parser.add_argument("--candidate-universe-json")
     parser.add_argument("--strategy-group-id", action="append", default=[])
     parser.add_argument("--include-observe-only", action="store_true")
     parser.add_argument("--max-symbols-per-group", type=int, default=DEFAULT_MAX_SYMBOLS_PER_GROUP)
@@ -812,6 +971,10 @@ def main(argv: list[str] | None = None) -> int:
         else build_handoff_intake_artifact(handoff_dir=Path(args.handoff_dir))
     )
     live_facts_readiness = _read_json(args.live_facts_readiness_json)
+    candidate_pool = _read_json(args.candidate_universe_json)
+    candidate_pool_readiness = _candidate_pool_readiness(candidate_pool)
+    if candidate_pool_readiness:
+        live_facts_readiness = candidate_pool_readiness
     if args.active_runtimes_json:
         active_payload = _read_json(args.active_runtimes_json)
         active_runtimes = _runtime_rows_from_payload(active_payload)
@@ -840,6 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
             output_json=args.output_json,
             renew_exhausted_runtimes=args.renew_exhausted_runtimes,
             renewal_batch_id=args.renewal_batch_id,
+            candidate_universe_source=args.candidate_universe_json,
         ),
         intake_artifact=intake,
         live_facts_readiness=live_facts_readiness,
@@ -847,6 +1011,7 @@ def main(argv: list[str] | None = None) -> int:
         active_inventory_blockers=active_blockers,
         active_inventory_counts=active_counts,
         client=client,
+        candidate_pool=candidate_pool,
     )
     _write_json(args.output_json, artifact)
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))

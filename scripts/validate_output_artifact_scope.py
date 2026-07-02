@@ -32,6 +32,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Validate changed output paths reported by git status --porcelain.",
     )
+    parser.add_argument(
+        "--git-tracked",
+        action="store_true",
+        help="Validate tracked output paths reported by git ls-files.",
+    )
     args = parser.parse_args(argv)
 
     manifest_path = Path(args.manifest)
@@ -41,6 +46,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.git_status:
         paths.extend(_git_changed_output_paths(REPO_ROOT))
     errors.extend(validate_changed_output_paths(paths, manifest))
+    if args.git_tracked:
+        errors.extend(
+            validate_tracked_output_paths(
+                _git_tracked_output_paths(REPO_ROOT),
+                manifest,
+            )
+        )
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -126,6 +138,24 @@ def validate_changed_output_paths(
     return errors
 
 
+def validate_tracked_output_paths(
+    paths: list[str],
+    manifest: dict[str, Any],
+) -> list[str]:
+    allowed = control_snapshot_paths(manifest)
+    errors: list[str] = []
+    for path in sorted(set(_normalize_path(path) for path in paths)):
+        if not path or not path.startswith("output/"):
+            continue
+        if path not in allowed:
+            errors.append(
+                f"{path} is tracked but is not an approved control snapshot; "
+                "remove it from the git index or add it to the manifest with "
+                "a source command and validator"
+            )
+    return errors
+
+
 def control_snapshot_paths(manifest: dict[str, Any]) -> set[str]:
     paths: set[str] = set()
     for row in _dict_rows(manifest.get("control_snapshots")):
@@ -147,9 +177,30 @@ def _git_changed_output_paths(repo_root: Path) -> list[str]:
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "git status failed")
+    return _changed_output_paths_from_porcelain(result.stdout)
+
+
+def _git_tracked_output_paths(repo_root: Path) -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", "output"],
+        cwd=repo_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git ls-files failed")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _changed_output_paths_from_porcelain(output: str) -> list[str]:
     paths: list[str] = []
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         if not line:
+            continue
+        status = line[:2]
+        if "D" in status:
             continue
         raw_path = line[3:]
         if " -> " in raw_path:

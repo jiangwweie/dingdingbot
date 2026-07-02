@@ -86,6 +86,8 @@ def _loop_command(
         command.extend(["--runtime-instance-id", runtime_instance_id])
     for strategy_family_id in args.strategy_family_id or []:
         command.extend(["--strategy-family-id", strategy_family_id])
+    if getattr(args, "candidate_universe_json", None):
+        command.extend(["--candidate-universe-json", args.candidate_universe_json])
     if args.allow_prepare_records:
         command.append("--allow-prepare-records")
     if args.include_artifacts:
@@ -435,6 +437,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "to this strategy family. May be repeated."
         ),
     )
+    parser.add_argument("--candidate-universe-json")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)

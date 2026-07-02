@@ -12,7 +12,6 @@ EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 # Optional bounded-experiment overlay. When present, this can raise the runtime
 # ceiling from read-only to order-capable without changing credentials or scope.
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
-Environment=BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001
 Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3
 Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
@@ -25,16 +24,17 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --max-iterations 1 \
   --cycle-timeout-seconds 180 \
   --status-stale-after-seconds 900 \
+  --candidate-universe-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json \
   --allow-prepare-records \
   --allow-arm-preview \
   --allow-attempt-policy-prepare \
   --allow-disabled-smoke \
   --allow-standing-operation-layer-evidence-prep \
+  --strategy-family-id CPM-RO-001 \
   --strategy-family-id MPG-001 \
-  --strategy-family-id TEQ-001 \
-  --strategy-family-id FBS-001 \
-  --strategy-family-id PMR-001 \
+  --strategy-family-id MI-001 \
   --strategy-family-id SOR-001 \
+  --strategy-family-id BRF2-001 \
   --label tokyo-runtime-signal-watcher
 ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_signal_watcher_readiness_pack.py \
   --report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \

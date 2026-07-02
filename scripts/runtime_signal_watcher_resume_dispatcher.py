@@ -280,6 +280,12 @@ def _action_strategy_group_ids(
     for source in (action_time_resume, resume_pack):
         add(source.get("strategy_group_id"))
         add(source.get("strategy_family_id"))
+    for source in (
+        _dict(resume_pack.get("command_plan")),
+        _dict(resume_pack.get("operation_layer_command_plan")),
+    ):
+        add(source.get("strategy_group_id"))
+        add(source.get("strategy_family_id"))
 
     for item in _list(resume_pack.get("runtime_signal_summaries")):
         if not isinstance(item, dict):
@@ -313,17 +319,16 @@ def _selected_scope_action_blockers(
     selected_strategy_group_id: str | None,
     resume_pack: dict[str, Any],
     action_time_resume: dict[str, Any],
+    require_unique_when_unselected: bool = False,
 ) -> list[str]:
-    selected = str(selected_strategy_group_id or "").strip()
-    if not selected:
-        return []
     action_groups = _action_strategy_group_ids(
         resume_pack=resume_pack,
         action_time_resume=action_time_resume,
     )
     return _selected_scope_group_blockers(
-        selected_strategy_group_id=selected,
+        selected_strategy_group_id=selected_strategy_group_id,
         action_groups=action_groups,
+        require_unique_when_unselected=require_unique_when_unselected,
     )
 
 
@@ -331,17 +336,32 @@ def _selected_scope_group_blockers(
     *,
     selected_strategy_group_id: str | None,
     action_groups: list[str],
+    require_unique_when_unselected: bool = False,
 ) -> list[str]:
     selected = str(selected_strategy_group_id or "").strip()
     if not selected:
-        return []
-    if not action_groups:
-        return ["missing_fact:selected_strategy_group_id_for_action"]
-    if selected not in action_groups:
+        if not require_unique_when_unselected:
+            return []
+        if len(action_groups) == 1:
+            return []
+        if not action_groups:
+            return ["missing_fact:unique_strategy_group_for_action"]
         return [
-            "selected_strategy_group_mismatch:"
-            f"expected={selected}:actual={','.join(action_groups)}"
+            "ambiguous_strategy_group_for_action:"
+            f"{','.join(sorted(action_groups))}"
         ]
+    if len(action_groups) > 1:
+        return [
+            "ambiguous_strategy_group_for_action:"
+            f"{','.join(sorted(action_groups))}"
+        ]
+    if selected not in action_groups:
+        if action_groups:
+            return [
+                "selected_strategy_group_mismatch:"
+                f"expected={selected}:actual={','.join(action_groups)}"
+            ]
+        return ["missing_fact:selected_strategy_group_id_for_action"]
     return []
 
 
@@ -1383,6 +1403,7 @@ def build_dispatch_artifact(
             selected_strategy_group_id=selected_strategy_group_id,
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
+            require_unique_when_unselected=execute_operation_layer_submit,
         )
         if selected_scope_blockers:
             return _dispatch_artifact(
@@ -1460,6 +1481,7 @@ def build_dispatch_artifact(
             selected_strategy_group_id=selected_strategy_group_id,
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
+            require_unique_when_unselected=execute_operation_layer_submit,
         )
     )
     if selected_scope_blockers:
@@ -1565,6 +1587,7 @@ def build_dispatch_artifact(
         selected_scope_blockers = _selected_scope_group_blockers(
             selected_strategy_group_id=selected_strategy_group_id,
             action_groups=handoff_groups,
+            require_unique_when_unselected=execute_operation_layer_submit,
         )
         if selected_scope_blockers:
             return _dispatch_artifact(

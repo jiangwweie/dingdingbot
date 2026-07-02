@@ -481,6 +481,9 @@ DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON = (
 DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.md"
 )
+DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-runtime-active-observation-status.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -713,6 +716,7 @@ def main(argv: list[str] | None = None) -> int:
             args.strategy_live_candidate_pool_json
         ),
         strategy_live_candidate_pool_md=Path(args.strategy_live_candidate_pool_md),
+        runtime_active_monitor_json=Path(args.runtime_active_monitor_json),
         binance_public_facts_ssh_host=args.binance_public_facts_ssh_host,
     )
     owner_progress_text = _owner_progress_text(report)
@@ -1001,6 +1005,7 @@ def build_local_monitor_sequence_report(
     single_lane_task_packet_md: Path = DEFAULT_SINGLE_LANE_TASK_PACKET_MD,
     strategy_live_candidate_pool_json: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_JSON,
     strategy_live_candidate_pool_md: Path = DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD,
+    runtime_active_monitor_json: Path = DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON,
     binance_public_facts_ssh_host: str = "",
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -2493,6 +2498,8 @@ def build_local_monitor_sequence_report(
         str(strategy_fresh_signal_action_time_boundary_json),
         "--single-lane-task-packet-json",
         str(single_lane_task_packet_json),
+        "--runtime-active-monitor-json",
+        str(runtime_active_monitor_json),
         "--output-json",
         str(strategy_live_candidate_pool_json),
         "--output-owner-progress",
@@ -2517,6 +2524,62 @@ def build_local_monitor_sequence_report(
             "validate_strategy_live_candidate_pool",
             validate_strategy_live_candidate_pool_command,
             strategy_live_candidate_pool_json,
+            runner,
+        )
+    )
+
+    server_backed_daily_live_enablement_table_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_daily_live_enablement_table.py"),
+        "--tradeability-json",
+        str(strategygroup_tradeability_decision_json),
+        "--replay-live-parity-json",
+        str(replay_live_parity_audit_json),
+        "--action-time-boundary-json",
+        str(strategy_fresh_signal_action_time_boundary_json),
+        "--mi-trial-admission-json",
+        str(mi_trial_admission_decision_json),
+        "--runtime-safety-json",
+        str(strategygroup_runtime_safety_state_json),
+        "--candidate-pool-json",
+        str(strategy_live_candidate_pool_json),
+        "--output-json",
+        str(daily_live_enablement_table_json),
+        "--output-owner-progress",
+        str(daily_live_enablement_table_md),
+    ]
+    steps.append(
+        _run_step(
+            "daily_live_enablement_table",
+            server_backed_daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "validate_daily_live_enablement_table",
+            validate_daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "single_lane_task_packet",
+            single_lane_task_packet_command,
+            single_lane_task_packet_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "validate_single_lane_task_packet",
+            validate_single_lane_task_packet_command,
+            single_lane_task_packet_json,
             runner,
         )
     )
@@ -5679,6 +5742,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--strategy-live-candidate-pool-md",
         default=str(DEFAULT_STRATEGY_LIVE_CANDIDATE_POOL_MD),
+    )
+    parser.add_argument(
+        "--runtime-active-monitor-json",
+        default=str(DEFAULT_RUNTIME_ACTIVE_MONITOR_JSON),
     )
     parser.add_argument(
         "--binance-public-facts-ssh-host",

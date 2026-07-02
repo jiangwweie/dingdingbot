@@ -252,6 +252,14 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
         strategy_family_id="VCB-001",
         strategy_family_version_id="VCB-001-v0",
     )
+    mi = catalog.get_binding(
+        strategy_family_id="MI-001",
+        strategy_family_version_id="MI-001-v0",
+    )
+    brf2 = catalog.get_binding(
+        strategy_family_id="BRF2-001",
+        strategy_family_version_id="BRF2-001-v0",
+    )
     rmr = catalog.get_binding(
         strategy_family_id="RMR-001",
         strategy_family_version_id="RMR-001-v0",
@@ -299,6 +307,19 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert vcb.supported_sides == ["long", "short"]
     assert vcb.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
     assert vcb.exit_policy.runner_required is True
+
+    assert mi.allows_shadow_order_candidate is True
+    assert mi.supported_sides == ["long"]
+    assert mi.metadata["pilot_strategygroup_route"] is True
+    assert mi.metadata["reference_role"] == "relative_strength_impulse_long"
+
+    assert brf2.allows_shadow_order_candidate is True
+    assert brf2.supported_sides == ["short"]
+    assert brf2.metadata["pilot_strategygroup_route"] is True
+    assert brf2.metadata["short_side_conservative_profile_required"] is True
+    assert brf2.metadata["reference_role"] == (
+        "conditional_short_reversal_followthrough"
+    )
 
     assert rmr.candidate_mode == StrategyCandidateMode.REGIME_CLASSIFIER_ONLY
     assert rmr.allows_shadow_order_candidate is False

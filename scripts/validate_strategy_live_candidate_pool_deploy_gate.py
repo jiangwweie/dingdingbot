@@ -64,6 +64,8 @@ RESIDUAL_DEPLOY_BLOCKERS = {
     "detector_not_attached",
     "watcher_tick_missing",
     "scope_not_attached",
+    "replay_live_rule_mismatch",
+    "action_time_boundary_not_reproduced",
     "policy_scope_missing",
     "runtime_profile_scope_missing",
     "active_position_resolution",

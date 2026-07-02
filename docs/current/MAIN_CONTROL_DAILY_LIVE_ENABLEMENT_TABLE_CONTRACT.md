@@ -9,13 +9,14 @@ last_verified: 2026-07-01
 
 ## Purpose
 
-This contract defines the single daily management table for the live-enablement
-phase.
+This contract defines the daily management summary for the live-enablement
+phase. It summarizes the Pre-Trade Runtime defined by
+`docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
 
 The table exists to answer one management question:
 
 ```text
-Which StrategyGroup + symbol lane became closer to live submit today?
+Which active StrategyGroup candidate symbols are closest to promotion or action-time?
 ```
 
 It replaces broad daily narratives, artifact tours, portfolio-board reading, and
@@ -32,7 +33,7 @@ any supporting detail:
 | Did the live-submit scope have a fresh eligible signal today? | `yes`, `no`, or `unknown_with_reason` |
 | If no trade happened, what was the first blocker? | One blocker class from `BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Did the top replay/missed events reproduce in the live detector? | `matched`, `not_matched`, `not_tested`, or concrete mismatch |
-| Which StrategyGroup + symbol lane is closest to tiny-live decision? | One lane, or `none_with_reason` |
+| Which StrategyGroup candidate symbol is closest to promotion or action-time? | One row, or `none_with_reason` |
 | What one engineering action most reduces real-trade distance next? | One action only |
 
 If a report cannot answer these five questions, it is not the main daily status
@@ -40,13 +41,14 @@ surface.
 
 ## Required Table
 
-The daily table must contain one row per active WIP lane and no more than the
-WIP contract allows.
+The daily table must contain one strategy-level row per active WIP
+StrategyGroup. The expanded per-symbol readiness matrix lives in
+`output/runtime-monitor/latest-strategy-live-candidate-pool.json`.
 
 | Field | Meaning |
 | --- | --- |
 | `strategy_group_id` | StrategyGroup lane, for example `CPM-RO-001` |
-| `symbol` | Symbol lane, for example `SOLUSDT` |
+| `symbol` | The currently highest-priority candidate symbol summary for the StrategyGroup |
 | `side` | Long/short or strategy-specific side |
 | `stage` | Current lane stage: `research`, `intake`, `admission`, `readonly`, `armed`, `market_wait_validated`, `action_time`, `live_submit_ready`, `review` |
 | `replay_signal` | `yes`, `no`, `not_applicable`, or `unknown_with_reason` |
@@ -58,12 +60,14 @@ WIP contract allows.
 | `stop_condition` | Concrete condition that stops or exits the lane from mainline WIP |
 
 The table must not include raw proof chains, packet names as primary labels,
-large nested evidence, or multiple next actions in one row.
+large nested evidence, or multiple next actions in one row. It also must not be
+interpreted as suppressing fresh-signal promotion from a different candidate
+symbol in the same active StrategyGroup.
 
 ## Active WIP Rows
 
-The daily table is currently limited to these mainline lanes unless the WIP
-contract admits a replacement:
+The daily table is currently limited to these mainline StrategyGroups unless the
+WIP contract admits a replacement:
 
 | Priority | StrategyGroup | Default reason |
 | --- | --- | --- |
@@ -74,7 +78,9 @@ contract admits a replacement:
 | `P2` | `BRF2-001` | Short-side lane remains active only while squeeze-disable state and armed observation are decision-relevant |
 
 Other StrategyGroups may appear only in an appendix or support artifact unless
-they replace one of the active WIP rows through the WIP contract.
+they replace one of the active WIP rows through the WIP contract. Candidate
+symbols inside an active StrategyGroup do not consume new WIP StrategyGroup
+slots.
 
 ## Valid Status Values
 
@@ -96,10 +102,10 @@ daily row status.
 ## Artifact Boundary
 
 Daily table rows may cite generated artifacts, but generated artifacts are not
-the management unit. The management unit is:
+the management unit. Before action-time, the management unit is:
 
 ```text
-StrategyGroup + symbol + first blocker + evidence + next action + stop condition
+StrategyGroup + symbol + readiness state + first blocker + evidence + next action + stop condition
 ```
 
 The table must not create live order authority, FinalGate input, Operation Layer

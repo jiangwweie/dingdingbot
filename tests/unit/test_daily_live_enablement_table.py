@@ -171,6 +171,43 @@ def _runtime_safety() -> dict:
     }
 
 
+def _candidate_pool() -> dict:
+    rows = [
+        ("CPM-RO-001", "ETHUSDT", "long", "computed_not_satisfied"),
+        ("MPG-001", "OPUSDT", "long", "computed_not_satisfied"),
+        ("MI-001", "AVAXUSDT", "long", "detector_not_attached"),
+        ("SOR-001", "SOLUSDT", "long", "artifact_missing"),
+        ("BRF2-001", "BTCUSDT", "short", "detector_not_attached"),
+    ]
+    return {
+        "schema": "brc.strategy_live_candidate_pool.v1",
+        "status": "strategy_live_candidate_pool_ready",
+        "server_runtime_coverage": {
+            "status": "complete",
+            "expected_row_count": 18,
+            "active_matched_row_count": 18,
+            "missing_row_count": 0,
+        },
+        "symbol_readiness_rows": [
+            {
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "first_blocker": first_blocker,
+                "next_action": f"next_action_for_{first_blocker}",
+                "stop_condition": "blocker moves",
+                "promotion_state": "idle",
+                "server_runtime_coverage": {
+                    "state": "active_watcher_scope",
+                    "active_runtime_instance_ids": [f"runtime-{strategy_group_id}"],
+                    "selected_runtime_instance_ids": [f"runtime-{strategy_group_id}"],
+                },
+            }
+            for strategy_group_id, symbol, side, first_blocker in rows
+        ],
+    }
+
+
 def _valid_table() -> dict:
     builder = _builder()
     return builder.build_daily_live_enablement_table(
@@ -206,6 +243,97 @@ def test_daily_table_generator_emits_five_wip_rows_and_rank_one():
     assert rank_1["strategy_group_id"] == "SOR-001"
     assert rank_1["first_blocker"] == "action_time_boundary_not_reproduced"
     assert table["source_validation"]["valid"] is True
+    assert _errors(table) == []
+
+
+def test_daily_table_can_rank_from_server_backed_candidate_pool_rows():
+    builder = _builder()
+    table = builder.build_daily_live_enablement_table(
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        mi_trial_admission=_mi(),
+        runtime_safety=_runtime_safety(),
+        candidate_pool=_candidate_pool(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = {row["strategy_group_id"]: row for row in table["rows"]}
+    assert rows["MI-001"]["symbol"] == "AVAXUSDT"
+    assert rows["MI-001"]["first_blocker"] == "detector_not_attached"
+    assert rows["MI-001"]["next_engineering_action"] == (
+        "next_action_for_detector_not_attached"
+    )
+    assert rows["MI-001"]["candidate_pool_reference"]["server_runtime_coverage"][
+        "state"
+    ] == "active_watcher_scope"
+    rank_1 = next(row for row in table["rows"] if row["closest_to_live_rank"] == 1)
+    assert rank_1["strategy_group_id"] == "MI-001"
+    assert rank_1["first_blocker_evidence"].startswith(
+        "output/runtime-monitor/latest-strategy-live-candidate-pool.json:"
+    )
+    assert _errors(table) == []
+
+
+def test_daily_table_candidate_pool_tie_breaker_prefers_primary_role():
+    builder = _builder()
+    candidate_pool = _candidate_pool()
+    rows = [
+        row
+        for row in candidate_pool["symbol_readiness_rows"]
+        if row["strategy_group_id"] != "MPG-001"
+    ]
+    rows.extend(
+        [
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "AVAXUSDT",
+                "side": "long",
+                "candidate_role": "secondary",
+                "first_blocker": "watcher_tick_missing",
+                "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+                "stop_condition": "blocker moves",
+                "promotion_state": "idle",
+                "mismatch_count": 0,
+                "server_runtime_coverage": {
+                    "state": "active_watcher_scope",
+                    "active_runtime_instance_ids": ["runtime-mpg-avax"],
+                    "selected_runtime_instance_ids": ["runtime-mpg-avax"],
+                },
+            },
+            {
+                "strategy_group_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "side": "long",
+                "candidate_role": "primary",
+                "first_blocker": "watcher_tick_missing",
+                "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+                "stop_condition": "blocker moves",
+                "promotion_state": "idle",
+                "mismatch_count": 0,
+                "server_runtime_coverage": {
+                    "state": "active_watcher_scope",
+                    "active_runtime_instance_ids": ["runtime-mpg-op"],
+                    "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                },
+            },
+        ]
+    )
+    candidate_pool["symbol_readiness_rows"] = rows
+
+    table = builder.build_daily_live_enablement_table(
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        mi_trial_admission=_mi(),
+        runtime_safety=_runtime_safety(),
+        candidate_pool=candidate_pool,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    mpg_row = next(row for row in table["rows"] if row["strategy_group_id"] == "MPG-001")
+    assert mpg_row["symbol"] == "OPUSDT"
+    assert mpg_row["candidate_pool_reference"]["symbol"] == "OPUSDT"
     assert _errors(table) == []
 
 
@@ -353,7 +481,8 @@ def test_daily_table_matches_action_time_row_by_selected_symbol():
     assert (
         cpm_row["first_blocker_evidence"]
         == "output/runtime-monitor/latest-replay-live-parity-audit.json:"
-        "CPM-RO-001/AVAXUSDT blocker_class=action_time_boundary_not_reproduced"
+        "CPM-RO-001/AVAXUSDT first_blocker=action_time_boundary_not_reproduced "
+        "watcher_tick_present=True"
     )
 
 

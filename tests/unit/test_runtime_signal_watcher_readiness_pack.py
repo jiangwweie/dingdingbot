@@ -1,13 +1,57 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from scripts.build_runtime_signal_watcher_readiness_pack import build_pack
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "build_runtime_signal_watcher_readiness_pack.py"
+
+
 def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_build_runtime_signal_watcher_readiness_pack_cli_imports_from_non_repo_cwd(
+    tmp_path,
+):
+    report_dir = tmp_path / "report"
+    output_dir = tmp_path / "out"
+    report_dir.mkdir()
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--report-dir",
+            str(report_dir),
+            "--output-dir",
+            str(output_dir),
+            "--stale-after-seconds",
+            "180",
+            "--label",
+            "unit-test",
+        ],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "completed"
+    assert summary["deployment_status"] == "evidence_missing"
+    assert (output_dir / "deployment-readiness-artifact.json").exists()
+    assert (output_dir / "post-signal-resume-pack.json").exists()
 
 
 def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):

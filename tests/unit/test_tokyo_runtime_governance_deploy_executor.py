@@ -128,7 +128,7 @@ def _assert_archive_upload_blocked(report: dict, calls: list[str]) -> None:
     assert calls == []
 
 
-def test_deploy_executor_dry_run_does_not_execute_commands(tmp_path: Path):
+def test_archive_deploy_executor_blocks_dry_run_without_commands(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
     calls = []
@@ -150,7 +150,7 @@ def test_deploy_executor_dry_run_does_not_execute_commands(tmp_path: Path):
     assert report["planned_commands"]
 
 
-def test_deploy_executor_applies_with_standing_authorization_without_confirmation(
+def test_archive_deploy_executor_blocks_apply_with_standing_authorization(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -173,7 +173,9 @@ def test_deploy_executor_applies_with_standing_authorization_without_confirmatio
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
 
 
-def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
+def test_archive_deploy_executor_blocks_before_legacy_confirmation_gate(
+    tmp_path: Path,
+):
     module = _load_module()
     plan = _ready_plan(tmp_path)
 
@@ -189,7 +191,7 @@ def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
     _assert_archive_upload_blocked(report, [])
 
 
-def test_deploy_executor_applies_with_standing_authorization_without_owner_evidence(
+def test_archive_deploy_executor_blocks_apply_without_owner_evidence(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -211,7 +213,9 @@ def test_deploy_executor_applies_with_standing_authorization_without_owner_evide
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
 
 
-def test_deploy_executor_blocks_apply_with_stale_owner_deploy_artifact(tmp_path: Path):
+def test_archive_deploy_executor_blocks_before_stale_owner_artifact_gate(
+    tmp_path: Path,
+):
     module = _load_module()
     plan = _ready_plan(tmp_path)
 
@@ -226,7 +230,7 @@ def test_deploy_executor_blocks_apply_with_stale_owner_deploy_artifact(tmp_path:
     _assert_archive_upload_blocked(report, [])
 
 
-def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
+def test_archive_deploy_executor_never_runs_fake_runner(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
     calls = []
@@ -246,7 +250,7 @@ def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
     _assert_archive_upload_blocked(report, calls)
 
 
-def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
+def test_archive_deploy_executor_blocks_before_command_failure_branch(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
     calls = []
@@ -268,7 +272,7 @@ def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
     _assert_archive_upload_blocked(report, calls)
 
 
-def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: Path):
+def test_archive_deploy_executor_blocks_before_remote_smoke_branch(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
 
@@ -288,7 +292,9 @@ def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: P
     _assert_archive_upload_blocked(report, [])
 
 
-def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Path):
+def test_archive_deploy_executor_blocks_before_remote_mutation_phase_gate(
+    tmp_path: Path,
+):
     module = _load_module()
     plan = _ready_plan(tmp_path)
     mutated_plan = {

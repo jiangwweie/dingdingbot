@@ -118,6 +118,22 @@ def _mpg_flat_1h() -> list[dict[str, Any]]:
     ]
 
 
+def _mi_impulse_1h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(14):
+        close = Decimal("100") + Decimal(index) * Decimal("0.45")
+        candles.append(
+            _candle(
+                index,
+                str(close),
+                str(close + Decimal("0.4")),
+                str(close - Decimal("0.3")),
+                str(close),
+            )
+        )
+    return candles
+
+
 def _signal_input(
     *,
     family_id: str = "BRF-001",
@@ -368,6 +384,53 @@ def test_strategygroup_pilot_reference_routes_are_configured_and_non_executing()
         assert result.order_created is False
         assert result.order_lifecycle_called is False
         assert result.exchange_called is False
+
+
+def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
+    service = RuntimeStrategySignalEvaluationService()
+
+    mi = service.evaluate(
+        _signal_input(
+            family_id="MI-001",
+            version_id="MI-001-v0",
+            one_hour=_mi_impulse_1h(),
+        )
+    )
+    brf2 = service.evaluate(
+        _signal_input(
+            family_id="BRF2-001",
+            version_id="BRF2-001-v0",
+            one_hour=_bear_rally_failure_1h(),
+            four_hour=_down_context_4h(),
+        )
+    )
+
+    assert mi.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert mi.blockers == []
+    assert mi.evaluator_called is True
+    assert mi.evaluator_id == "_MI001RuntimeReferenceEvaluator"
+    assert mi.output is not None
+    assert mi.output.strategy_family_id == "MI-001"
+    assert mi.output.strategy_family_version_id == "MI-001-v0"
+    assert mi.output.signal_type == SignalType.WOULD_ENTER
+    assert mi.output.side == SignalSide.LONG
+    assert mi.order_candidate_created is False
+    assert mi.execution_intent_created is False
+    assert mi.exchange_called is False
+
+    assert brf2.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert brf2.blockers == []
+    assert brf2.evaluator_called is True
+    assert brf2.evaluator_id == "_BRF2LiveReferenceEvaluator"
+    assert brf2.output is not None
+    assert brf2.output.strategy_family_id == "BRF2-001"
+    assert brf2.output.strategy_family_version_id == "BRF2-001-v0"
+    assert brf2.output.signal_type == SignalType.WOULD_ENTER
+    assert brf2.output.side == SignalSide.SHORT
+    assert brf2.output.signal_snapshot["reference_strategy_family"] == "BRF-001"
+    assert brf2.order_candidate_created is False
+    assert brf2.execution_intent_created is False
+    assert brf2.exchange_called is False
 
 
 def test_rmr_classifier_binding_observe_only_without_evaluator_call():

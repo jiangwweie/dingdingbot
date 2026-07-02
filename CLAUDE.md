@@ -1,7 +1,7 @@
 # CLAUDE.md - BRC Claude Worker Guide
 
-Last updated: 2026-07-01
-Current phase: StrategyGroup live-enablement pilot
+Last updated: 2026-07-02
+Current phase: Pre-Trade Runtime V0
 
 ## Role
 
@@ -22,6 +22,8 @@ docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
+docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
+docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
@@ -47,14 +49,14 @@ policy, Decision Ledger, or an explicit Codex-issued task card.
 
 ## Current Product Direction
 
-The current target is a StrategyGroup live-enablement pilot:
+The current target is a multi-StrategyGroup, multi-symbol pre-trade runtime:
 
 ```text
-select StrategyGroup + symbol lane
--> classify the earliest blocker precisely
--> remove detector / watcher / facts / scope / policy / runtime-profile blockers
--> reach market_wait_validated only after non-market blockers are closed
--> on fresh signal refresh action-time facts
+maintain active StrategyGroup candidate symbol sets
+-> compute per-symbol readiness and first blocker
+-> promote fresh satisfied candidates without live-submit authority leakage
+-> narrow at most one promoted candidate into an action-time lane input
+-> refresh action-time facts
 -> candidate / authorization evidence
 -> action-time FinalGate
 -> official Operation Layer
@@ -74,13 +76,22 @@ into lower leverage, lower exposure, smaller notional, or slower eligible
 submits for caution. Stop only for explicit authority or mechanical boundaries
 listed below.
 
-Current mainline work is Live Enablement. Claude tasks must remove or precisely
-reclassify the earliest blocker on a selected StrategyGroup + symbol lane.
-Replay, synthetic fixtures, observe-only evidence, no-action rows, and read-only
-watcher expansion are valid only when they produce per-symbol / per-fact blocker
-evidence or a scoped live-enable proposal. They must not become live signals,
-live RequiredFacts, FinalGate input, Operation Layer evidence, or real-order
+Current mainline work is Pre-Trade Runtime V0. Claude tasks must remove or
+precisely reclassify blockers for an active StrategyGroup candidate symbol, or
+improve fresh-signal promotion / action-time narrowing without authority
+leakage. Replay, synthetic fixtures, observe-only evidence, no-action rows, and
+read-only watcher expansion are valid only when they produce per-symbol /
+per-fact blocker evidence, a scoped live-enable proposal, or a machine-checkable
+readiness/promotion state. They must not become live signals, live
+RequiredFacts, FinalGate input, Operation Layer evidence, or real-order
 authority.
+
+Production recurring monitoring is owned by the Tokyo server-side readonly
+monitor path defined in `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`.
+Local monitor sequence and Codex heartbeat work are development diagnostic
+paths only unless a Codex task card explicitly scopes a migration, drift audit,
+or postdeploy verification task. They must not become the normal source of
+Owner notification decisions and must not be treated as a production fallback.
 
 ## Authority Model For Worker Tasks
 
@@ -185,7 +196,10 @@ Do not edit these unless the task card explicitly allows it.
 
 - Do not optimize strategy returns.
 - Do not tune strategy parameters unless the task is explicitly a research task.
-- Do not add multi-asset expansion outside the selected StrategyGroup boundary.
+- Do not add live-submit multi-asset expansion outside the selected
+  StrategyGroup boundary. Read-only candidate-symbol observation inside
+  `PRE_TRADE_RUNTIME_CONTRACT.md` is allowed when it does not expand live
+  profile, sizing, FinalGate, Operation Layer, or exchange-write authority.
 - Do not edit live trading profiles, credentials, or order-sizing defaults.
 - Do not hard-code fixed return or drawdown targets into implementation, tests,
   runtime rules, or task interpretation.

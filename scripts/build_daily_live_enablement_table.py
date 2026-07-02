@@ -127,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
         "--mi-trial-admission-json", default=str(DEFAULT_MI_TRIAL_ADMISSION_JSON)
     )
     parser.add_argument("--runtime-safety-json", default=str(DEFAULT_RUNTIME_SAFETY_JSON))
+    parser.add_argument(
+        "--candidate-pool-json",
+        default="",
+        help="Optional second-pass server-backed candidate pool JSON.",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -137,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         action_time_boundary=_read_optional_json(Path(args.action_time_boundary_json)),
         mi_trial_admission=_read_optional_json(Path(args.mi_trial_admission_json)),
         runtime_safety=_read_optional_json(Path(args.runtime_safety_json)),
+        candidate_pool=(
+            _read_optional_json(Path(args.candidate_pool_json))
+            if args.candidate_pool_json
+            else {}
+        ),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -163,8 +173,10 @@ def build_daily_live_enablement_table(
     action_time_boundary: dict[str, Any],
     mi_trial_admission: dict[str, Any],
     runtime_safety: dict[str, Any],
+    candidate_pool: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
+    candidate_pool = candidate_pool or {}
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
     source_validation = _source_validation(
         tradeability=tradeability,
@@ -185,6 +197,10 @@ def build_daily_live_enablement_table(
             action_time_boundary=action_time_boundary,
             mi_trial_admission=mi_trial_admission,
             runtime_safety=runtime_safety,
+            candidate_pool_row=_candidate_pool_row(
+                candidate_pool=candidate_pool,
+                strategy_group_id=strategy_group_id,
+            ),
         )
         for strategy_group_id in WIP_LANES
     ]
@@ -267,8 +283,10 @@ def _daily_row(
     action_time_boundary: dict[str, Any],
     mi_trial_admission: dict[str, Any],
     runtime_safety: dict[str, Any],
+    candidate_pool_row: dict[str, Any],
 ) -> dict[str, Any]:
-    first_blocker = str(
+    candidate_pool_first_blocker = str(candidate_pool_row.get("first_blocker") or "")
+    first_blocker = candidate_pool_first_blocker or str(
         tradeability_row.get("first_blocker_class") or "artifact_missing"
     )
     canonical_lane = _as_dict(tradeability_row.get("canonical_lane"))
@@ -283,7 +301,7 @@ def _daily_row(
         action_time_boundary,
         preferred_symbol=str(parity_row.get("symbol") or ""),
     )
-    symbol = _lane_symbol(
+    symbol = str(candidate_pool_row.get("symbol") or "") or _lane_symbol(
         strategy_group_id=strategy_group_id,
         tradeability_row=tradeability_row,
         parity_row=parity_row,
@@ -291,26 +309,37 @@ def _daily_row(
         canonical_lane=canonical_lane,
         mi_trial_admission=mi_trial_admission,
     )
-    side = _lane_side(
+    side = str(candidate_pool_row.get("side") or "") or _lane_side(
         strategy_group_id=strategy_group_id,
         tradeability_row=tradeability_row,
         mi_trial_admission=mi_trial_admission,
     )
     stage = _daily_stage(str(tradeability_row.get("stage") or "research_candidate"))
     chain_position = _chain_position(first_blocker)
-    evidence = _evidence(
-        strategy_group_id=strategy_group_id,
-        first_blocker=first_blocker,
-        tradeability_row=tradeability_row,
-        parity_row=parity_row,
-        action_row=action_row,
-        mi_trial_admission=mi_trial_admission,
+    evidence = (
+        _candidate_pool_evidence(
+            strategy_group_id=strategy_group_id,
+            candidate_pool_row=candidate_pool_row,
+            first_blocker=first_blocker,
+        )
+        if candidate_pool_row
+        else _evidence(
+            strategy_group_id=strategy_group_id,
+            first_blocker=first_blocker,
+            tradeability_row=tradeability_row,
+            parity_row=parity_row,
+            action_row=action_row,
+            mi_trial_admission=mi_trial_admission,
+        )
     )
     next_action = str(
-        tradeability_row.get("next_action")
+        candidate_pool_row.get("next_action")
+        or tradeability_row.get("next_action")
         or _next_action_for_blocker(first_blocker)
     )
-    stop_condition = _stop_condition(
+    stop_condition = str(
+        candidate_pool_row.get("stop_condition") or ""
+    ) or _stop_condition(
         strategy_group_id=strategy_group_id,
         first_blocker=first_blocker,
         next_action=next_action,
@@ -338,6 +367,82 @@ def _daily_row(
         "runtime_safety_reference": _runtime_safety_reference(
             strategy_group_id, runtime_safety
         ),
+        "candidate_pool_reference": _candidate_pool_reference(candidate_pool_row),
+    }
+
+
+def _candidate_pool_row(
+    *,
+    candidate_pool: dict[str, Any],
+    strategy_group_id: str,
+) -> dict[str, Any]:
+    if str(candidate_pool.get("status") or "") != "strategy_live_candidate_pool_ready":
+        return {}
+    rows = [
+        row
+        for row in _dict_rows(candidate_pool.get("symbol_readiness_rows"))
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+    ]
+    if not rows:
+        return {}
+    return sorted(rows, key=_candidate_pool_row_sort_key)[0]
+
+
+def _candidate_pool_row_sort_key(
+    row: dict[str, Any]
+) -> tuple[int, int, int, int, int, str]:
+    symbol = str(row.get("symbol") or "")
+    coverage = _as_dict(row.get("server_runtime_coverage"))
+    coverage_ready = str(coverage.get("state") or "") == "active_watcher_scope"
+    promotion_priority = {
+        "action_time_lane": 400,
+        "promotion_candidate": 300,
+        "idle": 100,
+        "blocked": 0,
+    }.get(str(row.get("promotion_state") or ""), 0)
+    role_priority = {
+        "primary": 30,
+        "lead": 20,
+        "secondary": 10,
+        "conditional": 5,
+    }.get(str(row.get("candidate_role") or ""), 0)
+    return (
+        -promotion_priority,
+        -BLOCKER_STAGE_TIER.get(str(row.get("first_blocker") or ""), 0),
+        0 if coverage_ready else 1,
+        -role_priority,
+        -int(row.get("mismatch_count") or 0),
+        symbol,
+    )
+
+
+def _candidate_pool_evidence(
+    *,
+    strategy_group_id: str,
+    candidate_pool_row: dict[str, Any],
+    first_blocker: str,
+) -> str:
+    coverage = _as_dict(candidate_pool_row.get("server_runtime_coverage"))
+    coverage_state = str(coverage.get("state") or "unknown")
+    return (
+        "output/runtime-monitor/latest-strategy-live-candidate-pool.json:"
+        f"{strategy_group_id}/{candidate_pool_row.get('symbol') or 'strategy_scope'} "
+        f"first_blocker={first_blocker} "
+        f"server_runtime_coverage={coverage_state}"
+    )
+
+
+def _candidate_pool_reference(candidate_pool_row: dict[str, Any]) -> dict[str, Any]:
+    if not candidate_pool_row:
+        return {}
+    return {
+        "source": "strategy_live_candidate_pool",
+        "strategy_group_id": candidate_pool_row.get("strategy_group_id"),
+        "symbol": candidate_pool_row.get("symbol"),
+        "first_blocker": candidate_pool_row.get("first_blocker"),
+        "promotion_state": candidate_pool_row.get("promotion_state"),
+        "server_runtime_coverage": candidate_pool_row.get("server_runtime_coverage")
+        or {},
     }
 
 
@@ -488,10 +593,18 @@ def _evidence(
     mi_trial_admission: dict[str, Any],
 ) -> str:
     if parity_row:
+        source_blocker = str(parity_row.get("blocker_class") or "")
+        source_detail = (
+            f"source_blocker_class={source_blocker} "
+            if source_blocker != first_blocker
+            else ""
+        )
         return (
             "output/runtime-monitor/latest-replay-live-parity-audit.json:"
             f"{strategy_group_id}/{parity_row.get('symbol') or 'strategy_scope'} "
-            f"blocker_class={parity_row.get('blocker_class')}"
+            f"first_blocker={first_blocker} "
+            f"{source_detail}"
+            f"watcher_tick_present={parity_row.get('watcher_tick_present')}"
         )
     if action_row:
         return (

@@ -338,6 +338,81 @@ def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization(
     assert artifact["safety_invariants"]["creates_order"] is False
 
 
+def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {
+            "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
+            "MPG-001": ["OPUSDT"],
+            "SOR-001": ["ETHUSDT"],
+            "BRF2-001": [
+                "BTCUSDT",
+                "brf2_research_supported_symbols_only",
+            ],
+        },
+        "candidate_rows": [
+            {"strategy_group_id": "MPG-001", "daily_rank": 1, "side": "long"},
+            {"strategy_group_id": "CPM-RO-001", "daily_rank": 2, "side": "long"},
+            {"strategy_group_id": "SOR-001", "daily_rank": 3, "side": "long"},
+            {"strategy_group_id": "BRF2-001", "daily_rank": 4, "side": "short"},
+        ],
+        "symbol_readiness_rows": [
+            {"strategy_group_id": "CPM-RO-001", "symbol": "ETHUSDT", "side": "long"},
+            {"strategy_group_id": "CPM-RO-001", "symbol": "SOLUSDT", "side": "long"},
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "long"},
+            {"strategy_group_id": "SOR-001", "symbol": "ETHUSDT", "side": "long"},
+            {"strategy_group_id": "BRF2-001", "symbol": "BTCUSDT", "side": "short"},
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            include_observe_only=True,
+            max_symbols_per_group=4,
+            max_total_new_runtimes=10,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": symbols},
+                }
+                for strategy_group_id, symbols in {
+                    "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
+                    "MPG-001": ["OPUSDT"],
+                    "SOR-001": ["ETHUSDT"],
+                    "BRF2-001": ["BTCUSDT"],
+                }.items()
+            ]
+        },
+        active_runtimes=[],
+        candidate_pool=candidate_pool,
+    )
+
+    target_keys = [
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"])
+        for item in artifact["targets"]
+    ]
+    assert target_keys == [
+        ("MPG-001", "OPUSDT", "long"),
+        ("CPM-RO-001", "ETHUSDT", "long"),
+        ("CPM-RO-001", "SOLUSDT", "long"),
+        ("SOR-001", "ETHUSDT", "short"),
+        ("BRF2-001", "BTCUSDT", "short"),
+    ]
+    assert not any("RESEARCH" in item["exchange_symbol"] for item in artifact["targets"])
+    assert artifact["runtime_scope"]["candidate_universe_source"] == "candidate-pool.json"
+    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 5
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
+
+
 def test_execute_creates_shadow_runtime_without_submit_paths():
     client = _FakeClient()
     artifact = build_artifact(

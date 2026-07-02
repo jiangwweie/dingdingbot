@@ -141,6 +141,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
 def _finalgate_ready_dispatch_artifact() -> dict:
     return {
         **_resume_pack("ready_for_action_time_final_gate"),
+        "strategy_group_id": "MPG-001",
         "status": "finalgate_ready",
         "dispatch_status": "official_finalgate_preflight_passed",
         "dispatch_action": "prepare_official_operation_layer_submit",
@@ -713,6 +714,63 @@ def test_dispatcher_blocks_actionable_resume_when_selected_scope_cannot_be_prove
     )
 
 
+def test_dispatcher_blocks_real_submit_when_unselected_scope_cannot_be_proven():
+    resume = _finalgate_ready_dispatch_artifact()
+    resume.pop("strategy_group_id", None)
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        execute_operation_layer_submit=True,
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert artifact["command_plan"] is None
+    assert artifact["blockers"] == ["missing_fact:unique_strategy_group_for_action"]
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+
+
+def test_dispatcher_blocks_real_submit_when_unselected_scope_is_ambiguous():
+    resume = _finalgate_ready_dispatch_artifact()
+    resume.pop("strategy_group_id", None)
+    resume["selected_runtime_instance_ids"] = ["runtime-mpg-1", "runtime-sor-1"]
+    resume["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "runtime-mpg-1",
+            "strategy_group_id": "MPG-001",
+            "signal_input_json": resume.get("signal_input_json"),
+            "shadow_candidate_id": resume.get("shadow_candidate_id"),
+            "prepared_authorization_id": resume.get("prepared_authorization_id"),
+        },
+        {
+            "runtime_instance_id": "runtime-sor-1",
+            "strategy_group_id": "SOR-001",
+            "signal_input_json": resume.get("signal_input_json"),
+            "shadow_candidate_id": resume.get("shadow_candidate_id"),
+            "prepared_authorization_id": resume.get("prepared_authorization_id"),
+        },
+    ]
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        execute_operation_layer_submit=True,
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert artifact["command_plan"] is None
+    assert artifact["blockers"] == [
+        "ambiguous_strategy_group_for_action:MPG-001,SOR-001"
+    ]
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+
+
 def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
     artifact = build_dispatch_artifact(
         resume_pack=_fresh_authorization_resume_pack(tmp_path),
@@ -948,7 +1006,9 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
     )
 
     artifact = build_dispatch_artifact(
-        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
@@ -1095,7 +1155,9 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
     artifact = build_dispatch_artifact(
-        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
@@ -1213,7 +1275,9 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
     monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
     artifact = build_dispatch_artifact(
-        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,

@@ -11,6 +11,7 @@ orders, OrderLifecycle calls, or exchange requests.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import Enum
 from typing import Literal, Protocol
 
@@ -32,6 +33,9 @@ from src.domain.reference_price_action_evaluators import (
     VCB001PriceActionEvaluator,
 )
 from src.domain.strategy_family_signal import (
+    ExpectedRiskShape,
+    SignalInputRefs,
+    SignalReviewPlan,
     SignalSide,
     SignalType,
     StrategyFamilySignalInput,
@@ -266,12 +270,189 @@ def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluato
         ("FBS-001", "FBS-001-v0"): FBS001PilotReferenceEvaluator(),
         ("PMR-001", "PMR-001-v0"): PMR001PilotReferenceEvaluator(),
         ("SOR-001", "SOR-001-v0"): SOR001PilotReferenceEvaluator(),
+        ("MI-001", "MI-001-v0"): _MI001RuntimeReferenceEvaluator(),
+        ("BRF2-001", "BRF2-001-v0"): _BRF2LiveReferenceEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),
         ("BTPC-001", "BTPC-001-v0"): BTPC001PriceActionEvaluator(),
         ("LSR-001", "LSR-001-v0"): LSR001PriceActionEvaluator(),
         ("RBR-001", "RBR-001-v0"): RBR001PriceActionEvaluator(),
         ("VCB-001", "VCB-001-v0"): VCB001PriceActionEvaluator(),
     }
+
+
+class _MI001RuntimeReferenceEvaluator:
+    """Evaluate MI-001 momentum impulse inputs without importing console glue."""
+
+    _lookback_bars = 12
+    _return_threshold_pct = Decimal("3")
+
+    def evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+    ) -> StrategyFamilySignalOutput:
+        if signal_input.strategy_family_id != "MI-001":
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_wrong_family"],
+                human_summary="Input is not for MI-001.",
+                evidence_payload={},
+                review_required=False,
+            )
+
+        candles = _candles_from_input(signal_input)
+        if len(candles) <= self._lookback_bars:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_insufficient_candles"],
+                human_summary=(
+                    "MI-001 requires at least 13 closed 1h candles for the "
+                    "12h close-to-close impulse."
+                ),
+                evidence_payload={
+                    "candle_count": len(candles),
+                    "min_needed": self._lookback_bars + 1,
+                },
+                review_required=False,
+            )
+
+        latest = candles[-1]
+        lookback = candles[-(self._lookback_bars + 1)]
+        impulse_return_pct = (
+            (latest["close"] - lookback["close"]) / lookback["close"]
+        ) * Decimal("100")
+        evidence = {
+            "logic_version": "mi001-runtime-reference-v0",
+            "lookback_bars": self._lookback_bars,
+            "return_threshold_pct": str(self._return_threshold_pct),
+            "lookback_close": str(lookback["close"]),
+            "latest_close": str(latest["close"]),
+            "latest_1h_open_time_ms": latest["open_time_ms"],
+            "impulse_return_pct": str(impulse_return_pct.quantize(Decimal("0.0001"))),
+            "closed_candle_count": len(candles),
+        }
+        if impulse_return_pct < self._return_threshold_pct:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.NO_ACTION,
+                side=SignalSide.NONE,
+                confidence=Decimal("0.20"),
+                reason_codes=["mi001_no_action_impulse_below_threshold"],
+                human_summary=(
+                    "MI-001 no-action observation: 12h close-to-close impulse "
+                    "is below threshold."
+                ),
+                evidence_payload=evidence,
+                review_required=False,
+            )
+
+        return self._output(
+            signal_input,
+            signal_type=SignalType.WOULD_ENTER,
+            side=SignalSide.LONG,
+            confidence=Decimal("0.65"),
+            reason_codes=[
+                "mi001_12h_momentum_impulse",
+                "observe_only_review_required",
+            ],
+            human_summary=(
+                "MI-001 would-enter long observation: 12h close-to-close "
+                "momentum impulse crossed threshold."
+            ),
+            evidence_payload=evidence,
+            review_required=True,
+        )
+
+    def _output(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        signal_type: SignalType,
+        side: SignalSide,
+        confidence: Decimal,
+        reason_codes: list[str],
+        human_summary: str,
+        evidence_payload: dict,
+        review_required: bool,
+    ) -> StrategyFamilySignalOutput:
+        return StrategyFamilySignalOutput(
+            signal_id=f"mi001-runtime-{signal_input.evaluation_id}",
+            evaluation_id=signal_input.evaluation_id,
+            strategy_family_id=signal_input.strategy_family_id,
+            strategy_family_version_id=signal_input.strategy_family_version_id,
+            playbook_id=signal_input.playbook_id,
+            symbol=signal_input.symbol,
+            timestamp_ms=signal_input.timestamp_ms,
+            timeframe=signal_input.primary_timeframe,
+            signal_type=signal_type,
+            side=side,
+            confidence=confidence,
+            reason_codes=reason_codes,
+            human_summary=human_summary,
+            required_execution_mode="observe_only",
+            expected_risk_shape=ExpectedRiskShape.TREND_FOLLOWING_WIDE_STOP,
+            signal_snapshot={
+                "strategy_family": signal_input.strategy_family_id,
+                "logic_version": "mi001-runtime-reference-v0",
+            },
+            evidence_payload=evidence_payload,
+            input_refs=SignalInputRefs(
+                market_snapshot_ref=(
+                    f"closed_ohlcv:{signal_input.symbol}:"
+                    f"{signal_input.timestamp_ms}"
+                ),
+                playbook_snapshot_ref=signal_input.playbook_id,
+                evaluation_ref=signal_input.evaluation_id,
+            ),
+            data_quality=signal_input.input_quality,
+            review_plan=SignalReviewPlan(
+                review_required=review_required,
+                review_windows=["24h", "72h", "7d"],
+                forward_outcome_metrics=[
+                    "MFE",
+                    "MAE",
+                    "follow_through",
+                    "return_time_curve",
+                ],
+                owner_review_status=(
+                    "strategy_review_pending" if review_required else "not_required"
+                ),
+            ),
+        )
+
+
+class _BRF2LiveReferenceEvaluator:
+    """Route BRF2-001 inputs through the BRF short-side price-action evaluator."""
+
+    def __init__(self, delegate: BRF001PriceActionEvaluator | None = None) -> None:
+        self._delegate = delegate or BRF001PriceActionEvaluator()
+
+    def evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+    ) -> StrategyFamilySignalOutput:
+        mapped_input = signal_input.model_copy(
+            update={
+                "strategy_family_id": "BRF-001",
+                "strategy_family_version_id": "BRF-001-v0",
+            },
+            deep=True,
+        )
+        output = self._delegate.evaluate(mapped_input)
+        return _retarget_reference_output(
+            output,
+            strategy_family_id=signal_input.strategy_family_id,
+            strategy_family_version_id=signal_input.strategy_family_version_id,
+            signal_snapshot_updates={
+                "reference_strategy_family": "BRF-001",
+                "reference_logic_version": output.signal_snapshot.get("logic_version"),
+            },
+        )
 
 
 class _CPM001LiveReferenceEvaluator:
@@ -292,18 +473,23 @@ class _CPM001LiveReferenceEvaluator:
             deep=True,
         )
         output = self._delegate.evaluate(mapped_input)
-        return _retarget_cpm_reference_output(
+        return _retarget_reference_output(
             output,
             strategy_family_id=signal_input.strategy_family_id,
             strategy_family_version_id=signal_input.strategy_family_version_id,
+            signal_snapshot_updates={
+                "reference_strategy_family": CPM_FAMILY_ID,
+                "reference_logic_version": output.signal_snapshot.get("logic_version"),
+            },
         )
 
 
-def _retarget_cpm_reference_output(
+def _retarget_reference_output(
     output: StrategyFamilySignalOutput,
     *,
     strategy_family_id: str,
     strategy_family_version_id: str,
+    signal_snapshot_updates: dict[str, str | None] | None = None,
 ) -> StrategyFamilySignalOutput:
     evidence_payload = dict(output.evidence_payload)
     candidate_semantics = evidence_payload.get("candidate_semantics")
@@ -316,8 +502,8 @@ def _retarget_cpm_reference_output(
 
     signal_snapshot = dict(output.signal_snapshot)
     signal_snapshot["strategy_family"] = strategy_family_id
-    signal_snapshot["reference_strategy_family"] = CPM_FAMILY_ID
-    signal_snapshot["reference_logic_version"] = signal_snapshot.get("logic_version")
+    if signal_snapshot_updates:
+        signal_snapshot.update(signal_snapshot_updates)
 
     return output.model_copy(
         update={
@@ -344,6 +530,26 @@ def _output_mismatches(
     if output.symbol != signal_input.symbol:
         mismatches.append("strategy_output_symbol_mismatch")
     return mismatches
+
+
+def _candles_from_input(signal_input: StrategyFamilySignalInput) -> list[dict]:
+    windows = dict(signal_input.market_snapshot.candle_context.get("windows") or {})
+    raw_candles = windows.get("1h") or windows.get(signal_input.primary_timeframe) or []
+    candles: list[dict] = []
+    for item in raw_candles:
+        try:
+            close = Decimal(str(item["close"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if close <= Decimal("0"):
+            continue
+        candles.append(
+            {
+                "open_time_ms": int(item.get("open_time_ms") or 0),
+                "close": close,
+            }
+        )
+    return candles
 
 
 def _dedupe(values: list[str]) -> list[str]:

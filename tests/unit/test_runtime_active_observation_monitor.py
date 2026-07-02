@@ -32,6 +32,7 @@ def _args(**overrides):
         "allow_prepare_records": False,
         "runtime_instance_id": [],
         "strategy_family_id": [],
+        "candidate_universe_json": None,
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
         "interval_seconds": 0.0,
@@ -276,6 +277,85 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
     assert packet["monitored_runtime_count"] == 2
     assert packet["requested_strategy_family_ids"] == ["MPG-001", "TEQ-001"]
     assert packet["selected_runtime_instance_ids"] == ["runtime-mpg", "runtime-teq"]
+
+
+def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
+    candidate_pool = tmp_path / "candidate-pool.json"
+    candidate_pool.write_text(
+        json.dumps(
+            {
+                "candidate_universe": {
+                    "MPG-001": ["OPUSDT", "SOLUSDT"],
+                    "BRF2-001": ["brf2_research_supported_symbols_only"],
+                    "SOR-001": ["ETHUSDT"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-mpg-sol",
+                strategy_family_id="MPG-001",
+                strategy_family_version_id="MPG-001-v0",
+                symbol="SOL/USDT:USDT",
+                side="long",
+            ),
+            _runtime(
+                "runtime-sor-eth",
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                symbol="ETH/USDT:USDT",
+                side="long",
+            ),
+        ]
+    )
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(
+            output_dir=str(tmp_path),
+            strategy_family_id=["MPG-001", "SOR-001"],
+            candidate_universe_json=str(candidate_pool),
+        ),
+        client=client,
+        runtime_artifact_builder=lambda args: {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "observation_cycle_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    coverage = packet["candidate_universe_coverage"]
+    rows = {
+        (row["strategy_group_id"], row["symbol"]): row
+        for row in coverage["rows"]
+    }
+    assert coverage["status"] == "incomplete"
+    assert coverage["expected_row_count"] == 3
+    assert coverage["active_matched_row_count"] == 2
+    assert rows[("MPG-001", "SOLUSDT")]["state"] == "active_watcher_scope"
+    assert rows[("SOR-001", "ETHUSDT")]["state"] == "active_watcher_scope"
+    assert rows[("MPG-001", "OPUSDT")]["blocker_class"] == (
+        "runtime_profile_scope_missing"
+    )
+    assert (
+        "candidate_universe_runtime_profile_scope_missing:MPG-001:OPUSDT"
+        in packet["warnings"]
+    )
+    assert packet["observation_monitor_plan"][
+        "candidate_universe_coverage_status"
+    ] == "incomplete"
+    assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(

@@ -13,14 +13,15 @@ This contract defines how main control names blockers while moving a selected
 StrategyGroup from admission toward the official live-submit path.
 
 The project does not need more broad explanations for why no trade happened.
-The current operating target is Live Enablement:
+The current operating target is Pre-Trade Runtime V0:
 
 ```text
-select StrategyGroup + symbol lane
--> classify the earliest blocker precisely
+active StrategyGroup candidate symbol set
+-> classify per-symbol readiness blockers precisely
 -> remove engineering / scope / policy / runtime blockers
--> reach market_wait_validated only when non-market blockers are closed
--> on fresh signal refresh action-time facts
+-> promote fresh satisfied candidates without authority leakage
+-> narrow at most one candidate into action-time lane input
+-> refresh action-time facts
 -> candidate / authorization evidence
 -> FinalGate
 -> Operation Layer
@@ -34,15 +35,16 @@ They are not independent completion paths.
 
 ## Core Rule
 
-Every blocker must name the earliest missing state that prevents the selected
-StrategyGroup + symbol lane from advancing toward live-submit readiness.
+Every blocker must name the earliest missing state that prevents an active
+StrategyGroup candidate symbol from advancing toward pre-trade readiness,
+promotion, or the narrowed action-time lane.
 
 Do not use broad labels such as `waiting_for_market`,
 `fresh_signal_absent`, `missing_fact`, or `live_detector_artifact_missing`
 unless the stricter class below is actually true.
 
-`market_wait_validated` is allowed only after all non-market blockers in the
-lane have been closed or explicitly scoped out by Owner policy.
+`market_wait_validated` is allowed only after all non-market blockers for that
+candidate symbol have been closed or explicitly scoped out by Owner policy.
 
 ## Blocker Classes
 

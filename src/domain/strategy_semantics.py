@@ -396,6 +396,31 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 reference_role="session_opening_range_short",
                 optional_fact_key="session_window_state",
             ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="MI-001",
+                strategy_family_version_id="MI-001-v0",
+                canonical_family_id="MI-001",
+                implementation_id="mi-market-impulse-pilot-v0",
+                source_ref="src/application/strategy_group_live_readonly_observation.py",
+                supported_sides=["long"],
+                trigger="relative_strength_momentum_impulse",
+                stop_reference="impulse_failure_or_atr_reference",
+                reference_role="relative_strength_impulse_long",
+                optional_fact_key="relative_strength",
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="BRF2-001",
+                strategy_family_version_id="BRF2-001-v0",
+                canonical_family_id="BRF2-001",
+                implementation_id="brf2-bearish-reversal-followthrough-pilot-v0",
+                source_ref="src/domain/brf_price_action_evaluator.py",
+                supported_sides=["short"],
+                trigger="squeeze_disable_cleared_bearish_followthrough",
+                stop_reference="squeeze_reclaim_or_atr_reference",
+                reference_role="conditional_short_reversal_followthrough",
+                optional_fact_key="short_squeeze_risk",
+                short_side_conservative_profile_required=True,
+            ),
             _brf_binding(),
             _btpc_binding(),
             _lsr_binding(),
@@ -535,6 +560,7 @@ def _pilot_strategygroup_binding(
     stop_reference: str,
     reference_role: str,
     optional_fact_key: str | None = None,
+    short_side_conservative_profile_required: bool = False,
 ) -> StrategyImplementationBinding:
     optional_facts = [
         _fact(
@@ -592,6 +618,9 @@ def _pilot_strategygroup_binding(
             "not_proven_alpha": True,
             "reference_role": reference_role,
             "pilot_strategygroup_route": True,
+            "short_side_conservative_profile_required": (
+                short_side_conservative_profile_required
+            ),
             "runtime_confirmation_note": (
                 "Owner confirms bounded runtime/profile; entries may be attempted "
                 "automatically only within runtime boundaries and after FinalGate."

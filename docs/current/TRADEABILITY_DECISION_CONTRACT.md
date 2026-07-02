@@ -32,6 +32,8 @@ experiment-worthy strategy asset
 
 The decision is a thin read model. It is not a ledger, strategy registry, policy
 store, FinalGate input, Operation Layer input, or exchange-write authority.
+Before action-time, it is consumed by the multi-symbol pre-trade runtime defined
+in `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
 
 Blocker classification follows
 `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. Tradeability rows may use
@@ -40,8 +42,8 @@ product-level decisions such as `not_tradable_market_wait`, but the
 
 ## Core Rule
 
-Every active or newly absorbed StrategyGroup candidate must have exactly one
-current tradeability decision:
+Every active or newly absorbed StrategyGroup must have exactly one current
+strategy-level tradeability decision:
 
 ```text
 tradable_now
@@ -54,6 +56,12 @@ not collapse unrelated blockers into `waiting_for_market`. A missing fresh
 signal is the first blocker only after the strategy asset is admitted, scoped,
 armed, detector-attached, watcher-fed, fact-computed, blocker-classified, and
 ready to continue to action-time facts when a signal appears.
+
+Per-symbol readiness is not stored by this decision. It is expanded by the
+Pre-Trade Candidate Pool into `StrategyGroup + symbol` rows. A strategy-level
+decision may therefore say the StrategyGroup is not tradable while one or more
+candidate symbols still remain valid for read-only observation or future
+promotion.
 
 ## Decision Values
 

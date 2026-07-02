@@ -10,7 +10,7 @@
     "single_rank_1": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-01T16:47:12.075565+00:00",
+  "generated_at_utc": "2026-07-02T08:03:53.998977+00:00",
   "interaction": {
     "approaches_real_order": false,
     "level": "L0_local_daily_live_enablement_table",
@@ -31,9 +31,9 @@
         "symbol": "ETHUSDT"
       },
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 3,
+      "closest_to_live_rank": 4,
       "first_blocker": "computed_not_satisfied",
-      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT blocker_class=computed_not_satisfied",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "live_detector": "computed_not_satisfied",
       "market_wait_validation": {
         "checks": {},
@@ -59,28 +59,28 @@
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "canonical_lane": {
-        "first_blocker": "scope_not_attached",
-        "lane_scope": "scoped_live_observation_proposal",
-        "live_submit_scope_priority": 20,
-        "mismatch_count": 10,
-        "next_action": "produce_scoped_live_observation_or_scope_proposal",
+        "first_blocker": "watcher_tick_missing",
+        "lane_scope": "action_time_boundary",
+        "live_submit_scope_priority": 0,
+        "mismatch_count": 0,
+        "next_action": "refresh_or_repair_watcher_fact_source",
         "selection_rule": "first_blocker_priority->live_submit_scope_priority->mismatch_count->symbol",
         "strategy_group_id": "MPG-001",
-        "symbol": "OPUSDT"
+        "symbol": "SOLUSDT"
       },
-      "chain_position": "symbol_scope_decision",
+      "chain_position": "replay_live_parity",
       "closest_to_live_rank": 1,
-      "first_blocker": "scope_not_attached",
-      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT blocker_class=scope_not_attached",
-      "live_detector": "scope_not_attached",
+      "first_blocker": "watcher_tick_missing",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "live_detector": "watcher_tick_missing",
       "market_wait_validation": {
         "checks": {},
         "not_applicable": true,
         "valid": false
       },
-      "next_engineering_action": "produce_scoped_live_observation_or_scope_proposal",
+      "next_engineering_action": "refresh_or_repair_watcher_fact_source",
       "owner_action_required": "no",
-      "rank_reason": "scope_not_attached tier 700 (WIP priority 20 only breaks same-tier ties)",
+      "rank_reason": "watcher_tick_missing tier 800 (WIP priority 20 only breaks same-tier ties)",
       "replay_signal": "yes",
       "runtime_safety_reference": {
         "live_submit_ready": false,
@@ -90,26 +90,26 @@
       },
       "side": "long",
       "stage": "armed",
-      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
       "strategy_group_id": "MPG-001",
-      "symbol": "OPUSDT"
+      "symbol": "SOLUSDT"
     },
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "canonical_lane": {},
       "chain_position": "symbol_scope_decision",
-      "closest_to_live_rank": 5,
-      "first_blocker": "policy_scope_missing",
-      "first_blocker_evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=trial_asset_admission_candidate",
+      "closest_to_live_rank": 3,
+      "first_blocker": "scope_not_attached",
+      "first_blocker_evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=park",
       "live_detector": "not_tested",
       "market_wait_validation": {
         "checks": {},
         "not_applicable": true,
         "valid": false
       },
-      "next_engineering_action": "record_scoped_owner_policy",
-      "owner_action_required": "yes",
-      "rank_reason": "policy_scope_missing tier 30 (WIP priority 10 only breaks same-tier ties)",
+      "next_engineering_action": "build_trial_asset_admission_proposal",
+      "owner_action_required": "no",
+      "rank_reason": "scope_not_attached tier 700 (WIP priority 10 only breaks same-tier ties)",
       "replay_signal": "not_applicable",
       "runtime_safety_reference": {
         "live_submit_ready": false,
@@ -119,35 +119,35 @@
       },
       "side": "long",
       "stage": "admission",
-      "stop_condition": "Owner scoped policy is recorded or lane exits mainline",
+      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
       "strategy_group_id": "MI-001",
       "symbol": "AVAXUSDT"
     },
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "canonical_lane": {
-        "first_blocker": "scope_not_attached",
-        "lane_scope": "primary_live_submit_scope",
-        "live_submit_scope_priority": 30,
-        "mismatch_count": 7,
-        "next_action": "produce_scoped_live_observation_or_scope_proposal",
+        "first_blocker": "watcher_tick_missing",
+        "lane_scope": "readonly_watcher_scope",
+        "live_submit_scope_priority": 10,
+        "mismatch_count": 8,
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
         "selection_rule": "first_blocker_priority->live_submit_scope_priority->mismatch_count->symbol",
         "strategy_group_id": "SOR-001",
-        "symbol": "ETHUSDT"
+        "symbol": "SOLUSDT"
       },
-      "chain_position": "symbol_scope_decision",
+      "chain_position": "replay_live_parity",
       "closest_to_live_rank": 2,
-      "first_blocker": "scope_not_attached",
-      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT blocker_class=scope_not_attached",
-      "live_detector": "scope_not_attached",
+      "first_blocker": "watcher_tick_missing",
+      "first_blocker_evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/SOLUSDT first_blocker=watcher_tick_missing watcher_tick_present=False",
+      "live_detector": "watcher_tick_missing",
       "market_wait_validation": {
         "checks": {},
         "not_applicable": true,
         "valid": false
       },
-      "next_engineering_action": "produce_scoped_live_observation_or_scope_proposal",
+      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
       "owner_action_required": "no",
-      "rank_reason": "scope_not_attached tier 700 (WIP priority 10 only breaks same-tier ties)",
+      "rank_reason": "watcher_tick_missing tier 800 (WIP priority 10 only breaks same-tier ties)",
       "replay_signal": "yes",
       "runtime_safety_reference": {
         "live_submit_ready": false,
@@ -157,15 +157,15 @@
       },
       "side": "long",
       "stage": "armed",
-      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
       "strategy_group_id": "SOR-001",
-      "symbol": "ETHUSDT"
+      "symbol": "SOLUSDT"
     },
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "canonical_lane": {},
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 4,
+      "closest_to_live_rank": 5,
       "first_blocker": "computed_not_satisfied",
       "first_blocker_evidence": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:BRF2-001 BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
       "live_detector": "not_tested",
@@ -272,10 +272,10 @@
   "status": "daily_live_enablement_table_ready",
   "summary": {
     "non_authority": true,
-    "owner_action_required_count": 1,
-    "rank_1_first_blocker": "scope_not_attached",
-    "rank_1_lane": "MPG-001:OPUSDT",
-    "rank_1_next_engineering_action": "produce_scoped_live_observation_or_scope_proposal",
+    "owner_action_required_count": 0,
+    "rank_1_first_blocker": "watcher_tick_missing",
+    "rank_1_lane": "MPG-001:SOLUSDT",
+    "rank_1_next_engineering_action": "refresh_or_repair_watcher_fact_source",
     "row_count": 5,
     "source_validation_valid": true,
     "wip_lane_count": 5

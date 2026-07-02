@@ -2418,6 +2418,9 @@ def _maybe_write_strategygroup_closure_step(
         parity_path = Path(command[command.index("--replay-live-parity-json") + 1])
         action_time_path = Path(command[command.index("--action-time-boundary-json") + 1])
         packet_path = Path(command[command.index("--single-lane-task-packet-json") + 1])
+        runtime_active_monitor_path = Path(
+            command[command.index("--runtime-active-monitor-json") + 1]
+        )
         output_json = Path(command[command.index("--output-json") + 1])
         output_md = Path(command[command.index("--output-owner-progress") + 1])
         artifact = build_strategy_live_candidate_pool(
@@ -2426,6 +2429,11 @@ def _maybe_write_strategygroup_closure_step(
             replay_live_parity=json.loads(parity_path.read_text(encoding="utf-8")),
             action_time_boundary=json.loads(action_time_path.read_text(encoding="utf-8")),
             single_lane_task_packet=json.loads(packet_path.read_text(encoding="utf-8")),
+            runtime_active_monitor=(
+                json.loads(runtime_active_monitor_path.read_text(encoding="utf-8"))
+                if runtime_active_monitor_path.exists()
+                else {}
+            ),
             generated_at_utc="2026-07-01T00:00:00+00:00",
         )
         output_json.write_text(json.dumps(artifact), encoding="utf-8")
@@ -2963,12 +2971,18 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "validate_single_lane_task_packet.py",
         "build_strategy_live_candidate_pool.py",
         "validate_strategy_live_candidate_pool.py",
+        "build_daily_live_enablement_table.py",
+        "validate_daily_live_enablement_table.py",
+        "build_single_lane_task_packet.py",
+        "validate_single_lane_task_packet.py",
     ]
     assert len(decision_loop_commands) == 2
     assert len(trial_admission_commands) == 1
     assert len(portfolio_board_commands) == 1
-    assert len(single_lane_task_packet_commands) == 1
-    assert len(single_lane_task_packet_validator_commands) == 1
+    assert len(daily_table_commands) == 2
+    assert len(daily_table_validator_commands) == 2
+    assert len(single_lane_task_packet_commands) == 2
+    assert len(single_lane_task_packet_validator_commands) == 2
     assert len(strategy_live_candidate_pool_commands) == 1
     assert len(strategy_live_candidate_pool_validator_commands) == 1
     assert len(binance_public_facts_commands) == 1
@@ -2977,7 +2991,14 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert len(sor_session_scope_detector_commands) == 1
     sor_session_command = sor_session_scope_detector_commands[0]
     assert sor_session_command[sor_session_command.index("--ssh-host") + 1] == "tokyo"
-    single_lane_command = single_lane_task_packet_commands[0]
+    bootstrap_daily_command = daily_table_commands[0]
+    server_backed_daily_command = daily_table_commands[1]
+    assert "--candidate-pool-json" not in bootstrap_daily_command
+    assert "--candidate-pool-json" in server_backed_daily_command
+    assert server_backed_daily_command[
+        server_backed_daily_command.index("--candidate-pool-json") + 1
+    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
+    single_lane_command = single_lane_task_packet_commands[-1]
     assert "--daily-table-json" in single_lane_command
     assert single_lane_command[
         single_lane_command.index("--daily-table-json") + 1
@@ -2992,6 +3013,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert candidate_pool_command[
         candidate_pool_command.index("--single-lane-task-packet-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
+    assert "--runtime-active-monitor-json" in candidate_pool_command
     portfolio_board_command = portfolio_board_commands[0]
     assert "--capture-gap-audit-json" in portfolio_board_command
     assert portfolio_board_command[
@@ -3255,33 +3277,39 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         )
         + 1
     ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
-    assert len(daily_table_commands) == 1
-    daily_table_command = daily_table_commands[0]
-    assert daily_table_command[
-        daily_table_command.index("--tradeability-json") + 1
+    assert len(daily_table_commands) == 2
+    bootstrap_daily_table_command = daily_table_commands[0]
+    server_backed_daily_table_command = daily_table_commands[1]
+    assert "--candidate-pool-json" not in bootstrap_daily_table_command
+    assert server_backed_daily_table_command[
+        server_backed_daily_table_command.index("--candidate-pool-json") + 1
+    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--tradeability-json") + 1
     ] == str(tmp_path / "tradeability.json")
-    assert daily_table_command[
-        daily_table_command.index("--replay-live-parity-json") + 1
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--replay-live-parity-json") + 1
     ] == str(tmp_path / "replay-live-parity.json")
-    assert daily_table_command[
-        daily_table_command.index("--action-time-boundary-json") + 1
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--action-time-boundary-json") + 1
     ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
-    assert daily_table_command[
-        daily_table_command.index("--mi-trial-admission-json") + 1
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--mi-trial-admission-json") + 1
     ] == str(tmp_path / "mi-trial-admission.json")
-    assert daily_table_command[
-        daily_table_command.index("--runtime-safety-json") + 1
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--runtime-safety-json") + 1
     ] == str(tmp_path / "runtime-safety-state.json")
-    assert daily_table_command[
-        daily_table_command.index("--output-json") + 1
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--output-json") + 1
     ] == str(tmp_path / "daily-live-table.json")
-    assert daily_table_command[
-        daily_table_command.index("--output-owner-progress") + 1
+    assert server_backed_daily_table_command[
+        server_backed_daily_table_command.index("--output-json") + 1
+    ] == str(tmp_path / "daily-live-table.json")
+    assert bootstrap_daily_table_command[
+        bootstrap_daily_table_command.index("--output-owner-progress") + 1
     ] == str(tmp_path / "daily-live-table.md")
-    assert len(daily_table_validator_commands) == 1
-    assert daily_table_validator_commands[0][-1] == str(
-        tmp_path / "daily-live-table.json"
-    )
+    assert len(daily_table_validator_commands) == 2
+    assert daily_table_validator_commands[-1][-1] == str(tmp_path / "daily-live-table.json")
     runtime_safety_state_command = runtime_safety_state_commands[0]
     assert "--brf2-shadow-candidate-evidence-json" in runtime_safety_state_command
     assert runtime_safety_state_command[

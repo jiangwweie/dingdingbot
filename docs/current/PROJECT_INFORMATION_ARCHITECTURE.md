@@ -73,7 +73,7 @@ them through `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 | `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher artifacts | Current operational truth, subject to freshness rules |
 | `generated_view` | Strategy Asset State evidence, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
 | `tracked_control_snapshot` | Small generated views that are allowed into routine Live Enablement commits | Paths listed in `config/output_control_snapshots.json` | Commit only with known source command, validator, and named task deliverable |
-| `volatile_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, and local runtime noise | `output/**` paths not listed as tracked control snapshots | Do not include in routine commits; regenerate or archive separately |
+| `volatile_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, and local runtime noise | `output/**` paths not listed as tracked control snapshots | Must remain untracked and ignored; regenerate or archive separately |
 | `archive` | Historical plans and obsolete evidence | `docs/history-archive-2026-06-15-pre-governance.tar.gz`, historical output | Recovery/provenance only |
 
 ## Authority Order
@@ -101,6 +101,8 @@ Owner decisions.
 | Tradeability Decision semantics | `docs/current/TRADEABILITY_DECISION_CONTRACT.md` |
 | Blocker classification and Live Enablement completion rules | `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
+| Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
+| Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
 | Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
@@ -194,10 +196,17 @@ Routine commits must apply this stricter split:
 | `volatile_output_artifact` | Must not be committed by default; keep local, regenerate, or archive outside routine Live Enablement commits | public facts ticks, strategy runtime-signal facts, dry-run audit chains, deploy/session snapshots, replay labs |
 | `historical_evidence_output` | Commit only when the task explicitly requires provenance capture and the artifact has a bounded retention reason | dated audits, one-off migration/deploy evidence, historical strategy-capture reports |
 
+Git tracking under `output/**` is closed by default. `.gitignore` ignores the
+whole output tree and re-admits only the exact control snapshot paths listed in
+`config/output_control_snapshots.json`. Historical output files that are not
+listed in the manifest are local compatibility evidence only and must be
+removed from the git index with `git rm --cached`, not hand-promoted through a
+routine commit.
+
 Before accepting output changes, run:
 
 ```text
-python3 scripts/validate_output_artifact_scope.py --git-status
+python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked
 ```
 
 The validator checks the current output change set against
