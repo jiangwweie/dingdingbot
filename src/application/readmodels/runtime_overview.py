@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Optional
+
+from src.application.readmodels.console_models import RuntimeOverviewResponse
+from src.infrastructure.database import probe_pg_connectivity
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _to_iso_from_millis(timestamp_ms: Optional[int]) -> str:
+    if not timestamp_ms:
+        return _iso_now()
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _freshness_from_age(age_seconds: float) -> str:
+    if age_seconds <= 90:
+        return "Fresh"
+    if age_seconds <= 300:
+        return "Stale"
+    return "Possibly Dead"
+
+
+def _resolve_backend_name(repo: Optional[Any], default: str) -> str:
+    if repo is None:
+        return default
+
+    class_name = repo.__class__.__name__
+    if class_name.startswith("Pg"):
+        return "postgres"
+    if class_name.endswith("Repository"):
+        return "sqlite"
+    return default
+
+
+def _to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _safe_pending_intent_count(execution_intent_repo: Optional[Any]) -> Optional[int]:
+    if execution_intent_repo is None or not hasattr(execution_intent_repo, "list_unfinished"):
+        return None
+    try:
+        return len(await execution_intent_repo.list_unfinished())
+    except Exception:
+        return None
+
+
+async def _safe_active_signal_count(signal_repo: Optional[Any]) -> Optional[int]:
+    if signal_repo is None or not hasattr(signal_repo, "get_signals"):
+        return None
+    try:
+        result = await signal_repo.get_signals(limit=500)
+    except Exception:
+        return None
+    if not isinstance(result, dict):
+        return None
+    data = result.get("data", [])
+    if not isinstance(data, list):
+        return None
+    active_statuses = {"PENDING", "ACTIVE", "pending", "active"}
+    return sum(1 for item in data if isinstance(item, dict) and item.get("status") in active_statuses)
+
+
+async def _safe_pending_recovery_count(execution_recovery_repo: Optional[Any]) -> Optional[int]:
+    if execution_recovery_repo is None:
+        return None
+    try:
+        if hasattr(execution_recovery_repo, "list_blocking"):
+            return len(await execution_recovery_repo.list_blocking())
+        if hasattr(execution_recovery_repo, "list_active"):
+            return len(await execution_recovery_repo.list_active())
+    except Exception:
+        return None
+    return None
+
+
+class RuntimeOverviewReadModel:
+    async def build(
+        self,
+        *,
+        runtime_config_provider: Optional[Any],
+        account_snapshot: Optional[Any],
+        exchange_gateway: Optional[Any],
+        execution_orchestrator: Optional[Any],
+        startup_reconciliation_summary: Optional[dict[str, Any]],
+        order_repo: Optional[Any] = None,
+        position_repo: Optional[Any] = None,
+        execution_intent_repo: Optional[Any] = None,
+        execution_recovery_repo: Optional[Any] = None,
+        signal_repo: Optional[Any] = None,
+    ) -> RuntimeOverviewResponse:
+        now = datetime.now(timezone.utc)
+        server_time = now.isoformat().replace("+00:00", "Z")
+
+        # Distinguish between "no snapshot yet" and "snapshot exists but stale"
+        if account_snapshot is not None:
+            runtime_update_at = _to_iso_from_millis(getattr(account_snapshot, "timestamp", None))
+            heartbeat_at = runtime_update_at
+            snapshot_ts = getattr(account_snapshot, "timestamp", None)
+            if snapshot_ts:
+                age_seconds = max(0.0, now.timestamp() - (snapshot_ts / 1000))
+            else:
+                age_seconds = 999999.0
+            freshness_status = _freshness_from_age(age_seconds)
+            active_positions = len(getattr(account_snapshot, "positions", []) or [])
+            total_equity = _to_float(getattr(account_snapshot, "total_balance", None))
+            unrealized_pnl = _to_float(getattr(account_snapshot, "unrealized_pnl", None))
+        else:
+            # Startup warmup: no snapshot yet
+            runtime_update_at = _iso_now()
+            heartbeat_at = runtime_update_at
+            age_seconds = 0.0
+            freshness_status = "Fresh"  # Pending first snapshot, not dead
+            active_positions = None
+            total_equity = None
+            unrealized_pnl = None
+
+        if runtime_config_provider is not None:
+            resolved = runtime_config_provider.resolved_config
+            environment = resolved.environment
+            market = resolved.market
+            profile = resolved.profile_name
+            version = str(resolved.version)
+            config_hash = resolved.config_hash
+            frozen = True
+            symbol = market.primary_symbol
+            timeframe = market.primary_timeframe
+            intent_backend = _resolve_backend_name(
+                execution_intent_repo,
+                environment.core_execution_intent_backend,
+            )
+            order_backend = _resolve_backend_name(order_repo, environment.core_order_backend)
+            position_backend = _resolve_backend_name(position_repo, environment.core_position_backend)
+            backend_summary = (
+                f"intent={intent_backend}, "
+                f"order={order_backend}, "
+                f"position={position_backend}"
+            )
+            session_maker = None
+            if order_repo is not None:
+                session_maker = getattr(order_repo, "_session_maker", None)
+            if session_maker is None and position_repo is not None:
+                session_maker = getattr(position_repo, "_session_maker", None)
+            if session_maker is None and execution_intent_repo is not None:
+                session_maker = getattr(execution_intent_repo, "_session_maker", None)
+            pg_health = "OK" if await probe_pg_connectivity(session_maker) else "DOWN"
+            webhook_health = "DEGRADED"  # No delivery success signal available
+        else:
+            profile = "unavailable"
+            version = "unavailable"
+            config_hash = "unavailable"
+            frozen = False
+            symbol = "unavailable"
+            timeframe = "unavailable"
+            backend_summary = "unavailable"
+            pg_health = "DOWN"
+            webhook_health = "DOWN"
+
+        permission_summary = (
+            exchange_gateway.get_permission_check_summary()
+            if exchange_gateway is not None and hasattr(exchange_gateway, "get_permission_check_summary")
+            else None
+        )
+
+        # Exchange health: distinguish startup warmup from real staleness
+        if account_snapshot is None:
+            # Startup warmup: no snapshot yet, use permission check as proxy
+            if exchange_gateway is None:
+                exchange_health = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "failed",
+                "error",
+            }:
+                exchange_health = "DOWN"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "not_checked",
+                "skipped_testnet",
+            }:
+                exchange_health = "DEGRADED"
+            else:
+                # Gateway exists, permission check passed or pending
+                exchange_health = "DEGRADED"  # Conservative: warmup, not yet verified
+        else:
+            # Snapshot exists: use freshness + permission check
+            exchange_health = "OK"
+            if freshness_status == "Possibly Dead":
+                exchange_health = "DOWN"
+            elif freshness_status == "Stale":
+                exchange_health = "DEGRADED"
+            elif permission_summary is not None and permission_summary.get("status") in {
+                "failed",
+                "error",
+                "not_checked",
+            }:
+                exchange_health = "DEGRADED"
+
+        breaker_symbols = []
+        if execution_orchestrator is not None and hasattr(execution_orchestrator, "list_circuit_breaker_symbols"):
+            breaker_symbols = execution_orchestrator.list_circuit_breaker_symbols()
+
+        if startup_reconciliation_summary:
+            reconciliation_summary = (
+                f"candidates={startup_reconciliation_summary.get('candidate_orders_count', 0)}, "
+                f"failed={startup_reconciliation_summary.get('failed_reconciliations_count', 0)}"
+            )
+        else:
+            reconciliation_summary = "not_run"
+
+        active_signals = await _safe_active_signal_count(signal_repo)
+        pending_intents = await _safe_pending_intent_count(execution_intent_repo)
+        pending_recovery_tasks = await _safe_pending_recovery_count(execution_recovery_repo)
+
+        return RuntimeOverviewResponse(
+            profile=profile,
+            version=version,
+            hash=config_hash,
+            frozen=frozen,
+            symbol=symbol,
+            timeframe=timeframe,
+            mode="SIM-1",
+            backend_summary=backend_summary,
+            exchange_health=exchange_health,
+            pg_health=pg_health,
+            webhook_health=webhook_health,
+            breaker_count=len(breaker_symbols),
+            reconciliation_summary=reconciliation_summary,
+            server_time=server_time,
+            last_runtime_update_at=runtime_update_at,
+            last_heartbeat_at=heartbeat_at,
+            freshness_status=freshness_status,
+            active_positions=active_positions,
+            active_signals=active_signals,
+            pending_intents=pending_intents,
+            pending_recovery_tasks=pending_recovery_tasks,
+            total_equity=total_equity,
+            unrealized_pnl=unrealized_pnl,
+        )

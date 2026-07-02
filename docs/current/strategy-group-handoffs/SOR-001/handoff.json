@@ -1,0 +1,140 @@
+{
+  "strategy_group_id": "SOR-001",
+  "version": "2026-06-14-r0-pilot",
+  "name": "Session Opening-Range Breakout Pilot",
+  "status": "runtime_pilot_contract",
+  "supported_symbols": [
+    "XAGUSDT",
+    "XAUUSDT",
+    "INTCUSDT",
+    "MSTRUSDT",
+    "COINUSDT"
+  ],
+  "supported_sides": [
+    "short",
+    "long_revival_only"
+  ],
+  "supported_symbol_scope": {
+    "mode": "pilot_universe",
+    "max_symbols": 5,
+    "symbols_selected_by": "strategy_research_handoff_plus_exchange_fact_availability"
+  },
+  "mode_recommendation": {
+    "default": "armed_observation",
+    "allowed": [
+      "observe_only",
+      "armed_observation"
+    ],
+    "not_allowed_by_research_window": [
+      "strategy_self_elevation",
+      "unbounded_auto_execute",
+      "leverage_expansion"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "ready_for_shadow_candidate_prepare",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.58",
+    "side": "short",
+    "stale_behavior": "mark_signal_observation_stale_and_block_candidate_prepare",
+    "conflict_behavior": "mark_signal_observation_conflict_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_open_range_bars",
+      "closed_trigger_bar",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state"
+    ],
+    "strategy": [
+      "session_open_range_state",
+      "session_breakout_trigger_state",
+      "tradfi_session_mapping_state",
+      "post_open_decay_disable_state",
+      "time_stop_exit_horizon_state"
+    ],
+    "risk": [
+      "session_gap_fill_state",
+      "mark_funding_session_review_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "pilot_boundary_not_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_leverage": "1",
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "72h_branch_specific"
+  },
+  "hard_stops": [
+    "missing_closed_open_range",
+    "missing_closed_trigger",
+    "session_mapping_missing",
+    "missing_exit_horizon",
+    "post_open_decay_detected",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan",
+    "risk_boundary_mismatch"
+  ],
+  "sample_signal_artifact": {
+    "status": "ready_for_shadow_candidate_prepare",
+    "strategy_group_id": "SOR-001",
+    "side": "short",
+    "freshness": "fresh",
+    "not_execution_authority": true
+  },
+  "sample_no_signal_artifact": {
+    "status": "no_signal",
+    "strategy_group_id": "SOR-001",
+    "next_observation_step": "continue_watcher_observation"
+  },
+  "sample_stale_signal_artifact": {
+    "status": "stale_signal",
+    "strategy_group_id": "SOR-001",
+    "blocked_reason": "signal_freshness_window_expired"
+  },
+  "sample_conflict_artifact": {
+    "status": "signal_conflict",
+    "strategy_group_id": "SOR-001",
+    "blocked_reason": "strategy_signal_conflict_or_session_context_missing"
+  },
+  "execution_boundary": {
+    "research_intake_source_only": true,
+    "runtime_registration_authorized": false,
+    "candidate_creation_authorized": false,
+    "final_gate_input": false,
+    "operation_layer_input": false,
+    "real_submit_authorized": false
+  },
+  "evidence_references": {
+    "source_workspace": "/Users/jiangwei/Documents/final-strategy-research",
+    "source_branch": "codex/strategy-research-20260613-goal",
+    "source_strategy_group": "SOR-001"
+  }
+}

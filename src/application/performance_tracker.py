@@ -4,7 +4,7 @@ Performance Tracker - Track PENDING signals and check if price hits take-profit 
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from src.domain.models import KlineData
+from src.domain.models import Direction, KlineData
 from src.infrastructure.logger import logger
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class PerformanceTracker:
             repository: Signal repository instance
         """
         signal_id = signal["id"]
-        direction = signal["direction"]
+        direction = Direction.normalize(signal["direction"])
         entry_price = signal["entry_price"]
         stop_loss = signal["stop_loss"]
         take_profit_1 = signal["take_profit_1"]
@@ -72,7 +72,7 @@ class PerformanceTracker:
         kline_low = kline.low
 
         # From risk-first perspective: check stop-loss first (more conservative)
-        if direction == "long":
+        if direction == "LONG":
             # LONG signal: price goes up to TP, down to SL
             # Check if low <= stop_loss (hit stop-loss)
             if kline_low <= stop_loss:
@@ -91,7 +91,7 @@ class PerformanceTracker:
                     f"(TP={take_profit_1}, K-line high={kline_high}, PnL={pnl_ratio:.2f})"
                 )
 
-        elif direction == "short":
+        elif direction == "SHORT":
             # SHORT signal: price goes down to TP, up to SL
             # Check if high >= stop_loss (hit stop-loss)
             if kline_high >= stop_loss:

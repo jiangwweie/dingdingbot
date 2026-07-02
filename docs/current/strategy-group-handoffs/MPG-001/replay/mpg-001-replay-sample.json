@@ -1,0 +1,39 @@
+{
+  "schema_version": "brc.strategygroup.runtime_replay_event.v1",
+  "event_id": "mpg-001-replay-sample-001",
+  "strategy_group_id": "MPG-001",
+  "fixture_case": "historical_momentum_continuation_sample",
+  "event_kind": "historical_window",
+  "replay_source": "local_runtime_replay",
+  "symbol": "MSTRUSDT",
+  "side": "long",
+  "observed_at_ms": 1781750000000,
+  "freshness_window_seconds": 120,
+  "signal_confidence": "0.62",
+  "signal_status": "fresh_signal_replay",
+  "required_facts_ready": true,
+  "blocker_class": "none",
+  "expected_owner_state": "processing",
+  "stage_results": {
+    "signal_evaluated": true,
+    "required_facts_gate_checked": true,
+    "prepare_chain_ready": true,
+    "candidate_authorization_dry_run_ready": true,
+    "finalgate_dry_run_reachable": true,
+    "operation_layer_shape_reachable": true,
+    "real_submit_allowed": false,
+    "exchange_write_called": false
+  },
+  "simulated_exit_outcome": "tp1_then_runner_or_hard_stop_review",
+  "review_recommendation": "keep_observing",
+  "notes": [
+    "Historical replay sample only.",
+    "May exercise dry-run chain shape but is not a live market signal."
+  ],
+  "replay_only": true,
+  "not_live_market_signal": true,
+  "not_execution_authority": true,
+  "operation_layer_submit_allowed": false,
+  "exchange_write_allowed": false,
+  "real_order_allowed": false
+}

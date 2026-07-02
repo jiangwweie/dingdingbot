@@ -1,0 +1,180 @@
+{
+  "strategy_group_id": "BTPC-001",
+  "version": "2026-06-19-l2-intake-r0",
+  "name": "Bear Trend Pullback Continuation Intake",
+  "status": "l2_intake_contract_observe_only",
+  "supported_symbols": [
+    "AVAXUSDT",
+    "XRPUSDT",
+    "SOLUSDT",
+    "ADAUSDT",
+    "ETHUSDT",
+    "BTCUSDT"
+  ],
+  "supported_sides": [
+    "short"
+  ],
+  "supported_symbol_scope": {
+    "mode": "l2_intake_review_universe",
+    "max_symbols": 6,
+    "symbols_selected_by": "current_signal_coverage_review_plus_research_right_tail_symbol_contribution"
+  },
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only",
+      "shadow_candidate_after_review"
+    ],
+    "not_allowed_by_research_window": [
+      "strategy_self_elevation",
+      "armed_observation_without_l2_dry_run",
+      "unbounded_auto_execute",
+      "l4_real_order_promotion",
+      "long_side"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "would_enter_observe_only",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "side": "short",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "source_member",
+      "classifier_id",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "activation_context": [
+      "bear_trend_context",
+      "weak_rally_or_pullback_depth",
+      "pullback_structure_loss",
+      "regime_trend_down_state"
+    ],
+    "stale_behavior": "mark_signal_observation_stale_and_block_l2_review",
+    "conflict_behavior": "mark_signal_observation_conflict_and_block_l2_review"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "recent_4h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state"
+    ],
+    "strategy": [
+      "bear_trend_context",
+      "weak_rally_or_pullback_depth",
+      "pullback_structure_loss",
+      "regime_trend_down_state",
+      "strong_uptrend_disable_state",
+      "short_squeeze_disable_state"
+    ],
+    "derivatives": [
+      "funding_72h",
+      "perp_spot_premium",
+      "open_interest_or_crowding_proxy",
+      "short_squeeze_risk",
+      "historical_open_interest_window",
+      "historical_global_long_short_ratio_window",
+      "top_trader_position_ratio_window"
+    ],
+    "risk": [
+      "real_exchange_margin_liquidation_model",
+      "spread_liquidity_downshift_state",
+      "slippage_cost_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "l2_intake_review_boundary_not_order_sizing_default",
+    "risk_tier": "not_live_order_eligible",
+    "max_notional_per_action_usdt": "0",
+    "max_active_positions": 0,
+    "default_leverage": "not_applicable",
+    "max_leverage": "not_applicable",
+    "research_leverage_context": [
+      "1x",
+      "2x",
+      "3x",
+      "5x"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "research_replay_review_only"
+  },
+  "hard_stops": [
+    "long_side_requested",
+    "strong_uptrend_regime",
+    "short_squeeze_risk_unbounded",
+    "missing_funding_or_premium_review",
+    "missing_historical_oi_or_long_short_context",
+    "missing_real_exchange_margin_model",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan",
+    "risk_boundary_mismatch",
+    "l4_promotion_requested_before_first_mpg_live_loop_closes"
+  ],
+  "sample_signal_artifact": {
+    "status": "would_enter_observe_only",
+    "strategy_group_id": "BTPC-001",
+    "side": "short",
+    "freshness": "fresh",
+    "not_execution_authority": true
+  },
+  "sample_no_signal_artifact": {
+    "status": "no_signal",
+    "strategy_group_id": "BTPC-001",
+    "next_observation_step": "continue_read_only_observation"
+  },
+  "sample_stale_signal_artifact": {
+    "status": "stale_signal",
+    "strategy_group_id": "BTPC-001",
+    "blocked_reason": "signal_freshness_window_expired"
+  },
+  "sample_conflict_artifact": {
+    "status": "signal_conflict",
+    "strategy_group_id": "BTPC-001",
+    "blocked_reason": "strong_uptrend_or_short_squeeze_conflict"
+  },
+  "execution_boundary": {
+    "research_intake_source_only": true,
+    "runtime_registration_authorized": false,
+    "candidate_creation_authorized": false,
+    "final_gate_input": false,
+    "operation_layer_input": false,
+    "real_submit_authorized": false
+  },
+  "evidence_references": {
+    "source_workspace": "/Users/jiangwei/Documents/final-strategy-research",
+    "source_branch": "codex/strategy-research-20260613-goal",
+    "source_strategy_group": "BTPC-001",
+    "source_candidate_artifact": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/candidate-packets/BTPC-001-bear-pullback-continuation-packet.md",
+    "source_derivatives_review": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/btpc-derivatives-reviewability/btpc-derivatives-reviewability-summary.md"
+  }
+}

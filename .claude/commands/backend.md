@@ -1,20 +1,18 @@
-# Backend Developer - 后端开发专家
-# 用法：/backend [可选：任务描述]
+# Backend Developer
 
-Agent(
-    subagent_type="backend-dev",
-    prompt="""
-请阅读并遵循 .claude/team/backend-dev/SKILL.md 中的规范。
+Use this command for scoped backend implementation from a Codex task card.
 
-重要：严格遵守文件边界，只修改 src/ 和 config/ 目录下的文件！
+Read:
+- `CLAUDE.md`
+- `.claude/team/backend-dev/SKILL.md`
+- `AGENTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
-用户任务：{{arguments}}
+User task:
+`{{arguments}}`
 
-请执行以下步骤：
-1. 阅读相关子任务文档
-2. 设计领域模型（Pydantic）
-3. 实现业务逻辑
-4. 编写单元测试
-5. 运行 pytest 验证
-"""
-)
+Before editing, verify the task includes `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
+
+Stop if required work falls outside the allowed scope.

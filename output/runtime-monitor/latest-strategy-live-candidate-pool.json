@@ -1,0 +1,1180 @@
+{
+  "action_time_lane_inputs": [],
+  "arbitration": {
+    "action_time_lane_input_count": 0,
+    "deferred_action_time_candidates": [],
+    "eligible_action_time_candidate_count": 0,
+    "promotion_candidate_count": 0,
+    "rule": "multiple promotion candidates may exist; real submit path may select at most one action-time candidate",
+    "selected_action_time_candidate": "none",
+    "single_real_submit_candidate": true
+  },
+  "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+  "candidate_rows": [
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "market",
+      "candidate_positioning": "reclaim / pullback recovery long candidate",
+      "candidate_status": "candidate_market_condition_wait",
+      "daily_rank": 4,
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
+      "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
+      "first_blocker": "computed_not_satisfied",
+      "market_condition": "strategy fact matrix must clear on the next detector tick",
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
+      "owner_action_required": "no",
+      "selected_symbol": "ETHUSDT",
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "strategy_group_id": "CPM-RO-001",
+      "trigger_condition": "ETHUSDT pullback reclaim signal with htf_trend_intact and reclaim_confirmed"
+    },
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "first_blocker": "watcher_tick_missing",
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "runtime",
+      "candidate_positioning": "selective leader continuation long candidate",
+      "candidate_status": "candidate_runtime_input_blocked",
+      "daily_rank": 1,
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
+      "first_blocker": "watcher_tick_missing",
+      "market_condition": "public market facts must refresh before market condition can be trusted",
+      "next_engineering_action": "refresh_or_repair_watcher_fact_source",
+      "owner_action_required": "no",
+      "selected_symbol": "SOLUSDT",
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "strategy_group_id": "MPG-001",
+      "trigger_condition": "SOLUSDT selective leader continuation signal with fresh public facts"
+    },
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "engineering",
+      "candidate_positioning": "relative strength / cross-asset candidate",
+      "candidate_status": "candidate_scope_decision_pending",
+      "daily_rank": 3,
+      "evidence": "output/runtime-monitor/latest-mi-trial-admission-decision.json:trial_admission_decision=park",
+      "exit_condition": "exit or support-only if scoped admission is rejected",
+      "first_blocker": "scope_not_attached",
+      "market_condition": "market condition is secondary until scope/admission is attached",
+      "next_engineering_action": "build_trial_asset_admission_proposal",
+      "owner_action_required": "no",
+      "selected_symbol": "AVAXUSDT",
+      "side": "long",
+      "stage": "admission",
+      "stop_condition": "scoped live observation proposal is attached or Owner scope decision is required",
+      "strategy_group_id": "MI-001",
+      "trigger_condition": "AVAXUSDT relative strength admission and scoped observation lane accepted"
+    },
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "first_blocker": "watcher_tick_missing",
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "runtime",
+      "candidate_positioning": "session / flow confirmation candidate",
+      "candidate_status": "candidate_runtime_input_blocked",
+      "daily_rank": 2,
+      "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/SOLUSDT first_blocker=watcher_tick_missing watcher_tick_present=False",
+      "exit_condition": "exit or downgrade if public facts cannot be refreshed through approved read-only paths",
+      "first_blocker": "watcher_tick_missing",
+      "market_condition": "public market facts must refresh before market condition can be trusted",
+      "next_engineering_action": "refresh_or_repair_watcher_public_fact_input",
+      "owner_action_required": "no",
+      "selected_symbol": "SOLUSDT",
+      "side": "long",
+      "stage": "armed",
+      "stop_condition": "watcher/public facts tick is present for the selected lane",
+      "strategy_group_id": "SOR-001",
+      "trigger_condition": "SOLUSDT session opening range plus breakout and follow-through confirmation"
+    },
+    {
+      "action_time_readiness": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
+      "blocker_owner": "market",
+      "candidate_positioning": "conditional failed-rebound short candidate",
+      "candidate_status": "candidate_conditional_observation",
+      "daily_rank": 5,
+      "evidence": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:BRF2-001 BRF2 runtime signal capture is attached; no fresh actionable short signal exists",
+      "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
+      "first_blocker": "computed_not_satisfied",
+      "market_condition": "conditional short only when bullish/squeeze disable state clears",
+      "next_engineering_action": "continue_brf2_armed_observation_until_disable_clears",
+      "owner_action_required": "no",
+      "selected_symbol": "brf2_research_supported_symbols_only",
+      "side": "short",
+      "stage": "armed",
+      "stop_condition": "failed fact matrix clears or blocker reclassifies after next detector tick",
+      "strategy_group_id": "BRF2-001",
+      "trigger_condition": "failed-rebound short setup after squeeze / strong-uptrend disable clears"
+    }
+  ],
+  "candidate_universe": {
+    "BRF2-001": [
+      "AVAXUSDT",
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "CPM-RO-001": [
+      "AVAXUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "SUIUSDT"
+    ],
+    "MI-001": [
+      "AVAXUSDT",
+      "ETHUSDT",
+      "SOLUSDT"
+    ],
+    "MPG-001": [
+      "AVAXUSDT",
+      "OPUSDT",
+      "SOLUSDT",
+      "SUIUSDT"
+    ],
+    "SOR-001": [
+      "AVAXUSDT",
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT"
+    ]
+  },
+  "checks": {
+    "all_rows_have_required_candidate_fields": true,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "deploy_ready": false,
+    "each_strategy_has_multiple_candidate_symbols": true,
+    "five_wip_candidates_present": true,
+    "order_created": false,
+    "p0_cleared": false,
+    "p1_cleared_or_waived": false,
+    "places_order": false,
+    "readonly_signal_cannot_order": true,
+    "single_real_submit_candidate": true,
+    "source_validation_passed": true
+  },
+  "generated_at_utc": "2026-07-02T08:03:53.998977+00:00",
+  "no_trade_audit": {
+    "blocker_counts": {
+      "computed_not_satisfied": 4,
+      "detector_not_attached": 6,
+      "watcher_tick_missing": 8
+    },
+    "reason": "candidate_pool_has_no_live_submit_allowed_fresh_satisfied_symbol",
+    "selected_action_time_candidate": "none",
+    "status": "no_action_time_candidate"
+  },
+  "p0_p1_review": [
+    {
+      "evidence": "candidate_rows contain required fields for all active WIP lanes",
+      "item": "five_strategy_candidate_pool_control_surface",
+      "next_action": "complete missing candidate fields",
+      "priority": "P0",
+      "status": "cleared"
+    },
+    {
+      "evidence": "MPG-001 first_blocker=watcher_tick_missing",
+      "item": "mpg_watcher_closure",
+      "next_action": "refresh_or_repair_watcher_fact_source",
+      "priority": "P0",
+      "status": "open"
+    },
+    {
+      "evidence": "SOR-001 first_blocker=watcher_tick_missing",
+      "item": "sor_watcher_closure",
+      "next_action": "refresh_or_repair_watcher_public_fact_input",
+      "priority": "P0",
+      "status": "open"
+    },
+    {
+      "evidence": "MI-001 first_blocker=scope_not_attached",
+      "item": "mi_scope_closure",
+      "next_action": "build_trial_asset_admission_proposal",
+      "priority": "P0",
+      "status": "open"
+    },
+    {
+      "evidence": "CPM-RO-001 first_blocker=computed_not_satisfied",
+      "item": "cpm_computed_refresh",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "priority": "P0",
+      "status": "cleared"
+    },
+    {
+      "evidence": "BRF2-001 candidate_status=candidate_conditional_observation",
+      "item": "brf2_conditionalization",
+      "next_action": "keep BRF2 conditional or exit under stop review",
+      "priority": "P0",
+      "status": "cleared"
+    },
+    {
+      "evidence": "candidate pool is non-executing",
+      "item": "no_authority_leakage",
+      "next_action": "preserve authority boundary",
+      "priority": "P0",
+      "status": "cleared"
+    },
+    {
+      "evidence": "validator script is present and must pass",
+      "item": "candidate_pool_validator",
+      "next_action": "run validator",
+      "priority": "P1",
+      "status": "cleared"
+    },
+    {
+      "evidence": "deploy gate reruns validate_output_artifact_scope.py --git-status",
+      "item": "output_whitelist_gate",
+      "next_action": "run validate_output_artifact_scope.py --git-status",
+      "priority": "P1",
+      "status": "cleared"
+    },
+    {
+      "evidence": "watcher_tick_missing rows prove public facts are not current: MPG-001,SOR-001",
+      "item": "no_stale_facts",
+      "next_action": "refresh approved public facts path",
+      "priority": "P1",
+      "status": "open"
+    },
+    {
+      "evidence": "candidate pool includes machine-readable p0_p1_review rows",
+      "item": "review_report",
+      "next_action": "rerun candidate pool after blocker refresh",
+      "priority": "P1",
+      "status": "cleared"
+    },
+    {
+      "evidence": "deploy gate validator checks candidate pool, Daily Table, Single Lane Packet, monitor sequence, output scope, and authority leakage",
+      "item": "postdeploy_validation_script",
+      "next_action": "run validate_strategy_live_candidate_pool_deploy_gate.py before deploy",
+      "priority": "P1",
+      "status": "cleared"
+    }
+  ],
+  "pretrade_runtime": {
+    "active_strategy_groups": [
+      "CPM-RO-001",
+      "MPG-001",
+      "MI-001",
+      "SOR-001",
+      "BRF2-001"
+    ],
+    "candidate_symbols_per_strategy_group": {
+      "BRF2-001": 3,
+      "CPM-RO-001": 4,
+      "MI-001": 3,
+      "MPG-001": 4,
+      "SOR-001": 4
+    },
+    "name": "Multi-Strategy Multi-Symbol Pre-Trade Runtime V0",
+    "principle": "wide_observation_medium_candidate_narrow_action_time_single_intent_submit"
+  },
+  "promotion_candidates": [],
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "live_profile_changed": false,
+    "order_created": false,
+    "order_sizing_changed": false,
+    "places_order": false
+  },
+  "schema": "brc.strategy_live_candidate_pool.v1",
+  "scope": "five_strategy_live_candidate_pool_non_authority",
+  "server_runtime_coverage": {},
+  "source_validation": {
+    "sources": {
+      "action_time_boundary": true,
+      "daily_table": true,
+      "replay_live_parity": true,
+      "tradeability": true
+    },
+    "valid": true
+  },
+  "status": "strategy_live_candidate_pool_ready",
+  "summary": {
+    "action_time_lane_input_count": 0,
+    "candidate_count": 5,
+    "deploy_ready": false,
+    "fresh_candidate_count": 0,
+    "non_authority": true,
+    "p0_cleared": false,
+    "p1_cleared_or_waived": false,
+    "symbol_readiness_count": 18,
+    "top_action_time_candidate": "none",
+    "wip_lane_count": 5
+  },
+  "symbol_readiness_rows": [
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "primary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "trial_scope_proposed",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "ETHUSDT",
+      "symbol_or_basket": "ETHUSDT",
+      "watcher_state": "fresh"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/AVAXUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "AVAXUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "AVAXUSDT",
+      "symbol_or_basket": "AVAXUSDT",
+      "watcher_state": "fresh"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/SOLUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "reclaim_confirmed"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SOLUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SOLUSDT",
+      "symbol_or_basket": "SOLUSDT",
+      "watcher_state": "fresh"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+        "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/SUIUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "htf_trend_intact",
+          "reclaim_confirmed"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "SUIUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "CPM-RO-001",
+      "symbol": "SUIUSDT",
+      "symbol_or_basket": "SUIUSDT",
+      "watcher_state": "fresh"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "primary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available",
+          "not_in_current_readonly_watcher_batch"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "warning",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MPG-001",
+        "symbol": "OPUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MPG-001",
+      "symbol": "OPUSDT",
+      "symbol_or_basket": "OPUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/AVAXUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "warning",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MPG-001",
+        "symbol": "AVAXUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MPG-001",
+      "symbol": "AVAXUSDT",
+      "symbol_or_basket": "AVAXUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "watcher_tick_missing",
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SOLUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "warning",
+      "scope_state": "trial_scope_proposed",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SOLUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MPG-001",
+      "symbol": "SOLUSDT",
+      "symbol_or_basket": "SOLUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/SUIUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [
+          "binance_usdm_public_facts_missing_or_stale",
+          "exchange_contract_exists",
+          "mark_price_fresh",
+          "funding_not_extreme",
+          "spread_ok",
+          "min_notional_ok",
+          "qty_step_ok",
+          "leverage_available"
+        ],
+        "missing": [],
+        "satisfied": [],
+        "state": "computed_not_satisfied"
+      },
+      "risk_state": "warning",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MPG-001",
+        "symbol": "SUIUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MPG-001",
+      "symbol": "SUIUSDT",
+      "symbol_or_basket": "SUIUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "primary",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:MI-001/AVAXUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MI-001",
+        "symbol": "AVAXUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MI-001",
+      "symbol": "AVAXUSDT",
+      "symbol_or_basket": "AVAXUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:MI-001/ETHUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MI-001",
+        "symbol": "ETHUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MI-001",
+      "symbol": "ETHUSDT",
+      "symbol_or_basket": "ETHUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:MI-001/SOLUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "MI-001",
+        "symbol": "SOLUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "MI-001",
+      "symbol": "SOLUSDT",
+      "symbol_or_basket": "SOLUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "primary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "computed_public_facts"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "SOR-001",
+      "symbol": "ETHUSDT",
+      "symbol_or_basket": "ETHUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/AVAXUSDT first_blocker=watcher_tick_missing watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "computed_public_facts"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "SOR-001",
+        "symbol": "AVAXUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "SOR-001",
+      "symbol": "AVAXUSDT",
+      "symbol_or_basket": "AVAXUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/BTCUSDT first_blocker=watcher_tick_missing source_blocker_class=scope_not_attached watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "computed_public_facts"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "SOR-001",
+        "symbol": "BTCUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "SOR-001",
+      "symbol": "BTCUSDT",
+      "symbol_or_basket": "BTCUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "first_blocker": "watcher_tick_missing",
+        "next_action": "refresh_or_repair_watcher_public_fact_input",
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "blocked_public_facts"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "secondary",
+      "detector_state": "ready",
+      "evidence_ref": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/SOLUSDT first_blocker=watcher_tick_missing watcher_tick_present=False",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "computed_public_facts"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "trial_scope_proposed",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "SOR-001",
+        "symbol": "SOLUSDT"
+      },
+      "side": "long",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "SOR-001",
+      "symbol": "SOLUSDT",
+      "symbol_or_basket": "SOLUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "primary",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:BRF2-001/BTCUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "BTCUSDT"
+      },
+      "side": "short",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "BRF2-001",
+      "symbol": "BTCUSDT",
+      "symbol_or_basket": "BTCUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "conditional",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:BRF2-001/AVAXUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "AVAXUSDT"
+      },
+      "side": "short",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "BRF2-001",
+      "symbol": "AVAXUSDT",
+      "symbol_or_basket": "AVAXUSDT",
+      "watcher_state": "missing"
+    },
+    {
+      "action_time": {
+        "action_time_path_ready": false,
+        "private_action_time_facts_ready": false,
+        "public_facts_ready": false,
+        "status": "not_applicable_current_stage"
+      },
+      "asset_class": "crypto_perpetual",
+      "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+      "candidate_role": "conditional",
+      "detector_state": "missing",
+      "evidence_ref": "default_candidate_universe:BRF2-001/ETHUSDT",
+      "first_blocker": "detector_not_attached",
+      "next_action": "attach_detector_for_candidate_symbol",
+      "observation_scope": "readonly",
+      "promotion_state": "idle",
+      "public_facts_state": {
+        "computed_not_satisfied": [],
+        "missing": [
+          "per_symbol_replay_live_parity_row"
+        ],
+        "satisfied": [],
+        "state": "missing"
+      },
+      "risk_state": "acceptable",
+      "scope_state": "readonly_only",
+      "server_runtime_coverage": {
+        "active_runtime_instance_ids": [],
+        "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
+        "blocker_class": "runtime_profile_scope_missing",
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "selected_runtime_instance_ids": [],
+        "state": "runtime_profile_scope_missing",
+        "strategy_group_id": "BRF2-001",
+        "symbol": "ETHUSDT"
+      },
+      "side": "short",
+      "signal_state": "absent",
+      "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
+      "strategy_group_id": "BRF2-001",
+      "symbol": "ETHUSDT",
+      "symbol_or_basket": "ETHUSDT",
+      "watcher_state": "missing"
+    }
+  ]
+}

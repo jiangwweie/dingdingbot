@@ -1,0 +1,156 @@
+{
+  "strategy_group_id": "MPG-001",
+  "version": "2026-06-14-r0-pilot",
+  "name": "Momentum Persistence Group Pilot",
+  "status": "runtime_pilot_contract",
+  "supported_symbols": [
+    "COINUSDT",
+    "INTCUSDT",
+    "MSTRUSDT"
+  ],
+  "supported_sides": [
+    "long"
+  ],
+  "supported_symbol_scope": {
+    "mode": "pilot_universe",
+    "max_symbols": 3,
+    "symbols_selected_by": "current_tokyo_watcher_scope_and_exchange_fact_availability"
+  },
+  "mode_recommendation": {
+    "default": "armed_observation",
+    "allowed": [
+      "observe_only",
+      "armed_observation"
+    ],
+    "not_allowed_by_research_window": [
+      "strategy_self_elevation",
+      "unbounded_auto_execute",
+      "leverage_expansion"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "ready_for_shadow_candidate_prepare",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.58",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "source_member",
+      "classifier_id",
+      "entry_reason",
+      "invalidation_reason",
+      "protection_plan_hint",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "overbought_persistence",
+      "momentum_persistence",
+      "zero_cross",
+      "trend_strength"
+    ],
+    "stale_behavior": "mark_signal_observation_stale_and_block_candidate_prepare",
+    "conflict_behavior": "mark_signal_observation_conflict_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state"
+    ],
+    "strategy": [
+      "mpg_member_signal_state",
+      "mpg_group_pool_selection_state",
+      "momentum_clean_persistence_state",
+      "momentum_exhaustion_disable_state",
+      "mpg_signal_body_extension_state",
+      "mpg_symbol_concentration_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "pilot_boundary_not_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_leverage": "1",
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "12h_tradeoff_lane"
+  },
+  "hard_stops": [
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "missing_closed_candle",
+    "no_stop_loss_plan",
+    "missing_exit_horizon",
+    "late_cycle_extension_detected",
+    "strategy_signal_conflict",
+    "same_symbol_duplicate_candidate",
+    "risk_boundary_mismatch"
+  ],
+  "sample_signal_artifact": {
+    "status": "ready_for_shadow_candidate_prepare",
+    "strategy_group_id": "MPG-001",
+    "side": "long",
+    "freshness": "fresh",
+    "not_execution_authority": true
+  },
+  "sample_no_signal_artifact": {
+    "status": "no_signal",
+    "strategy_group_id": "MPG-001",
+    "next_observation_step": "continue_watcher_observation"
+  },
+  "sample_stale_signal_artifact": {
+    "status": "stale_signal",
+    "strategy_group_id": "MPG-001",
+    "blocked_reason": "signal_freshness_window_expired"
+  },
+  "sample_conflict_artifact": {
+    "status": "signal_conflict",
+    "strategy_group_id": "MPG-001",
+    "blocked_reason": "strategy_signal_conflict"
+  },
+  "execution_boundary": {
+    "research_intake_source_only": true,
+    "runtime_registration_authorized": false,
+    "candidate_creation_authorized": false,
+    "final_gate_input": false,
+    "operation_layer_input": false,
+    "real_submit_authorized": false
+  },
+  "evidence_references": {
+    "source_workspace": "/Users/jiangwei/Documents/final-strategy-research",
+    "source_branch": "codex/strategy-research-20260613-goal",
+    "source_commit": "05f616b0",
+    "source_strategy_group": "MPG-001"
+  }
+}

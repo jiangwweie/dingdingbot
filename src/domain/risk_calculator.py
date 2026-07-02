@@ -1,10 +1,15 @@
 """
 Risk Calculator - Position sizing and stop-loss calculation.
 All calculations use Decimal for precision, no float allowed.
+
+Thread Safety (R3.3 fix):
+- Uses asyncio.Lock to protect config access during concurrent updates
+- Config updates are atomic (replace entire config object)
 """
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Tuple, List, Dict, Any, Optional
 import json
+import asyncio
 
 from src.infrastructure.logger import setup_logger
 
@@ -33,6 +38,10 @@ class RiskCalculator:
     - Balance: Account equity available for trading
     - Loss_Percent: Maximum acceptable loss as fraction (e.g., 0.01 for 1%)
     - Stop_Loss_Distance: |Entry_Price - Stop_Loss| / Entry_Price (as percentage)
+
+    Thread Safety:
+    - Uses asyncio.Lock to protect config access during concurrent updates
+    - Config updates are atomic (replace entire config object)
     """
 
     def __init__(self, config: RiskConfig, take_profit_config: Optional[TakeProfitConfig] = None):
@@ -43,7 +52,8 @@ class RiskCalculator:
             config: Risk configuration
             take_profit_config: Optional take profit configuration (uses default if not provided)
         """
-        self.config = config
+        self._config_lock = asyncio.Lock()
+        self._config = config
         self.take_profit_config = take_profit_config or self._get_default_take_profit_config()
         self._precision = Decimal("0.00000001")  # 8 decimal places for crypto
 
@@ -77,7 +87,7 @@ class RiskCalculator:
 
         return self._quantize_price(stop_loss, kline.close)
 
-    def calculate_position_size(
+    async def calculate_position_size(
         self,
         account: AccountSnapshot,
         entry_price: Decimal,
@@ -104,13 +114,21 @@ class RiskCalculator:
         Returns:
             Tuple of (position_size, leverage_to_use)
         """
-        logger.debug(f"仓位计算：balance={account.total_balance}, risk={self.config.max_loss_percent}")
+        # Read config under lock protection
+        async with self._config_lock:
+            max_loss_percent = self._config.max_loss_percent
+            max_leverage = self._config.max_leverage
+            max_total_exposure = self._config.max_total_exposure
+
+        logger.debug(f"仓位计算：balance={account.total_balance}, available={account.available_balance}, risk={max_loss_percent}")
 
         # Handle zero/negative balance
         if account.total_balance <= Decimal(0):
+            logger.warning(f"[RISK_CALC] position_size=0: total_balance <= 0 ({account.total_balance})")
             return Decimal(0), 1
 
         if account.available_balance <= Decimal(0):
+            logger.warning(f"[RISK_CALC] position_size=0: available_balance <= 0 ({account.available_balance})")
             return Decimal(0), 1
 
         # Step 1: Calculate current total exposure from all positions
@@ -128,44 +146,80 @@ class RiskCalculator:
         # Step 3: Calculate available exposure room
         available_exposure = max(
             Decimal(0),
-            self.config.max_total_exposure - current_exposure_ratio
+            max_total_exposure - current_exposure_ratio
         )
 
+        # 诊断日志：追踪敞口状态
+        if len(account.positions) > 0 or available_exposure == 0:
+            logger.info(f"[RISK_CALC_EXPOSURE] positions={len(account.positions)}, total_value={total_position_value:.2f}, balance={account.total_balance:.2f}, ratio={current_exposure_ratio:.4f}, max={max_total_exposure}, available={available_exposure}")
+
         # Step 4: Calculate base risk amount using available balance
-        base_risk_amount = account.available_balance * self.config.max_loss_percent
+        base_risk_amount = account.available_balance * max_loss_percent
 
-        # Step 5: Apply exposure limit - reduce risk if approaching limit
-        exposure_limited_risk = account.available_balance * available_exposure
-        risk_amount = min(base_risk_amount, exposure_limited_risk)
-
-        # If no risk budget available, return zero position
-        if risk_amount <= Decimal(0):
-            return Decimal(0), 1
-
-        # Step 6: Calculate stop-loss distance (absolute price difference)
+        # Step 5: Calculate stop-loss distance (absolute price difference)
         stop_distance = abs(entry_price - stop_loss)
         if stop_distance == Decimal(0):
             from .exceptions import DataQualityWarning
             raise DataQualityWarning("Stop loss distance is zero (doji candle)", "W-001")
 
-        # Step 7: Calculate position size: risk_amount / stop_distance
-        position_size = risk_amount / stop_distance
+        # ============================================================
+        # Three-layer independent constraints (correct implementation)
+        # ============================================================
 
-        # Step 8: Apply leverage cap
-        max_position_value = account.available_balance * Decimal(self.config.max_leverage)
-        max_position_size = max_position_value / entry_price
-        position_size = min(position_size, max_position_size)
+        # Layer 1: Risk constraint → base position size from risk budget
+        # Position size that respects max_loss_percent
+        risk_based_position_size = base_risk_amount / stop_distance
 
-        # Step 9: Calculate leverage to use
+        # Layer 2: Exposure constraint → limit total position value
+        # Remaining exposure room = max_exposure - current_exposure
+        remaining_exposure_value = max(
+            Decimal(0),
+            account.total_balance * max_total_exposure - total_position_value
+        )
+        exposure_based_position_size = remaining_exposure_value / entry_price
+
+        # Layer 3: Leverage constraint → limit per-position amplification
+        # Maximum position value from leverage cap
+        max_position_value = account.available_balance * Decimal(max_leverage)
+        leverage_based_position_size = max_position_value / entry_price
+
+        # Apply all three constraints (most restrictive wins)
+        position_size = min(
+            risk_based_position_size,
+            exposure_based_position_size,
+            leverage_based_position_size
+        )
+
+        # Diagnostic logging for constraint analysis
+        if len(account.positions) > 0 or available_exposure == 0:
+            logger.info(
+                f"[RISK_CALC_CONSTRAINTS] "
+                f"risk_based={risk_based_position_size:.6f}, "
+                f"exposure_based={exposure_based_position_size:.6f}, "
+                f"leverage_based={leverage_based_position_size:.6f}, "
+                f"selected={position_size:.6f}"
+            )
+
+        # If no position allowed, return zero
+        if position_size <= Decimal(0):
+            logger.warning(
+                f"[RISK_CALC] position_size=0: "
+                f"risk_based={risk_based_position_size}, "
+                f"exposure_based={exposure_based_position_size}, "
+                f"leverage_based={leverage_based_position_size}"
+            )
+            return Decimal(0), 1
+
+        # Step 6: Calculate leverage to use
         position_value = position_size * entry_price
         leverage_required = position_value / account.available_balance if account.available_balance > 0 else Decimal(1)
         leverage_to_use = min(
             int(leverage_required.quantize(Decimal("1"), rounding=ROUND_DOWN)) + 1,
-            self.config.max_leverage,
+            max_leverage,
         )
         leverage_to_use = max(leverage_to_use, 1)
 
-        # Step 10: Quantize to reasonable precision
+        # Step 7: Quantize to reasonable precision
         position_size = position_size.quantize(self._precision, rounding=ROUND_DOWN)
 
         return position_size, leverage_to_use
@@ -257,7 +311,7 @@ class RiskCalculator:
 
         return levels
 
-    def generate_risk_info(
+    async def generate_risk_info(
         self,
         account: AccountSnapshot,
         position_size: Decimal,
@@ -282,12 +336,16 @@ class RiskCalculator:
         stop_distance = abs(entry_price - stop_loss)
         actual_risk = stop_distance * position_size
 
+        # Read config under lock protection
+        async with self._config_lock:
+            max_loss_percent = self._config.max_loss_percent
+
         # Format as percentage
-        loss_percent = self.config.max_loss_percent * Decimal(100)
+        loss_percent = max_loss_percent * Decimal(100)
 
         return f"Risk {loss_percent:.2f}% = {actual_risk:.2f} USDT"
 
-    def calculate_signal_result(
+    async def calculate_signal_result(
         self,
         kline: KlineData,
         account: AccountSnapshot,
@@ -295,7 +353,7 @@ class RiskCalculator:
         tags: List[Dict[str, str]] = None,
         kline_timestamp: int = 0,
         strategy_name: str = "unknown",
-        score: float = 0.0,
+        score: Decimal = Decimal("0.0"),
     ) -> SignalResult:
         """
         Calculate complete signal result with risk parameters.
@@ -319,12 +377,12 @@ class RiskCalculator:
         stop_loss = self.calculate_stop_loss(kline, direction)
 
         # Calculate position size and leverage
-        position_size, leverage = self.calculate_position_size(
+        position_size, leverage = await self.calculate_position_size(
             account, entry_price, stop_loss, direction
         )
 
         # Generate risk info
-        risk_info = self.generate_risk_info(
+        risk_info = await self.generate_risk_info(
             account, position_size, entry_price, stop_loss, direction
         )
 
@@ -350,3 +408,26 @@ class RiskCalculator:
             score=score,
             take_profit_levels=take_profit_levels,
         )
+
+    async def update_config(self, new_config: RiskConfig) -> None:
+        """
+        Atomically update the risk configuration.
+
+        This method is thread-safe and protects against concurrent reads.
+
+        Args:
+            new_config: New risk configuration to use
+        """
+        async with self._config_lock:
+            self._config = new_config
+        logger.info("RiskCalculator configuration updated")
+
+    async def get_config(self) -> RiskConfig:
+        """
+        Get a copy of the current risk configuration.
+
+        Returns:
+            Copy of current RiskConfig
+        """
+        async with self._config_lock:
+            return self._config

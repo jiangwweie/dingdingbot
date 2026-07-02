@@ -119,6 +119,7 @@ class FilterContext:
     current_trend: Optional[TrendDirection] = None  # Current timeframe EMA trend
     current_timeframe: str = ""  # Current timeframe being processed
     kline: Optional[KlineData] = None  # Current K-line (for advanced filters)
+    current_price: Optional[Decimal] = None  # Current K-line close price (for attribution)
 
 
 # ============================================================
@@ -131,9 +132,10 @@ class EmaTrendFilterDynamic(FilterBase):
     Stateful: Maintains EMA calculators per symbol/timeframe.
     """
 
-    def __init__(self, period: int = 60, enabled: bool = True):
+    def __init__(self, period: int = 60, enabled: bool = True, min_distance_pct: Decimal = Decimal('0')):
         self._period = period
         self._enabled = enabled
+        self._min_distance_pct = min_distance_pct  # 最小距离阈值（横盘过滤）
         self._ema_calculators: Dict[str, EMACalculator] = {}  # key: "symbol:timeframe"
 
     @property
@@ -166,7 +168,13 @@ class EmaTrendFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "enabled": False,
+                }
             )
 
         current_trend = context.current_trend
@@ -176,7 +184,51 @@ class EmaTrendFilterDynamic(FilterBase):
                 passed=False,
                 reason="ema_data_not_ready",
                 expected="valid_ema_trend",
-                actual="no_data"
+                actual="no_data",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "ema_value": None,
+                    "trend_direction": None,
+                    # Attribution fields
+                    "price": float(context.current_price) if context.current_price is not None else None,
+                    "distance_pct": None,
+                }
+            )
+
+        # Get EMA value and compute distance for attribution metadata
+        ema_value = None
+        current_price = context.current_price
+        if current_price is None and context.kline is not None:
+            current_price = context.kline.close
+        if context.kline is not None and context.current_timeframe:
+            key = f"{context.kline.symbol}:{context.current_timeframe}"
+            if key in self._ema_calculators:
+                ema_value = self._ema_calculators[key].value
+        distance_pct = abs(current_price - ema_value) / ema_value if ema_value is not None and current_price is not None else None
+
+        # 距离阈值检查（横盘过滤）
+        # 价格与 EMA 距离过近 = 横盘震荡，信号无效
+        if (self._min_distance_pct > 0
+            and distance_pct is not None
+            and Decimal(str(distance_pct)) < self._min_distance_pct):
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="ema_distance_too_small",
+                expected=f"distance >= {self._min_distance_pct}",
+                actual=f"distance = {distance_pct:.4f}",
+                metadata={
+                    "filter_name": "ema_trend",
+                    "filter_type": "ema_trend",
+                    "period": self._period,
+                    "trend_direction": current_trend.value if current_trend else None,
+                    "price": float(current_price) if current_price is not None else None,
+                    "ema_value": float(ema_value) if ema_value is not None else None,
+                    "distance_pct": float(distance_pct),
+                    "min_distance_pct": float(self._min_distance_pct),
+                }
             )
 
         # Check if pattern direction matches trend
@@ -187,7 +239,18 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=True,
                     reason="trend_match",
                     expected="bullish",
-                    actual="bullish"
+                    actual="bullish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -195,7 +258,18 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=False,
                     reason="bearish_trend_blocks_long",
                     expected="bullish",
-                    actual="bearish"
+                    actual="bearish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
+                    }
                 )
         else:  # SHORT
             if current_trend == TrendDirection.BEARISH:
@@ -204,7 +278,18 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=True,
                     reason="trend_match",
                     expected="bearish",
-                    actual="bearish"
+                    actual="bearish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -212,7 +297,18 @@ class EmaTrendFilterDynamic(FilterBase):
                     passed=False,
                     reason="bullish_trend_blocks_short",
                     expected="bearish",
-                    actual="bullish"
+                    actual="bullish",
+                    metadata={
+                        "filter_name": "ema_trend",
+                        "filter_type": "ema_trend",
+                        "period": self._period,
+                        "trend_direction": current_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "price": float(current_price) if current_price is not None else None,
+                        "ema_value": float(ema_value) if ema_value is not None else None,
+                        "distance_pct": float(distance_pct) if distance_pct is not None else None,
+                    }
                 )
 
 
@@ -259,11 +355,27 @@ class MtfFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "enabled": False,
+                }
             )
 
         current_tf = context.current_timeframe
         higher_tf = self._timeframe_map.get(current_tf)
+
+        # Compute attribution fields from higher timeframe trends
+        higher_tf_trends = context.higher_tf_trends
+        pattern_dir = pattern.direction
+        if pattern_dir == Direction.LONG:
+            aligned_count = sum(1 for t in higher_tf_trends.values() if t == TrendDirection.BULLISH)
+        else:
+            aligned_count = sum(1 for t in higher_tf_trends.values() if t == TrendDirection.BEARISH)
+        total_count = len(higher_tf_trends)
+        # Serialize trends for JSON compatibility
+        higher_tf_trends_serialized = {k: v.value for k, v in higher_tf_trends.items()}
 
         if higher_tf is None:
             # No higher timeframe available (e.g., 1w)
@@ -271,7 +383,17 @@ class MtfFilterDynamic(FilterBase):
                 node_name=self.name,
                 passed=True,
                 reason="no_higher_timeframe",
-                metadata={"current_timeframe": current_tf}
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "current_timeframe": current_tf,
+                    "higher_timeframe": None,
+                    "higher_trend": None,
+                    # Attribution fields
+                    "higher_tf_trends": higher_tf_trends_serialized,
+                    "aligned_count": aligned_count,
+                    "total_count": total_count,
+                }
             )
 
         higher_tf_trend = context.higher_tf_trends.get(higher_tf)
@@ -282,7 +404,17 @@ class MtfFilterDynamic(FilterBase):
                 reason="higher_tf_data_unavailable",
                 expected=f"trend_data_for_{higher_tf}",
                 actual="no_data",
-                metadata={"higher_timeframe": higher_tf}
+                metadata={
+                    "filter_name": "mtf",
+                    "filter_type": "mtf",
+                    "current_timeframe": current_tf,
+                    "higher_timeframe": higher_tf,
+                    "higher_trend": None,
+                    # Attribution fields
+                    "higher_tf_trends": higher_tf_trends_serialized,
+                    "aligned_count": aligned_count,
+                    "total_count": total_count,
+                }
             )
 
         # Check if signal direction matches higher timeframe trend
@@ -294,7 +426,18 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_confirmed_bullish",
                     expected="bullish",
                     actual="bullish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -303,7 +446,18 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_rejected_bearish_higher_tf",
                     expected="bullish",
                     actual="bearish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
+                    }
                 )
         else:  # SHORT
             if higher_tf_trend == TrendDirection.BEARISH:
@@ -313,7 +467,18 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_confirmed_bearish",
                     expected="bearish",
                     actual="bearish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
+                    }
                 )
             else:
                 return TraceEvent(
@@ -322,7 +487,18 @@ class MtfFilterDynamic(FilterBase):
                     reason="mtf_rejected_bullish_higher_tf",
                     expected="bearish",
                     actual="bullish",
-                    metadata={"higher_timeframe": higher_tf, "higher_trend": higher_tf_trend.value}
+                    metadata={
+                        "filter_name": "mtf",
+                        "filter_type": "mtf",
+                        "current_timeframe": current_tf,
+                        "higher_timeframe": higher_tf,
+                        "higher_trend": higher_tf_trend.value,
+                        "pattern_direction": pattern.direction.value,
+                        # Attribution fields
+                        "higher_tf_trends": higher_tf_trends_serialized,
+                        "aligned_count": aligned_count,
+                        "total_count": total_count,
+                    }
                 )
 
 
@@ -336,9 +512,10 @@ class AtrFilterDynamic(FilterBase):
     Stateful: Maintains ATR calculation per symbol/timeframe using Wilder's smoothing method.
     """
 
-    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), enabled: bool = False):
+    def __init__(self, period: int = 14, min_atr_ratio: Decimal = Decimal("0.001"), max_atr_ratio: Optional[Decimal] = None, enabled: bool = False):
         self._period = period
         self._min_atr_ratio = min_atr_ratio
+        self._max_atr_ratio = max_atr_ratio
         self._enabled = enabled
         # key: "symbol:timeframe", value: {"tr_values": List[Decimal], "atr": Optional[Decimal], "prev_close": Optional[Decimal]}
         self._atr_state: Dict[str, Dict[str, Any]] = {}
@@ -415,7 +592,12 @@ class AtrFilterDynamic(FilterBase):
             return TraceEvent(
                 node_name=self.name,
                 passed=True,
-                reason="filter_disabled"
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
+                    "enabled": False,
+                }
             )
 
         kline = context.kline
@@ -424,7 +606,11 @@ class AtrFilterDynamic(FilterBase):
                 node_name=self.name,
                 passed=False,
                 reason="kline_data_missing",
-                metadata={"error": "kline is None"}
+                metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
+                    "error": "kline is None",
+                }
             )
 
         atr = self._get_atr(kline.symbol, kline.timeframe)
@@ -435,9 +621,12 @@ class AtrFilterDynamic(FilterBase):
                 passed=False,
                 reason="atr_data_not_ready",
                 metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
                     "symbol": kline.symbol,
                     "timeframe": kline.timeframe,
                     "required_period": self._period,
+                    "atr_value": None,
                 }
             )
 
@@ -451,48 +640,297 @@ class AtrFilterDynamic(FilterBase):
                 passed=False,
                 reason="insufficient_volatility",
                 metadata={
+                    "filter_name": "atr_volatility",
+                    "filter_type": "atr_volatility",
                     "candle_range": float(candle_range),
-                    "atr": float(atr),
+                    "atr_value": float(atr),
                     "min_required": float(min_range),
-                    "ratio": float(candle_range / atr),
+                    "volatility_ratio": float(candle_range / atr),
+                    "min_atr_ratio": float(self._min_atr_ratio),
                 }
             )
+
+        # 新增：过滤高 ATR 环境（ATR/price 超过阈值 → 噪声比 SL 大，止损无效）
+        if self._max_atr_ratio is not None:
+            atr_pct = atr / kline.close
+            if atr_pct > self._max_atr_ratio:
+                return TraceEvent(
+                    node_name=self.name,
+                    passed=False,
+                    reason="atr_too_high",
+                    metadata={
+                        "filter_name": "atr_volatility",
+                        "filter_type": "atr_volatility",
+                        "atr_value": float(atr),
+                        "atr_pct_of_price": float(atr_pct),
+                        "max_atr_ratio": float(self._max_atr_ratio),
+                    }
+                )
 
         return TraceEvent(
             node_name=self.name,
             passed=True,
             reason="volatility_sufficient",
             metadata={
+                "filter_name": "atr_volatility",
+                "filter_type": "atr_volatility",
                 "candle_range": float(candle_range),
-                "atr": float(atr),
-                "ratio": float(candle_range / atr),
+                "atr_value": float(atr),
+                "volatility_ratio": float(candle_range / atr),
+                "min_atr_ratio": float(self._min_atr_ratio),
             }
         )
 
 
 # ============================================================
-# Placeholder Filters for newly requested React integrations
+# Donchian Distance Filter - Stateful
+# ============================================================
+class DonchianDistanceFilterDynamic(FilterBase):
+    """
+    Donchian distance filter for filtering signals too close to channel boundaries.
+
+    Stateful: Maintains rolling high/low windows per symbol/timeframe.
+    Purpose: Avoid Pinbar signals near Donchian channel extremes (toxic states).
+
+    Lifecycle Assumptions:
+        1. update_state(kline) is called BEFORE check() for every bar
+        2. check() excludes the last bar in rolling window (current K-line) to prevent look-ahead
+        3. If history < lookback+1 bars, returns passed=True with reason="insufficient_history" (safe degradation)
+
+    Look-ahead Prevention:
+        - Current K-line is appended to window in update_state()
+        - check() uses only previous N bars: window[-(lookback+1):-1]
+        - This ensures Donchian high/low are computed from completed bars only
+    """
+
+    def __init__(
+        self,
+        lookback: int = 20,
+        max_distance_to_high_pct: Optional[Decimal] = None,
+        max_distance_to_low_pct: Optional[Decimal] = None,
+        enabled: bool = True
+    ):
+        """
+        Initialize Donchian distance filter.
+
+        Args:
+            lookback: Number of bars for Donchian channel (default 20, must be >= 1)
+            max_distance_to_high_pct: Max distance to Donchian high for LONG signals (e.g., -0.016809, must be <= 0)
+            max_distance_to_low_pct: Max distance to Donchian low for SHORT signals (must be <= 0)
+            enabled: Whether filter is active (default True, follows project convention)
+
+        Raises:
+            ValueError: If lookback < 1 or distance thresholds are positive
+
+        Note:
+            Configuration must explicitly set enabled=True/False. The default True follows
+            project convention (FilterConfig.enabled defaults to True).
+        """
+        # Validate lookback
+        if lookback < 1:
+            raise ValueError(f"lookback must be >= 1, got {lookback}")
+
+        # Validate distance thresholds (must be <= 0)
+        if max_distance_to_high_pct is not None and max_distance_to_high_pct > 0:
+            raise ValueError(
+                f"max_distance_to_high_pct must be <= 0 (distance is always negative or zero), "
+                f"got {max_distance_to_high_pct}"
+            )
+        if max_distance_to_low_pct is not None and max_distance_to_low_pct > 0:
+            raise ValueError(
+                f"max_distance_to_low_pct must be <= 0 (distance is always negative or zero), "
+                f"got {max_distance_to_low_pct}"
+            )
+
+        self._lookback = lookback
+        self._max_distance_to_high_pct = max_distance_to_high_pct
+        self._max_distance_to_low_pct = max_distance_to_low_pct
+        self._enabled = enabled
+        # key: "symbol:timeframe", value: {"highs": List[Decimal], "lows": List[Decimal]}
+        self._state: Dict[str, Dict[str, List[Decimal]]] = {}
+
+    @property
+    def name(self) -> str:
+        return "donchian_distance"
+
+    @property
+    def is_stateful(self) -> bool:
+        return True
+
+    def update_state(self, kline: KlineData, symbol: str, timeframe: str) -> None:
+        """
+        Update rolling high/low windows for every kline.
+
+        Maintains lookback+1 bars to exclude current bar in check().
+        """
+        key = f"{symbol}:{timeframe}"
+        if key not in self._state:
+            self._state[key] = {"highs": [], "lows": []}
+
+        state = self._state[key]
+        state["highs"].append(kline.high)
+        state["lows"].append(kline.low)
+
+        # Keep only lookback+1 bars (current + previous N)
+        if len(state["highs"]) > self._lookback + 1:
+            state["highs"] = state["highs"][-(self._lookback + 1):]
+            state["lows"] = state["lows"][-(self._lookback + 1):]
+
+    def get_current_trend(self, kline: KlineData, symbol: str, timeframe: str) -> Optional[TrendDirection]:
+        """No-op: Donchian filter doesn't track trend."""
+        return None
+
+    def check(self, pattern: PatternResult, context: FilterContext) -> TraceEvent:
+        """
+        Check if signal is too close to Donchian channel boundary.
+
+        Look-ahead prevention: Excludes current K-line from Donchian calculation.
+        Only uses previous N bars' high/low values.
+        """
+        if not self._enabled:
+            return TraceEvent(
+                node_name=self.name,
+                passed=True,
+                reason="filter_disabled",
+                metadata={
+                    "filter_name": "donchian_distance",
+                    "filter_type": "donchian_distance",
+                    "enabled": False,
+                }
+            )
+
+        kline = context.kline
+        if kline is None:
+            return TraceEvent(
+                node_name=self.name,
+                passed=False,
+                reason="kline_data_missing",
+                metadata={
+                    "filter_name": "donchian_distance",
+                    "filter_type": "donchian_distance",
+                    "error": "kline is None",
+                }
+            )
+
+        key = f"{kline.symbol}:{context.current_timeframe}"
+        state = self._state.get(key)
+
+        # Need at least lookback+1 bars (current + previous N)
+        if state is None or len(state["highs"]) < self._lookback + 1:
+            return TraceEvent(
+                node_name=self.name,
+                passed=True,
+                reason="insufficient_history",
+                metadata={
+                    "filter_name": "donchian_distance",
+                    "filter_type": "donchian_distance",
+                    "symbol": kline.symbol,
+                    "timeframe": context.current_timeframe,
+                    "required_bars": self._lookback + 1,
+                    "available_bars": len(state["highs"]) if state else 0,
+                }
+            )
+
+        # P0: Look-ahead prevention - exclude current bar (last element)
+        # Use only previous lookback bars for Donchian calculation
+        historical_highs = state["highs"][-(self._lookback + 1):-1]
+        historical_lows = state["lows"][-(self._lookback + 1):-1]
+
+        dc_high = max(historical_highs)
+        dc_low = min(historical_lows)
+
+        current_price = kline.close
+
+        # LONG signal: check distance to Donchian high
+        if pattern.direction == Direction.LONG and self._max_distance_to_high_pct is not None:
+            # Distance = (close - dc_high) / dc_high, always <= 0
+            distance = (current_price - dc_high) / dc_high
+
+            # If distance is too close to high (less negative than threshold), filter out
+            if distance >= self._max_distance_to_high_pct:
+                return TraceEvent(
+                    node_name=self.name,
+                    passed=False,
+                    reason="too_close_to_donchian_high",
+                    expected=f"distance < {self._max_distance_to_high_pct}",
+                    actual=f"distance = {distance:.6f}",
+                    metadata={
+                        "filter_name": "donchian_distance",
+                        "filter_type": "donchian_distance",
+                        "signal_direction": "LONG",
+                        "current_price": float(current_price),
+                        "donchian_high": float(dc_high),
+                        "distance_pct": float(distance),
+                        "threshold": float(self._max_distance_to_high_pct),
+                        "lookback": self._lookback,
+                    }
+                )
+
+        # SHORT signal: check distance to Donchian low
+        if pattern.direction == Direction.SHORT and self._max_distance_to_low_pct is not None:
+            # Distance = (dc_low - close) / dc_low, always <= 0
+            distance = (dc_low - current_price) / dc_low
+
+            # If distance is too close to low (less negative than threshold), filter out
+            if distance >= self._max_distance_to_low_pct:
+                return TraceEvent(
+                    node_name=self.name,
+                    passed=False,
+                    reason="too_close_to_donchian_low",
+                    expected=f"distance < {self._max_distance_to_low_pct}",
+                    actual=f"distance = {distance:.6f}",
+                    metadata={
+                        "filter_name": "donchian_distance",
+                        "filter_type": "donchian_distance",
+                        "signal_direction": "SHORT",
+                        "current_price": float(current_price),
+                        "donchian_low": float(dc_low),
+                        "distance_pct": float(distance),
+                        "threshold": float(self._max_distance_to_low_pct),
+                        "lookback": self._lookback,
+                    }
+                )
+
+        # Signal passes filter
+        return TraceEvent(
+            node_name=self.name,
+            passed=True,
+            reason="donchian_distance_ok",
+            metadata={
+                "filter_name": "donchian_distance",
+                "filter_type": "donchian_distance",
+                "signal_direction": pattern.direction.value,
+                "current_price": float(current_price),
+                "donchian_high": float(dc_high),
+                "donchian_low": float(dc_low),
+                "lookback": self._lookback,
+            }
+        )
+
+
+# ============================================================
+# Placeholder filters for newly requested query integrations
 # ============================================================
 class PlaceholderFilter(FilterBase):
-    """Generic placeholder for unimplemented UI filters."""
+    """Generic placeholder for unimplemented query filters."""
     def __init__(self, name: str, enabled: bool = True, **kwargs):
         self._name_val = name
         self._enabled = enabled
-    
+
     @property
     def name(self) -> str:
         return self._name_val
-        
+
     @property
     def is_stateful(self) -> bool:
         return False
-        
+
     def update_state(self, kline, symbol, timeframe) -> None:
         pass
-        
+
     def get_current_trend(self, kline, symbol, timeframe):
         return None
-        
+
     def check(self, pattern, context) -> TraceEvent:
         return TraceEvent(node_name=self.name, passed=True, reason="placeholder_auto_pass")
 
@@ -510,6 +948,7 @@ class FilterFactory:
         "ema_trend": EmaTrendFilterDynamic,
         "mtf": MtfFilterDynamic,
         "atr": AtrFilterDynamic,
+        "donchian_distance": DonchianDistanceFilterDynamic,
         "volume_surge": lambda **kw: PlaceholderFilter("volume_surge", **kw),
         "volatility_filter": lambda **kw: PlaceholderFilter("volatility_filter", **kw),
         "time_filter": lambda **kw: PlaceholderFilter("time_filter", **kw),
@@ -517,12 +956,13 @@ class FilterFactory:
     }
 
     @classmethod
-    def create(cls, filter_config: Any) -> FilterBase:
+    def create(cls, filter_config: Any, resolved_params: Optional[Any] = None) -> FilterBase:
         """
         Create a filter instance from config.
 
         Args:
             filter_config: FilterConfig Pydantic model or dict with 'type' key
+            resolved_params: Optional ResolvedBacktestParams for parameter injection (Phase 8.1)
 
         Returns:
             FilterBase instance
@@ -546,11 +986,34 @@ class FilterFactory:
 
         filter_class = cls._registry[filter_type]
 
+        # Phase 8.1: resolved_params 可覆盖过滤器参数
+        # 优先级：resolved_params > filter_config.params > 默认值
+        def get_param(key: str, default, resolved_key: str = None):
+            """获取参数，支持 resolved_params 覆盖"""
+            if resolved_params:
+                # 映射 key 到 resolved_params 字段
+                key_mapping = {
+                    'min_distance_pct': 'min_distance_pct',
+                    'period': 'ema_period',  # EMA period
+                    'max_atr_ratio': 'max_atr_ratio',
+                    'min_atr_ratio': 'min_atr_ratio',  # 注意：resolved_params 没有 min_atr_ratio
+                }
+                resolved_key = key_mapping.get(key, key)
+                resolved_val = getattr(resolved_params, resolved_key, None)
+                if resolved_val is not None:
+                    return resolved_val
+            return params.get(key, default)
+
         # Extract relevant params based on filter class
         if filter_type in ("ema", "ema_trend"):
+            min_dist = get_param('min_distance_pct', 0)
+            if not isinstance(min_dist, Decimal):
+                min_dist = Decimal(str(min_dist))
+            period = get_param('period', 60)
             return filter_class(
-                period=params.get('period', 60),
-                enabled=enabled
+                period=period,
+                enabled=enabled,
+                min_distance_pct=min_dist,
             )
         elif filter_type == "mtf":
             return filter_class(
@@ -558,9 +1021,30 @@ class FilterFactory:
                 timeframe_map=params.get('timeframe_map')
             )
         elif filter_type == "atr":
+            min_atr_ratio = params.get('min_atr_ratio', Decimal("0.001"))
+            if not isinstance(min_atr_ratio, Decimal):
+                min_atr_ratio = Decimal(str(min_atr_ratio))
+            # max_atr_ratio 可被 resolved_params 覆盖
+            max_atr_ratio = get_param('max_atr_ratio', None)
+            if max_atr_ratio is not None and not isinstance(max_atr_ratio, Decimal):
+                max_atr_ratio = Decimal(str(max_atr_ratio))
             return filter_class(
                 period=params.get('period', 14),
-                min_atr_ratio=params.get('min_atr_ratio', Decimal("0.001")),
+                min_atr_ratio=min_atr_ratio,
+                max_atr_ratio=max_atr_ratio,
+                enabled=enabled
+            )
+        elif filter_type == "donchian_distance":
+            max_dist_high = params.get('max_distance_to_high_pct')
+            if max_dist_high is not None and not isinstance(max_dist_high, Decimal):
+                max_dist_high = Decimal(str(max_dist_high))
+            max_dist_low = params.get('max_distance_to_low_pct')
+            if max_dist_low is not None and not isinstance(max_dist_low, Decimal):
+                max_dist_low = Decimal(str(max_dist_low))
+            return filter_class(
+                lookback=params.get('lookback', 20),
+                max_distance_to_high_pct=max_dist_high,
+                max_distance_to_low_pct=max_dist_low,
                 enabled=enabled
             )
         elif filter_type in ["volume_surge", "volatility_filter", "time_filter", "price_action"]:
@@ -569,17 +1053,18 @@ class FilterFactory:
         raise ValueError(f"Failed to create filter of type: {filter_type}")
 
     @classmethod
-    def create_chain(cls, filter_configs: List[Any]) -> List[FilterBase]:
+    def create_chain(cls, filter_configs: List[Any], resolved_params: Optional[Any] = None) -> List[FilterBase]:
         """
         Create a chain of filters from config list.
 
         Args:
             filter_configs: List of FilterConfig models or dicts
+            resolved_params: Optional ResolvedBacktestParams for parameter injection (Phase 8.1)
 
         Returns:
             List of FilterBase instances
         """
-        return [cls.create(config) for config in filter_configs]
+        return [cls.create(config, resolved_params=resolved_params) for config in filter_configs]
 
     @classmethod
     def register_filter(cls, name: str, filter_class: type):

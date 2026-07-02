@@ -1,0 +1,167 @@
+{
+  "current_strategy_groups": {
+    "FBS-001": {
+      "mode": "armed_observation",
+      "reason": "Funding/basis stress remains observable, but requires stricter derivatives facts before any promotion.",
+      "tier": "L3"
+    },
+    "MPG-001": {
+      "mode": "tiny_real_order_eligible",
+      "reason": "First bounded-aggressive live-order pilot lane; use Owner-allocated subaccount profile; no expansion of symbol, side, notional, leverage, or max exposure beyond the selected profile.",
+      "tier": "L4"
+    },
+    "CPM-RO-001": {
+      "mode": "armed_observation",
+      "reason": "Standalone CPM-LONG pullback-reclaim trial StrategyGroup; may observe and run non-executing rehearsal, but real submit still requires fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "tier": "L3"
+    },
+    "PMR-001": {
+      "mode": "observe_only",
+      "reason": "Precious-metal overlay remains observe-only until role/session/mark facts are consistently ready.",
+      "tier": "L1"
+    },
+    "SOR-001": {
+      "mode": "conditional_armed_observation",
+      "reason": "Session-window observer; armed only inside its session/structure conditions.",
+      "tier": "L3"
+    },
+    "TEQ-001": {
+      "mode": "shadow_candidate",
+      "reason": "Equity-like perpetual momentum may prepare candidate evidence, but should not compete with the first MPG real-order closure.",
+      "tier": "L2"
+    },
+    "BTPC-001": {
+      "mode": "shadow_candidate",
+      "reason": "Passed main-control L2 intake dry-run; may prepare non-executing shadow-candidate evidence only and remains outside L4 real-order scope.",
+      "tier": "L2"
+    }
+  },
+  "l4_real_order_requirements": [
+    "selected_strategygroup_scope",
+    "allocated_subaccount_profile_boundary",
+    "fresh_signal",
+    "required_facts_readiness",
+    "candidate_authorization_evidence",
+    "action_time_finalgate",
+    "official_operation_layer",
+    "exchange_native_protection",
+    "post_submit_finalize",
+    "reconciliation",
+    "budget_settlement",
+    "review_capture"
+  ],
+  "last_updated": "2026-06-19",
+  "legacy_compatibility_notes": {
+    "tiny_real_order_eligible": "Legacy mode label retained for compatibility; it means allocated-subaccount bounded-aggressive real-order eligibility, not an instruction to reduce risk.",
+    "superseded_boundary_name": "The former tiny-boundary wording is retired. Current authority is allocated_subaccount_profile_boundary."
+  },
+  "new_strategy_group_defaults": {
+    "default_mode": "observe_only",
+    "default_tier": "L1",
+    "known_new_groups": {
+      "BRF": "L1",
+      "LSR": "L1",
+      "RBR": "L1",
+      "VCB": "L1"
+    },
+    "promotion_rule": "New StrategyGroups may move from L1 to L2 only after reviewed handoff intake and dry-run audit. They must not enter L4 until the first MPG allocated-subaccount real-order loop has closed or the Owner explicitly changes the selected live lane."
+  },
+  "not_execution_authority": true,
+  "not_finalgate_input": true,
+  "not_operation_layer_input": true,
+  "not_order_sizing_default": true,
+  "strategygroup_decision_review": {
+    "contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
+    "compatibility_path_retained": true,
+    "not_general_opportunity_log": true,
+    "not_promotion_authority_by_itself": true,
+    "required_row_fields": [
+      "strategy_group_id",
+      "tier",
+      "opportunity_type",
+      "decision",
+      "reason",
+      "required_next_evidence",
+      "authority_boundary",
+      "next_checkpoint"
+    ],
+    "tier_decision_inputs": [
+      "high_priority_no_action_or_would_enter_evidence",
+      "replay_coverage",
+      "required_facts_mapping",
+      "classifier_state",
+      "freshness_state",
+      "cost_or_edge_review",
+      "current_tier_policy"
+    ],
+    "allowed_decisions": [
+      "go_live",
+      "do_not_go_live",
+      "keep_observing",
+      "revise",
+      "park",
+      "kill",
+      "promote",
+      "block_for_safety"
+    ],
+    "one_current_row_per_strategy_group": true,
+    "raw_replay_samples_stay_lower_level": true,
+    "review_rows_are_not_submit_authority": true
+  },
+  "safety_invariants": {
+    "l4_still_requires_official_runtime_chain": true,
+    "no_strategy_group_directly_authorizes_real_submit": true,
+    "no_strategy_group_directly_defines_candidate_pipeline": true,
+    "no_strategy_group_directly_defines_finalgate": true,
+    "no_strategy_group_directly_defines_operation_layer": true
+  },
+  "schema": "brc.strategy_group_runtime_tier_policy.v1",
+  "status": "current_pilot_supplement",
+  "tier_definitions": {
+    "L0": {
+      "may_observe_market": false,
+      "may_place_real_order": false,
+      "may_prepare_shadow_candidate": false,
+      "may_reach_finalgate": false,
+      "may_reach_operation_layer": false,
+      "meaning": "Visible in the StrategyGroup catalog only; no runtime observation.",
+      "name": "catalog_only"
+    },
+    "L1": {
+      "may_observe_market": true,
+      "may_place_real_order": false,
+      "may_prepare_shadow_candidate": false,
+      "may_reach_finalgate": false,
+      "may_reach_operation_layer": false,
+      "meaning": "May record read-only observations and no-action evidence only.",
+      "name": "observe_only"
+    },
+    "L2": {
+      "may_observe_market": true,
+      "may_place_real_order": false,
+      "may_prepare_shadow_candidate": true,
+      "may_reach_finalgate": false,
+      "may_reach_operation_layer": false,
+      "meaning": "May prepare non-executing shadow candidate and authorization evidence after fresh signal and facts pass.",
+      "name": "shadow_candidate"
+    },
+    "L3": {
+      "may_observe_market": true,
+      "may_place_real_order": false,
+      "may_prepare_shadow_candidate": true,
+      "may_reach_finalgate": true,
+      "may_reach_operation_layer": false,
+      "meaning": "May run armed observation and action-time rehearsal, but cannot place a real order unless separately promoted to L4.",
+      "name": "armed_observation"
+    },
+    "L4": {
+      "may_observe_market": true,
+      "may_place_real_order": true,
+      "may_prepare_shadow_candidate": true,
+      "may_reach_finalgate": true,
+      "may_reach_operation_layer": true,
+      "meaning": "May place an allocated-subaccount bounded-aggressive real order after selected scope, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass. The legacy mode name is not a de-risking instruction.",
+      "name": "tiny_real_order_eligible"
+    }
+  }
+}

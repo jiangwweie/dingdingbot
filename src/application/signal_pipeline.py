@@ -8,14 +8,15 @@ Supports:
 - Async queue worker for non-blocking SQLite persistence
 """
 import asyncio
+import copy
 import time
 import json
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Optional, Dict, List, Any, Tuple, Callable, Awaitable
 from decimal import Decimal
 
 from src.domain.models import (
-    KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection,
-    StrategyDefinition, SignalAttempt, SignalStatus,
+    KlineData, SignalResult, AccountSnapshot, Direction, TrendDirection, OrderStrategy,
+    StrategyDefinition, SignalAttempt, SignalStatus, FilterResult,
 )
 from src.domain.strategy_engine import create_dynamic_runner
 from src.domain.risk_calculator import RiskCalculator, RiskConfig
@@ -48,7 +49,14 @@ class SignalPipeline:
         risk_config: RiskConfig,
         notification_service: Optional[NotificationService] = None,
         signal_repository: Optional[SignalRepository] = None,
+        signal_executor: Optional[Callable[[SignalResult, OrderStrategy], Awaitable[Any]]] = None,
         cooldown_seconds: int = 14400,  # Signal deduplication cooldown in seconds (default 4 hours)
+        runtime_strategy_definitions: Optional[List[StrategyDefinition]] = None,
+        runtime_allowed_directions: Optional[List[Direction]] = None,
+        runtime_mtf_ema_period: Optional[int] = None,
+        runtime_execution_strategy: Optional[OrderStrategy] = None,
+        runtime_risk_locked: bool = False,
+        strategy_signal_v2_observe_writer: Optional[Any] = None,
     ):
         """
         Initialize Signal Pipeline.
@@ -58,19 +66,34 @@ class SignalPipeline:
             risk_config: Risk configuration
             notification_service: Notification service instance
             signal_repository: Optional signal repository for persistence
+            signal_executor: Optional execution hook for fired signals
             cooldown_seconds: Signal deduplication cooldown period in seconds
+            runtime_strategy_definitions: Optional frozen runtime strategy definitions
+            runtime_allowed_directions: Optional runtime direction allowlist
+            runtime_mtf_ema_period: Optional frozen MTF EMA period
+            runtime_execution_strategy: Optional frozen execution OrderStrategy
+            runtime_risk_locked: If True, ConfigManager hot reload cannot replace risk_config
+            strategy_signal_v2_observe_writer: Optional observe-only writer for StrategySignalV2 snapshots
         """
         self._config_manager = config_manager
         self._risk_config = risk_config
+        self._runtime_risk_locked = runtime_risk_locked
+        self._runtime_strategy_definitions = runtime_strategy_definitions
+        self._runtime_allowed_directions = set(runtime_allowed_directions or [])
+        self._runtime_execution_strategy = runtime_execution_strategy
         self._notification_service = notification_service or get_notification_service()
         self._repository = signal_repository
+        self._signal_executor = signal_executor
+        self._strategy_signal_v2_observe_writer = strategy_signal_v2_observe_writer
         self._cooldown_seconds = cooldown_seconds
         self._status_tracker = SignalStatusTracker(signal_repository)
 
         # Queue configuration from core.yaml (S4-2)
-        self._queue_batch_size = config_manager.core_config.signal_pipeline.queue.batch_size
-        self._queue_flush_interval = config_manager.core_config.signal_pipeline.queue.flush_interval
-        self._queue_max_size = config_manager.core_config.signal_pipeline.queue.max_queue_size
+        # R3.1 fix: 使用同步方法获取配置副本
+        core_config = config_manager.get_core_config()
+        self._queue_batch_size = core_config.signal_pipeline.queue.batch_size
+        self._queue_flush_interval = core_config.signal_pipeline.queue.flush_interval
+        self._queue_max_size = core_config.signal_pipeline.queue.max_queue_size
 
         # Store K-line history per symbol/timeframe (for warmup on reload)
         self._kline_history: Dict[str, List[KlineData]] = {}
@@ -92,7 +115,8 @@ class SignalPipeline:
 
         # S3-1: MTF EMA indicators (one per symbol:timeframe combination)
         self._mtf_ema_indicators: Dict[str, EMACalculator] = {}
-        self._mtf_ema_period = config_manager.user_config.mtf_ema_period or 60
+        # R3.1 fix: 使用同步方法获取配置副本
+        self._mtf_ema_period = runtime_mtf_ema_period or config_manager.get_user_config_sync().mtf_ema_period or 60
 
         # Build dynamic strategy runner from config (uses _kline_history for warmup)
         self._runner = self._build_and_warmup_runner()
@@ -270,9 +294,11 @@ class SignalPipeline:
             return
 
         try:
+            # R10.3: Get current config version for traceability
+            config_version = str(self._config_manager.get_config_version())
             for attempt, symbol, timeframe in buffer:
-                await self._repository.save_attempt(attempt, symbol, timeframe)
-            logger.debug(f"Flushed {len(buffer)} attempts to database")
+                await self._repository.save_attempt(attempt, symbol, timeframe, config_version)
+            logger.debug(f"Flushed {len(buffer)} attempts to database (config_version={config_version})")
         except Exception as e:
             logger.error(f"Failed to flush attempts batch: {e}")
 
@@ -280,20 +306,63 @@ class SignalPipeline:
         """
         Observer callback for configuration hot-reload.
 
-        Called by ConfigManager when user.yaml is updated.
+        Called by ConfigManager when DB configuration is updated.
         Rebuilds the strategy runner and warms up with cached K-line history.
+        Updates _risk_config and _mtf_ema_period to reflect new configuration.
         """
-        logger.info("Configuration hot-reload triggered, rebuilding strategy runner...")
+        # 记录新 risk_config 详情
+        user_config_snapshot = await self._config_manager.get_user_config()
+        new_risk_config = user_config_snapshot.risk
+        logger.info(
+            f"[热重载] 开始热重载，新 risk_config: max_loss_percent={new_risk_config.max_loss_percent}, "
+            f"max_leverage={new_risk_config.max_leverage}"
+        )
 
         async with self._get_runner_lock():
-            # Step 1: Build new runner from updated config
+            # R3.1 fix: 使用 await 获取配置副本，而非直接引用
+            user_config = await self._config_manager.get_user_config()
+
+            # Step 1: Reload risk configuration (unless runtime profile owns it)
+            if self._runtime_risk_locked:
+                logger.info(
+                    "[热重载] Risk config 由 runtime profile 锁定，跳过 ConfigManager 覆盖"
+                )
+            else:
+                old_max_loss = self._risk_config.max_loss_percent
+                old_max_leverage = self._risk_config.max_leverage
+                self._risk_config = copy.deepcopy(user_config.risk)
+                logger.info(
+                    f"[热重载] Risk config 更新：max_loss_percent={old_max_loss}->{self._risk_config.max_loss_percent}, "
+                    f"max_leverage={old_max_leverage}->{self._risk_config.max_leverage}"
+                )
+
+            # Step 2: Reload MTF EMA period (S3-1 fix: _mtf_ema_period was stale on hot-reload)
+            old_mtf_ema_period = self._mtf_ema_period
+            if self._runtime_strategy_definitions is None:
+                self._mtf_ema_period = user_config.mtf_ema_period or 60
+            else:
+                logger.info(
+                    "[热重载] MTF EMA 周期由 runtime strategy 锁定，跳过 ConfigManager 覆盖"
+                )
+            if old_mtf_ema_period != self._mtf_ema_period:
+                logger.info(f"[热重载] MTF EMA 周期更新：{old_mtf_ema_period} -> {self._mtf_ema_period}")
+            else:
+                logger.info(f"[热重载] MTF EMA 周期保持不变：{self._mtf_ema_period}")
+
+            # Step 3: Rebuild MTF EMA indicators with new period (recreate all indicators)
+            old_indicator_count = len(self._mtf_ema_indicators)
+            self._mtf_ema_indicators.clear()
+            logger.info(f"[热重载] MTF EMA indicators 清空：移除 {old_indicator_count} 个缓存指标")
+
+            # Step 4: Build new runner from updated config
             self._runner = self._build_and_warmup_runner()
 
-            # Step 2: Clear stale cooldown cache (config params may have changed)
+            # Step 5: Clear stale cooldown cache (config params may have changed)
+            old_cache_size = len(self._signal_cooldown_cache)
             self._signal_cooldown_cache.clear()
-            logger.info("Signal cooldown cache cleared (stale cache prevention)")
+            logger.info(f"[热重载] Signal cooldown cache 清空：移除 {old_cache_size} 条缓存记录")
 
-            logger.info("Strategy runner rebuilt and warmup complete")
+            logger.info("[热重载] 策略 runner 重建完成，热重载流程结束")
 
     def _get_runner_lock(self) -> asyncio.Lock:
         """Get or create the runner lock."""
@@ -316,30 +385,95 @@ class SignalPipeline:
         Returns:
             DynamicStrategyRunner instance
         """
-        # Get active strategies from config
-        active_strategies = self._config_manager.user_config.active_strategies
-        core_config = self._config_manager.core_config
+        # R3.1 fix: 使用 get_user_config() 和 get_core_config() 获取副本
+        # 注意：这些是同步方法，在初始化时使用
+        active_strategies = (
+            self._runtime_strategy_definitions
+            if self._runtime_strategy_definitions is not None
+            else self._config_manager.get_user_config_sync().active_strategies
+        )
+        core_config = self._config_manager.get_core_config()
 
         # Build runner using factory function
         runner = create_dynamic_runner(active_strategies, core_config)
+        source = "runtime profile" if self._runtime_strategy_definitions is not None else "ConfigManager"
+        logger.info(f"Strategy runner 创建完成，来源={source}，激活策略数：{len(active_strategies)}")
 
         # Warmup: replay cached K-lines to restore EMA and other stateful indicators
         if self._kline_history:
             warmup_count = 0
             warmup_details = []
+            total_time_range_start = None
+            total_time_range_end = None
             for key, history in self._kline_history.items():
                 parts = key.split(":")
                 symbol = parts[0]
                 timeframe = parts[1]
                 count = len(history)
-                warmup_details.append(f"{symbol}:{timeframe}({count} bars)")
+
+                # 计算时间范围
+                if history:
+                    first_timestamp = history[0].timestamp
+                    last_timestamp = history[-1].timestamp
+                    if total_time_range_start is None or first_timestamp < total_time_range_start:
+                        total_time_range_start = first_timestamp
+                    if total_time_range_end is None or last_timestamp > total_time_range_end:
+                        total_time_range_end = last_timestamp
+                    time_range_str = f"time_range: {first_timestamp}-{last_timestamp}"
+                else:
+                    time_range_str = "time_range: N/A"
+
+                warmup_details.append(f"{symbol}:{timeframe}({count} bars, {time_range_str})")
                 for kline in history:
                     # The runner's update_state takes only kline, symbol/timeframe are extracted internally
                     runner.update_state(kline)
                     warmup_count += 1
 
-            logger.info(f"Runner warmup complete: {warmup_count} K-lines replayed from {len(warmup_details)} streams")
-            logger.debug(f"Warmup details: {', '.join(warmup_details)}")
+            # 格式化总时间范围
+            if total_time_range_start and total_time_range_end:
+                from datetime import datetime
+                start_dt = datetime.fromtimestamp(total_time_range_start / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                end_dt = datetime.fromtimestamp(total_time_range_end / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                logger.info(
+                    f"[热重载] K-line 历史重放：{warmup_count} 根 K 线，时间范围 {start_dt} - {end_dt} "
+                    f"(UTC: {total_time_range_start}-{total_time_range_end})"
+                )
+            else:
+                logger.info(f"[热重载] K-line 历史重放：{warmup_count} 根 K 线")
+
+            logger.debug(f"[热重载] 重放详情：{', '.join(warmup_details)}")
+
+        # MTF EMA warmup: pre-warm higher timeframe EMA indicators for MTF filters
+        # This ensures MTF filters have ready EMAs on first signal check
+        # Note: key format is "symbol:timeframe" where symbol may contain ":" (e.g., "BTC/USDT:USDT:1h")
+        if self._kline_history:
+            mtf_warmup_count = 0
+            mtf_debug_keys = []
+            for key, history in self._kline_history.items():
+                parts = key.split(":")
+                # Parse timeframe from the end, since symbol may contain ":"
+                timeframe = parts[-1] if parts[-1] in ["1h", "4h", "1d", "1w"] else parts[-2]
+
+                # Only warm up higher timeframe EMAs (used for MTF filtering)
+                if timeframe in ["1h", "4h", "1d"]:
+                    ema_key = key
+                    if ema_key not in self._mtf_ema_indicators:
+                        self._mtf_ema_indicators[ema_key] = EMACalculator(period=self._mtf_ema_period)
+
+                    ema = self._mtf_ema_indicators[ema_key]
+                    mtf_debug_keys.append(f"{ema_key} ({len(history)} bars)")
+
+                    # Warmup EMA with historical K-lines (exclude currently running kline)
+                    for kline in history[:-1]:
+                        ema.update(kline.close)
+                        mtf_warmup_count += 1
+
+            # Log MTF EMA warmup completion
+            logger.info(f"[热重载] MTF EMA 预加热：检查 {len(mtf_debug_keys)} 个周期，预热 {mtf_warmup_count} 个数据点到 {len(self._mtf_ema_indicators)} 个指标")
+            if mtf_warmup_count > 0:
+                logger.info(f"[热重载] MTF EMA 重建完成：{mtf_warmup_count} 个数据点，{len(self._mtf_ema_indicators)} 个指标就绪")
+            elif self._kline_history:
+                logger.info("[热重载] MTF EMA 重建跳过：暂无更高周期数据可用")
 
         return runner
 
@@ -353,6 +487,37 @@ class SignalPipeline:
         self._account_snapshot = snapshot
         logger.debug(f"Account snapshot updated: balance={snapshot.total_balance}")
 
+    def _build_execution_strategy(self, signal: SignalResult) -> OrderStrategy:
+        """从 SignalResult 派生最小执行策略快照。"""
+        if self._runtime_execution_strategy is not None:
+            return self._runtime_execution_strategy.model_copy(deep=True)
+
+        tp_ratios: List[Decimal] = []
+        tp_targets: List[Decimal] = []
+
+        for level in signal.take_profit_levels:
+            position_ratio = level.get("position_ratio")
+            risk_reward = level.get("risk_reward")
+            if position_ratio is None or risk_reward is None:
+                continue
+            tp_ratios.append(Decimal(str(position_ratio)))
+            tp_targets.append(Decimal(str(risk_reward)))
+
+        if not tp_ratios:
+            tp_ratios = [Decimal("1.0")]
+            tp_targets = [Decimal("1.5")]
+
+        return OrderStrategy(
+            id=f"exec_{signal.strategy_name or 'signal'}",
+            name=signal.strategy_name or "Signal Execution Strategy",
+            tp_levels=len(tp_ratios),
+            tp_ratios=tp_ratios,
+            tp_targets=tp_targets,
+            initial_stop_loss_rr=Decimal("-1.0"),
+            trailing_stop_enabled=False,
+            oco_enabled=True,
+        )
+
     async def process_kline(self, kline: KlineData) -> None:
         """
         Process a single closed K-line.
@@ -361,6 +526,14 @@ class SignalPipeline:
             kline: Closed K-line data
         """
         try:
+            # P0-2: 防御性检查 - 仅处理已收盘 K 线
+            if not kline.is_closed:
+                logger.warning(
+                    f"[DEFENSE] Received unclosed K-line: {kline.symbol} {kline.timeframe} "
+                    f"ts={kline.timestamp} close={kline.close} - skipped"
+                )
+                return
+
             # Ensure async primitives and flush worker are running (lazy init)
             self._ensure_flush_worker()
 
@@ -379,6 +552,11 @@ class SignalPipeline:
             # Run strategy engine with lock protection (prevents race condition during hot-reload)
             async with lock:
                 attempts = self._run_strategy(kline)
+            # Runtime direction policy intentionally runs after the strategy lock.
+            # This is safe because `_runtime_allowed_directions` is treated as a
+            # frozen startup snapshot and is not hot-reloaded during process lifetime.
+            self._apply_runtime_direction_policy(kline, attempts)
+            self._write_strategy_signal_v2_observations(kline, attempts)
 
             # Log filter rejection details for analysis
             for attempt in attempts:
@@ -437,7 +615,7 @@ class SignalPipeline:
                         continue
 
                     # Calculate complete signal result with risk
-                    signal = self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, score)
+                    signal = await self._calculate_risk(kline, attempt.pattern.direction, attempt, attempt.strategy_name, score)
 
                     # Start tracking signal status
                     signal_id = await self._status_tracker.track_signal(signal)
@@ -479,8 +657,78 @@ class SignalPipeline:
                         except Exception as e:
                             logger.error(f"Failed to persist signal: {e}")
 
+                    if self._signal_executor is not None:
+                        try:
+                            strategy = self._build_execution_strategy(signal)
+                            await self._signal_executor(signal, strategy)
+                            logger.info(
+                                f"Signal execution dispatched: {kline.symbol} {kline.timeframe} "
+                                f"{attempt.pattern.direction.value} [{attempt.strategy_name}]"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to dispatch signal execution: {e}")
+
         except Exception as e:
             logger.error(f"Error processing K-line: {e}")
+
+    def _write_strategy_signal_v2_observations(
+        self,
+        kline: KlineData,
+        attempts: List[SignalAttempt],
+    ) -> None:
+        """Write optional observe-only StrategySignalV2 snapshots after runtime filtering."""
+        writer = self._strategy_signal_v2_observe_writer
+        if writer is None:
+            return
+
+        source_context_id = f"{kline.symbol}:{kline.timeframe}:{kline.timestamp}"
+        try:
+            writer.write_observations(
+                kline=kline,
+                attempts=copy.deepcopy(attempts),
+                source_context_id=source_context_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "StrategySignalV2 observe writer failed; continuing signal flow: "
+                f"symbol={kline.symbol}, timeframe={kline.timeframe}, error={e}"
+            )
+
+    def _apply_runtime_direction_policy(
+        self,
+        kline: KlineData,
+        attempts: List[SignalAttempt],
+    ) -> None:
+        """Convert disallowed runtime directions to FILTERED before persistence."""
+        if not self._runtime_allowed_directions:
+            return
+
+        allowed = {direction.value for direction in self._runtime_allowed_directions}
+        for attempt in attempts:
+            if attempt.final_result != "SIGNAL_FIRED" or not attempt.pattern:
+                continue
+            if attempt.pattern.direction in self._runtime_allowed_directions:
+                continue
+
+            attempt.final_result = "FILTERED"
+            attempt.filter_results.append(
+                (
+                    "runtime_direction_policy",
+                    FilterResult(
+                        passed=False,
+                        reason="direction_not_allowed_by_runtime_profile",
+                        metadata={
+                            "allowed_directions": sorted(allowed),
+                            "actual_direction": attempt.pattern.direction.value,
+                        },
+                    ),
+                )
+            )
+            logger.info(
+                f"Signal filtered by runtime direction policy before persistence: "
+                f"{kline.symbol} {kline.timeframe} {attempt.pattern.direction.value} "
+                f"[{attempt.strategy_name}]"
+            )
 
     def _store_kline(self, kline: KlineData) -> None:
         """Store K-line in history for MTF analysis"""
@@ -544,10 +792,10 @@ class SignalPipeline:
         result: Dict[str, TrendDirection] = {}
         current_tf = kline.timeframe
 
-        # Get higher timeframe from config
+        # Get higher timeframe from config (R3.1 fix: use sync method to get copy)
         higher_tf = get_higher_timeframe(
             current_tf,
-            self._config_manager.user_config.mtf_mapping
+            self._config_manager.get_user_config_sync().mtf_mapping
         )
 
         if higher_tf is None:
@@ -598,7 +846,7 @@ class SignalPipeline:
 
         return result
 
-    def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
+    async def _calculate_risk(self, kline: KlineData, direction: Direction, attempt: SignalAttempt, strategy_name: str = "unknown", score: float = 0.0) -> SignalResult:
         """
         Calculate complete signal result with risk parameters.
 
@@ -627,7 +875,7 @@ class SignalPipeline:
         tags = self._generate_tags_from_filters(attempt.filter_results)
 
         # Use risk_calculator's calculate_signal_result with tags
-        return self._risk_calculator.calculate_signal_result(
+        return await self._risk_calculator.calculate_signal_result(
             kline=kline,
             account=self._account_snapshot,
             direction=direction,
@@ -711,21 +959,11 @@ class SignalPipeline:
         logger.info("Rebuilding signal cooldown cache from database...")
 
         try:
-            # Get all ACTIVE signals from database
-            async with self._repository._db.execute(
-                """
-                SELECT signal_id, symbol, timeframe, direction, strategy_name,
-                       score, created_at
-                FROM signals
-                WHERE status IN ('ACTIVE', 'active', 'PENDING', 'pending')
-                ORDER BY created_at DESC
-                """
-            ) as cursor:
-                rows = await cursor.fetchall()
+            rows = await self._repository.list_active_signals_for_cache_rebuild()
 
             cache_count = 0
             for row in rows:
-                dedup_key = f"{row['symbol']}:{row['timeframe']}:{row['direction']}:{row['strategy_name']}"
+                dedup_key = f"{row['symbol']}:{row['timeframe']}:{row['direction']}:{row.get('strategy_name', 'unknown')}"
 
                 # Parse created_at timestamp
                 from datetime import datetime, timezone
@@ -774,7 +1012,7 @@ class SignalPipeline:
         self,
         kline: KlineData,
         attempt: SignalAttempt,
-        score: float,
+        score: Decimal,
     ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """
         Check if new signal should cover (supersede) existing active signal.
@@ -888,17 +1126,13 @@ class SignalPipeline:
             return None
 
         try:
-            async with self._repository._db.execute(
-                "SELECT * FROM signals WHERE signal_id = ?", (opposing_signal_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    opposing_signal_data = dict(row)
-                    logger.info(
-                        f"Opposing signal found: {opposing_signal_id} "
-                        f"({opposite_direction}, score: {old_score:.3f})"
-                    )
-                    return opposing_signal_data
+            opposing_signal_data = await self._repository.get_signal_by_tracker_id(opposing_signal_id)
+            if opposing_signal_data:
+                logger.info(
+                    f"Opposing signal found: {opposing_signal_id} "
+                    f"({opposite_direction}, score: {old_score:.3f})"
+                )
+                return opposing_signal_data
         except (TypeError, AttributeError):
             # Fallback for tests with mock objects - use cache data
             logger.info(

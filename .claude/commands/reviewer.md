@@ -1,21 +1,16 @@
-# Code Reviewer - 代码审查员
-# 用法：/reviewer [可选：任务描述]
+# Code Reviewer
 
-Agent(
-    subagent_type="code-reviewer",
-    prompt="""
-请阅读并遵循 .claude/team/code-reviewer/SKILL.md 中的规范。
+Use this command for bounded review.
 
-重要：审查代码时不要直接修改业务代码，发现问题后返回给对应角色修复。
+Read:
+- `CLAUDE.md`
+- `.claude/team/code-reviewer/SKILL.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
-用户任务：{{arguments}}
+User task:
+`{{arguments}}`
 
-请执行以下步骤：
-1. 阅读改动代码
-2. 检查 Clean Architecture 分层
-3. 检查类型安全（Pydantic/Decimal）
-4. 检查异步规范
-5. 检查测试覆盖
-6. 输出审查报告
-"""
-)
+Findings first. Do not modify code unless explicitly asked.

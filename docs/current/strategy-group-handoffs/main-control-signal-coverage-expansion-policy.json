@@ -1,0 +1,344 @@
+{
+  "schema": "brc.strategy_group_signal_coverage_expansion_policy.v1",
+  "status": "current_pilot_supplement",
+  "last_updated": "2026-06-19",
+  "scope": "read_only_signal_coverage_expansion_review",
+  "not_execution_authority": true,
+  "not_finalgate_input": true,
+  "not_operation_layer_input": true,
+  "not_order_sizing_default": true,
+  "does_not_expand_l4_real_order_scope": true,
+  "source_notes": {
+    "main_control_runtime_policy": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json",
+    "research_handoff_reference": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/main-control-strategy-research-v3-handoff.md",
+    "research_requiredfacts_reference": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/strategy-group-requiredfacts-proposals.md"
+  },
+  "strategy_groups": {
+    "BTPC-001": {
+      "current_main_control_tier": "L2",
+      "coverage_review_priority": "P0_5",
+      "l2_readiness": "l2_shadow_candidate_observation_enabled",
+      "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "main-control l2 intake handoff imported as non-executing strategy input",
+        "main-control RequiredFacts map now includes BTPC-001 L2 intake facts",
+        "main-control L2 intake dry-run passed",
+        "runtime tier policy promotes BTPC-001 to L2 shadow_candidate only",
+        "largest current right-tail lead among reviewed expansion candidates",
+        "candidate evidence reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
+        "supports bearish-only activation and strong-uptrend disable review"
+      ],
+      "blocking_gaps_before_l2": [
+        "historical_open_interest_window_missing",
+        "historical_global_long_short_ratio_window_missing",
+        "top_trader_position_ratio_window_missing",
+        "real_exchange_margin_liquidation_model_missing",
+        "short_squeeze_risk_not_runtime_blocking"
+      ],
+      "classifier_rule_review": {
+        "status": "local_classifier_rule_review_recorded",
+        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+        "logic_version": "btpc-001-price-action-v1",
+        "reviewed_rules": [
+          "btpc_strong_uptrend_conflict_disable_rule",
+          "btpc_freshness_or_classifier_stale_signal_rule"
+        ],
+        "covered_replay_cases": [
+          "strong_uptrend_conflict",
+          "stale_signal"
+        ],
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
+    },
+    "LSR-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P1",
+      "l2_readiness": "blocked_rewrite_required",
+      "recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "short upper-range revival lane exists in research",
+        "best 90d rewrite window reached 133.488401 percent at 2x"
+      ],
+      "blocking_gaps_before_l2": [
+        "current_broader_preview_side_long_conflicts_with_short_upper_range_revival_lead",
+        "broad_lsr_sequence_negative",
+        "lookahead_failed_proxy_requires_rewrite",
+        "lsr_disable_classifier_state_missing_from_runtime",
+        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+      ],
+      "classifier_repair_spec": {
+        "status": "local_repair_spec_ready",
+        "target_classifier": "side_specific_short_revival_classifier",
+        "blocking_gap_keys": [
+          "lookahead_failed_proxy_requires_rewrite",
+          "lsr_disable_classifier_state_missing_from_runtime"
+        ],
+        "required_entry_states": [
+          "upper_range_liquidity_sweep_detected",
+          "reclaim_failure_or_rejection_confirmed",
+          "short_revival_confirmation_present",
+          "lookahead_proxy_absent"
+        ],
+        "required_disable_states": [
+          "current_broader_preview_side_long_conflicts_with_short_revival_lead",
+          "range_context_missing",
+          "sweep_reclaim_missing",
+          "stale_signal"
+        ],
+        "replay_acceptance_cases": [
+          "short_revival_rewrite_needed",
+          "liquidity_sweep_long_would_enter_current_v0",
+          "missing_range_context",
+          "stale_signal"
+        ],
+        "acceptance_signal": "LSR remains L1 until the short-revival rewrite produces a side-specific non-lookahead classifier and disables the current long preview conflict.",
+        "revision_execution": {
+          "status": "local_classifier_revision_executed",
+          "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+          "logic_version": "lsr-001-price-action-v1",
+          "executed_entry_states": [
+            "upper_range_liquidity_sweep_detected",
+            "reclaim_failure_or_rejection_confirmed",
+            "short_revival_confirmation_present",
+            "lookahead_proxy_absent"
+          ],
+          "executed_disable_states": [
+            "current_broader_preview_side_long_conflicts_with_short_revival_lead",
+            "range_context_missing",
+            "sweep_reclaim_missing",
+            "stale_signal"
+          ],
+          "validation_cases": [
+            "short_revival_short_would_enter",
+            "old_long_preview_disabled"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      },
+      "economic_replay_spec": {
+        "status": "local_economic_replay_spec_ready",
+        "blocking_gap_keys": [
+          "cost_fill_slot_m2m_and_leverage_boundary_missing"
+        ],
+        "required_cost_fields": [
+          "fee_estimate_usdt",
+          "slippage_estimate_usdt",
+          "funding_impact_usdt",
+          "min_qty_step_size_impact",
+          "fill_slot_assumption",
+          "leverage_survival_note",
+          "net_edge_note",
+          "does_not_lower_owner_selected_leverage",
+          "not_submit_authority"
+        ],
+        "replay_acceptance_cases": [
+          "liquidity_sweep_long_would_enter_current_v0",
+          "short_revival_rewrite_needed"
+        ],
+        "acceptance_signal": "LSR economic replay must expose fill-slot and leverage-survival review fields before any L2 rewrite promotion review.",
+        "replay_execution": {
+          "status": "local_economic_replay_executed",
+          "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+          "covered_cost_fields": [
+            "fee_estimate_usdt",
+            "slippage_estimate_usdt",
+            "funding_impact_usdt",
+            "min_qty_step_size_impact",
+            "fill_slot_assumption",
+            "leverage_survival_note",
+            "net_edge_note",
+            "does_not_lower_owner_selected_leverage",
+            "not_submit_authority"
+          ],
+          "validation_cases": [
+            "liquidity_sweep_long_would_enter_current_v0",
+            "short_revival_rewrite_needed"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
+    },
+    "BRF-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P0_5",
+      "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+      "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "runtime semantics builder already defines BRF-001 bear rally failure short entry and structure-extreme protection vocabulary",
+        "main-control runtime tier policy keeps BRF as a known new L1 observe-only group",
+        "BRF shares the short-continuation research track with BTPC but has not passed separate L2 intake"
+      ],
+      "blocking_gaps_before_l2": [
+        "rally_high_and_rejection_context_not_attached_to_runtime_facts",
+        "short_squeeze_risk_classifier_missing_from_runtime",
+        "separate_brf_l2_intake_dry_run_missing",
+        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+      ]
+    },
+    "RBR-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P2",
+      "l2_readiness": "blocked_parked_negative_evidence",
+      "recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "range-boundary vocabulary can still help classifier design"
+      ],
+      "blocking_gaps_before_l2": [
+        "fixed_horizon_economic_result_negative",
+        "calm_range_m2m_failed",
+        "worst_90d_2x_reaches_negative_135_68_percent",
+        "trend_invalidation_and_range_quality_facts_missing"
+      ]
+    },
+    "VCB-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P1",
+      "l2_readiness": "blocked_classifier_redesign_required",
+      "recommended_action": "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "true-breakout classifier/revival track exists",
+        "pre-entry volume-compression lane has a best 90d 2x window over 100 percent before stronger cost stress"
+      ],
+      "blocking_gaps_before_l2": [
+        "generic_vcb_realized_equity_weak",
+        "volume_compression_cost_m2m_full_sequence_negative",
+        "pre_entry_classifier_does_not_reproduce_post_entry_edge",
+        "false_breakout_disable_state_missing_from_runtime",
+        "slot_m2m_equity_and_leverage_ruin_state_missing"
+      ],
+      "classifier_repair_spec": {
+        "status": "local_repair_spec_ready",
+        "target_classifier": "true_breakout_pre_entry_classifier",
+        "blocking_gap_keys": [
+          "pre_entry_classifier_does_not_reproduce_post_entry_edge",
+          "false_breakout_disable_state_missing_from_runtime"
+        ],
+        "required_entry_states": [
+          "compression_window_present",
+          "breakout_close_confirmed",
+          "volume_expansion_confirmed",
+          "post_entry_edge_proxy_reproducible_without_lookahead"
+        ],
+        "required_disable_states": [
+          "false_breakout_reversal_detected",
+          "compression_context_missing",
+          "slot_m2m_ruin_state_triggered",
+          "stale_signal"
+        ],
+        "replay_acceptance_cases": [
+          "compression_breakout_would_enter",
+          "false_breakout_disable_needed",
+          "missing_compression_context",
+          "stale_signal"
+        ],
+        "acceptance_signal": "VCB remains L1 until the pre-entry classifier reproduces the true-breakout edge and false-breakout disable state is represented in runtime review.",
+        "revision_execution": {
+          "status": "local_classifier_revision_executed",
+          "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+          "logic_version": "vcb-001-price-action-v1",
+          "executed_entry_states": [
+            "compression_window_present",
+            "breakout_close_confirmed",
+            "volume_expansion_confirmed",
+            "post_entry_edge_proxy_reproducible_without_lookahead"
+          ],
+          "executed_disable_states": [
+            "false_breakout_reversal_detected",
+            "compression_context_missing",
+            "slot_m2m_ruin_state_triggered",
+            "stale_signal"
+          ],
+          "validation_cases": [
+            "true_breakout_with_volume_would_enter",
+            "false_breakout_reversal_disabled",
+            "volume_expansion_missing_disabled"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      },
+      "economic_replay_spec": {
+        "status": "local_economic_replay_spec_ready",
+        "blocking_gap_keys": [
+          "volume_compression_cost_m2m_full_sequence_negative",
+          "slot_m2m_equity_and_leverage_ruin_state_missing"
+        ],
+        "required_cost_fields": [
+          "fee_estimate_usdt",
+          "slippage_estimate_usdt",
+          "funding_impact_usdt",
+          "min_qty_step_size_impact",
+          "fill_slot_assumption",
+          "leverage_survival_note",
+          "net_edge_note",
+          "does_not_lower_owner_selected_leverage",
+          "not_submit_authority"
+        ],
+        "replay_acceptance_cases": [
+          "compression_breakout_would_enter",
+          "false_breakout_disable_needed"
+        ],
+        "acceptance_signal": "VCB economic replay must expose volume-compression cost survival, false-breakout cost drag, fill-slot, and leverage-survival review fields before any L2 classifier promotion review.",
+        "replay_execution": {
+          "status": "local_economic_replay_executed",
+          "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+          "covered_cost_fields": [
+            "fee_estimate_usdt",
+            "slippage_estimate_usdt",
+            "funding_impact_usdt",
+            "min_qty_step_size_impact",
+            "fill_slot_assumption",
+            "leverage_survival_note",
+            "net_edge_note",
+            "does_not_lower_owner_selected_leverage",
+            "not_submit_authority"
+          ],
+          "validation_cases": [
+            "compression_breakout_would_enter",
+            "false_breakout_disable_needed"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
+    }
+  },
+  "safety_invariants": {
+    "policy_is_review_only": true,
+    "policy_does_not_change_tier_policy": true,
+    "policy_does_not_authorize_shadow_candidate": true,
+    "policy_does_not_authorize_finalgate": true,
+    "policy_does_not_authorize_operation_layer": true,
+    "policy_does_not_authorize_real_order": true
+  }
+}

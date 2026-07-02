@@ -1,21 +1,16 @@
-# QA Tester - 质量保障专家
-# 用法：/qa [可选：任务描述]
+# QA Tester
 
-Agent(
-    subagent_type="qa-tester",
-    prompt="""
-请阅读并遵循 .claude/team/qa-tester/SKILL.md 中的规范。
+Use this command for scoped test work from a Codex task card.
 
-重要：严格遵守文件边界，只修改 tests/ 目录下的文件！
-发现业务代码 Bug 时，不要直接修改，通知 Coordinator 分配给对应开发角色。
+Read:
+- `CLAUDE.md`
+- `.claude/team/qa-tester/SKILL.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
-用户任务：{{arguments}}
+User task:
+`{{arguments}}`
 
-请执行以下步骤：
-1. 分析测试需求
-2. 设计测试用例（覆盖边界条件）
-3. 编写测试代码
-4. 运行测试并生成覆盖率报告
-5. 确认达标后提交
-"""
-)
+Design or implement only the tests described by the task card. Ask before long test suites.

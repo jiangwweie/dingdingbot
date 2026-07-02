@@ -1,29 +1,83 @@
 """
-Crypto Signal Monitor - Main Entry Point
+Automated Execution System - Main Entry Point
 
 Orchestrates the complete startup flow:
-1. Load configuration
+1. Load configuration (SQLite DB + Runtime Profile)
 2. Initialize exchange (REST + WebSocket)
-3. Warm up historical data
-4. Start WebSocket subscriptions
-5. Start asset polling
-6. Enter event loop
-
-Zero Execution Policy: This system is READ-ONLY. No trading operations.
+3. Initialize execution runtime (PG-backed orders/positions/intents)
+4. Warm up historical data
+5. Start WebSocket subscriptions
+6. Start asset polling
+7. Enter event loop (embedded REST API on port 8000)
 """
 import asyncio
+import json
+import os
 import sys
 import signal as sys_signal
-from typing import Optional
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional, List
 
-from src.application.config_manager import ConfigManager, load_all_configs
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
+if load_dotenv is not None:
+    repo_root = Path(__file__).resolve().parents[1]
+    load_dotenv(repo_root / ".env")
+    load_dotenv(repo_root / ".env.local", override=True)
+
+from src.application.config_manager import load_all_configs_async
+from src.application.runtime_config import RuntimeConfigProvider, RuntimeConfigResolver
+from src.application.runtime_context import RuntimeContext
+from src.application.account_service import BinanceAccountService
+from src.application.account_risk_service import AccountRiskService
+from src.application.capital_protection import (
+    CapitalProtectionManager,
+    resolve_daily_risk_stats_scope_key,
+)
+from src.application.campaign_state_service import CampaignStateService
+from src.application.bounded_risk_campaign_service import BoundedRiskCampaignService
+from src.application.decision_trace import TraceService
+from src.application.execution_permission import ExecutionPermission
+from src.application.execution_orchestrator import ExecutionOrchestrator
+from src.application.external_close_monitor import ExternalCloseMonitor
+from src.application.global_kill_switch import GlobalKillSwitchService
+from src.application.order_lifecycle_service import OrderLifecycleService
+from src.application.periodic_reconciliation import run_periodic_reconciliation
+from src.application.position_projection_service import PositionProjectionService
+from src.application.protection_health_monitor import ProtectionHealthMonitor
+from src.application.startup_trading_guard import StartupTradingGuardService
 from src.infrastructure.exchange_gateway import ExchangeGateway
+from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
+from src.infrastructure.core_repository_factory import (
+    create_execution_intent_repository,
+    create_runtime_campaign_state_repository,
+    create_runtime_brc_campaign_repository,
+    create_runtime_global_kill_switch_repository,
+    create_runtime_daily_risk_stats_repository,
+    create_runtime_order_repository,
+    create_runtime_position_repository,
+    create_runtime_reconciliation_read_model_repository,
+    create_runtime_signal_repository,
+)
+from src.infrastructure.runtime_profile_repository import RuntimeProfileRepository
 from src.application.signal_pipeline import SignalPipeline
+from src.application.strategy_signal_v2_observe_writer import PatternStrategySignalObserveWriter
 from src.domain.risk_calculator import RiskConfig
 from src.domain.models import KlineData
-from src.domain.exceptions import FatalStartupError, ConnectionLostError
+from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, ConnectionLostError
 from src.infrastructure.logger import logger, setup_logger, register_secret
+from src.infrastructure.database import close_db, validate_pg_core_configuration
+from src.infrastructure.connection_pool import close_all_connections
+from src.infrastructure.strategy_signal_v2_observe_sink import (
+    DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
+    StrategySignalV2ObserveSink,
+)
 
 
 # ============================================================
@@ -32,18 +86,393 @@ from src.infrastructure.logger import logger, setup_logger, register_secret
 _shutdown_event: Optional[asyncio.Event] = None  # Created in run_application()
 _exchange_gateway: Optional[ExchangeGateway] = None
 _notification_service: Optional[NotificationService] = None
+_config_entry_repo = None  # Initialized in Phase 9
+_order_repo = None
+_execution_intent_repo = None
+_position_repo = None
+_order_lifecycle_service: Optional[OrderLifecycleService] = None
+_capital_protection: Optional[CapitalProtectionManager] = None
+_execution_orchestrator: Optional[ExecutionOrchestrator] = None
+_execution_recovery_repo = None  # PG 正式版
+_runtime_config_provider: Optional[RuntimeConfigProvider] = None
+_trace_service: Optional[TraceService] = None
+_global_kill_switch_service: Optional[GlobalKillSwitchService] = None
+_startup_trading_guard_service: Optional[StartupTradingGuardService] = None
+_account_risk_service: Optional[AccountRiskService] = None
+_campaign_state_service: Optional[CampaignStateService] = None
+_brc_campaign_service: Optional[BoundedRiskCampaignService] = None
+_protection_health_monitor: Optional[ProtectionHealthMonitor] = None
+_external_close_monitor: Optional[ExternalCloseMonitor] = None
+_reconciliation_read_model_repo = None
+_order_watch_tasks: List[asyncio.Task] = []
+_periodic_reconciliation_task: Optional[asyncio.Task] = None
+_snapshot_update_task: Optional[asyncio.Task] = None
+_ws_task: Optional[asyncio.Task] = None
+_api_task: Optional[asyncio.Task] = None
+_api_server: Optional[object] = None
+
+
+class _CapitalProtectionNotifierAdapter:
+    """把 NotificationService 适配为 CapitalProtectionManager 需要的告警接口。"""
+
+    def __init__(self, notification_service: NotificationService):
+        self._notification_service = notification_service
+
+    async def send_alert(self, title: str, message: str) -> None:
+        await self._notification_service.send_system_alert(title, message)
+
+
+async def _noop_order_watch_callback(_order: object) -> None:
+    """Keep watch_orders callback contract without duplicating lifecycle updates."""
+    return None
+
+
+def _dedupe_runtime_symbols(symbols: List[str]) -> List[str]:
+    """Preserve order while removing duplicate symbols for order watch startup."""
+    return list(dict.fromkeys(symbols))
+
+
+def _block_startup_guard_for_shutdown(source: str) -> None:
+    """Reset process-local startup guard before runtime shutdown completes."""
+    if _startup_trading_guard_service is None:
+        return
+    try:
+        _startup_trading_guard_service.block(
+            updated_by="system",
+            reason="RUNTIME_SHUTDOWN_RESET",
+            source=source,
+        )
+    except Exception as exc:
+        logger.error(
+            "Startup trading guard shutdown reset failed: %s",
+            exc,
+            exc_info=True,
+        )
+
+
+def _build_strategy_signal_v2_observe_writer(env: Optional[dict] = None):
+    """Build optional StrategySignalV2 observe writer from local ops env flags."""
+    if env is None:
+        env = os.environ
+    enabled = env.get("STRATEGY_SIGNAL_V2_OBSERVE_ENABLED", "").strip().lower() == "true"
+    if not enabled:
+        logger.info("StrategySignalV2 observe disabled")
+        return None
+
+    observe_path = env.get(
+        "STRATEGY_SIGNAL_V2_OBSERVE_PATH",
+        DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
+    )
+    try:
+        sink = StrategySignalV2ObserveSink(observe_path)
+        writer = PatternStrategySignalObserveWriter(sink=sink)
+    except Exception as e:
+        logger.warning(
+            "StrategySignalV2 observe init failed; observe disabled: "
+            f"path={observe_path}, error={e}",
+            exc_info=True,
+        )
+        return None
+
+    logger.info("StrategySignalV2 observe enabled: path=%s", observe_path)
+    return writer
+
+
+async def _run_order_watch(symbol: str) -> None:
+    """Run one order-watch loop and isolate failures from the main runtime."""
+    if _exchange_gateway is None:
+        logger.warning("Order watch start skipped: ExchangeGateway not initialized")
+        return
+
+    try:
+        await _exchange_gateway.watch_orders(symbol, _noop_order_watch_callback)
+    except asyncio.CancelledError:
+        logger.info(f"Order watch task cancelled: {symbol}")
+        raise
+    except Exception as e:
+        logger.error(f"Order watch runtime failed: symbol={symbol}, error={e}", exc_info=True)
+
+
+def _start_order_watch_tasks(symbols: List[str]) -> List[asyncio.Task]:
+    """Start one order-watch background task per runtime symbol."""
+    tasks: List[asyncio.Task] = []
+    for symbol in _dedupe_runtime_symbols(symbols):
+        task = asyncio.create_task(_run_order_watch(symbol), name=f"order-watch:{symbol}")
+        tasks.append(task)
+        logger.info(f"Order watch task started: {symbol}")
+    return tasks
+
+
+async def _cancel_order_watch_tasks(tasks: List[asyncio.Task]) -> None:
+    """Cancel and await all order-watch tasks."""
+    for task in tasks:
+        task.cancel()
+
+    for task in tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Order watch task shutdown error: {e}", exc_info=True)
+
+
+def _runtime_task_name(task: asyncio.Task) -> str:
+    try:
+        return task.get_name()
+    except Exception:
+        return repr(task)
+
+
+async def _log_pending_runtime_tasks(context: str) -> None:
+    """Log named runtime tasks still pending during shutdown diagnostics."""
+    current = asyncio.current_task()
+    interesting_prefixes = (
+        "order-watch:",
+        "periodic-reconciliation",
+        "snapshot-update",
+        "ws-",
+        "api-",
+        "pending-exchange-update:",
+    )
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not current
+        and not task.done()
+        and any(_runtime_task_name(task).startswith(prefix) for prefix in interesting_prefixes)
+    ]
+    if not pending:
+        return
+    logger.warning(
+        "Runtime shutdown pending tasks after %s: %s",
+        context,
+        [_runtime_task_name(task) for task in pending],
+    )
+
+
+async def _run_periodic_reconciliation_task(
+    reconciliation_service: object,
+    symbols: List[str],
+    read_model_repository: object = None,
+    protection_health_monitor: object = None,
+    external_close_monitor: object = None,
+) -> None:
+    """Run periodic reconciliation and isolate unexpected task failures."""
+    if _shutdown_event is None:
+        logger.warning("Periodic reconciliation start skipped: shutdown event not initialized")
+        return
+
+    try:
+        await run_periodic_reconciliation(
+            reconciliation_service,
+            _dedupe_runtime_symbols(symbols),
+            _shutdown_event,
+            read_model_repository=read_model_repository,
+            protection_health_monitor=protection_health_monitor,
+            external_close_monitor=external_close_monitor,
+        )
+    except asyncio.CancelledError:
+        logger.info("Periodic reconciliation task cancelled")
+        raise
+    except Exception as e:
+        logger.error(f"Periodic reconciliation task failed: {e}", exc_info=True)
+
+
+def _start_periodic_reconciliation_task(
+    reconciliation_service: object,
+    symbols: List[str],
+    read_model_repository: object = None,
+    protection_health_monitor: object = None,
+    external_close_monitor: object = None,
+) -> asyncio.Task:
+    """Start the report-only periodic reconciliation background task."""
+    task = asyncio.create_task(
+        _run_periodic_reconciliation_task(
+            reconciliation_service,
+            symbols,
+            read_model_repository,
+            protection_health_monitor,
+            external_close_monitor,
+        ),
+        name="periodic-reconciliation",
+    )
+    logger.info("Periodic reconciliation task started: symbols=%s", _dedupe_runtime_symbols(symbols))
+    return task
+
+
+async def _run_startup_protection_health_check(
+    reconciliation_service: object,
+    symbols: List[str],
+    protection_health_monitor: object,
+    external_close_monitor: object = None,
+) -> None:
+    """Run one startup protection-health check from the read-only reconciliation model."""
+    for symbol in _dedupe_runtime_symbols(symbols):
+        try:
+            result = await reconciliation_service.build_read_model(symbol)
+            if external_close_monitor is not None:
+                external_close_changed_state = bool(await external_close_monitor.handle_read_model_result(
+                    result,
+                    source="startup",
+                ))
+                if external_close_changed_state:
+                    result = await reconciliation_service.build_read_model(symbol)
+            await protection_health_monitor.handle_read_model_result(
+                result,
+                source="startup",
+            )
+        except Exception as exc:
+            logger.error(
+                "Startup protection health check failed: symbol=%s, error=%s",
+                symbol,
+                exc,
+                exc_info=True,
+            )
+
+
+async def _cancel_periodic_reconciliation_task(task: Optional[asyncio.Task]) -> None:
+    """Cancel and await the periodic reconciliation task."""
+    if task is None:
+        return
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"Periodic reconciliation task shutdown error: {e}", exc_info=True)
+
+
+async def _run_snapshot_update_loop(polling_interval: float) -> None:
+    """Keep SignalPipeline account snapshot current until shutdown."""
+    if _shutdown_event is None:
+        logger.warning("Snapshot update loop start skipped: shutdown event not initialized")
+        return
+
+    while not _shutdown_event.is_set():
+        try:
+            snapshot = _exchange_gateway.get_account_snapshot() if _exchange_gateway else None
+            pipeline = get_signal_pipeline()
+            if snapshot and pipeline:
+                pipeline.update_account_snapshot(snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Snapshot update loop failed: {e}", exc_info=True)
+
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=polling_interval)
+        except TimeoutError:
+            pass
+
+
+def _start_snapshot_update_task(polling_interval: float) -> asyncio.Task:
+    """Start the managed account snapshot update background task."""
+    task = asyncio.create_task(_run_snapshot_update_loop(polling_interval), name="snapshot-update")
+    logger.info("Snapshot update task started: polling_interval=%ss", polling_interval)
+    return task
+
+
+async def _cancel_snapshot_update_task() -> None:
+    """Cancel, await, and clear the snapshot update task."""
+    global _snapshot_update_task
+
+    task = _snapshot_update_task
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"Snapshot update task shutdown error: {e}", exc_info=True)
+    finally:
+        _snapshot_update_task = None
+
+
+async def _cancel_ws_task() -> None:
+    """Cancel, await, and clear the OHLCV websocket task."""
+    global _ws_task
+
+    task = _ws_task
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"WebSocket task shutdown error: {e}", exc_info=True)
+    finally:
+        _ws_task = None
+
+
+async def _cancel_api_task() -> None:
+    """Cancel, await, and clear the embedded API server task."""
+    global _api_task, _api_server
+
+    task = _api_task
+    if task is None:
+        _api_server = None
+        return
+
+    if _api_server is not None:
+        try:
+            setattr(_api_server, "should_exit", True)
+        except Exception:
+            logger.warning("API server shutdown flag could not be set", exc_info=True)
+
+    if not task.done():
+        task.cancel()
+
+    try:
+        await asyncio.wait_for(task, timeout=10)
+    except asyncio.CancelledError:
+        pass
+    except TimeoutError:
+        logger.warning("API server task did not stop within timeout; cancelling")
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    except Exception as e:
+        logger.warning(f"API server task shutdown error: {e}", exc_info=True)
+    finally:
+        _api_task = None
+        _api_server = None
 
 
 # ============================================================
 # Signal Handlers
 # ============================================================
+def _request_runtime_shutdown(source: str) -> None:
+    """Request runtime shutdown; cleanup is centralized in run_application."""
+    logger.info("Runtime shutdown requested: source=%s", source)
+    _block_startup_guard_for_shutdown(source)
+    if _shutdown_event is None:
+        logger.warning("Shutdown requested before shutdown event was initialized")
+        return
+    _shutdown_event.set()
+
+
 def setup_signal_handlers(loop: asyncio.AbstractEventLoop):
     """Set up graceful shutdown signal handlers"""
     for sig in (sys_signal.SIGINT, sys_signal.SIGTERM):
         try:
             loop.add_signal_handler(
                 sig,
-                lambda: asyncio.create_task(graceful_shutdown())
+                lambda sig=sig: _request_runtime_shutdown(sig.name),
             )
         except NotImplementedError:
             # Windows doesn't support add_signal_handler
@@ -57,13 +486,7 @@ async def graceful_shutdown():
     """
     logger.info("Graceful shutdown initiated...")
 
-    global _shutdown_event
-    _shutdown_event.set()
-
-    if _exchange_gateway:
-        await _exchange_gateway.close()
-
-    logger.info("Shutdown complete")
+    _request_runtime_shutdown("graceful_shutdown")
 
 
 # ============================================================
@@ -91,42 +514,58 @@ async def on_kline_received(kline: KlineData):
 _signal_pipeline: Optional[SignalPipeline] = None
 
 
-def create_signal_pipeline(config_manager: ConfigManager, signal_repository=None) -> SignalPipeline:
-    """
-    Create SignalPipeline from configuration.
-
-    Args:
-        config_manager: Loaded ConfigManager instance
-        signal_repository: Optional SignalRepository instance for persistence
-
-    Returns:
-        Configured SignalPipeline instance
-    """
-    global _signal_pipeline
-
-    # Get risk config from user config
-    user = config_manager.user_config
-
-    risk_config = RiskConfig(
-        max_loss_percent=user.risk.max_loss_percent,
-        max_leverage=user.risk.max_leverage,
-    )
-
-    # Create pipeline with new dynamic config
-    _signal_pipeline = SignalPipeline(
-        config_manager=config_manager,
-        risk_config=risk_config,
-        notification_service=get_notification_service(),
-        signal_repository=signal_repository,
-        cooldown_seconds=config_manager.core_config.signal_pipeline.cooldown_seconds,
-    )
-
-    return _signal_pipeline
-
-
 def get_signal_pipeline() -> Optional[SignalPipeline]:
     """Get global SignalPipeline instance"""
     return _signal_pipeline
+
+
+def _signal_executor_for_brc_permission(
+    execution_orchestrator: Optional[ExecutionOrchestrator],
+    permission: ExecutionPermission,
+    *,
+    allow_legacy_signal_execution: bool = False,
+):
+    if execution_orchestrator is None:
+        return None
+    if permission >= ExecutionPermission.ORDER_ALLOWED and allow_legacy_signal_execution:
+        return execution_orchestrator.execute_signal
+    logger.warning(
+        "SignalPipeline signal_executor disabled by BRC execution permission: "
+        "permission=%s required=order_allowed allow_legacy_signal_execution=%s. "
+        "Owner-bounded order capability must not bind generic signal-to-order execution.",
+        permission.value_name,
+        allow_legacy_signal_execution,
+    )
+    return None
+
+
+async def _close_runtime_resource(name: str, resource: object) -> None:
+    """Close an optional runtime resource without masking later cleanup."""
+    close_method = getattr(resource, "close", None)
+    if close_method is None:
+        return
+    try:
+        result = close_method()
+        if hasattr(result, "__await__"):
+            await result
+    except Exception as exc:
+        logger.warning("Runtime resource close failed: name=%s, error=%s", name, exc, exc_info=True)
+
+
+def _log_runtime_threads(context: str) -> None:
+    """Log non-daemon threads that could keep the process alive after shutdown."""
+    non_daemon_threads = [
+        (thread.name, thread.ident)
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread() and not thread.daemon
+    ]
+    if not non_daemon_threads:
+        return
+    logger.warning(
+        "Runtime shutdown non-daemon threads after %s: %s",
+        context,
+        non_daemon_threads,
+    )
 
 
 # ============================================================
@@ -137,7 +576,14 @@ async def run_application():
     Main application entry point.
     Orchestrates the complete startup and runtime flow.
     """
-    global _exchange_gateway, _notification_service, _shutdown_event
+    global _exchange_gateway, _notification_service, _shutdown_event, _config_entry_repo
+    global _order_repo, _execution_intent_repo, _position_repo, _order_lifecycle_service
+    global _capital_protection, _execution_orchestrator, _execution_recovery_repo, _trace_service, _global_kill_switch_service
+    global _startup_trading_guard_service, _protection_health_monitor, _external_close_monitor
+    global _account_risk_service, _campaign_state_service, _brc_campaign_service
+    global _runtime_config_provider, _order_watch_tasks, _periodic_reconciliation_task
+    global _reconciliation_read_model_repo, _snapshot_update_task, _ws_task, _api_task, _api_server
+    global _signal_pipeline
 
     # Create shutdown event in the current event loop
     _shutdown_event = asyncio.Event()
@@ -152,69 +598,544 @@ async def run_application():
 
     try:
         # =============================================
+        # Preflight: Validate PG core backend configuration
+        # =============================================
+        try:
+            validate_pg_core_configuration()
+        except ValueError as e:
+            raise FatalStartupError(str(e), "F-003")
+
+        # =============================================
         # Phase 1: Load Configuration
         # =============================================
-        logger.info("Phase 1: Loading configuration...")
-        config_manager = load_all_configs()
+        logger.info("Phase 1: Loading configuration from SQLite DB...")
+        config_manager = await load_all_configs_async()
         logger.info("Configuration loaded successfully")
+
+        # R7.1: Explicit marker - ConfigManager initialization complete
+        logger.info("[启动顺序] Phase 1 完成：ConfigManager 已初始化")
+
+        # =============================================
+        # Phase 1.1: Resolve Runtime Config Snapshot
+        # =============================================
+        logger.info("Phase 1.1: Resolving runtime config snapshot...")
+        runtime_profile_name = os.environ.get("RUNTIME_PROFILE")
+        runtime_profile_repo = RuntimeProfileRepository()
+        try:
+            await runtime_profile_repo.initialize()
+            runtime_resolver = RuntimeConfigResolver(runtime_profile_repo)
+            resolved_runtime_config = await runtime_resolver.resolve_startup(runtime_profile_name)
+            _runtime_config_provider = RuntimeConfigProvider(resolved_runtime_config)
+            logger.info(
+                "Runtime config resolved: "
+                f"profile={resolved_runtime_config.profile_name}, "
+                f"version={resolved_runtime_config.version}, "
+                f"hash={resolved_runtime_config.config_hash}"
+            )
+            logger.info(
+                "Runtime config safe summary: "
+                + json.dumps(
+                    _runtime_config_provider.to_safe_summary(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+            )
+            logger.info(
+                "Runtime config resolved in partial-cutover mode: market scope is "
+                "runtime-driven; strategy/risk/execution still use existing paths"
+            )
+        except ValueError as e:
+            raise FatalStartupError(f"Runtime config resolution failed: {e}", "F-003")
+        finally:
+            await runtime_profile_repo.close()
 
         # =============================================
         # Phase 1.5: Initialize Signal Database
         # =============================================
         logger.info("Phase 1.5: Initializing signal database...")
-        from src.infrastructure.signal_repository import SignalRepository
-        signal_repository = SignalRepository()
+        signal_repository = create_runtime_signal_repository()
         await signal_repository.initialize()
         logger.info("Signal database initialized")
 
         # =============================================
-        # Phase 2: Initialize Notification Service
+        # Phase 2: Get Configuration Snapshots (Dependency Injection)
         # =============================================
-        logger.info("Phase 2: Setting up notification channels...")
+        logger.info("Phase 2: Getting configuration snapshots...")
+        # R7.1: Defensive check - ensure ConfigManager is ready
+        config_manager.assert_initialized()
+        core_config = config_manager.get_core_config()
+        user_config = await config_manager.get_user_config()
+        logger.info("Configuration snapshots ready for dependency injection")
+
+        # =============================================
+        # Phase 3: Initialize Notification Service
+        # =============================================
+        logger.info("Phase 3: Setting up notification channels...")
         _notification_service = get_notification_service()
-        _notification_service.setup_channels(
-            [{"type": ch.type, "webhook_url": ch.webhook_url}
-             for ch in config_manager.user_config.notification.channels]
-        )
+        if _runtime_config_provider is not None:
+            env = _runtime_config_provider.resolved_config.environment
+            if env.feishu_webhook_url is not None:
+                webhook_url_val = env.feishu_webhook_url.get_secret_value()
+                register_secret(webhook_url_val)
+                _notification_service.setup_channels(
+                    [
+                        {
+                            "type": "feishu",
+                            "webhook_url": webhook_url_val,
+                        }
+                    ]
+                )
+            else:
+                logger.warning(
+                    "FEISHU_WEBHOOK_URL is not configured; runtime starts with no notification channels"
+                )
+                _notification_service.setup_channels([])
+        else:
+            _notification_service.setup_channels(
+                [{"type": ch.type, "webhook_url": ch.webhook_url} for ch in user_config.notification.channels]
+            )
         logger.info(f"Notification channels ready: {len(_notification_service._channels)}")
 
         # =============================================
-        # Phase 3: Initialize Exchange Gateway
+        # Phase 4: Initialize Exchange Gateway
         # =============================================
-        logger.info("Phase 3: Initializing exchange gateway...")
-        exchange_cfg = config_manager.user_config.exchange
-
-        _exchange_gateway = ExchangeGateway(
-            exchange_name=exchange_cfg.name,
-            api_key=exchange_cfg.api_key,
-            api_secret=exchange_cfg.api_secret,
-            testnet=exchange_cfg.testnet,
-        )
+        logger.info("Phase 4: Initializing exchange gateway...")
+        if _runtime_config_provider is not None:
+            env = _runtime_config_provider.resolved_config.environment
+            api_key_val = env.exchange_api_key.get_secret_value()
+            api_secret_val = env.exchange_api_secret.get_secret_value()
+            register_secret(api_key_val)
+            register_secret(api_secret_val)
+            _exchange_gateway = ExchangeGateway(
+                exchange_name=env.exchange_name,
+                api_key=api_key_val,
+                api_secret=api_secret_val,
+                testnet=env.exchange_testnet,
+            )
+        else:
+            exchange_cfg = user_config.exchange
+            register_secret(exchange_cfg.api_key)
+            register_secret(exchange_cfg.api_secret)
+            _exchange_gateway = ExchangeGateway(
+                exchange_name=exchange_cfg.name,
+                api_key=exchange_cfg.api_key,
+                api_secret=exchange_cfg.api_secret,
+                testnet=exchange_cfg.testnet,
+            )
 
         await _exchange_gateway.initialize()
         logger.info("Exchange gateway initialized")
 
         # =============================================
-        # Phase 3.5: Check API Key Permissions
+        # Phase 4.2: Initialize Core Execution Runtime
         # =============================================
-        logger.info("Phase 3.5: Checking API key permissions...")
-        await config_manager.check_api_key_permissions(_exchange_gateway.rest_exchange)
-        logger.info("API key permission check passed")
+        logger.info("Phase 4.2: Initializing core execution runtime...")
+        _order_repo = create_runtime_order_repository()
+        await _order_repo.initialize()
+        if hasattr(_order_repo, "set_exchange_gateway"):
+            _order_repo.set_exchange_gateway(_exchange_gateway)
+
+        _execution_intent_repo = create_execution_intent_repository()
+        if _execution_intent_repo is not None:
+            await _execution_intent_repo.initialize()
+
+        _position_repo = create_runtime_position_repository()
+        if _position_repo is not None:
+            await _position_repo.initialize()
+
+        _order_lifecycle_service = OrderLifecycleService(repository=_order_repo)
+        await _order_lifecycle_service.start()
+
+        # PG 正式恢复表：初始化（仅当 PG 可用时）
+        _execution_recovery_repo = None
+        try:
+            from src.infrastructure.database import get_pg_session_maker
+            from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
+
+            session_maker = get_pg_session_maker()
+            if session_maker:
+                _execution_recovery_repo = PgExecutionRecoveryRepository(session_maker=session_maker)
+                await _execution_recovery_repo.initialize()
+                logger.info("PG execution recovery repository initialized")
+        except Exception as e:
+            logger.warning(
+                f"PG execution recovery repository 初始化失败（不影响主进程）: {e}",
+                exc_info=True
+            )
+            # 继续启动（降级到无 PG 模式）
+            _execution_recovery_repo = None
+
+        account_service = BinanceAccountService(_exchange_gateway)
+        capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
+        _trace_service = TraceService(
+            sinks=[JsonlTraceSink(Path("logs/runtime/risk_decision.jsonl"))]
+        )
+        capital_protection_config = config_manager.build_capital_protection_config()
+        if _runtime_config_provider is not None:
+            runtime_risk = _runtime_config_provider.resolved_config.risk
+            startup_snapshot = _exchange_gateway.get_account_snapshot()
+            if startup_snapshot is None:
+                startup_snapshot = await _exchange_gateway.fetch_account_balance()
+            startup_equity = startup_snapshot.total_balance if startup_snapshot else None
+            capital_protection_config = runtime_risk.to_capital_protection_config(
+                account_equity=startup_equity,
+                base=capital_protection_config,
+            )
+            logger.info(
+                "CapitalProtection driven by runtime risk: "
+                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"single_trade_max_loss_percent={capital_protection_config.single_trade['max_loss_percent']}, "
+                f"daily_max_loss_percent={capital_protection_config.daily['max_loss_percent']}, "
+                f"daily_max_loss_amount={capital_protection_config.daily.get('max_loss_amount')}, "
+                f"max_leverage={capital_protection_config.account['max_leverage']}"
+            )
+        daily_risk_stats_repo = None
+        restored_daily_stats = None
+        daily_stats_persistence_available = True
+        daily_risk_stats_scope_key = resolve_daily_risk_stats_scope_key(
+            profile_name=(
+                _runtime_config_provider.resolved_config.profile_name
+                if _runtime_config_provider is not None
+                else None
+            ),
+            trading_env=(
+                _runtime_config_provider.resolved_config.environment.trading_env
+                if _runtime_config_provider is not None
+                else None
+            ),
+            exchange_testnet=(
+                _runtime_config_provider.resolved_config.environment.exchange_testnet
+                if _runtime_config_provider is not None
+                else None
+            ),
+        )
+        try:
+            daily_risk_stats_repo = create_runtime_daily_risk_stats_repository()
+            await daily_risk_stats_repo.initialize()
+            restored_daily_stats = await daily_risk_stats_repo.restore_or_create(
+                daily_risk_stats_scope_key,
+                datetime.now(timezone.utc).date(),
+            )
+            logger.info(
+                "Daily risk stats restored: "
+                f"scope_key={restored_daily_stats.scope_key}, "
+                f"stats_date={restored_daily_stats.stats_date}, "
+                f"realized_pnl={restored_daily_stats.realized_pnl}, "
+                f"trade_count={restored_daily_stats.trade_count}"
+            )
+        except Exception as e:
+            daily_risk_stats_repo = None
+            restored_daily_stats = None
+            daily_stats_persistence_available = False
+            logger.error(
+                "Daily risk stats restore failed; runtime will continue in no-new-entry mode: "
+                f"{e}",
+                exc_info=True,
+            )
+        _capital_protection = CapitalProtectionManager(
+            config=capital_protection_config,
+            account_service=account_service,
+            notifier=capital_notifier,
+            gateway=_exchange_gateway,
+            trace_service=_trace_service,
+            config_hash=_runtime_config_provider.config_hash if _runtime_config_provider is not None else None,
+            daily_stats_repository=daily_risk_stats_repo,
+            daily_stats_scope_key=daily_risk_stats_scope_key,
+            restored_daily_stats=restored_daily_stats,
+            daily_stats_persistence_required=True,
+            daily_stats_persistence_available=daily_stats_persistence_available,
+        )
+
+        # P0-6：为 ExecutionOrchestrator 创建告警适配函数
+        async def _orchestrator_notifier_adapter(title: str, message: str) -> None:
+            """复用现有 notification service 发送飞书告警"""
+            await _notification_service.send_system_alert(title, message)
+
+        _startup_trading_guard_service = StartupTradingGuardService(
+            trace_service=_trace_service,
+            config_hash=(
+                _runtime_config_provider.config_hash
+                if _runtime_config_provider is not None
+                else None
+            ),
+        )
+
+        try:
+            global_kill_switch_repo = create_runtime_global_kill_switch_repository()
+            _global_kill_switch_service = GlobalKillSwitchService(
+                repository=global_kill_switch_repo,
+                trace_service=_trace_service,
+                notifier=_orchestrator_notifier_adapter,
+            )
+            await _global_kill_switch_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[GKS-v0][HIGH] Global Kill Switch initialization failed; "
+                "runtime will use fail-closed process state: %s",
+                e,
+                exc_info=True,
+            )
+            _global_kill_switch_service = GlobalKillSwitchService(
+                repository=None,
+                trace_service=_trace_service,
+                notifier=_orchestrator_notifier_adapter,
+            )
+            await _global_kill_switch_service.set_state(
+                active=True,
+                reason="GKS_INIT_FAILED",
+                updated_by="system",
+            )
+
+        _account_risk_service = AccountRiskService(
+            gateway=_exchange_gateway,
+            account_service=account_service,
+        )
+
+        try:
+            campaign_state_repo = create_runtime_campaign_state_repository()
+            _campaign_state_service = CampaignStateService(repository=campaign_state_repo)
+            await _campaign_state_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[CampaignState][HIGH] Campaign state initialization failed; "
+                "runtime will block new entries fail-closed: %s",
+                e,
+                exc_info=True,
+            )
+            _campaign_state_service = CampaignStateService(repository=None)
+            await _campaign_state_service.initialize()
+
+        try:
+            brc_campaign_repo = create_runtime_brc_campaign_repository()
+            _brc_campaign_service = BoundedRiskCampaignService(repository=brc_campaign_repo)
+            await _brc_campaign_service.initialize()
+        except Exception as e:
+            logger.critical(
+                "[BRC][HIGH] BRC campaign initialization failed; "
+                "BRC testnet control endpoints will fail closed: %s",
+                e,
+                exc_info=True,
+            )
+            _brc_campaign_service = None
+
+        position_projection_service = PositionProjectionService(_position_repo)
+        _execution_orchestrator = ExecutionOrchestrator(
+            capital_protection=_capital_protection,
+            order_lifecycle=_order_lifecycle_service,
+            gateway=_exchange_gateway,
+            intent_repository=_execution_intent_repo,
+            notifier=_orchestrator_notifier_adapter,  # P0-6: 注入告警回调
+            execution_recovery_repository=_execution_recovery_repo,  # PG 正式版
+            position_projection_service=position_projection_service,
+            global_kill_switch=_global_kill_switch_service,
+            startup_trading_guard=_startup_trading_guard_service,
+            account_risk_service=_account_risk_service,
+            campaign_state_service=_campaign_state_service,
+            brc_execution_permission_max=(
+                _runtime_config_provider.resolved_config.environment.brc_execution_permission_max
+                if _runtime_config_provider is not None
+                else ExecutionPermission.ORDER_ALLOWED
+            ),
+        )
+        _exchange_gateway.set_global_order_callback(_order_lifecycle_service.update_order_from_exchange)
+        _protection_health_monitor = ProtectionHealthMonitor(
+            execution_orchestrator=_execution_orchestrator,
+            trace_service=_trace_service,
+            notifier=_orchestrator_notifier_adapter,
+        )
+        _external_close_monitor = ExternalCloseMonitor(
+            execution_orchestrator=_execution_orchestrator,
+            position_projection_service=position_projection_service,
+            order_lifecycle=_order_lifecycle_service,
+            trace_service=_trace_service,
+        )
+        logger.info("Core execution runtime ready")
 
         # =============================================
-        # Phase 4: Create Signal Pipeline
+        # Phase 4.3: Run Startup Reconciliation
         # =============================================
-        logger.info("Phase 4: Creating signal pipeline...")
-        create_signal_pipeline(config_manager, signal_repository=signal_repository)
+        logger.info("Phase 4.3: Running startup reconciliation...")
+        reconciliation_summary = None
+        try:
+            from src.application.startup_reconciliation_service import StartupReconciliationService
+
+            reconciliation_service = StartupReconciliationService(
+                gateway=_exchange_gateway,
+                repository=_order_repo,
+                lifecycle=_order_lifecycle_service,
+                orchestrator=_execution_orchestrator,
+                execution_recovery_repository=_execution_recovery_repo,
+            )
+
+            reconciliation_summary = await reconciliation_service.run_startup_reconciliation()
+
+            logger.info("=" * 70)
+            logger.info("启动对账完成")
+            logger.info(f"候选订单: {reconciliation_summary['total_candidates']} 个")
+            logger.info(f"对账成功: {reconciliation_summary['success_count']} 个")
+            logger.info(f"对账失败: {reconciliation_summary['failure_count']} 个")
+            logger.info(f"清除待恢复标记: {reconciliation_summary['recovery_cleared_count']} 个")
+            logger.info(f"PG recovery: 已解决: {reconciliation_summary['pg_recovery_resolved_count']} 个")
+            logger.info(f"PG recovery: 重试中: {reconciliation_summary['pg_recovery_retrying_count']} 个")
+            logger.info(f"PG recovery: 已失败: {reconciliation_summary['pg_recovery_failed_count']} 个")
+            logger.info(f"执行耗时: {reconciliation_summary['duration_ms']} ms")
+            logger.info("=" * 70)
+
+        except Exception as e:
+            logger.error(f"启动对账失败（不影响主进程启动）: {e}", exc_info=True)
+            # 继续启动（可用性优先）
+
+        # =============================================
+        # Phase 4.4: Rebuild Circuit Breakers from PG Recovery Tasks
+        # =============================================
+        logger.info("Phase 4.4: Rebuilding circuit breakers from PG recovery tasks...")
+        try:
+            breaker_count = await _execution_orchestrator.rebuild_circuit_breakers_from_recovery_tasks()
+            logger.info(f"Circuit breaker 重建完成: {breaker_count} 个 symbol 被熔断")
+        except Exception as e:
+            logger.error(f"Circuit breaker 重建失败（不影响主进程启动）: {e}", exc_info=True)
+            # 继续启动（可用性优先）
+
+        # =============================================
+        # Phase 4.5: Check API Key Permissions
+        # =============================================
+        logger.info("Phase 4.5: Checking API key permissions...")
+        await _exchange_gateway.check_api_key_permissions()
+        permission_summary = _exchange_gateway.get_permission_check_summary()
+        logger.info(
+            "Phase 4.5 permission summary: verified=%s, status=%s, exchange=%s, testnet=%s",
+            permission_summary["verified"],
+            permission_summary["status"],
+            permission_summary["exchange"],
+            permission_summary["testnet"],
+        )
+        if permission_summary["reason"]:
+            logger.warning(
+                "Phase 4.5 permission check reason: %s",
+                permission_summary["reason"],
+            )
+
+        # =============================================
+        # Phase 5: Create Signal Pipeline (Dependency Injection)
+        # =============================================
+        logger.info("Phase 5: Creating signal pipeline...")
+        # 配置重构后：SignalPipeline 需要 config_manager 作为第一个参数
+        runtime_strategy_definitions = None
+        runtime_allowed_directions = None
+        runtime_mtf_ema_period = None
+        runtime_execution_strategy = None
+        runtime_risk_locked = False
+
+        if _runtime_config_provider is not None:
+            runtime_config = _runtime_config_provider.resolved_config
+            runtime_risk = runtime_config.risk
+            runtime_strategy = runtime_config.strategy
+            runtime_execution = runtime_config.execution
+            runtime_market = runtime_config.market
+            risk_config = runtime_risk.to_risk_config()
+            runtime_strategy_definitions = [
+                runtime_strategy.to_strategy_definition(
+                    primary_symbol=runtime_market.primary_symbol,
+                    primary_timeframe=runtime_market.primary_timeframe,
+                )
+            ]
+            runtime_allowed_directions = runtime_strategy.allowed_directions
+            runtime_mtf_ema_period = runtime_strategy.get_mtf_ema_period()
+            runtime_execution_strategy = runtime_execution.to_order_strategy(
+                strategy_id=f"{runtime_config.profile_name}_execution"
+            )
+            runtime_risk_locked = True
+            logger.info(
+                "SignalPipeline risk config driven by runtime profile: "
+                f"profile={runtime_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"max_loss_percent={risk_config.max_loss_percent}, "
+                f"max_leverage={risk_config.max_leverage}, "
+                f"max_total_exposure={risk_config.max_total_exposure}, "
+                f"daily_max_trades={risk_config.daily_max_trades}"
+            )
+            logger.info(
+                "SignalPipeline strategy driven by runtime profile: "
+                f"profile={runtime_config.profile_name}, "
+                f"allowed_directions={[direction.value for direction in runtime_allowed_directions]}, "
+                f"trigger={runtime_strategy.trigger.type}, "
+                f"filters={[filter_config.type for filter_config in runtime_strategy.filters]}, "
+                f"mtf_ema_period={runtime_mtf_ema_period}"
+            )
+            logger.info(
+                "SignalPipeline execution strategy driven by runtime profile: "
+                f"profile={runtime_config.profile_name}, "
+                f"tp_levels={runtime_execution_strategy.tp_levels}, "
+                f"tp_ratios={runtime_execution_strategy.tp_ratios}, "
+                f"tp_targets={runtime_execution_strategy.tp_targets}, "
+                f"initial_stop_loss_rr={runtime_execution_strategy.initial_stop_loss_rr}, "
+                f"trailing_stop_enabled={runtime_execution_strategy.trailing_stop_enabled}, "
+                f"oco_enabled={runtime_execution_strategy.oco_enabled}"
+            )
+        else:
+            risk_config = RiskConfig(
+                max_loss_percent=user_config.risk.max_loss_percent,
+                max_leverage=user_config.risk.max_leverage,
+            )
+            logger.warning(
+                "Runtime config provider missing; falling back to ConfigManager "
+                f"risk config: max_loss_percent={risk_config.max_loss_percent}, "
+                f"max_leverage={risk_config.max_leverage}, "
+                f"max_total_exposure={risk_config.max_total_exposure}"
+            )
+        strategy_signal_v2_observe_writer = _build_strategy_signal_v2_observe_writer()
+        brc_execution_permission = (
+            _runtime_config_provider.resolved_config.environment.brc_execution_permission_max
+            if _runtime_config_provider is not None
+            else ExecutionPermission.ORDER_ALLOWED
+        )
+        signal_executor = _signal_executor_for_brc_permission(
+            _execution_orchestrator,
+            brc_execution_permission,
+        )
+        global _signal_pipeline
+        _signal_pipeline = SignalPipeline(
+            config_manager=config_manager,
+            risk_config=risk_config,
+            notification_service=_notification_service,
+            signal_repository=signal_repository,
+            signal_executor=signal_executor,
+            cooldown_seconds=core_config.signal_pipeline.cooldown_seconds,
+            runtime_strategy_definitions=runtime_strategy_definitions,
+            runtime_allowed_directions=runtime_allowed_directions,
+            runtime_mtf_ema_period=runtime_mtf_ema_period,
+            runtime_execution_strategy=runtime_execution_strategy,
+            runtime_risk_locked=runtime_risk_locked,
+            strategy_signal_v2_observe_writer=strategy_signal_v2_observe_writer,
+        )
         logger.info("Signal pipeline ready")
 
         # =============================================
-        # Phase 5: REST API Warmup
+        # Phase 6: REST API Warmup
         # =============================================
-        logger.info("Phase 5: Warming up historical data...")
-        warmup_bars = config_manager.core_config.warmup.history_bars
-        symbols = config_manager.merged_symbols
-        timeframes = config_manager.user_config.timeframes
+        logger.info("Phase 6: Warming up historical data...")
+        if _runtime_config_provider is not None:
+            runtime_market = _runtime_config_provider.resolved_config.market
+            warmup_bars = runtime_market.warmup_history_bars
+            symbols = runtime_market.symbols
+            timeframes = runtime_market.timeframes
+            logger.info(
+                "Market scope driven by runtime config: "
+                f"profile={_runtime_config_provider.resolved_config.profile_name}, "
+                f"hash={_runtime_config_provider.config_hash}, "
+                f"symbols={symbols}, timeframes={timeframes}, warmup_bars={warmup_bars}"
+            )
+        else:
+            warmup_bars = core_config.warmup.history_bars
+            symbols = core_config.core_symbols
+            timeframes = user_config.timeframes
+            logger.warning(
+                "Runtime config provider missing; falling back to ConfigManager "
+                f"market scope: symbols={symbols}, timeframes={timeframes}, "
+                f"warmup_bars={warmup_bars}"
+            )
 
         warmup_tasks = []
         for symbol in symbols:
@@ -242,36 +1163,85 @@ async def run_application():
         logger.info("Historical data fed to pipeline for EMA warmup")
 
         # =============================================
-        # Phase 6: Start Asset Polling
+        # Phase 7: Start Asset Polling
         # =============================================
-        logger.info("Phase 6: Starting asset polling...")
-        polling_interval = config_manager.user_config.asset_polling.interval_seconds
+        logger.info("Phase 7: Starting asset polling...")
+        if _runtime_config_provider is not None:
+            polling_interval = _runtime_config_provider.resolved_config.market.asset_polling_interval
+            logger.info(f"Asset polling interval driven by runtime config: {polling_interval}s")
+        else:
+            polling_interval = user_config.asset_polling.interval_seconds
+            logger.warning(f"Asset polling interval fallback from ConfigManager: {polling_interval}s")
         await _exchange_gateway.start_asset_polling(polling_interval)
 
-        # Periodically update pipeline with latest snapshot
-        async def update_snapshot_loop():
-            while not _shutdown_event.is_set():
-                snapshot = _exchange_gateway.get_account_snapshot()
-                if snapshot and get_signal_pipeline():
-                    get_signal_pipeline().update_account_snapshot(snapshot)
-                await asyncio.sleep(polling_interval)
-
-        asyncio.create_task(update_snapshot_loop())
+        _snapshot_update_task = _start_snapshot_update_task(polling_interval)
         logger.info("Asset polling started")
 
         # =============================================
-        # Phase 7: Start WebSocket Subscriptions
+        # Phase 7.5: Start Periodic Reconciliation Read Model
         # =============================================
-        logger.info("Phase 7: Starting WebSocket subscriptions...")
+        logger.info("Phase 7.5: Starting periodic reconciliation read model...")
+        try:
+            from src.application.reconciliation import ReconciliationService
+
+            try:
+                _reconciliation_read_model_repo = (
+                    create_runtime_reconciliation_read_model_repository()
+                )
+                await _reconciliation_read_model_repo.initialize()
+                logger.info("Periodic reconciliation read model repository initialized")
+            except Exception as repo_error:
+                logger.error(
+                    "Periodic reconciliation read model repository unavailable; continuing without persistence: %s",
+                    repo_error,
+                    exc_info=True,
+                )
+                _reconciliation_read_model_repo = None
+
+            periodic_reconciliation_service = ReconciliationService(
+                gateway=_exchange_gateway,
+                position_mgr=_position_repo,
+                order_repository=_order_repo,
+            )
+            if _protection_health_monitor is not None:
+                await _run_startup_protection_health_check(
+                    periodic_reconciliation_service,
+                    symbols,
+                    _protection_health_monitor,
+                    _external_close_monitor,
+                )
+            _periodic_reconciliation_task = _start_periodic_reconciliation_task(
+                periodic_reconciliation_service,
+                symbols,
+                _reconciliation_read_model_repo,
+                _protection_health_monitor,
+                _external_close_monitor,
+            )
+        except Exception as e:
+            logger.error(
+                f"Periodic reconciliation task startup failed（不影响主进程）: {e}",
+                exc_info=True,
+            )
+            _reconciliation_read_model_repo = None
+            _periodic_reconciliation_task = None
+
+        # =============================================
+        # Phase 8: Start WebSocket Subscriptions
+        # =============================================
+        logger.info("Phase 8: Starting WebSocket subscriptions...")
+
+        _order_watch_tasks = _start_order_watch_tasks(symbols)
+        logger.info(f"Order watch tasks active: {len(_order_watch_tasks)}")
 
         # Create WebSocket task
-        ws_task = asyncio.create_task(
+        _ws_task = asyncio.create_task(
             _exchange_gateway.subscribe_ohlcv(
                 symbols=symbols,
                 timeframes=timeframes,
                 callback=on_kline_received,
                 history_bars=warmup_bars,
-            )
+            ),
+            name="ws-ohlcv",
         )
 
         logger.info("=" * 60)
@@ -279,54 +1249,162 @@ async def run_application():
         logger.info("=" * 60)
 
         # =============================================
-        # Phase 7.5: Start REST API Server (embedded)
+        # Phase 9: Start REST API Server (embedded)
         # =============================================
-        import os
         import uvicorn
-        from src.interfaces.api import app as api_app, set_dependencies
+        from src.interfaces.api import app as api_app, bind_runtime_context
 
         api_port = int(os.environ.get("BACKEND_PORT", 8000))
-        logger.info(f"Phase 7.5: Starting REST API server on port {api_port}...")
+        logger.info(f"Phase 9: Starting REST API server on port {api_port}...")
 
         # Set API dependencies (shared with main process)
         from src.application.signal_tracker import SignalStatusTracker
+        from src.application.config_snapshot_service import ConfigSnapshotService
+        from src.infrastructure.config_snapshot_repository import ConfigSnapshotRepository
+        from src.infrastructure.config_entry_repository import ConfigEntryRepository
+
         _status_tracker = SignalStatusTracker(repository=signal_repository)
 
-        set_dependencies(
-            repository=signal_repository,
-            account_getter=_exchange_gateway.get_account_snapshot,
-            config_manager=config_manager,
-            exchange_gateway=_exchange_gateway,
-            signal_tracker=_status_tracker,
+        # Initialize ConfigSnapshotService with repository
+        snapshot_repo = ConfigSnapshotRepository(db_path="data/config_snapshots.db")
+        await snapshot_repo.initialize()
+        _snapshot_service = ConfigSnapshotService(repository=snapshot_repo)
+        config_manager.set_snapshot_service(_snapshot_service)
+
+        # Initialize ConfigEntryRepository for strategy params API
+        _config_entry_repo = ConfigEntryRepository()
+        await _config_entry_repo.initialize()
+
+        # Inject into ConfigManager (required for backtest config KV storage)
+        config_manager.set_config_entry_repository(_config_entry_repo)
+
+        logger.info("ConfigEntryRepository initialized")
+
+        # Initialize config repositories (unified dependency injection)
+        from src.infrastructure.repositories.config_repositories import (
+            StrategyConfigRepository,
+            RiskConfigRepository,
+            SystemConfigRepository,
+            SymbolConfigRepository,
+            NotificationConfigRepository,
+            ConfigHistoryRepository,
+            ConfigSnapshotRepositoryExtended,
         )
+
+        _api_strategy_repo = StrategyConfigRepository()
+        await _api_strategy_repo.initialize()
+        logger.info("StrategyConfigRepository initialized")
+
+        _api_risk_repo = RiskConfigRepository()
+        await _api_risk_repo.initialize()
+        logger.info("RiskConfigRepository initialized")
+
+        _api_system_repo = SystemConfigRepository()
+        await _api_system_repo.initialize()
+        logger.info("SystemConfigRepository initialized")
+
+        _api_symbol_repo = SymbolConfigRepository()
+        await _api_symbol_repo.initialize()
+        logger.info("SymbolConfigRepository initialized")
+
+        _api_notification_repo = NotificationConfigRepository()
+        await _api_notification_repo.initialize()
+        logger.info("NotificationConfigRepository initialized")
+
+        _api_history_repo = ConfigHistoryRepository()
+        await _api_history_repo.initialize()
+        logger.info("ConfigHistoryRepository initialized")
+
+        _api_snapshot_repo_extended = ConfigSnapshotRepositoryExtended()
+        await _api_snapshot_repo_extended.initialize()
+        logger.info("ConfigSnapshotRepository initialized")
+
+        runtime_context = RuntimeContext(
+            owner="main",
+            shutdown_event=_shutdown_event,
+            config_manager=config_manager,
+            runtime_config_provider=_runtime_config_provider,
+            exchange_gateway=_exchange_gateway,
+            notification_service=_notification_service,
+            signal_repository=signal_repository,
+            config_entry_repo=_config_entry_repo,
+            order_repo=_order_repo,
+            execution_intent_repo=_execution_intent_repo,
+            execution_recovery_repo=_execution_recovery_repo,
+            position_repo=_position_repo,
+            reconciliation_read_model_repo=_reconciliation_read_model_repo,
+            signal_pipeline=_signal_pipeline,
+            account_service=account_service,
+            order_lifecycle_service=_order_lifecycle_service,
+            capital_protection=_capital_protection,
+            execution_orchestrator=_execution_orchestrator,
+            global_kill_switch_service=_global_kill_switch_service,
+            startup_trading_guard_service=_startup_trading_guard_service,
+            account_risk_service=_account_risk_service,
+            campaign_state_service=_campaign_state_service,
+            brc_campaign_service=_brc_campaign_service,
+            trace_service=_trace_service,
+            protection_health_monitor=_protection_health_monitor,
+            external_close_monitor=_external_close_monitor,
+            startup_reconciliation_summary=reconciliation_summary,
+            signal_tracker=_status_tracker,
+            snapshot_service=_snapshot_service,
+            strategy_repo=_api_strategy_repo,
+            risk_repo=_api_risk_repo,
+            system_repo=_api_system_repo,
+            symbol_repo=_api_symbol_repo,
+            notification_repo=_api_notification_repo,
+            history_repo=_api_history_repo,
+            snapshot_repo=_api_snapshot_repo_extended,
+            order_watch_tasks=_order_watch_tasks,
+            periodic_reconciliation_task=_periodic_reconciliation_task,
+            snapshot_update_task=_snapshot_update_task,
+            ws_task=_ws_task,
+        )
+        await runtime_context.start()
+        bind_runtime_context(runtime_context, api_app)
         logger.info("API dependencies initialized")
 
         # Start uvicorn server as a background task
+        api_host = os.environ.get("API_HOST", "127.0.0.1")
         api_config = uvicorn.Config(
             api_app,
-            host="0.0.0.0",
+            host=api_host,
             port=api_port,
             log_level="warning",
             lifespan="off",
         )
-        api_server = uvicorn.Server(api_config)
-        api_task = asyncio.create_task(api_server.serve())
+        _api_server = uvicorn.Server(api_config)
+        _api_task = asyncio.create_task(_api_server.serve(), name="api-server")
+        runtime_context.api_server = _api_server
+        runtime_context.api_task = _api_task
 
         # Wait a moment for API server to initialize
         await asyncio.sleep(2)
-        logger.info(f"REST API server ready at http://localhost:{api_port}")
+        if _shutdown_event.is_set():
+            logger.info("Shutdown requested during API startup; proceeding to cleanup")
+        else:
+            logger.info(f"REST API server ready at http://{api_host}:{api_port}")
 
         # =============================================
         # Event Loop - Wait for shutdown
         # =============================================
-        await _shutdown_event.wait()
+        if not _shutdown_event.is_set():
+            await _shutdown_event.wait()
 
-        # Cancel WebSocket task
-        ws_task.cancel()
-        try:
-            await ws_task
-        except asyncio.CancelledError:
-            pass
+        await _cancel_ws_task()
+        await _cancel_api_task()
+
+        if _snapshot_update_task:
+            await _cancel_snapshot_update_task()
+
+        if _periodic_reconciliation_task:
+            await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
+            _periodic_reconciliation_task = None
+
+        if _order_watch_tasks:
+            await _cancel_order_watch_tasks(_order_watch_tasks)
+            _order_watch_tasks = []
 
     except FatalStartupError as e:
         logger.error(f"Fatal startup error: {e}")
@@ -356,19 +1434,126 @@ async def run_application():
 
     finally:
         # Cleanup
+        _block_startup_guard_for_shutdown("run_application_finally")
+        await _cancel_ws_task()
+        await _cancel_api_task()
+
+        if _snapshot_update_task:
+            await _cancel_snapshot_update_task()
+
+        if _periodic_reconciliation_task:
+            await _cancel_periodic_reconciliation_task(_periodic_reconciliation_task)
+            _periodic_reconciliation_task = None
+
+        if _order_watch_tasks:
+            await _cancel_order_watch_tasks(_order_watch_tasks)
+            _order_watch_tasks = []
+
         if _exchange_gateway:
             await _exchange_gateway.close()
+            _exchange_gateway = None
 
-        # Stop API server task
-        if 'api_task' in locals():
-            logger.info("Stopping API server...")
-            api_task.cancel()
+        _global_kill_switch_service = None
+        _startup_trading_guard_service = None
+        _account_risk_service = None
+        _campaign_state_service = None
+        _brc_campaign_service = None
+
+        if _order_lifecycle_service is not None:
             try:
-                await api_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("API server shutdown complete")
+                await _order_lifecycle_service.stop()
+            except Exception as exc:
+                logger.warning(
+                    "Order lifecycle service stop failed: %s",
+                    exc,
+                    exc_info=True,
+                )
+            else:
+                logger.info("Order lifecycle service stopped")
+            _order_lifecycle_service = None
 
+        if _signal_pipeline is not None:
+            await _close_runtime_resource("signal_pipeline", _signal_pipeline)
+            _signal_pipeline = None
+            _notification_service = None
+        elif _notification_service is not None:
+            await _close_runtime_resource("notification_service", _notification_service)
+            _notification_service = None
+
+        if 'config_manager' in locals():
+            await _close_runtime_resource("config_manager", config_manager)
+
+        if 'signal_repository' in locals():
+            await _close_runtime_resource("signal_repository", signal_repository)
+
+        if 'daily_risk_stats_repo' in locals() and daily_risk_stats_repo is not None:
+            await _close_runtime_resource("daily_risk_stats_repo", daily_risk_stats_repo)
+
+        if _execution_recovery_repo is not None:
+            await _close_runtime_resource("execution_recovery_repo", _execution_recovery_repo)
+            _execution_recovery_repo = None
+
+        if _execution_intent_repo is not None:
+            await _close_runtime_resource("execution_intent_repo", _execution_intent_repo)
+            _execution_intent_repo = None
+
+        if _order_repo is not None:
+            await _close_runtime_resource("order_repo", _order_repo)
+            _order_repo = None
+
+        if _position_repo is not None:
+            await _close_runtime_resource("position_repo", _position_repo)
+            _position_repo = None
+
+        if _reconciliation_read_model_repo is not None:
+            await _close_runtime_resource(
+                "reconciliation_read_model_repo",
+                _reconciliation_read_model_repo,
+            )
+            _reconciliation_read_model_repo = None
+
+        # Close ConfigEntryRepository
+        if _config_entry_repo:
+            await _config_entry_repo.close()
+            logger.info("ConfigEntryRepository closed")
+            _config_entry_repo = None
+
+        # Close config repositories (unified dependency injection)
+        if '_api_strategy_repo' in locals():
+            await _api_strategy_repo.close()
+            await _api_risk_repo.close()
+            await _api_system_repo.close()
+            await _api_symbol_repo.close()
+            await _api_notification_repo.close()
+            await _api_history_repo.close()
+            await _api_snapshot_repo_extended.close()
+            logger.info("Config repositories closed")
+
+        await close_db()
+        logger.info("Database engines closed")
+        await close_all_connections()
+        logger.info("SQLite connection pool closed")
+
+        _capital_protection = None
+        _execution_orchestrator = None
+        _runtime_config_provider = None
+        _reconciliation_read_model_repo = None
+        _protection_health_monitor = None
+        _external_close_monitor = None
+        _order_watch_tasks = []
+        _periodic_reconciliation_task = None
+        _snapshot_update_task = None
+        _ws_task = None
+        _api_task = None
+        _api_server = None
+        try:
+            from src.interfaces import api as api_module
+
+            api_module.clear_runtime_context()
+        except Exception as exc:
+            logger.warning("API runtime context clear failed: %s", exc, exc_info=True)
+
+        await _log_pending_runtime_tasks("run_application.finally")
         logger.info("Application shutdown complete")
 
 
@@ -380,19 +1565,23 @@ def main():
     Main entry point.
     Sets up event loop and runs the application.
     """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        # Create event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        # Run application
         loop.run_until_complete(run_application())
-
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception as e:
         logger.error(f"Failed to start: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(loop.shutdown_default_executor())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+            _log_runtime_threads("main.loop_closed")
 
 
 if __name__ == "__main__":

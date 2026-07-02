@@ -17,20 +17,24 @@ from typing import List, Optional
 # ============================================================
 def mask_secret(value: str, visible_chars: int = 4) -> str:
     """
-    Mask sensitive data: keep first 4 and last 4 characters, replace middle with ****.
+    脱敏敏感信息（API 密钥等）
 
-    Example: "abcdefghijklmnop" -> "abcd****mnop"
+    保留首尾各 visible_chars 个字符，中间用 ... 替代
 
     Args:
-        value: The sensitive string to mask
-        visible_chars: Number of characters to show at start and end
+        value: 需要脱敏的字符串
+        visible_chars: 保留的首尾字符数（默认 4）
 
     Returns:
-        Masked string
+        str: 脱敏后的字符串
+
+    Example:
+        >>> mask_secret("sk-abcdefghijklmnopqrstuvwxyz123456")
+        'sk-a...456'
     """
-    if len(value) <= visible_chars * 2:
-        return "****"
-    return f"{value[:visible_chars]}****{value[-visible_chars:]}"
+    if not value or len(value) <= visible_chars * 2:
+        return value
+    return f"{value[:visible_chars]}...{value[-visible_chars:]}"
 
 
 def mask_sensitive_data(text: str, secrets: List[str]) -> str:

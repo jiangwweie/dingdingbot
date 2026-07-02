@@ -6,12 +6,13 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from enum import Enum
 from typing import Optional, List, Dict, Any
 
 import aiosqlite
 
 from src.domain.models import (
-    SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest,
+    Direction, SignalResult, SignalQuery, SignalDeleteRequest, AttemptQuery, AttemptDeleteRequest,
     SignalAttempt, PatternResult, FilterResult
 )
 from src.domain.logic_tree import LogicNode, LeafNode, TriggerLeaf, FilterLeaf
@@ -25,30 +26,94 @@ class SignalRepository:
     SQLite repository for persisting trading signals.
     """
 
-    def __init__(self, db_path: str = "data/signals.db"):
+    def __new__(
+        cls,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
+        if cls is SignalRepository and connection is None and db_path == "data/v3_dev.db":
+            from src.infrastructure.database import should_use_pg_for_default_repository
+
+            if should_use_pg_for_default_repository():
+                from src.infrastructure.pg_signal_repository import PgSignalRepository
+
+                return PgSignalRepository()
+        return super().__new__(cls)
+
+    def __init__(
+        self,
+        db_path: str = "data/v3_dev.db",
+        connection: Optional[aiosqlite.Connection] = None,
+    ):
         """
         Initialize SignalRepository.
 
         Args:
             db_path: Path to SQLite database file
+            connection: Optional injected connection (if None, creates own connection)
         """
         self.db_path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[aiosqlite.Connection] = connection
+        self._owns_connection = connection is None
+        self._lock: Optional[asyncio.Lock] = None  # 延迟创建，避免事件循环冲突
         logger.info(f"数据库初始化完成：{db_path}")
+
+    def _ensure_lock(self) -> asyncio.Lock:
+        """Ensure lock is created for current event loop.
+
+        This method is safe to call from any event loop context.
+        Each call will return the lock associated with the current running event loop.
+        """
+        try:
+            # 尝试获取当前运行的事件循环
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行的事件循环，返回一个新创建的 lock
+            # 这种情况通常发生在同步代码中
+            return asyncio.Lock()
+
+        # 为当前事件循环创建或获取 lock
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        return self._lock
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        """Serialize domain values commonly embedded in signal diagnostics."""
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, Enum):
+            return value.value
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+    def _json_dumps(self, value: Any) -> str:
+        """Dump JSON for observability payloads without losing Decimal precision."""
+        return json.dumps(value, ensure_ascii=False, default=self._json_default)
 
     async def initialize(self) -> None:
         """
         Initialize database connection and create tables.
         Also creates the data/ directory if it doesn't exist.
-        """
-        # Create data directory if not exists
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
 
-        # Open database connection
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
+        This method is idempotent - calling it multiple times has no effect after first initialization.
+        """
+        # 幂等性检查：如果已经初始化，直接返回
+        if self._db is not None:
+            return
+
+        async with self._ensure_lock():
+            # Create connection if not injected
+            if self._owns_connection and self._db is None:
+                # Create data directory if not exists
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
+
+                # Open database connection via connection pool (shared across repos)
+                from src.infrastructure.connection_pool import get_connection as pool_get_connection
+                self._db = await pool_get_connection(self.db_path)
+                # PRAGMAs are set centrally in connection_pool, no need to repeat here
 
         # Create signals table
         await self._db.execute("""
@@ -158,6 +223,15 @@ class SignalRepository:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+        # R10.3: Add config_version column to signal_attempts for configuration traceability
+        try:
+            await self._db.execute("""
+                ALTER TABLE signal_attempts ADD COLUMN config_version TEXT
+            """)
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
         # Add signal_id column to signals table (S5-2)
         try:
             await self._db.execute("""
@@ -177,28 +251,11 @@ class SignalRepository:
             CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)
         """)
 
-        # Create custom_strategies table for strategy templates
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS custom_strategies (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                name          TEXT NOT NULL,
-                description   TEXT,
-                strategy_json TEXT NOT NULL,
-                created_at    TEXT NOT NULL,
-                updated_at    TEXT NOT NULL
-            )
-        """)
-
-        # Create index for custom_strategies
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_custom_strategies_name ON custom_strategies(name)
-        """)
-
         # Create config_snapshots table for configuration version control
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS config_snapshots (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                version       TEXT NOT NULL,
+                version       TEXT NOT NULL UNIQUE,
                 config_json   TEXT NOT NULL,
                 description   TEXT DEFAULT '',
                 created_at    TEXT NOT NULL,
@@ -376,7 +433,7 @@ class SignalRepository:
         # Final result
         lines.append("【评估结果】")
         if attempt.final_result == "SIGNAL_FIRED":
-            direction_str = "看涨" if attempt.direction == "long" else "看跌" if attempt.direction == "short" else "未知"
+            direction_str = "看涨" if attempt.direction == "LONG" else "看跌" if attempt.direction == "SHORT" else "未知"
             lines.append(f"最终结果：信号触发 ({direction_str})")
         elif attempt.final_result == "NO_PATTERN":
             lines.append("最终结果：未检测到有效形态")
@@ -389,7 +446,7 @@ class SignalRepository:
         # Pattern detection
         lines.append("【形态检测】")
         if attempt.pattern:
-            direction_str = "看涨" if attempt.pattern.direction == "long" else "看跌" if attempt.pattern.direction == "short" else "未知"
+            direction_str = "看涨" if attempt.pattern.direction == "LONG" else "看跌" if attempt.pattern.direction == "SHORT" else "未知"
             lines.append(f"检测到形态：{attempt.pattern.strategy_name} ({direction_str})")
             lines.append(f"形态评分：{attempt.pattern.score:.2f}")
             # Add pattern details if available
@@ -515,7 +572,7 @@ class SignalRepository:
 
         return root
 
-    async def save_attempt(self, attempt, symbol: str, timeframe: str) -> None:
+    async def save_attempt(self, attempt, symbol: str, timeframe: str, config_version: str = None) -> None:
         """
         Save a SignalAttempt to the signal_attempts table.
 
@@ -523,12 +580,13 @@ class SignalRepository:
             attempt: SignalAttempt object from strategy engine
             symbol: Trading pair symbol
             timeframe: Timeframe string
+            config_version: Configuration version when this attempt was generated (R10.3)
         """
         created_at = datetime.now(timezone.utc).isoformat()
 
         # Extract fields from attempt
         direction = attempt.pattern.direction.value if attempt.pattern else None
-        pattern_score = attempt.pattern.score if attempt.pattern else None
+        pattern_score = float(attempt.pattern.score) if attempt.pattern else None
         final_result = attempt.final_result
         kline_timestamp = attempt.kline_timestamp
 
@@ -549,14 +607,14 @@ class SignalRepository:
                 for f_name, f_result in attempt.filter_results
             ]
         }
-        details_json = json.dumps(details_dict)
+        details_json = self._json_dumps(details_dict)
 
         # Generate evaluation summary report
         evaluation_summary = self._generate_evaluation_summary(attempt, symbol, timeframe)
 
         # Build trace tree structure
         trace_tree = self._build_trace_tree(attempt)
-        trace_tree_json = json.dumps(trace_tree)
+        trace_tree_json = self._json_dumps(trace_tree)
 
         await self._db.execute(
             """
@@ -564,8 +622,8 @@ class SignalRepository:
                 created_at, symbol, timeframe, strategy_name,
                 direction, pattern_score, final_result,
                 filter_stage, filter_reason, details, kline_timestamp,
-                evaluation_summary, trace_tree
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                evaluation_summary, trace_tree, config_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -581,6 +639,7 @@ class SignalRepository:
                 kline_timestamp,
                 evaluation_summary,
                 trace_tree_json,
+                config_version,
             ),
         )
         await self._db.commit()
@@ -709,20 +768,23 @@ class SignalRepository:
             signal_id: The database signal ID or provided tracker ID
         """
         created_at = datetime.now(timezone.utc).isoformat()
-        tags_json = json.dumps(signal.tags)
+        tags_json = self._json_dumps(signal.tags)
 
         # Use signal_id if provided, otherwise use created_at as signal_id
         signal_id_value = signal_id or created_at
+        take_profit_1 = None
+        if signal.take_profit_levels:
+            take_profit_1 = signal.take_profit_levels[0].get("price")
 
         await self._db.execute(
             """
             INSERT INTO signals (
                 created_at, symbol, timeframe, direction,
                 entry_price, stop_loss, position_size, leverage,
-                tags_json, risk_info, status, pnl_ratio,
+                tags_json, risk_info, status, take_profit_1, pnl_ratio,
                 kline_timestamp, strategy_name, score, signal_id, source,
                 ema_trend, mtf_status, pattern_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -736,7 +798,8 @@ class SignalRepository:
                 tags_json,
                 signal.risk_reward_info,
                 status,
-                signal.pnl_ratio,
+                str(take_profit_1) if take_profit_1 is not None else None,
+                str(signal.pnl_ratio) if signal.pnl_ratio is not None else None,
                 signal.kline_timestamp,
                 signal.strategy_name,
                 signal.score,
@@ -817,7 +880,7 @@ class SignalRepository:
 
         # Extract from the end: strategy_name, direction, timeframe, and the rest is symbol
         strategy_name = parts[-1]
-        direction = parts[-2]
+        direction = Direction.normalize(parts[-2])
         timeframe = parts[-3]
         symbol = ":".join(parts[:-3])  # Join remaining parts as symbol
 
@@ -846,6 +909,28 @@ class SignalRepository:
                 return None
             return dict(row)
 
+    async def get_signal_by_tracker_id(self, signal_id: str) -> Optional[dict]:
+        """按 tracker signal_id 获取单条信号。"""
+        async with self._db.execute(
+            "SELECT * FROM signals WHERE signal_id = ? ORDER BY created_at DESC LIMIT 1",
+            (signal_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row is not None else None
+
+    async def list_active_signals_for_cache_rebuild(self) -> List[dict]:
+        """返回 ACTIVE/PENDING 信号，用于启动时重建 dedup cache。"""
+        async with self._db.execute(
+            """
+            SELECT signal_id, symbol, timeframe, direction, strategy_name, score, created_at
+            FROM signals
+            WHERE status IN ('ACTIVE', 'active', 'PENDING', 'pending')
+            ORDER BY created_at DESC
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     async def get_opposing_signal(
         self,
         symbol: str,
@@ -864,7 +949,8 @@ class SignalRepository:
             Signal dict if found, None otherwise
         """
         # Determine opposing direction
-        opposing_direction = "short" if direction == "long" else "long"
+        normalized_direction = Direction.normalize(direction)
+        opposing_direction = "SHORT" if normalized_direction == "LONG" else "LONG"
 
         async with self._db.execute(
             """
@@ -926,6 +1012,8 @@ class SignalRepository:
             status = query.status
             start_time = query.start_time
             end_time = query.end_time
+
+        direction = Direction.normalize(direction) if direction else None
 
         # Build WHERE clause dynamically
         where_clauses = ["1=1"]
@@ -1048,6 +1136,8 @@ class SignalRepository:
             end_time = request.end_time
             source = request.source
 
+        direction = Direction.normalize(direction) if direction else None
+
         # If ids provided, delete by IDs
         if ids and len(ids) > 0:
             placeholders = ",".join("?" * len(ids))
@@ -1153,7 +1243,7 @@ class SignalRepository:
         # Get long count
         async with self._db.execute(
             "SELECT COUNT(*) as count FROM signals WHERE direction = ?",
-            ("long",)
+            ("LONG",)
         ) as cursor:
             row = await cursor.fetchone()
             long_count = row["count"]
@@ -1161,7 +1251,7 @@ class SignalRepository:
         # Get short count
         async with self._db.execute(
             "SELECT COUNT(*) as count FROM signals WHERE direction = ?",
-            ("short",)
+            ("SHORT",)
         ) as cursor:
             row = await cursor.fetchone()
             short_count = row["count"]
@@ -1195,9 +1285,8 @@ class SignalRepository:
         }
 
     async def close(self) -> None:
-        """Close database connection."""
-        if self._db:
-            await self._db.close()
+        """Clear local connection reference (pool-managed connections are never closed by repos)."""
+        self._db = None
 
     async def get_pending_signals(self, symbol: str) -> List[Dict[str, Any]]:
         """
@@ -1470,139 +1559,6 @@ class SignalRepository:
         return cursor.rowcount
 
     # ========================================================================
-    # Custom Strategies CRUD Methods
-    # ========================================================================
-
-    async def get_all_custom_strategies(self) -> List[Dict[str, Any]]:
-        """
-        Get all custom strategy templates (list view with basic info only).
-
-        Returns:
-            List of strategies with id, name, description, created_at, updated_at
-        """
-        async with self._db.execute(
-            """
-            SELECT id, name, description, created_at, updated_at
-            FROM custom_strategies
-            ORDER BY created_at DESC
-            """
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-
-    async def get_custom_strategy_by_id(self, strategy_id: int) -> Optional[Dict[str, Any]]:
-        """
-        Get a single custom strategy by ID with full strategy_json data.
-
-        Args:
-            strategy_id: Strategy record ID
-
-        Returns:
-            Strategy dict with all fields, or None if not found
-        """
-        async with self._db.execute(
-            "SELECT * FROM custom_strategies WHERE id = ?", (strategy_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            return dict(row)
-
-    async def create_custom_strategy(
-        self,
-        name: str,
-        strategy_json: str,
-        description: str = None,
-    ) -> int:
-        """
-        Create a new custom strategy template.
-
-        Args:
-            name: Strategy name
-            strategy_json: Serialized StrategyDefinition JSON
-            description: Optional description
-
-        Returns:
-            ID of the newly created strategy
-        """
-        created_at = datetime.now(timezone.utc).isoformat()
-        updated_at = created_at
-
-        cursor = await self._db.execute(
-            """
-            INSERT INTO custom_strategies (name, description, strategy_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (name, description, strategy_json, created_at, updated_at),
-        )
-        await self._db.commit()
-        return cursor.lastrowid
-
-    async def update_custom_strategy(
-        self,
-        strategy_id: int,
-        name: str = None,
-        strategy_json: str = None,
-        description: str = None,
-    ) -> bool:
-        """
-        Update an existing custom strategy template.
-
-        Args:
-            strategy_id: Strategy record ID
-            name: New name (optional)
-            strategy_json: New strategy JSON (optional)
-            description: New description (optional)
-
-        Returns:
-            True if updated successfully, False if strategy not found
-        """
-        updated_at = datetime.now(timezone.utc).isoformat()
-
-        # Build dynamic UPDATE clause
-        updates = []
-        params = []
-
-        if name is not None:
-            updates.append("name = ?")
-            params.append(name)
-        if strategy_json is not None:
-            updates.append("strategy_json = ?")
-            params.append(strategy_json)
-        if description is not None:
-            updates.append("description = ?")
-            params.append(description)
-
-        if not updates:
-            return False
-
-        updates.append("updated_at = ?")
-        params.append(updated_at)
-        params.append(strategy_id)
-
-        update_sql = "UPDATE custom_strategies SET " + ", ".join(updates) + " WHERE id = ?"
-
-        cursor = await self._db.execute(update_sql, params)
-        await self._db.commit()
-        return cursor.rowcount > 0
-
-    async def delete_custom_strategy(self, strategy_id: int) -> bool:
-        """
-        Delete a custom strategy template by ID.
-
-        Args:
-            strategy_id: Strategy record ID
-
-        Returns:
-            True if deleted successfully, False if strategy not found
-        """
-        cursor = await self._db.execute(
-            "DELETE FROM custom_strategies WHERE id = ?", (strategy_id,)
-        )
-        await self._db.commit()
-        return cursor.rowcount > 0
-
-    # ========================================================================
     # Config Snapshot CRUD Methods
     # ========================================================================
 
@@ -1741,6 +1697,36 @@ class SignalRepository:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def get_recent_config_snapshots(self, count: int = 5) -> List[int]:
+        """
+        Get IDs of the most recent N snapshots.
+
+        Args:
+            count: Number of recent snapshots to get
+
+        Returns:
+            List of snapshot IDs (newest first)
+        """
+        async with self._db.execute(
+            "SELECT id FROM config_snapshots ORDER BY created_at DESC LIMIT ?",
+            (count,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def get_active_config_version(self) -> Optional[str]:
+        """
+        Get the version of the currently active snapshot.
+
+        Returns:
+            Version string or None if no active snapshot
+        """
+        async with self._db.execute(
+            "SELECT version FROM config_snapshots WHERE is_active = 1 LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
     async def get_all_attempts(self) -> List[dict]:
         """
         Get all signal attempts from database.
@@ -1871,18 +1857,47 @@ class SignalRepository:
         numeric_signal_id = row[0]
 
         await self._db.execute(
-            """
-            UPDATE signal_take_profits
-            SET status = ?, pnl_ratio = ?, filled_at = ?
-            WHERE signal_id = ? AND tp_id = ?
-            """,
-            (
-                status,
-                str(pnl_ratio) if pnl_ratio else None,
-                filled_at,
-                numeric_signal_id,
-                tp_id,
-            ),
+            "UPDATE signals SET take_profit_status = ?, take_profit pnl_ratio = ? WHERE id = ?",
+            (status, str(pnl_ratio) if pnl_ratio else None, numeric_signal_id),
         )
+        await self._db.commit()
+
+    async def get_signal_ids_by_backtest_report(
+        self,
+        strategy_id: str,
+        start_time: int,
+        end_time: int,
+    ) -> List[str]:
+        """
+        Get signal IDs for a specific backtest report.
+
+        通过 strategy_id 和时间范围查询回测信号 ID 列表。
+
+        Args:
+            strategy_id: Strategy ID to filter
+            start_time: Backtest start timestamp (milliseconds)
+            end_time: Backtest end timestamp (milliseconds)
+
+        Returns:
+            List of signal IDs
+        """
+        async with self._ensure_lock():
+            # Convert timestamps to ISO format for comparison
+            start_iso = datetime.fromtimestamp(start_time / 1000, tz=timezone.utc).isoformat()
+            end_iso = datetime.fromtimestamp(end_time / 1000, tz=timezone.utc).isoformat()
+
+            cursor = await self._db.execute("""
+                SELECT signal_id FROM signals
+                WHERE source = 'backtest'
+                  AND strategy_name = ?
+                  AND created_at >= ?
+                  AND created_at <= ?
+                ORDER BY created_at ASC
+            """, (strategy_id, start_iso, end_iso))
+
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+            return [row[0] for row in rows if row[0]]
         await self._db.commit()
         logger.debug(f"Updated take-profit status: signal_id={signal_id}, tp_id={tp_id}, status={status}")

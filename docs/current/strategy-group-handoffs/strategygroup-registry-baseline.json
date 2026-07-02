@@ -1,0 +1,985 @@
+{
+  "required_row_fields": [
+    "strategy_group_id",
+    "owner_label",
+    "edge_thesis",
+    "trade_logic",
+    "regime_fit",
+    "supported_sides",
+    "default_tier",
+    "trial_eligible",
+    "risk_gaps",
+    "hard_blocks",
+    "required_facts_summary",
+    "promotion_gate",
+    "downshift_rule",
+    "park_rule",
+    "kill_condition",
+    "evidence_refs",
+    "authority_boundary"
+  ],
+  "risk_acceptance_policy": {
+    "owner_may_accept": [
+      "strategy_quality_risk",
+      "fact_coverage_risk",
+      "economic_risk"
+    ],
+    "owner_may_not_override": [
+      "execution_safety_risk",
+      "authority_risk"
+    ]
+  },
+  "rows": [
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L4",
+      "downshift_rule": "Downshift if momentum exhaustion, concentration, stale facts, or protection/account conflicts appear.",
+      "edge_thesis": "Capture clean momentum continuation after member and group-pool confirmation.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/MPG-001/handoff.json"
+        },
+        {
+          "kind": "replay",
+          "path": "docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-corpus.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "reviewed_handoff_plus_replay",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if live/replay outcomes show persistent false continuation after costs and protection.",
+      "owner_label": "动量延续",
+      "park_rule": "Park only after repeated no-edge reviews or Owner selects a different live lane.",
+      "promotion_gate": "Already current first live-trial lane; live action still depends on runtime state only.",
+      "regime_fit": "Directional crypto momentum with clean 1h persistence and acceptable liquidity.",
+      "required_facts_summary": {
+        "account_exchange": "balance, position, open orders, symbol availability, min notional, step, tick, leverage limit",
+        "market": "latest price, recent 1h candles, closed candle timestamp, volume, mark, funding",
+        "risk": "fill gap, slippage, protection plan, exit plan",
+        "strategy": "member signal, group-pool selection, persistence, exhaustion disable, body extension, concentration"
+      },
+      "required_next_evidence": "first allocated-subaccount live outcome when fresh signal and official runtime chain pass",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L4 tier still is not direct submit authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "fee, funding, fill-gap slippage, and min-size friction"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "missing protection, stale account facts, open-order or active-position conflict"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "closed-candle and member-state freshness remain action-time runtime facts"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "false breakout",
+            "fast reversal",
+            "choppy no-trade regime"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "MPG-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Long-only continuation lane with exhaustion and concentration disables, protected by stop/exit plan.",
+      "trial_eligible": true
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L3",
+      "downshift_rule": "Downshift if pullback/reclaim facts, action-time account facts, liquidity, or funding context become unavailable.",
+      "edge_thesis": "Capture trend-intact pullback followed by reclaim, distinct from MPG momentum continuation.",
+      "evidence_refs": [
+        {
+          "kind": "identity_decision",
+          "path": "output/runtime-monitor/latest-cpm-identity-routing-decision.json"
+        },
+        {
+          "kind": "required_facts_mapping",
+          "path": "output/runtime-monitor/latest-cpm-required-facts-mapping.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "standalone_trial_asset_identity_closed",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live review shows pullback-reclaim has persistent false continuation after costs and protection.",
+      "owner_label": "CPM 回踩收复",
+      "park_rule": "Park if identity evidence regresses or CPM becomes redundant with MPG after review.",
+      "promotion_gate": "Armed observation only; real submit still depends on fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "regime_fit": "Bullish rebound or trend-continuation regime where pullback depth remains normal and reclaim confirms.",
+      "required_facts_summary": {
+        "account_exchange": "action-time available balance, active position, open orders, symbol availability, min notional, step, tick, leverage limit",
+        "market": "15m/1h/4h closed structure, liquidity, mark, funding",
+        "risk": "invalidated below level, protection plan, exit plan, time stop",
+        "strategy": "htf trend intact, pullback depth normal, reclaim confirmed"
+      },
+      "required_next_evidence": "fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L3 armed observation is not real submit authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "fee, funding, fill-gap slippage, and pullback continuation failure"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "missing protection, stale account facts, open-order or active-position conflict"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "trend, pullback depth, reclaim, liquidity, funding, and action-time account facts"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "failed reclaim",
+            "trend break after pullback",
+            "choppy rebound regime"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "CPM-RO-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Long-only pullback-reclaim lane with trend break, failed reclaim, liquidity, funding, and action-time account disables.",
+      "trial_eligible": true
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L2",
+      "downshift_rule": "Downshift if product eligibility, breadth, or session gap facts are unavailable.",
+      "edge_thesis": "Capture theme or basket momentum in equity-like perpetual products.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/TEQ-001/handoff.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "reviewed_handoff_partial_runtime_history",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if repeated review shows theme bursts fail after session and cost friction.",
+      "owner_label": "类股权永续动量",
+      "park_rule": "Park while theme momentum evidence is thin or concentration risk dominates.",
+      "promotion_gate": "Post-MPG review or explicit Owner lane change plus replay/live evidence that product/session risk is controlled.",
+      "regime_fit": "Theme momentum where product/session and concentration risks are acceptable.",
+      "required_facts_summary": {
+        "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
+        "market": "latest price, recent 1h candles, volume, mark, funding",
+        "risk": "mark/funding review, session fill slippage, protection and exit plan",
+        "strategy": "theme momentum, basket breadth, concentration, session gap, product eligibility, overextension disable"
+      },
+      "required_next_evidence": "shadow outcomes and cost/session review before any L4 review",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L2 shadow candidate evidence cannot create real-order authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "session fill slippage and funding/mark review"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "runtime account, protection, and exchange filters remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "theme breadth, product eligibility, and session gap context"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "low-history product momentum",
+            "post-burst overextension",
+            "symbol concentration"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "TEQ-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Long-only burst continuation with product eligibility, breadth, and overextension disables.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L3",
+      "downshift_rule": "Downshift if derivatives facts are stale or settlement timing invalidates the setup.",
+      "edge_thesis": "Capture funding, basis, and crowding stress where derivatives pressure creates asymmetric continuation or unwind.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/FBS-001/handoff.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "reviewed_handoff_derivatives_heavy",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if stress signals repeatedly fail after funding, basis, and liquidation costs.",
+      "owner_label": "资金费率/基差压力",
+      "park_rule": "Park if crowding stress is absent or derivatives source quality is too weak.",
+      "promotion_gate": "Derivatives facts and margin/liquidation mapping must support a Strategy Asset State promote/go-live review after P0 closure or Owner lane change.",
+      "regime_fit": "Derivative crowding, negative funding, basis/premium stress, and settlement timing regimes.",
+      "required_facts_summary": {
+        "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
+        "derivatives": "open interest, global long/short, top-trader ratio, negative funding crowding, settlement timing",
+        "market": "latest price, 1h candles, mark, funding window, basis/premium window, volume",
+        "risk": "exchange margin/liquidation model, spread/liquidity downshift, mark deviation, protection plan"
+      },
+      "required_next_evidence": "derivatives source reliability and cost-survival review",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L3 armed observation cannot place real orders without separate L4 eligibility"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "funding, basis reversal, spread, and liquidation envelope"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "protection, account, open-order, and exchange filter facts remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "OI, long/short, top-trader, settlement, and margin/liquidation facts are heavy"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "crowding stress may unwind before runtime capture",
+            "short lane needs redesign"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "FBS-001",
+      "supported_sides": [
+        "long",
+        "short_disable_or_redesign_only"
+      ],
+      "trade_logic": "Observe derivatives stress; long lane is primary while short side remains disable/redesign-only.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L3",
+      "downshift_rule": "Downshift outside valid session/structure window or when trigger bars are not closed.",
+      "edge_thesis": "Capture opening-range structure after session-specific breakout or revival conditions.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/SOR-001/handoff.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "reviewed_handoff_session_conditional",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if session breakouts repeatedly reverse after gap/fill and time-stop review.",
+      "owner_label": "开盘区间结构",
+      "park_rule": "Park if session conditions cannot be mapped reliably.",
+      "promotion_gate": "Session branch evidence and post-open decay review must support tier review; no L4 before P0 closure or Owner lane change.",
+      "regime_fit": "TradFi-linked session opens with closed range bars, trigger bar, and post-open decay control.",
+      "required_facts_summary": {
+        "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
+        "market": "latest price, 1h candles, closed open-range bars, closed trigger bar, volume, mark, funding",
+        "risk": "session gap fill, mark/funding session review, protection and exit plan",
+        "strategy": "session range, breakout trigger, tradfi session mapping, post-open decay disable, time-stop horizon"
+      },
+      "required_next_evidence": "session replay/outcome review before any higher-tier decision",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L3 conditional observation is not live submit authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "session gap fill, mark/funding, slippage around session open"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "closed-bar freshness, protection, account, and exchange filters remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "closed open range, trigger bar, and session mapping must be fresh"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "session false breakout",
+            "post-open decay",
+            "branch-specific long revival uncertainty"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "SOR-001",
+      "supported_sides": [
+        "short",
+        "long_revival_only"
+      ],
+      "trade_logic": "Session-window short lane with long-revival branch only when branch conditions are satisfied.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L1",
+      "downshift_rule": "Remain observe-only when overlay role or session facts are unclear.",
+      "edge_thesis": "Use precious-metal regime behavior as an overlay or selected directional context.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/PMR-001/handoff.json"
+        },
+        {
+          "kind": "tier_policy",
+          "path": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+        }
+      ],
+      "evidence_status": "reviewed_handoff_observe_overlay",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if overlay signals fail to improve StrategyGroup decisions or outcomes.",
+      "owner_label": "贵金属制度覆盖",
+      "park_rule": "Park if it only provides context and does not change runtime decisions.",
+      "promotion_gate": "Clarify target-specific role and attach reliable session/mark facts before L2 review.",
+      "regime_fit": "Commodity-style regimes, silver/gold dominance splits, and regular-session breakdowns.",
+      "required_facts_summary": {
+        "account_exchange": "balance, position, open orders, symbol availability and exchange filters",
+        "market": "latest price, 1h candles, mark, funding, volume",
+        "risk": "mark deviation, session fill slippage, protection and exit plan",
+        "strategy": "metal role split, XAG dominance, regular breakdown, overlay disable, commodity session gap"
+      },
+      "required_next_evidence": "role-specific replay and fact maturity before tier review",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L1 observe-only cannot create candidates or orders"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "session fill slippage and mark deviation"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "account, protection, and exchange facts remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "metal role split, XAG dominance, and commodity session gap facts"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "overlay may not translate into standalone trade edge",
+            "long side is context-only"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "PMR-001",
+      "supported_sides": [
+        "short",
+        "long_context_only"
+      ],
+      "trade_logic": "Short lane is primary; long is context-only until target-specific role and facts mature.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "default_tier": "L2",
+      "downshift_rule": "Downshift if strong-uptrend conflict, stale signal, squeeze risk, or derivatives facts invalidate review.",
+      "edge_thesis": "Capture bear-trend pullback continuation when weak rally loses structure and derivatives/crowding context is reviewable.",
+      "evidence_refs": [
+        {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/BTPC-001/handoff.json"
+        },
+        {
+          "kind": "replay",
+          "path": "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json"
+        },
+        {
+          "kind": "decision",
+          "path": "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-review.json"
+        },
+        {
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
+        }
+      ],
+      "evidence_status": "reviewed_l2_handoff_plus_proxy_replay_decision",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if bear-pullback would-enter cases fail after derivatives, squeeze, freshness, and cost review.",
+      "owner_label": "熊市回抽延续",
+      "park_rule": "Park if proxy replay or live derivatives source review shows no durable right-tail edge.",
+      "promotion_gate": "Complete live derivatives fact-source mapping, classifier review, and Strategy Asset State revise resolution before higher-tier review.",
+      "regime_fit": "Downtrend continuation after weak rally or pullback, excluding strong upside reclaim regimes.",
+      "required_facts_summary": {
+        "derivatives": "funding, premium, OI/crowding proxy, squeeze risk, historical OI, long/short, top-trader ratio",
+        "market": "price, 1h/4h candles, closed candle timestamp, volume, mark, funding",
+        "risk_account_exchange": "margin/liquidation model, slippage, protection, account state, exchange filters",
+        "strategy": "bear trend context, weak rally depth, structure loss, strong uptrend disable, squeeze disable"
+      },
+      "required_next_evidence": "execute BTPC L2 fact-source and classifier review tasks locally",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L2 proxy/replay evidence cannot authorize L4, FinalGate, Operation Layer, or order submit"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "funding, spread, slippage, leverage survival, liquidation envelope"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "live facts, protection, account state, and exchange filters remain runtime-only"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "historical OI, global long/short, top-trader ratio, live margin/liquidation model"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "strong-uptrend conflict",
+            "stale signal handling",
+            "short squeeze classifier quality"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "BTPC-001",
+      "supported_sides": [
+        "short"
+      ],
+      "trade_logic": "Short-only L2 shadow lane using pullback structure loss, strong-uptrend disable, squeeze review, and derivatives facts.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "current_decision_ref": "keep_observing",
+      "default_tier": "L1",
+      "downshift_rule": "Keep at L1 or park when replay, facts, classifier, or cost evidence is insufficient.",
+      "edge_thesis": "Capture compression breakout when true breakout evidence survives false-breakout disable review.",
+      "evidence_refs": [
+        {
+          "kind": "replay_or_generated_view",
+          "path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json"
+        },
+        {
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
+        }
+      ],
+      "evidence_status": "partial_replay_and_decision_evidence",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live outcomes repeatedly contradict the edge after facts and costs are reviewed.",
+      "owner_label": "波动压缩突破",
+      "park_rule": "Park when evidence is weak, negative, low-priority, or not tied to right-tail opportunity.",
+      "promotion_gate": "False-breakout disable and economic replay must remain stable before L2 review.",
+      "regime_fit": "Volatility compression, breakout close, and volume expansion regimes.",
+      "required_facts_summary": {
+        "market": "partial; runtime observation facts remain lower-level evidence",
+        "risk_account_exchange": "runtime-only before any live or shadow authority",
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
+      },
+      "required_next_evidence": "post-revision stage review before any tier change",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L1 observe-only evidence cannot create shadow candidate or real order"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "cost m2m, fee, slippage, funding, fill-slot assumptions"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "runtime facts and protection remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "compression context, volume expansion, disable state"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "false breakout reversal",
+            "breakout close confirmation fragility"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "VCB-001",
+      "supported_sides": [
+        "long"
+      ],
+      "trade_logic": "Observe long-side breakout candidates; revise false-breakout disable and cost review before L2.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "current_decision_ref": "keep_observing",
+      "default_tier": "L1",
+      "downshift_rule": "Keep at L1 or park when replay, facts, classifier, or cost evidence is insufficient.",
+      "edge_thesis": "Capture liquidity sweep or short-revival setups after side-specific rewrite quality is proven.",
+      "evidence_refs": [
+        {
+          "kind": "replay_or_generated_view",
+          "path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json"
+        },
+        {
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
+        }
+      ],
+      "evidence_status": "partial_replay_and_decision_evidence",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live outcomes repeatedly contradict the edge after facts and costs are reviewed.",
+      "owner_label": "流动性扫盘/短线复活",
+      "park_rule": "Park when evidence is weak, negative, low-priority, or not tied to right-tail opportunity.",
+      "promotion_gate": "Side-specific classifier rewrite and economic replay must support non-executing L2 review.",
+      "regime_fit": "Liquidity sweep, reclaim, and short-revival structures where range context is known.",
+      "required_facts_summary": {
+        "market": "partial; runtime observation facts remain lower-level evidence",
+        "risk_account_exchange": "runtime-only before any live or shadow authority",
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
+      },
+      "required_next_evidence": "post-revision stage review before any tier change",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L1 observe-only evidence cannot create shadow candidate or real order"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "fee, slippage, funding, fill-slot, leverage survival"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "runtime facts and protection remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "liquidity sweep confirmation, reclaim context, disable state"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "lookahead proxy failure",
+            "short-revival classifier fragility",
+            "range context missing"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "LSR-001",
+      "supported_sides": [
+        "long_observe",
+        "short_revival_review"
+      ],
+      "trade_logic": "Observe sweep/reclaim cases; keep short-revival rewrite and cost review as promotion prerequisites.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "current_decision_ref": "keep_observing",
+      "default_tier": "L1",
+      "downshift_rule": "Keep at L1 or park when replay, facts, classifier, or cost evidence is insufficient.",
+      "edge_thesis": "Capture short continuation after a bear-market rally fails instead of shorting early breakdowns.",
+      "evidence_refs": [
+        {
+          "kind": "replay_or_generated_view",
+          "path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json"
+        },
+        {
+          "kind": "strategy_asset_state",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
+        }
+      ],
+      "evidence_status": "partial_replay_and_decision_evidence",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live outcomes repeatedly contradict the edge after facts and costs are reviewed.",
+      "owner_label": "熊市反弹失败",
+      "park_rule": "Park when evidence is weak, negative, low-priority, or not tied to right-tail opportunity.",
+      "promotion_gate": "Rally context, squeeze-risk classifier, and cost replay must be attached before L2 review.",
+      "regime_fit": "Bear rally failure, rejection, and structure-extreme regimes.",
+      "required_facts_summary": {
+        "market": "partial; runtime observation facts remain lower-level evidence",
+        "risk_account_exchange": "runtime-only before any live or shadow authority",
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
+      },
+      "required_next_evidence": "post-revision stage review before any tier change",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "L1 observe-only evidence cannot create shadow candidate or real order"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "cost/fill/leverage boundary missing"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "runtime facts and protection remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "rally high/rejection context and squeeze-risk classifier"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "rally failure context may be weak",
+            "short squeeze risk"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "BRF-001",
+      "supported_sides": [
+        "short"
+      ],
+      "trade_logic": "Observe rally failure and squeeze-risk cases; require context and classifier quality before L2.",
+      "trial_eligible": false
+    },
+    {
+      "authority_boundary": "Registry row is strategy asset governance only. It does not authorize runtime start, candidate creation, FinalGate, Operation Layer, exchange write, real order, live-profile mutation, order-sizing mutation, withdrawal, transfer, or credential mutation.",
+      "current_decision_ref": "park",
+      "default_tier": "L1",
+      "downshift_rule": "Keep at L1 or park when replay, facts, classifier, or cost evidence is insufficient.",
+      "edge_thesis": "Range-boundary reversion vocabulary kept only if materially new edge evidence appears.",
+      "evidence_refs": [
+        {
+          "kind": "replay_or_generated_view",
+          "path": "output/runtime-monitor/latest-strategy-asset-state.json"
+        }
+      ],
+      "evidence_status": "partial_generated_decision_only",
+      "hard_blocks": [
+        "stale runtime facts",
+        "missing protection",
+        "duplicate submit risk",
+        "conflicting active position or open order",
+        "out-of-scope StrategyGroup, symbol, side, profile, notional, or leverage",
+        "authority bypass or credential/live-profile/sizing mutation"
+      ],
+      "kill_condition": "Kill if replay/live outcomes repeatedly contradict the edge after facts and costs are reviewed.",
+      "owner_label": "区间边界回归",
+      "park_rule": "Park when evidence is weak, negative, low-priority, or not tied to right-tail opportunity.",
+      "promotion_gate": "Materially new positive replay or live-observation evidence is required before unpark.",
+      "regime_fit": "Calm range boundary rejection regimes, currently weak or negative in review.",
+      "required_facts_summary": {
+        "market": "partial; runtime observation facts remain lower-level evidence",
+        "risk_account_exchange": "runtime-only before any live or shadow authority",
+        "strategy": "partial; see replay corpus and current Strategy Asset State evidence"
+      },
+      "required_next_evidence": "new edge evidence strong enough to reopen active review",
+      "risk_gaps": {
+        "authority_risk": {
+          "items": [
+            "parked L1 vocabulary has no candidate or order authority"
+          ],
+          "owner_can_accept": false
+        },
+        "economic_risk": {
+          "items": [
+            "calm-range m2m failed and cost survival uncertain"
+          ],
+          "owner_can_accept": true
+        },
+        "execution_safety_risk": {
+          "items": [
+            "runtime facts and protection remain hard stops"
+          ],
+          "owner_can_accept": false
+        },
+        "fact_coverage_risk": {
+          "items": [
+            "trend invalidation and range quality facts missing"
+          ],
+          "owner_can_accept": true
+        },
+        "strategy_quality_risk": {
+          "items": [
+            "weak edge evidence",
+            "negative or low-priority review",
+            "range-quality uncertainty"
+          ],
+          "owner_can_accept": true
+        }
+      },
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_group_id": "RBR-001",
+      "supported_sides": [
+        "short_review"
+      ],
+      "trade_logic": "Currently parked vocabulary; do not allocate active review until new evidence changes decision.",
+      "trial_eligible": false
+    }
+  ],
+  "runtime_authority_contract": {
+    "runtime_authority_sources": [
+      "Tradeability Decision",
+      "Runtime Safety State"
+    ],
+    "static_rows_must_not_grant_runtime_authority": true,
+    "trial_eligible_source": "registry_plus_owner_policy"
+  },
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "changes_live_profile": false,
+    "changes_order_sizing_defaults": false,
+    "places_order": false,
+    "withdrawal_or_transfer": false
+  },
+  "schema": "brc.strategygroup_registry_baseline.v1",
+  "scope": "strategygroup_registry_baseline",
+  "source_authority": {
+    "handoff_index": "docs/current/strategy-group-handoffs/main-control-handoff-index.md",
+    "registry_contract": "docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md",
+    "strategy_asset_state_evidence_contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
+    "tier_policy": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+  },
+  "status": "current_pilot_baseline"
+}

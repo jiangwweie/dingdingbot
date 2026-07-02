@@ -1,3 +1,18 @@
+> [!CAUTION]
+> **SUPERSEDED_AGENT_TEAM_REFERENCE** — This file describes a previous agent-team workflow and no longer represents current project instructions.
+>
+> Current authoritative instructions are:
+>
+> * `AGENTS.md`
+> * `CLAUDE.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+>
+> This file is preserved only as historical reference.
+
+---
+
 # Agent Team 快速开始指南
 
 > **最后更新**: 2026-03-25
@@ -9,8 +24,8 @@
 ### 方式 1：最简单 - 直接描述需求
 
 ```bash
-# 输入 /coordinator 然后描述你的需求
-/coordinator
+# 输入 /pm 然后描述你的需求
+/pm
 
 我想添加一个策略预览功能，用户可以：
 1. 在策略编辑器中点击"测试"按钮
@@ -19,7 +34,7 @@
 ```
 
 **会发生什么**：
-1. Coordinator 自动分解任务
+1. PM 自动分解任务
 2. 并行调用 Backend、Frontend、QA
 3. 每个角色只修改自己负责的文件
 4. 最后汇总输出
@@ -61,9 +76,9 @@
 
 ### 示例：开发"策略预览"功能
 
-#### 步骤 1：启动 Coordinator
+#### 步骤 1：启动 PM
 ```bash
-/coordinator
+/pm
 ```
 
 #### 步骤 2：描述需求
@@ -82,9 +97,9 @@
 - 需要有测试覆盖
 ```
 
-#### 步骤 3：Coordinator 分解任务
+#### 步骤 3：PM 分解任务
 
-Coordinator 会自动创建以下任务：
+PM 会自动创建以下任务：
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -102,7 +117,7 @@ Coordinator 会自动创建以下任务：
 #### 步骤 4：并行执行
 
 ```python
-# Coordinator 并行调用三个角色
+# PM 并行调用三个角色
 Agent(subagent_type="backend-dev", prompt="实现预览接口...")
 Agent(subagent_type="frontend-dev", prompt="实现预览按钮...")
 Agent(subagent_type="qa-tester", prompt="编写测试...")
@@ -130,7 +145,7 @@ Agent(subagent_type="qa-tester", prompt="编写测试...")
 
 ### 验证命令
 pytest tests/unit/test_preview_api.py -v
-cd web-front && npm test
+cd gemimi-web-front && npm test
 ```
 
 ---
@@ -169,7 +184,7 @@ GET /api/strategies/{id}/history
 
 ### 场景 4：完整功能开发
 ```bash
-/coordinator
+/pm
 
 实现"策略模板导入/导出"功能：
 1. 用户可以导出策略为 JSON 文件
@@ -184,13 +199,13 @@ GET /api/strategies/{id}/history
 ## ⚠️ 注意事项
 
 ### ✅ 推荐做法
-- 完整功能开发 → 使用 `/coordinator`
+- 完整功能开发 → 使用 `/pm`
 - 单一角色任务 → 直接调用 `/frontend`、`backend`、`qa`
-- 任务完成后 → 等待 Coordinator 汇总再验收
+- 任务完成后 → 等待 PM 汇总再验收
 
 ### ❌ 避免做法
 - 同时调用多个角色做同一件事（会冲突）
-- 跳过 Coordinator 直接并行多个 Agent
+- 跳过 PM 直接并行多个 Agent
 - 修改不属于自己负责的文件
 
 ---
@@ -202,7 +217,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 刚才的任务分配有误，请重新分解：
 - XX 文件应该由 frontend-dev 修改
 - XX 文件应该由 backend-dev 修改
@@ -213,7 +228,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 检测到文件冲突：XX 文件被多个角色修改
 请重新协调任务边界，确保每人只改自己的文件
 ```
@@ -223,7 +238,7 @@ GET /api/strategies/{id}/history
 
 **解决**：
 ```bash
-/coordinator
+/pm
 Task X 依赖 Task Y 完成，但 Task Y 卡住了
 请检查依赖关系，调整执行顺序
 ```
@@ -235,7 +250,7 @@ Task X 依赖 Task Y 完成，但 Task Y 卡住了
 - `.claude/team/frontend-dev/SKILL.md` - 前端角色详细规范
 - `.claude/team/backend-dev/SKILL.md` - 后端角色详细规范
 - `.claude/team/qa-tester/SKILL.md` - 测试角色详细规范
-- `.claude/team/team-coordinator/SKILL.md` - 协调员详细规范
+- `.claude/team/project-manager/SKILL.md` - 项目经理详细规范 ⭐
 
 ---
 
@@ -252,10 +267,10 @@ Task X 依赖 Task Y 完成，但 Task Y 卡住了
 3. **可验证**：说明如何验证完成
 
 ### 文件边界
-1. **先确认**：不确定文件归属时先问 Coordinator
+1. **先确认**：不确定文件归属时先问 PM
 2. **不越界**：只改自己负责的文件
 3. **早报告**：发现冲突立即停止并报告
 
 ---
 
-*开始使用吧！输入 `/coordinator` 然后描述你的第一个需求！*
+*开始使用吧！输入 `/pm` 然后描述你的第一个需求！*

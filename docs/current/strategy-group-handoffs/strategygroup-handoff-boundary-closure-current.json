@@ -1,0 +1,133 @@
+{
+  "counts": {
+    "explicit_missing_boundary_count": 3,
+    "required_explicit_missing_boundary_count": 3,
+    "row_count": 5
+  },
+  "interaction": {
+    "approaches_real_order": false,
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "level": "L0_local_handoff_boundary_closure",
+    "mutates_remote_files": false,
+    "places_order": false,
+    "remote_interaction_count": 0
+  },
+  "review_outcome_state": {
+    "all_required_missing_boundaries_explicit": true,
+    "default_next_step": "use_explicit_boundaries_before_tier_or_handoff_review",
+    "primary_judgment_source": false,
+    "primary_judgment_source_name": "strategy_asset_state",
+    "promote_or_live_authority_created": false,
+    "review_scope": "handoff_boundary_closure",
+    "source_role": "handoff_boundary_closure_lifecycle_evidence",
+    "state_family": "Review Outcome State",
+    "tradeability_decision_source": false,
+    "vcb_lsr_brf_can_continue_observe_only": true
+  },
+  "rows": [
+    {
+      "boundary_is_explicit": true,
+      "boundary_state": "handoff_present_non_executing_input",
+      "current_decision": "revise",
+      "current_tier": "L2",
+      "handoff_pack_present": true,
+      "l2_shadow_authority_created": false,
+      "l4_scope_change_recommended": false,
+      "next_checkpoint": "continue_btpc_fact_classifier_guard",
+      "owner_manual_operation_required": false,
+      "primary_gap_class": "fact_source_gap",
+      "replay_corpus_present": true,
+      "required_facts_mapping_present": true,
+      "strategy_group_id": "BTPC-001",
+      "system_can_continue": true,
+      "trial_eligibility_may_be_reviewed_by_owner_policy": true
+    },
+    {
+      "boundary_is_explicit": true,
+      "boundary_state": "explicit_missing_handoff_boundary_accepted",
+      "current_decision": "keep_observing",
+      "current_tier": "L1",
+      "handoff_pack_present": false,
+      "l2_shadow_authority_created": false,
+      "l4_scope_change_recommended": false,
+      "next_checkpoint": "create_handoff_pack_before_l2_or_l4_review",
+      "owner_manual_operation_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "replay_corpus_present": true,
+      "required_facts_mapping_present": false,
+      "strategy_group_id": "VCB-001",
+      "system_can_continue": true,
+      "trial_eligibility_may_be_reviewed_by_owner_policy": true
+    },
+    {
+      "boundary_is_explicit": true,
+      "boundary_state": "explicit_missing_handoff_boundary_accepted",
+      "current_decision": "revise",
+      "current_tier": "L1",
+      "handoff_pack_present": false,
+      "l2_shadow_authority_created": false,
+      "l4_scope_change_recommended": false,
+      "next_checkpoint": "create_handoff_pack_before_l2_or_l4_review",
+      "owner_manual_operation_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "replay_corpus_present": true,
+      "required_facts_mapping_present": false,
+      "strategy_group_id": "LSR-001",
+      "system_can_continue": true,
+      "trial_eligibility_may_be_reviewed_by_owner_policy": true
+    },
+    {
+      "boundary_is_explicit": true,
+      "boundary_state": "explicit_missing_handoff_boundary_accepted",
+      "current_decision": "promote_review_only",
+      "current_tier": "L1",
+      "handoff_pack_present": false,
+      "l2_shadow_authority_created": false,
+      "l4_scope_change_recommended": false,
+      "next_checkpoint": "create_handoff_pack_before_l2_or_l4_review",
+      "owner_manual_operation_required": false,
+      "primary_gap_class": "stale_or_missing_artifact_gap",
+      "replay_corpus_present": true,
+      "required_facts_mapping_present": false,
+      "strategy_group_id": "BRF-001",
+      "system_can_continue": true,
+      "trial_eligibility_may_be_reviewed_by_owner_policy": true
+    },
+    {
+      "boundary_is_explicit": true,
+      "boundary_state": "parked_no_handoff_boundary",
+      "current_decision": "park",
+      "current_tier": "L1",
+      "handoff_pack_present": false,
+      "l2_shadow_authority_created": false,
+      "l4_scope_change_recommended": false,
+      "next_checkpoint": "keep_parked_until_material_new_edge_evidence",
+      "owner_manual_operation_required": false,
+      "primary_gap_class": "parked_low_priority_gap",
+      "replay_corpus_present": false,
+      "required_facts_mapping_present": false,
+      "strategy_group_id": "RBR-001",
+      "system_can_continue": false,
+      "trial_eligibility_may_be_reviewed_by_owner_policy": true
+    }
+  ],
+  "safety_invariants": {
+    "calls_exchange_write": false,
+    "calls_finalgate": false,
+    "calls_operation_layer": false,
+    "changes_live_profile": false,
+    "changes_order_sizing_defaults": false,
+    "l2_shadow_authority_created": false,
+    "l4_scope_change_recommended": false,
+    "places_order": false
+  },
+  "schema": "brc.strategygroup_handoff_boundary_closure.v1",
+  "scope": "strategygroup_handoff_boundary_closure",
+  "source_status": {
+    "quality_wave": "quality_wave_ready"
+  },
+  "status": "handoff_boundary_closure_ready",
+  "validation_errors": []
+}

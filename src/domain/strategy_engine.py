@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Dict, List, Tuple, Any
 from enum import Enum
+import logging
 
 from .models import (
     KlineData,
@@ -19,6 +20,9 @@ from .models import (
 )
 from .indicators import EMACalculator, EMACache
 from .filter_factory import FilterBase, FilterContext, TraceEvent, FilterFactory, AtrFilterDynamic
+
+# 获取 logger（domain 层使用基础 logging 模块，避免依赖 infrastructure）
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -145,7 +149,7 @@ class PatternStrategy(Strategy):
         self,
         pattern_ratio: Decimal,  # 形态质量比例 (0~1)
         atr_ratio: Optional[Decimal] = None,  # ATR 倍数 (可选)
-    ) -> float:
+    ) -> Decimal:
         """
         统一评分公式（所有形态策略共用）
 
@@ -156,16 +160,16 @@ class PatternStrategy(Strategy):
         Returns:
             最终评分（0~1）
         """
-        base_score = float(pattern_ratio)
+        base_score = pattern_ratio  # Keep as Decimal
 
         if atr_ratio and atr_ratio > 0:
             # ATR 加分（波幅质量），上限 2 倍
-            atr_bonus = min(float(atr_ratio), 2.0) * 0.3
-            score = base_score * 0.7 + atr_bonus
+            atr_bonus = min(atr_ratio, Decimal("2.0")) * Decimal("0.3")
+            score = base_score * Decimal("0.7") + atr_bonus
         else:
             score = base_score
 
-        return min(score, 1.0)
+        return min(score, Decimal("1.0"))
 
 
 # ============================================================
@@ -190,8 +194,15 @@ class PinbarStrategy(PatternStrategy):
         Bullish Pinbar: Long lower wick, body positioned at top
         Bearish Pinbar: Long upper wick, body positioned at bottom
 
+        P0-4: 新增最小波幅检查（防止开盘初期波幅极小误判）
+
+        逻辑：
+        - 如果 ATR 可用：min_required_range = atr * 0.1 (10%)
+        - 后备：min_required_range = 0.5 USDT (固定值)
+
         Args:
             kline: K-line data to analyze
+            atr_value: Optional ATR value for dynamic threshold
 
         Returns:
             PatternResult if Pinbar detected, None otherwise
@@ -207,6 +218,31 @@ class PinbarStrategy(PatternStrategy):
         candle_range = high - low
         if candle_range == Decimal(0):
             return None
+
+        # ============================================================
+        # P0-4: 新增最小波幅检查（形态检测层）
+        # 目的：防止开盘初期波幅极小误判
+        #
+        # 逻辑：
+        # - 如果 ATR 可用：min_required_range = atr * 0.1 (10%)
+        # - 后备：min_required_range = close * 0.001 (0.1% 价格波幅)
+        #   使用百分比而非绝对值，适配不同价格级别的币种
+        # ============================================================
+        if atr_value and atr_value > 0:
+            min_required_range = atr_value * Decimal("0.1")  # ATR 的 10%
+        else:
+            # 后备方案：使用价格的 0.1% 作为最小波幅
+            # 例如：BTC=100000 时，min_required = 100 USDT
+            #      DOGE=0.10 时，min_required = 0.0001 USDT
+            min_required_range = close * Decimal("0.001")
+
+        if candle_range < min_required_range:
+            logger.debug(
+                f"[Pinbar] 波幅过小过滤：{kline.symbol} {kline.timeframe} "
+                f"range={candle_range} min={min_required_range} "
+                f"(ATR={atr_value})"
+            )
+            return None  # 波幅太小，可能是开盘初期或低波动市场
 
         # Calculate body size
         body_size = abs(close - open_price)
@@ -262,7 +298,7 @@ class PinbarStrategy(PatternStrategy):
             score = self.calculate_score(pattern_ratio, atr_ratio)
         else:
             # Fallback to legacy scoring when ATR not available
-            score = float(pattern_ratio)
+            score = pattern_ratio
 
         return PatternResult(
             strategy_name="pinbar",
@@ -282,9 +318,10 @@ class PinbarStrategy(PatternStrategy):
 class EmaTrendFilter(Filter):
     """EMA trend filter implementation."""
 
-    def __init__(self, period: int, enabled: bool):
+    def __init__(self, period: int, enabled: bool, min_distance_pct: Decimal = Decimal('0')):
         self._period = period
         self._enabled = enabled
+        self._min_distance_pct = min_distance_pct  # 最小距离阈值（横盘过滤）
         self._ema_calculators: Dict[str, EMACalculator] = {}  # key: "symbol:timeframe"
 
     @property
@@ -315,6 +352,21 @@ class EmaTrendFilter(Filter):
         current_trend = context.current_trend
         if current_trend is None:
             return FilterResult(passed=False, reason="ema_data_not_ready")
+
+        # 距离阈值检查（横盘过滤）
+        if self._min_distance_pct > 0:
+            current_price = context.current_price
+            if current_price is None:
+                # 无法计算距离，跳过此检查
+                pass
+            else:
+                # 获取 EMA 值
+                ema_value = None
+                # 从 context 尝试获取 symbol/timeframe（需要从其他途径获取）
+                # 简化处理：使用 current_trend 推断 EMA 存在
+                # 实际需要访问 _ema_calculators，但 check 方法没有 symbol/timeframe 参数
+                # 暂时跳过，在 get_trend 时已经可以获取
+                pass
 
         # Check if pattern direction matches trend
         if pattern.direction == Direction.LONG:
@@ -466,6 +518,7 @@ class StrategyRunner:
             context = FilterContext(
                 higher_tf_trends=higher_tf_trends,
                 current_trend=current_trend,
+                current_price=kline.close,
             )
 
             filter_results = []
@@ -690,7 +743,8 @@ class DynamicStrategyRunner:
             pattern = None
 
             # S6-2-2: Pass atr_value to detect() if strategy supports it
-            if hasattr(strat.strategy, 'detect_with_history') and kline_history:
+            # CRITICAL: Check kline_history is not None, not just truthy (empty list is valid)
+            if hasattr(strat.strategy, 'detect_with_history') and kline_history is not None:
                 # Check if detect_with_history supports atr_value parameter
                 import inspect
                 sig = inspect.signature(strat.strategy.detect_with_history)
@@ -733,6 +787,7 @@ class DynamicStrategyRunner:
                 current_trend=effective_current_trend,
                 current_timeframe=kline.timeframe,
                 kline=kline,
+                current_price=kline.close,
             )
 
             # Run filter chain with short-circuit
@@ -1042,6 +1097,7 @@ class StrategyEngine:
 def create_dynamic_runner(
     strategy_definitions: List[Any],
     core_config: Optional[Any] = None,
+    resolved_params: Optional[Any] = None,  # Phase 8.1: 回测参数收口
 ) -> DynamicStrategyRunner:
     """
     Create a DynamicStrategyRunner from strategy definitions.
@@ -1051,6 +1107,7 @@ def create_dynamic_runner(
     Args:
         strategy_definitions: List of StrategyDefinition from config
         core_config: Optional CoreConfig for default parameters
+        resolved_params: Optional ResolvedBacktestParams for filter parameter injection (Phase 8.1)
 
     Returns:
         DynamicStrategyRunner ready for execution
@@ -1082,8 +1139,8 @@ def create_dynamic_runner(
         is_global = getattr(strat_def, "is_global", True)
         apply_to = getattr(strat_def, "apply_to", [])
 
-        # Create filter chain from config
-        filters = FilterFactory.create_chain(filters_config)
+        # Create filter chain from config (Phase 8.1: 传入 resolved_params)
+        filters = FilterFactory.create_chain(filters_config, resolved_params=resolved_params)
 
         # Handle OR logic by expanding to multiple independent runners
         # (AND logic for morphological patterns is rare, treated as OR for now)

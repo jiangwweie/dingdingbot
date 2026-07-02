@@ -18,16 +18,24 @@ DEFAULT_MTF_MAPPING = {
     "1d": "1w",
 }
 
-# 时间周期毫秒数映射
+# 时间周期毫秒数映射（支持所有 CCXT 标准时间框架）
 TIMEFRAME_TO_MS = {
     "1m": 60 * 1000,
+    "3m": 3 * 60 * 1000,
     "5m": 5 * 60 * 1000,
     "15m": 15 * 60 * 1000,
     "30m": 30 * 60 * 1000,
     "1h": 60 * 60 * 1000,
+    "2h": 2 * 60 * 60 * 1000,
     "4h": 4 * 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "12h": 12 * 60 * 60 * 1000,
     "1d": 24 * 60 * 60 * 1000,
+    "2d": 2 * 24 * 60 * 60 * 1000,
+    "3d": 3 * 24 * 60 * 60 * 1000,
     "1w": 7 * 24 * 60 * 60 * 1000,
+    "2w": 2 * 7 * 24 * 60 * 60 * 1000,
+    "1M": 30 * 24 * 60 * 60 * 1000,  # 月度 K 线（近似 30 天）
 }
 
 
@@ -96,10 +104,8 @@ def get_last_closed_kline_index(
     """
     Find the index of the last closed kline for MTF analysis.
 
-    For MTF analysis, we need the kline from the higher timeframe that
-    corresponds to the current period. If the current timestamp matches
-    a kline's timestamp exactly, that kline is considered "current" (not
-    yet started), so we return the previous one.
+    A kline is considered "closed" when its end time <= current_timestamp.
+    Kline end time = kline.timestamp + period_duration.
 
     Args:
         klines: List of klines (sorted by timestamp ascending)
@@ -112,37 +118,29 @@ def get_last_closed_kline_index(
     Example:
         current_timestamp = 10:15 (15m kline)
         timeframe = "1h"
-        Returns index of 10:00 kline (10:00-11:00 period)
+        Returns index of 10:00 kline (10:00-11:00 period, closes at 11:00)
 
-        current_timestamp = 11:00 (exactly matches 11:00 kline)
+        current_timestamp = 11:00 (exactly when 10:00-11:00 kline closes)
         timeframe = "1h"
-        Returns index of 10:00 kline (11:00 is current, not started)
+        Returns index of 10:00 kline (just closed, available for MTF)
+
+        current_timestamp = 10:59 (before 10:00-11:00 kline closes)
+        timeframe = "1h"
+        Returns index of 09:00 kline (10:00-11:00 not yet closed)
     """
     period_ms = parse_timeframe_to_ms(timeframe)
 
-    # Calculate which period current_timestamp belongs to
-    current_period = current_timestamp // period_ms
-
-    # Find klines in the same period as current_timestamp
-    # If current_timestamp matches a kline exactly, that kline is "current"
     best_index = -1
     for i, kline in enumerate(klines):
-        kline_period = kline.timestamp // period_ms
+        # Calculate when this kline ends
+        kline_end_time = kline.timestamp + period_ms
 
-        if kline_period < current_period:
-            # Previous period, definitely available
+        if kline_end_time <= current_timestamp:
+            # This kline has closed, it's safe to use for MTF analysis
             best_index = i
-        elif kline_period == current_period:
-            # Same period
-            if kline.timestamp == current_timestamp:
-                # This kline is "current" (just started), return previous
-                break
-            else:
-                # This kline is in the same period, use it
-                best_index = i
-                break
         else:
-            # Future period
+            # This kline hasn't closed yet, and neither do any after it
+            # (klines are sorted by timestamp ascending)
             break
 
     return best_index
