@@ -183,6 +183,68 @@ def test_fresh_signal_or_action_time_boundary_notifies_once_with_dedupe(
     assert dedupe_key["last_notified_at"]
 
 
+def test_promotion_candidate_from_candidate_pool_notifies(tmp_path: Path) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+    candidate_pool = json.loads(paths["candidate_pool"].read_text(encoding="utf-8"))
+    candidate_pool["promotion_candidates"] = [
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "promotion_state": "promotion_candidate",
+            "signal_state": "fresh",
+            "first_blocker": "scope_not_attached",
+        }
+    ]
+    _write(paths["candidate_pool"], candidate_pool)
+
+    artifact = module.build_server_monitor_artifact(
+        _args(module, paths),
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["decision"]["decision"] == "notify"
+    assert artifact["decision"]["strategy_group_id"] == "MPG-001"
+    assert artifact["decision"]["symbol"] == "OPUSDT"
+    assert artifact["decision"]["blocker_class"] == "promotion_candidate"
+    assert artifact["decision"]["checkpoint"] == "fresh_signal_promotion"
+    assert "promotion_candidate_present" in artifact["decision"]["reasons"]
+    assert artifact["notification"]["sent"] is True
+
+
+def test_fresh_symbol_readiness_non_market_blocker_notifies(tmp_path: Path) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+    candidate_pool = json.loads(paths["candidate_pool"].read_text(encoding="utf-8"))
+    candidate_pool["symbol_readiness_rows"] = [
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "signal_state": "fresh",
+            "first_blocker": "watcher_tick_missing",
+        }
+    ]
+    _write(paths["candidate_pool"], candidate_pool)
+
+    artifact = module.build_server_monitor_artifact(
+        _args(module, paths),
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["decision"]["decision"] == "notify"
+    assert artifact["decision"]["strategy_group_id"] == "SOR-001"
+    assert artifact["decision"]["symbol"] == "ETHUSDT"
+    assert artifact["decision"]["blocker_class"] == "watcher_tick_missing"
+    assert artifact["decision"]["checkpoint"] == "fresh_signal_promotion"
+    assert (
+        "fresh_signal_blocked_by_non_market_blocker:watcher_tick_missing"
+        in artifact["decision"]["reasons"]
+    )
+    assert artifact["notification"]["sent"] is True
+
+
 def test_non_market_blocker_notifies(tmp_path: Path) -> None:
     module = _load_module()
     paths = _base_paths(tmp_path)

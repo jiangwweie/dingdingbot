@@ -307,7 +307,20 @@ def _daily_table_has_non_market_blocker(daily_table: dict[str, Any]) -> dict[str
 def _candidate_pool_fresh_or_action_time(candidate_pool: dict[str, Any]) -> dict[str, Any] | None:
     lane_inputs = _as_list(candidate_pool.get("action_time_lane_inputs"))
     if lane_inputs:
-        return _as_dict(lane_inputs[0]) or {"status": "action_time_lane_input_present"}
+        row = dict(_as_dict(lane_inputs[0]) or {"status": "action_time_lane_input_present"})
+        row["_server_monitor_event_type"] = "action_time_lane_input"
+        return row
+    promotion_candidates = _as_list(candidate_pool.get("promotion_candidates"))
+    if promotion_candidates:
+        row = dict(_as_dict(promotion_candidates[0]) or {"status": "promotion_candidate_present"})
+        row["_server_monitor_event_type"] = "promotion_candidate"
+        return row
+    for row in _as_list(candidate_pool.get("symbol_readiness_rows")):
+        row_dict = _as_dict(row)
+        if str(row_dict.get("signal_state") or "") == "fresh":
+            row_copy = dict(row_dict)
+            row_copy["_server_monitor_event_type"] = "fresh_signal"
+            return row_copy
     for row in _as_list(candidate_pool.get("candidate_rows")):
         row_dict = _as_dict(row)
         readiness = _as_dict(row_dict.get("action_time_readiness"))
@@ -321,11 +334,18 @@ def _candidate_pool_fresh_or_action_time(candidate_pool: dict[str, Any]) -> dict
                 "fresh_signal_ready",
             }
         ):
-            return row_dict
+            row_copy = dict(row_dict)
+            row_copy["_server_monitor_event_type"] = "legacy_fresh_signal"
+            return row_copy
     return None
 
 
 def _runtime_data_gap_from_candidate_pool(candidate_pool: dict[str, Any]) -> dict[str, Any] | None:
+    for row in _as_list(candidate_pool.get("symbol_readiness_rows")):
+        row_dict = _as_dict(row)
+        blocker = str(row_dict.get("first_blocker") or "")
+        if blocker in RUNTIME_DATA_GAP_BLOCKERS:
+            return row_dict
     for row in _as_list(candidate_pool.get("candidate_rows")):
         row_dict = _as_dict(row)
         blocker = str(row_dict.get("first_blocker") or "")
@@ -402,9 +422,24 @@ def _decision_from_sources(
             or fresh_or_action_time.get("symbol")
             or "unknown"
         )
-        reasons.append("fresh_signal_or_action_time_boundary")
-        blocker_class = "action_time_boundary"
-        checkpoint = "fresh_signal_action_time_boundary"
+        event_type = str(fresh_or_action_time.get("_server_monitor_event_type") or "")
+        first_blocker = str(fresh_or_action_time.get("first_blocker") or "")
+        if event_type == "action_time_lane_input":
+            reasons.append("action_time_lane_input_present")
+            blocker_class = "action_time_boundary"
+            checkpoint = "fresh_signal_action_time_boundary"
+        elif event_type == "promotion_candidate":
+            reasons.append("promotion_candidate_present")
+            blocker_class = "promotion_candidate"
+            checkpoint = "fresh_signal_promotion"
+        elif first_blocker and first_blocker not in MARKET_BLOCKERS:
+            reasons.append("fresh_signal_blocked_by_non_market_blocker:" + first_blocker)
+            blocker_class = first_blocker
+            checkpoint = "fresh_signal_promotion"
+        else:
+            reasons.append("fresh_signal_present")
+            blocker_class = "fresh_signal"
+            checkpoint = "fresh_signal_promotion"
 
     data_gap_row = _runtime_data_gap_from_candidate_pool(candidate_pool)
     if data_gap_row and blocker_class == "none":
