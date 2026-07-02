@@ -67,6 +67,10 @@ DEFAULT_CANDIDATE_UNIVERSE = {
     "SOR-001": ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"),
     "BRF2-001": ("BTCUSDT", "ETHUSDT", "AVAXUSDT"),
 }
+PLACEHOLDER_SYMBOLS = {
+    "strategy_scope",
+    "brf2_research_supported_symbols_only",
+}
 PRIMARY_SYMBOLS = {
     "CPM-RO-001": "ETHUSDT",
     "MPG-001": "OPUSDT",
@@ -399,6 +403,11 @@ def _symbol_readiness_rows(
                 runtime_coverage_rows,
                 strategy_group_id,
                 symbol,
+            ) or _missing_runtime_coverage_row(strategy_group_id, symbol)
+            runtime_coverage_row = _normalize_runtime_coverage_row(
+                runtime_coverage_row,
+                strategy_group_id,
+                symbol,
             )
             result.append(
                 _symbol_readiness_row(
@@ -438,11 +447,18 @@ def _candidate_symbols(
             if str(row.get("strategy_group_id") or "") == strategy_group_id
         ),
     ):
-        if symbol and symbol != "strategy_scope":
+        if _symbol_authorized(strategy_group_id, symbol):
             symbols.append(symbol)
     if not symbols:
         symbols.append(PRIMARY_SYMBOLS.get(strategy_group_id, "strategy_scope"))
     return sorted(set(symbols), key=lambda symbol: (_symbol_role(strategy_group_id, symbol), symbol))
+
+
+def _symbol_authorized(strategy_group_id: str, symbol: str) -> bool:
+    if not symbol or symbol in PLACEHOLDER_SYMBOLS:
+        return False
+    authorized = set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ()))
+    return symbol in authorized
 
 
 def _matching_symbol_row(
@@ -455,6 +471,37 @@ def _matching_symbol_row(
         ):
             return row
     return {}
+
+
+def _missing_runtime_coverage_row(strategy_group_id: str, symbol: str) -> dict[str, Any]:
+    return {
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "state": "runtime_profile_scope_missing",
+        "blocker_class": "runtime_profile_scope_missing",
+        "active_runtime_instance_ids": [],
+        "selected_runtime_instance_ids": [],
+        "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+def _normalize_runtime_coverage_row(
+    row: dict[str, Any], strategy_group_id: str, symbol: str
+) -> dict[str, Any]:
+    normalized = dict(row)
+    normalized.setdefault("strategy_group_id", strategy_group_id)
+    normalized.setdefault("symbol", symbol)
+    normalized.setdefault("state", "runtime_profile_scope_missing")
+    normalized.setdefault("blocker_class", "runtime_profile_scope_missing")
+    normalized.setdefault("active_runtime_instance_ids", [])
+    normalized.setdefault("selected_runtime_instance_ids", [])
+    normalized.setdefault(
+        "next_action",
+        "bind_or_start_pretrade_runtime_for_candidate_symbol",
+    )
+    normalized.setdefault("authority_boundary", AUTHORITY_BOUNDARY)
+    return normalized
 
 
 def _symbol_readiness_row(
@@ -491,7 +538,6 @@ def _symbol_readiness_row(
         tradeability_row=tradeability_row,
     )
     risk_state = _risk_state(parity_row)
-    runtime_scope_missing = bool(runtime_coverage_row) and not runtime_active
     action_time_scope_missing = (
         signal_state == "fresh"
         and scope_state == "live_submit_allowed"
@@ -508,14 +554,14 @@ def _symbol_readiness_row(
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
-        runtime_scope_missing=runtime_scope_missing or action_time_scope_missing,
+        runtime_scope_missing=action_time_scope_missing,
     )
     promotion_state = _promotion_state(
         public_facts_state=public_facts_state,
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
-        runtime_scope_missing=runtime_scope_missing or action_time_scope_missing,
+        runtime_scope_missing=action_time_scope_missing,
     )
     return {
         "strategy_group_id": strategy_group_id,

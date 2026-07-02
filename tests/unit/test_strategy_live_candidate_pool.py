@@ -162,7 +162,7 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
     assert artifact["schema"] == "brc.strategy_live_candidate_pool.v1"
     assert artifact["status"] == "strategy_live_candidate_pool_ready"
     assert artifact["summary"]["candidate_count"] == 5
-    assert artifact["summary"]["symbol_readiness_count"] >= 10
+    assert artifact["summary"]["symbol_readiness_count"] == 18
     assert artifact["summary"]["deploy_ready"] is False
     assert "rank_1_lane" not in artifact["summary"]
     assert "rank_1_task_id" not in artifact["summary"]
@@ -174,6 +174,25 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
     assert rows["MI-001"]["candidate_status"] == "candidate_scope_decision_pending"
     assert rows["MPG-001"]["action_time_readiness"]["status"] == "blocked_public_facts"
     readiness = artifact["symbol_readiness_rows"]
+    assert {
+        row["strategy_group_id"]: artifact["pretrade_runtime"][
+            "candidate_symbols_per_strategy_group"
+        ][row["strategy_group_id"]]
+        for row in artifact["candidate_rows"]
+    } == {
+        "CPM-RO-001": 4,
+        "MPG-001": 4,
+        "MI-001": 3,
+        "SOR-001": 4,
+        "BRF2-001": 3,
+    }
+    assert "brf2_research_supported_symbols_only" not in {
+        row["symbol"] for row in readiness
+    }
+    assert all(
+        row["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
+        for row in readiness
+    )
     cpm_symbols = {
         row["symbol"]
         for row in readiness
@@ -327,10 +346,8 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
     }
     op = rows[("MPG-001", "OPUSDT")]
     sol = rows[("MPG-001", "SOLUSDT")]
-    assert op["first_blocker"] == "runtime_profile_scope_missing"
-    assert op["evidence_ref"].startswith(
-        "runtime_active_observation_status:candidate_universe_coverage:"
-    )
+    assert op["first_blocker"] == "detector_not_attached"
+    assert op["evidence_ref"] == "default_candidate_universe:MPG-001/OPUSDT"
     assert op["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
     assert sol["observation_scope"] == "active_observation"
     assert sol["watcher_state"] == "fresh"
@@ -723,7 +740,9 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent()
     )
     assert row["first_blocker"] == "runtime_profile_scope_missing"
     assert row["promotion_state"] == "idle"
-    assert row["evidence_ref"].endswith("MPG-001/OPUSDT missing_active_watcher_scope")
+    assert row["evidence_ref"].endswith(
+        "MPG-001/OPUSDT first_blocker=runtime_profile_scope_missing"
+    )
     assert artifact["action_time_lane_inputs"] == []
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
@@ -874,6 +893,37 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
 
     assert any("action_time_lane requires active server runtime coverage" in error for error in errors)
     assert any("action_time_lane_inputs[0] requires active server runtime coverage" in error for error in errors)
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    row["server_runtime_coverage"]["symbol"] = "SOLUSDT"
+    artifact["action_time_lane_inputs"][0]["server_runtime_coverage"][
+        "strategy_group_id"
+    ] = "SOR-001"
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any(
+        "server_runtime_coverage.symbol must match row symbol" in error
+        for error in errors
+    )
+    assert any(
+        "server_runtime_coverage.strategy_group_id must match row strategy_group_id"
+        in error
+        for error in errors
+    )
 
     artifact = _builder().build_strategy_live_candidate_pool(
         daily_table=_daily_table(),

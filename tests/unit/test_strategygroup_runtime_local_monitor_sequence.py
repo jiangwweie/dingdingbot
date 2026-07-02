@@ -2453,6 +2453,54 @@ def _maybe_write_strategygroup_closure_step(
             "",
             "\n".join(errors),
         )
+    if script == "runtime_active_observation_monitor.py":
+        candidate_pool_path = Path(command[command.index("--candidate-universe-json") + 1])
+        output_json = Path(command[command.index("--output-json") + 1])
+        candidate_pool = json.loads(candidate_pool_path.read_text(encoding="utf-8"))
+        rows = []
+        for strategy_group_id, symbols in sorted(
+            (candidate_pool.get("candidate_universe") or {}).items()
+        ):
+            for symbol in sorted(symbols):
+                rows.append(
+                    {
+                        "strategy_group_id": strategy_group_id,
+                        "symbol": symbol,
+                        "state": "active_watcher_scope",
+                        "blocker_class": "none",
+                        "active_runtime_instance_ids": [
+                            f"runtime-{strategy_group_id}-{symbol}"
+                        ],
+                        "selected_runtime_instance_ids": [
+                            f"runtime-{strategy_group_id}-{symbol}"
+                        ],
+                        "next_action": "continue_pretrade_observation",
+                        "authority_boundary": (
+                            "candidate_universe_coverage_is_read_only; "
+                            "no_finalgate_no_operation_layer_no_exchange_write"
+                        ),
+                    }
+                )
+        artifact = {
+            "scope": "runtime_active_observation_monitor",
+            "status": "waiting_for_signal",
+            "candidate_universe_coverage": {
+                "status": "complete",
+                "rows": rows,
+                "expected_row_count": len(rows),
+                "active_matched_row_count": len(rows),
+                "missing_row_count": 0,
+            },
+            "safety_invariants": {
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+                "order_created": False,
+            },
+        }
+        output_json.write_text(json.dumps(artifact), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
     if script == "build_brf2_owner_trial_policy_scope.py":
         _write_ready_brf2_owner_trial_policy_scope(command)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -2505,6 +2553,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     single_lane_task_packet_validator_commands: list[list[str]] = []
     strategy_live_candidate_pool_commands: list[list[str]] = []
     strategy_live_candidate_pool_validator_commands: list[list[str]] = []
+    runtime_active_observation_monitor_commands: list[list[str]] = []
     binance_public_facts_commands: list[list[str]] = []
     sor_session_scope_detector_commands: list[list[str]] = []
     action_time_boundary_commands: list[list[str]] = []
@@ -2557,6 +2606,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             strategy_live_candidate_pool_commands.append(command)
         if script == "validate_strategy_live_candidate_pool.py":
             strategy_live_candidate_pool_validator_commands.append(command)
+        if script == "runtime_active_observation_monitor.py":
+            runtime_active_observation_monitor_commands.append(command)
         if script == "fetch_binance_usdm_public_facts.py":
             binance_public_facts_commands.append(command)
         if script == "build_sor_session_scope_detector.py":
@@ -2906,6 +2957,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         daily_live_enablement_table_md=tmp_path / "daily-live-table.md",
         single_lane_task_packet_json=tmp_path / "single-lane-task-packet.json",
         single_lane_task_packet_md=tmp_path / "single-lane-task-packet.md",
+        runtime_active_monitor_json=tmp_path / "runtime-active-monitor.json",
         binance_public_facts_ssh_host="tokyo",
         command_runner=fake_runner,
     )
@@ -2971,6 +3023,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "validate_single_lane_task_packet.py",
         "build_strategy_live_candidate_pool.py",
         "validate_strategy_live_candidate_pool.py",
+        "runtime_active_observation_monitor.py",
+        "build_strategy_live_candidate_pool.py",
+        "validate_strategy_live_candidate_pool.py",
         "build_daily_live_enablement_table.py",
         "validate_daily_live_enablement_table.py",
         "build_single_lane_task_packet.py",
@@ -2983,8 +3038,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert len(daily_table_validator_commands) == 2
     assert len(single_lane_task_packet_commands) == 2
     assert len(single_lane_task_packet_validator_commands) == 2
-    assert len(strategy_live_candidate_pool_commands) == 1
-    assert len(strategy_live_candidate_pool_validator_commands) == 1
+    assert len(strategy_live_candidate_pool_commands) == 2
+    assert len(strategy_live_candidate_pool_validator_commands) == 2
+    assert len(runtime_active_observation_monitor_commands) == 1
     assert len(binance_public_facts_commands) == 1
     binance_command = binance_public_facts_commands[0]
     assert binance_command[binance_command.index("--ssh-host") + 1] == "tokyo"
@@ -3006,7 +3062,14 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert single_lane_command[
         single_lane_command.index("--output-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
-    candidate_pool_command = strategy_live_candidate_pool_commands[0]
+    runtime_active_command = runtime_active_observation_monitor_commands[0]
+    assert runtime_active_command[
+        runtime_active_command.index("--candidate-universe-json") + 1
+    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
+    assert runtime_active_command[
+        runtime_active_command.index("--output-json") + 1
+    ] == str(tmp_path / "runtime-active-monitor.json")
+    candidate_pool_command = strategy_live_candidate_pool_commands[-1]
     assert candidate_pool_command[
         candidate_pool_command.index("--daily-table-json") + 1
     ] == str(tmp_path / "daily-live-table.json")

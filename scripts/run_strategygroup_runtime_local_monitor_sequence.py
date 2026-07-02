@@ -2528,6 +2528,46 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    runtime_active_observation_monitor_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/runtime_active_observation_monitor.py"),
+        "--candidate-universe-json",
+        str(strategy_live_candidate_pool_json),
+        "--output-json",
+        str(runtime_active_monitor_json),
+        "--max-cycles-per-runtime",
+        "1",
+        "--timeout-seconds",
+        "10",
+        "--continue-on-blocked",
+    ]
+    steps.append(
+        _run_step(
+            "runtime_active_observation_monitor",
+            runtime_active_observation_monitor_command,
+            runtime_active_monitor_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "strategy_live_candidate_pool",
+            strategy_live_candidate_pool_command,
+            strategy_live_candidate_pool_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "validate_strategy_live_candidate_pool",
+            validate_strategy_live_candidate_pool_command,
+            strategy_live_candidate_pool_json,
+            runner,
+        )
+    )
+
     server_backed_daily_live_enablement_table_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_daily_live_enablement_table.py"),

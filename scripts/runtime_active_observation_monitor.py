@@ -246,6 +246,10 @@ def _candidate_universe_coverage(
                     "active_runtime_instance_ids": active_matches,
                     "selected_runtime_instance_ids": selected_matches,
                     "next_action": next_action,
+                    "authority_boundary": (
+                        "candidate_universe_coverage_is_read_only; "
+                        "no_finalgate_no_operation_layer_no_exchange_write"
+                    ),
                 }
             )
     missing_rows = [row for row in rows if row["blocker_class"] != "none"]

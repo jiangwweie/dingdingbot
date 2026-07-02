@@ -20,6 +20,8 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
 )
 from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
     AUTHORITY_BOUNDARY,
+    DEFAULT_CANDIDATE_UNIVERSE,
+    PLACEHOLDER_SYMBOLS,
     SCHEMA,
 )
 
@@ -40,6 +42,13 @@ FORBIDDEN_TRUE_KEYS = {
     "operation_layer_called",
     "live_profile_changed",
     "order_sizing_changed",
+}
+SERVER_RUNTIME_COVERAGE_STATES = {
+    "active_watcher_scope",
+    "active_runtime_filtered_out",
+    "runtime_profile_scope_missing",
+    "watcher_tick_missing",
+    "detector_not_attached",
 }
 
 
@@ -88,6 +97,7 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
         errors.append("symbol_readiness_rows are required")
     for index, row in enumerate(symbol_rows):
         errors.extend(_validate_symbol_readiness_row(index, row))
+    errors.extend(_validate_authorized_candidate_universe(symbol_rows))
     errors.extend(_validate_pretrade_runtime(artifact, symbol_rows))
     summary = _as_dict(artifact.get("summary"))
     if summary.get("candidate_count") != len(WIP_LANES):
@@ -226,6 +236,15 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         errors.append(
             f"{prefix}.action_time_lane requires active server runtime coverage"
         )
+    coverage = _as_dict(row.get("server_runtime_coverage"))
+    errors.extend(
+        _validate_server_runtime_coverage_identity(
+            prefix=f"{prefix}.server_runtime_coverage",
+            coverage=coverage,
+            strategy_group_id=str(row.get("strategy_group_id") or ""),
+            symbol=str(row.get("symbol") or ""),
+        )
+    )
     if row.get("authority_boundary") and "no_finalgate" not in str(
         row.get("authority_boundary")
     ):
@@ -246,15 +265,27 @@ def _validate_pretrade_runtime(
         counts = {}
     for strategy_group_id in WIP_LANES:
         count = int(counts.get(strategy_group_id) or 0)
-        if count < 2:
+        expected = len(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ()))
+        if count != expected:
             errors.append(
-                f"pretrade_runtime requires at least two symbols for {strategy_group_id}"
+                "pretrade_runtime candidate symbol count must match authorized "
+                f"universe for {strategy_group_id}"
             )
     promotion_candidates = _dict_rows(artifact.get("promotion_candidates"))
     action_time_inputs = _dict_rows(artifact.get("action_time_lane_inputs"))
     if len(action_time_inputs) > 1:
         errors.append("action_time_lane_inputs must contain at most one real-submit candidate")
     for index, row in enumerate(action_time_inputs):
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        symbol = str(row.get("symbol") or "")
+        if symbol in PLACEHOLDER_SYMBOLS:
+            errors.append(
+                f"action_time_lane_inputs[{index}].symbol must be a real authorized symbol"
+            )
+        if symbol not in set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())):
+            errors.append(
+                f"action_time_lane_inputs[{index}].symbol is outside authorized universe"
+            )
         if row.get("scope_state") == "readonly_only":
             errors.append(
                 f"action_time_lane_inputs[{index}] must not be readonly_only"
@@ -267,6 +298,14 @@ def _validate_pretrade_runtime(
             errors.append(
                 f"action_time_lane_inputs[{index}] requires active server runtime coverage"
             )
+        errors.extend(
+            _validate_server_runtime_coverage_identity(
+                prefix=f"action_time_lane_inputs[{index}].server_runtime_coverage",
+                coverage=_as_dict(row.get("server_runtime_coverage")),
+                strategy_group_id=strategy_group_id,
+                symbol=symbol,
+            )
+        )
     arbitration = _as_dict(artifact.get("arbitration"))
     if arbitration.get("single_real_submit_candidate") is not True:
         errors.append("arbitration.single_real_submit_candidate must be true")
@@ -274,6 +313,31 @@ def _validate_pretrade_runtime(
         row.get("promotion_state") == "promotion_candidate" for row in symbol_rows
     ):
         errors.append("promotion_candidates must match symbol readiness rows")
+    return errors
+
+
+def _validate_authorized_candidate_universe(
+    symbol_rows: list[dict[str, Any]]
+) -> list[str]:
+    errors: list[str] = []
+    actual: dict[str, set[str]] = {}
+    for row in symbol_rows:
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        symbol = str(row.get("symbol") or "")
+        actual.setdefault(strategy_group_id, set()).add(symbol)
+        if symbol in PLACEHOLDER_SYMBOLS:
+            errors.append(
+                f"symbol_readiness_rows contains placeholder symbol {symbol}"
+            )
+    for strategy_group_id in WIP_LANES:
+        expected_symbols = set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ()))
+        actual_symbols = actual.get(strategy_group_id, set())
+        if actual_symbols != expected_symbols:
+            errors.append(
+                "symbol_readiness_rows must match authorized universe for "
+                f"{strategy_group_id}: expected={sorted(expected_symbols)} "
+                f"actual={sorted(actual_symbols)}"
+            )
     return errors
 
 
@@ -307,6 +371,32 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _validate_server_runtime_coverage_identity(
+    *,
+    prefix: str,
+    coverage: dict[str, Any],
+    strategy_group_id: str,
+    symbol: str,
+) -> list[str]:
+    if not coverage:
+        return [f"{prefix} is required"]
+    errors: list[str] = []
+    if str(coverage.get("strategy_group_id") or "") != strategy_group_id:
+        errors.append(f"{prefix}.strategy_group_id must match row strategy_group_id")
+    if str(coverage.get("symbol") or "") != symbol:
+        errors.append(f"{prefix}.symbol must match row symbol")
+    if str(coverage.get("state") or "") not in SERVER_RUNTIME_COVERAGE_STATES:
+        errors.append(f"{prefix}.state is invalid")
+    blocker = str(coverage.get("blocker_class") or "")
+    if blocker not in {"none", *SERVER_RUNTIME_COVERAGE_STATES}:
+        errors.append(f"{prefix}.blocker_class is invalid")
+    if not str(coverage.get("next_action") or ""):
+        errors.append(f"{prefix}.next_action is required")
+    if "no_finalgate" not in str(coverage.get("authority_boundary") or ""):
+        errors.append(f"{prefix}.authority_boundary is invalid")
+    return errors
 
 
 def _server_runtime_scope_ready(runtime_coverage_row: dict[str, Any]) -> bool:

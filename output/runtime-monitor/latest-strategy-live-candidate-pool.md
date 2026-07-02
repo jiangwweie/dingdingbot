@@ -2,7 +2,7 @@
 
 - Status: `strategy_live_candidate_pool_ready`
 - Candidate count: `5`
-- Symbol readiness rows: `19`
+- Symbol readiness rows: `18`
 - Fresh promotion candidates: `0`
 - Top action-time candidate: `none`
 - P0 cleared: `False`
@@ -40,4 +40,3 @@
 | BRF2-001 | BTCUSDT | missing | absent | readonly_only | idle | detector_not_attached |
 | BRF2-001 | AVAXUSDT | missing | absent | readonly_only | idle | detector_not_attached |
 | BRF2-001 | ETHUSDT | missing | absent | readonly_only | idle | detector_not_attached |
-| BRF2-001 | brf2_research_supported_symbols_only | missing | absent | readonly_only | idle | detector_not_attached |

@@ -286,7 +286,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
             {
                 "candidate_universe": {
                     "MPG-001": ["OPUSDT", "SOLUSDT"],
-                    "BRF2-001": ["brf2_research_supported_symbols_only"],
+                    "BRF2-001": ["BTCUSDT"],
                     "SOR-001": ["ETHUSDT"],
                 }
             }
@@ -341,7 +341,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
         for row in coverage["rows"]
     }
     assert coverage["status"] == "incomplete"
-    assert coverage["expected_row_count"] == 3
+    assert coverage["expected_row_count"] == 4
     assert coverage["active_matched_row_count"] == 2
     assert rows[("MPG-001", "SOLUSDT")]["state"] == "active_watcher_scope"
     assert rows[("SOR-001", "ETHUSDT")]["state"] == "active_watcher_scope"
