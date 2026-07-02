@@ -27,6 +27,7 @@ if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
 
 from scripts.plan_tokyo_runtime_governance_deploy import (
+    ARCHIVE_UPLOAD_DEPLOY_BLOCKER,
     CONFIRMATION_PHRASE,
     DEFAULT_API_BASE,
     DEFAULT_DEPLOY_ROOT,
@@ -113,6 +114,8 @@ def execute_deploy_plan(
     """Execute or dry-run a generated deploy plan."""
 
     blockers = list(plan.get("checks", {}).get("blockers") or [])
+    if ARCHIVE_UPLOAD_DEPLOY_BLOCKER not in blockers:
+        blockers.append(ARCHIVE_UPLOAD_DEPLOY_BLOCKER)
     if blockers:
         return _execution_report(
             plan=plan,

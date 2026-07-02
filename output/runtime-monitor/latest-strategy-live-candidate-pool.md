@@ -2,9 +2,9 @@
 
 - Status: `strategy_live_candidate_pool_ready`
 - Candidate count: `5`
-- P0 cleared: `True`
+- P0 cleared: `False`
 - P1 cleared or waived: `True`
-- Deploy ready: `True`
+- Deploy ready: `False`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategy-live-candidate-pool.json`
 
 | StrategyGroup | Symbol | Status | First blocker | Next action |

@@ -70,6 +70,7 @@ RUNTIME_SIGNAL_WATCHER_GOAL_STATUS_DROPIN_REPO_PATH = (
 RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"
 )
+ARCHIVE_UPLOAD_DEPLOY_BLOCKER = "archive_upload_deploy_forbidden_use_git_deploy"
 
 
 class DeployPlanError(RuntimeError):
@@ -139,8 +140,11 @@ def build_deploy_plan(
     migration_gap_revision_count = (
         target_migration_count - expected_remote_migration_count
     )
-    blockers: list[str] = []
-    warnings: list[str] = []
+    blockers: list[str] = [ARCHIVE_UPLOAD_DEPLOY_BLOCKER]
+    warnings: list[str] = [
+        "archive upload deploy path is disabled; use "
+        "scripts/execute_tokyo_runtime_governance_git_deploy.py"
+    ]
     if tracked_dirty:
         blockers.append("tracked_worktree_dirty")
     if local_latest_migration != expected_latest_migration:

@@ -115,8 +115,9 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
         ),
     )
 
-    assert report["status"] == "ready_for_owner_authorized_remote_deploy_plan"
-    assert report["checks"]["blockers"] == []
+    assert report["status"] == "blocked"
+    assert "archive_upload_deploy_forbidden_use_git_deploy" in report["checks"]["blockers"]
+    assert report["checks"]["ready_for_owner_authorized_remote_deploy"] is False
     assert report["checks"]["remote_mutation_requires_confirmation_phrase"] == (
         "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
     )
@@ -145,6 +146,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
         for phase in report["plan_phases"]
         for command in phase["commands"]
     )
+    assert "scp " in all_commands
     assert "pg_dump" in all_commands
     assert "PG_DATABASE_URL" in all_commands
     assert 'pg_dump "$DB_URL"' in all_commands

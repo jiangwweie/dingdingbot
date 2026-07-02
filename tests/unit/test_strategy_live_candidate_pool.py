@@ -266,6 +266,26 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
     assert review["cpm_computed_refresh"]["status"] == "cleared"
 
 
+def test_candidate_pool_no_stale_facts_waives_blocked_public_facts_with_reason():
+    daily_table = json.loads(json.dumps(_daily_table()))
+    for row in daily_table["rows"]:
+        row["first_blocker"] = "computed_not_satisfied"
+        row["next_engineering_action"] = "continue_observation_with_failed_fact_matrix"
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=daily_table,
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    review = {row["item"]: row for row in artifact["p0_p1_review"]}
+    assert review["no_stale_facts"]["status"] == "waived_with_reason"
+    assert "action-time public facts are not cleared" in review["no_stale_facts"]["evidence"]
+    assert artifact["summary"]["p1_cleared_or_waived"] is True
+
+
 def test_candidate_pool_validator_rejects_missing_required_candidate_field():
     artifact = _builder().build_strategy_live_candidate_pool(
         daily_table=_daily_table(),

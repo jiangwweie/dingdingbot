@@ -139,10 +139,10 @@
     "calls_finalgate": false,
     "calls_operation_layer": false,
     "daily_table_single_lane_consistent": true,
-    "deploy_ready": true,
+    "deploy_ready": false,
     "five_wip_candidates_present": true,
     "order_created": false,
-    "p0_cleared": true,
+    "p0_cleared": false,
     "p1_cleared_or_waived": true,
     "places_order": false,
     "source_validation_passed": true
@@ -161,21 +161,21 @@
       "item": "mpg_watcher_closure",
       "next_action": "produce_scoped_live_observation_or_scope_proposal",
       "priority": "P0",
-      "status": "cleared"
+      "status": "open"
     },
     {
       "evidence": "SOR-001 first_blocker=scope_not_attached",
       "item": "sor_watcher_closure",
       "next_action": "produce_scoped_live_observation_or_scope_proposal",
       "priority": "P0",
-      "status": "cleared"
+      "status": "open"
     },
     {
       "evidence": "MI-001 first_blocker=policy_scope_missing",
       "item": "mi_scope_closure",
       "next_action": "record_scoped_owner_policy",
       "priority": "P0",
-      "status": "cleared"
+      "status": "open"
     },
     {
       "evidence": "CPM-RO-001 first_blocker=computed_not_satisfied",
@@ -220,11 +220,11 @@
       "status": "cleared"
     },
     {
-      "evidence": "watcher_tick_missing rows prove public facts are not current",
+      "evidence": "non-executing deploy may proceed, but action-time public facts are not cleared for: CPM-RO-001",
       "item": "no_stale_facts",
-      "next_action": "refresh approved public facts path",
+      "next_action": "refresh action-time public facts before treating lane as market_wait_validated",
       "priority": "P1",
-      "status": "cleared"
+      "status": "waived_with_reason"
     },
     {
       "evidence": "candidate pool includes machine-readable p0_p1_review rows",
@@ -266,9 +266,9 @@
   "status": "strategy_live_candidate_pool_ready",
   "summary": {
     "candidate_count": 5,
-    "deploy_ready": true,
+    "deploy_ready": false,
     "non_authority": true,
-    "p0_cleared": true,
+    "p0_cleared": false,
     "p1_cleared_or_waived": true,
     "rank_1_lane": "MPG-001:OPUSDT",
     "rank_1_task_id": "P0-MPG-001-SCOPE-NOT-ATTACHED-CLOSURE",

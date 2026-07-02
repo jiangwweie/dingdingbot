@@ -83,6 +83,30 @@ def _candidate_pool(deploy_ready: bool = False) -> dict:
     return artifact
 
 
+def _deploy_ready_candidate_pool() -> dict:
+    artifact = _candidate_pool(deploy_ready=False)
+    for row in artifact["candidate_rows"]:
+        row["first_blocker"] = "computed_not_satisfied"
+        row["blocker_owner"] = "market"
+        row["owner_action_required"] = "no"
+        row["candidate_status"] = "candidate_market_condition_wait"
+        row["action_time_readiness"] = {
+            "status": "not_applicable_current_stage",
+            "action_time_path_ready": False,
+            "public_facts_ready": True,
+            "private_action_time_facts_ready": False,
+        }
+    for row in artifact["p0_p1_review"]:
+        row["status"] = "cleared"
+    artifact["summary"]["p0_cleared"] = True
+    artifact["summary"]["p1_cleared_or_waived"] = True
+    artifact["summary"]["deploy_ready"] = True
+    artifact["checks"]["p0_cleared"] = True
+    artifact["checks"]["p1_cleared_or_waived"] = True
+    artifact["checks"]["deploy_ready"] = True
+    return artifact
+
+
 def _local_monitor_sequence() -> dict:
     return {
         "status": "temporarily_unavailable_monitor_refresh_needed",
@@ -125,7 +149,7 @@ def test_deploy_gate_accepts_valid_non_authority_artifacts_when_ready():
     module = _load_module()
 
     errors = module.validate_strategy_live_candidate_pool_deploy_gate(
-        candidate_pool=_candidate_pool(deploy_ready=True),
+        candidate_pool=_deploy_ready_candidate_pool(),
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
         local_monitor_sequence=_local_monitor_sequence(),
@@ -142,7 +166,7 @@ def test_deploy_gate_accepts_waiting_for_market_monitor_sequence():
     monitor["status"] = "waiting_for_market"
 
     errors = module.validate_strategy_live_candidate_pool_deploy_gate(
-        candidate_pool=_candidate_pool(deploy_ready=True),
+        candidate_pool=_deploy_ready_candidate_pool(),
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
         local_monitor_sequence=monitor,
@@ -151,6 +175,59 @@ def test_deploy_gate_accepts_waiting_for_market_monitor_sequence():
     )
 
     assert errors == []
+
+
+def test_deploy_gate_recomputes_p0_p1_and_blocks_forged_summary():
+    module = _load_module()
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=_candidate_pool(deploy_ready=True),
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=_local_monitor_sequence(),
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert any("does not match p0_p1_review" in error for error in errors)
+    assert any("residual blocker" in error for error in errors)
+
+
+def test_deploy_gate_blocks_owner_action_without_policy_waiver():
+    module = _load_module()
+    candidate_pool = _deploy_ready_candidate_pool()
+    candidate_pool["candidate_rows"][0]["owner_action_required"] = "yes"
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=candidate_pool,
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=_local_monitor_sequence(),
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert any("owner_action_required=yes" in error for error in errors)
+
+
+def test_deploy_gate_blocks_blocked_public_facts_without_waiver():
+    module = _load_module()
+    candidate_pool = _deploy_ready_candidate_pool()
+    candidate_pool["candidate_rows"][0]["action_time_readiness"] = {
+        "status": "blocked_public_facts",
+        "public_facts_ready": False,
+    }
+
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=candidate_pool,
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        local_monitor_sequence=_local_monitor_sequence(),
+        manifest=_manifest(),
+        changed_output_paths=[],
+    )
+
+    assert any("blocked_public_facts prevents deploy_ready" in error for error in errors)
 
 
 def test_deploy_gate_cli_reports_blocked_for_current_not_ready_pool(tmp_path: Path):

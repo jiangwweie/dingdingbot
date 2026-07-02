@@ -117,6 +117,17 @@ def _owner_evidence_for_plan(plan: dict, *, head: str | None = None) -> dict:
     }
 
 
+def _assert_archive_upload_blocked(report: dict, calls: list[str]) -> None:
+    assert report["status"] == "blocked"
+    assert report["checks"]["commands_executed"] == 0
+    assert "archive_upload_deploy_forbidden_use_git_deploy" in report["checks"]["blockers"]
+    assert report["effects"]["remote_files_modified"] is False
+    assert report["effects"]["migrations_run"] is False
+    assert report["effects"]["order_created"] is False
+    assert report["effects"]["exchange_called"] is False
+    assert calls == []
+
+
 def test_deploy_executor_dry_run_does_not_execute_commands(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
@@ -133,15 +144,10 @@ def test_deploy_executor_dry_run_does_not_execute_commands(tmp_path: Path):
         runner=runner,
     )
 
-    assert report["status"] == "dry_run_ready"
+    _assert_archive_upload_blocked(report, calls)
     assert report["apply_requested"] is False
-    assert report["checks"]["blockers"] == []
     assert report["checks"]["commands_planned"] > 0
-    assert report["checks"]["commands_executed"] == 0
     assert report["planned_commands"]
-    assert calls == []
-    assert report["effects"]["remote_files_modified"] is False
-    assert report["effects"]["migrations_run"] is False
 
 
 def test_deploy_executor_applies_with_standing_authorization_without_confirmation(
@@ -163,11 +169,8 @@ def test_deploy_executor_applies_with_standing_authorization_without_confirmatio
         runner=runner,
     )
 
-    assert report["status"] == "applied"
-    assert report["checks"]["blockers"] == []
+    _assert_archive_upload_blocked(report, calls)
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
-    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
-    assert calls
 
 
 def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
@@ -183,12 +186,7 @@ def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
-    assert report["status"] == "blocked"
-    assert report["checks"]["commands_executed"] == 0
-    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is True
-    assert "owner_confirmation_phrase_missing_or_mismatch" in (
-        report["checks"]["blockers"]
-    )
+    _assert_archive_upload_blocked(report, [])
 
 
 def test_deploy_executor_applies_with_standing_authorization_without_owner_evidence(
@@ -209,11 +207,8 @@ def test_deploy_executor_applies_with_standing_authorization_without_owner_evide
         runner=runner,
     )
 
-    assert report["status"] == "applied"
-    assert report["checks"]["blockers"] == []
+    _assert_archive_upload_blocked(report, calls)
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
-    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
-    assert calls
 
 
 def test_deploy_executor_blocks_apply_with_stale_owner_deploy_artifact(tmp_path: Path):
@@ -228,10 +223,7 @@ def test_deploy_executor_blocks_apply_with_stale_owner_deploy_artifact(tmp_path:
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
-    assert report["status"] == "blocked"
-    assert report["checks"]["commands_executed"] == 0
-    assert "owner_deploy_artifact_head_mismatch" in report["checks"]["blockers"]
-    assert report["effects"]["remote_files_modified"] is False
+    _assert_archive_upload_blocked(report, [])
 
 
 def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
@@ -251,16 +243,7 @@ def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
         runner=runner,
     )
 
-    assert report["status"] == "applied"
-    assert report["checks"]["blockers"] == []
-    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
-    assert len(calls) == report["checks"]["commands_planned"]
-    assert any("alembic upgrade head" in command for command in calls)
-    assert any("verify_tokyo_runtime_governance_postdeploy.py" in command for command in calls)
-    assert report["effects"]["remote_files_modified"] is True
-    assert report["effects"]["migrations_run"] is True
-    assert report["effects"]["order_created"] is False
-    assert report["effects"]["exchange_called"] is False
+    _assert_archive_upload_blocked(report, calls)
 
 
 def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
@@ -282,10 +265,7 @@ def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
         runner=runner,
     )
 
-    assert report["status"] == "failed"
-    assert report["checks"]["commands_executed"] == 2
-    assert report["checks"]["blockers"] == ["command_failed:0_local_preflight"]
-    assert report["command_results"][-1]["stderr_tail"] == "boom"
+    _assert_archive_upload_blocked(report, calls)
 
 
 def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: Path):
@@ -305,14 +285,7 @@ def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: P
         runner=runner,
     )
 
-    assert report["status"] == "failed"
-    assert report["checks"]["blockers"] == ["command_failed:4_switch_start_and_smoke"]
-    assert report["effects"]["remote_files_modified"] is True
-    assert report["effects"]["database_backup_created"] is True
-    assert report["effects"]["migrations_run"] is True
-    assert report["effects"]["services_restarted"] is True
-    assert report["effects"]["order_created"] is False
-    assert report["effects"]["exchange_called"] is False
+    _assert_archive_upload_blocked(report, [])
 
 
 def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Path):
@@ -342,9 +315,4 @@ def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Pat
         runner=runner,
     )
 
-    assert report["status"] == "blocked"
-    assert report["checks"]["commands_executed"] == 0
-    assert report["checks"]["blockers"] == [
-        "remote_mutation_phase_missing_authorization_marker:unsafe_remote_phase"
-    ]
-    assert calls == []
+    _assert_archive_upload_blocked(report, calls)

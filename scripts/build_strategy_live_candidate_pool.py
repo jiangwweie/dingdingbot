@@ -172,7 +172,7 @@ def build_strategy_live_candidate_pool(
         if row["priority"] == "P0"
     )
     p1_cleared_or_waived = all(
-        row["status"] in {"cleared", "waived"}
+        row["status"] in {"cleared", "waived", "waived_with_reason"}
         for row in p0_p1_review
         if row["priority"] == "P1"
     )
@@ -414,7 +414,9 @@ def _p0_p1_status(
         row = by_strategy.get("MPG-001", {})
         blocker = row.get("first_blocker")
         return (
-            "open" if blocker == "watcher_tick_missing" else "cleared",
+            "open"
+            if blocker in {"watcher_tick_missing", "scope_not_attached"}
+            else "cleared",
             f"MPG-001 first_blocker={blocker}",
             row.get("next_engineering_action") or "refresh MPG public facts",
         )
@@ -422,7 +424,9 @@ def _p0_p1_status(
         row = by_strategy.get("SOR-001", {})
         blocker = row.get("first_blocker")
         return (
-            "open" if blocker == "watcher_tick_missing" else "cleared",
+            "open"
+            if blocker in {"watcher_tick_missing", "scope_not_attached"}
+            else "cleared",
             f"SOR-001 first_blocker={blocker}",
             row.get("next_engineering_action") or "refresh SOR public facts",
         )
@@ -430,7 +434,9 @@ def _p0_p1_status(
         row = by_strategy.get("MI-001", {})
         blocker = row.get("first_blocker")
         return (
-            "open" if blocker == "scope_not_attached" else "cleared",
+            "open"
+            if blocker in {"scope_not_attached", "policy_scope_missing"}
+            else "cleared",
             f"MI-001 first_blocker={blocker}",
             row.get("next_engineering_action") or "close MI scope/admission",
         )
@@ -475,13 +481,35 @@ def _p0_p1_status(
             "run validate_output_artifact_scope.py --git-status",
         )
     if item == "no_stale_facts":
-        stale = any(
-            row.get("first_blocker") == "watcher_tick_missing"
+        watcher_missing = [
+            row["strategy_group_id"]
             for row in by_strategy.values()
-        )
+            if row.get("first_blocker") == "watcher_tick_missing"
+        ]
+        blocked_public = [
+            row["strategy_group_id"]
+            for row in by_strategy.values()
+            if _as_dict(row.get("action_time_readiness")).get("status")
+            == "blocked_public_facts"
+        ]
+        if watcher_missing:
+            return (
+                "open",
+                "watcher_tick_missing rows prove public facts are not current: "
+                + ",".join(sorted(watcher_missing)),
+                "refresh approved public facts path",
+            )
+        if blocked_public:
+            return (
+                "waived_with_reason",
+                "non-executing deploy may proceed, but action-time public facts "
+                "are not cleared for: "
+                + ",".join(sorted(blocked_public)),
+                "refresh action-time public facts before treating lane as market_wait_validated",
+            )
         return (
-            "open" if stale else "cleared",
-            "watcher_tick_missing rows prove public facts are not current",
+            "cleared",
+            "watcher and action-time public facts are current or not applicable",
             "refresh approved public facts path",
         )
     if item == "review_report":
