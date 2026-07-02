@@ -19,6 +19,7 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
     WIP_LANES,
 )
 from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
+    ACTION_TIME_INPUT_BLOCKERS,
     ACTION_TIME_SCOPE_STATES,
     AUTHORITY_BOUNDARY,
     DEFAULT_CANDIDATE_UNIVERSE,
@@ -236,6 +237,11 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         errors.append(f"{prefix}.action_time_lane requires action-time scope")
     if (
         row.get("promotion_state") == "action_time_lane"
+        and row.get("first_blocker") in ACTION_TIME_INPUT_BLOCKERS
+    ):
+        errors.append(f"{prefix}.action_time_lane has unresolved blocker")
+    if (
+        row.get("promotion_state") == "action_time_lane"
         and not _server_runtime_scope_ready(
             _as_dict(row.get("server_runtime_coverage"))
         )
@@ -296,6 +302,10 @@ def _validate_pretrade_runtime(
         if row.get("scope_state") == "readonly_only":
             errors.append(
                 f"action_time_lane_inputs[{index}] must not be readonly_only"
+            )
+        if row.get("first_blocker") in ACTION_TIME_INPUT_BLOCKERS:
+            errors.append(
+                f"action_time_lane_inputs[{index}] has unresolved blocker"
             )
         errors.extend(_validate_row_owner_authorization(
             f"action_time_lane_inputs[{index}]",

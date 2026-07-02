@@ -183,6 +183,40 @@ def test_fresh_signal_or_action_time_boundary_notifies_once_with_dedupe(
     assert dedupe_key["last_notified_at"]
 
 
+def test_conditional_action_time_rehearsal_notifies_with_separate_checkpoint(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+    candidate_pool = json.loads(paths["candidate_pool"].read_text(encoding="utf-8"))
+    candidate_pool["action_time_lane_inputs"] = [
+        {
+            "strategy_group_id": "BRF2-001",
+            "symbol": "BTCUSDT",
+            "scope_state": "conditional_action_time_rehearsal_allowed",
+        }
+    ]
+    _write(paths["candidate_pool"], candidate_pool)
+
+    artifact = module.build_server_monitor_artifact(
+        _args(module, paths),
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["decision"]["decision"] == "notify"
+    assert artifact["decision"]["strategy_group_id"] == "BRF2-001"
+    assert artifact["decision"]["symbol"] == "BTCUSDT"
+    assert artifact["decision"]["blocker_class"] == "conditional_action_time_rehearsal"
+    assert artifact["decision"]["checkpoint"] == "conditional_action_time_rehearsal"
+    assert "conditional_action_time_rehearsal_only" in artifact["decision"]["reasons"]
+    assert artifact["notification"]["dedupe_key"]["checkpoint"] == (
+        "conditional_action_time_rehearsal"
+    )
+    assert artifact["safety_invariants"]["calls_exchange_write"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+
+
 def test_promotion_candidate_from_candidate_pool_notifies(tmp_path: Path) -> None:
     module = _load_module()
     paths = _base_paths(tmp_path)

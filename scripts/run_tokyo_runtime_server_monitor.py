@@ -426,8 +426,16 @@ def _decision_from_sources(
         first_blocker = str(fresh_or_action_time.get("first_blocker") or "")
         if event_type == "action_time_lane_input":
             reasons.append("action_time_lane_input_present")
-            blocker_class = "action_time_boundary"
-            checkpoint = "fresh_signal_action_time_boundary"
+            if (
+                str(fresh_or_action_time.get("scope_state") or "")
+                == "conditional_action_time_rehearsal_allowed"
+            ):
+                reasons.append("conditional_action_time_rehearsal_only")
+                blocker_class = "conditional_action_time_rehearsal"
+                checkpoint = "conditional_action_time_rehearsal"
+            else:
+                blocker_class = "action_time_boundary"
+                checkpoint = "fresh_signal_action_time_boundary"
         elif event_type == "promotion_candidate":
             reasons.append("promotion_candidate_present")
             blocker_class = "promotion_candidate"

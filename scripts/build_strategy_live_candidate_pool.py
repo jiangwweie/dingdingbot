@@ -125,6 +125,16 @@ ACTION_TIME_SCOPE_STATES = {
     "live_submit_allowed",
     "conditional_action_time_rehearsal_allowed",
 }
+ACTION_TIME_INPUT_BLOCKERS = {
+    "action_time_boundary_not_reproduced",
+    "artifact_missing",
+    "detector_not_attached",
+    "watcher_tick_missing",
+    "scope_not_attached",
+    "policy_scope_missing",
+    "hard_safety_stop",
+    "replay_live_rule_mismatch",
+}
 SCOPED_LIVE_SUBMIT_STRATEGIES = {
     "CPM-RO-001",
     "MPG-001",
@@ -991,6 +1001,7 @@ def _symbol_readiness_row(
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
+        first_blocker=first_blocker,
         runtime_scope_missing=action_time_scope_missing,
     )
     return {
@@ -1192,6 +1203,7 @@ def _promotion_state(
     signal_state: str,
     scope_state: str,
     risk_state: str,
+    first_blocker: str,
     runtime_scope_missing: bool = False,
 ) -> str:
     if runtime_scope_missing:
@@ -1201,6 +1213,8 @@ def _promotion_state(
     if risk_state == "disable":
         return "blocked"
     if scope_state in ACTION_TIME_SCOPE_STATES:
+        if first_blocker in ACTION_TIME_INPUT_BLOCKERS:
+            return "idle"
         return "action_time_lane"
     return "promotion_candidate"
 
@@ -1323,6 +1337,8 @@ def _action_time_lane_input(row: dict[str, Any]) -> dict[str, Any]:
         "runtime_profile": "selected_profile_required_at_action_time",
         "scope_state": row["scope_state"],
         "owner_authorization": row["owner_authorization"],
+        "first_blocker": row["first_blocker"],
+        "next_action": row["next_action"],
         "signal_state": row["signal_state"],
         "public_facts_state": row["public_facts_state"],
         "risk_state": row["risk_state"],
