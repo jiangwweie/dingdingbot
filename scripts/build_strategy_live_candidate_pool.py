@@ -93,7 +93,6 @@ P0_P1_ITEMS = (
     ("P0", "mi_scope_closure"),
     ("P0", "cpm_computed_refresh"),
     ("P0", "brf2_conditionalization"),
-    ("P0", "daily_table_single_lane_consistency"),
     ("P0", "no_authority_leakage"),
     ("P1", "candidate_pool_validator"),
     ("P1", "output_whitelist_gate"),
@@ -298,8 +297,6 @@ def build_strategy_live_candidate_pool(
             "p0_cleared": p0_cleared,
             "p1_cleared_or_waived": p1_cleared_or_waived,
             "deploy_ready": deploy_ready,
-            "rank_1_lane": _rank_1_lane(daily_table),
-            "rank_1_task_id": str(single_lane_task_packet.get("task_id") or ""),
             "non_authority": True,
         },
         "checks": {
@@ -310,9 +307,6 @@ def build_strategy_live_candidate_pool(
             == set(WIP_LANES),
             "all_rows_have_required_candidate_fields": all(
                 _candidate_row_complete(row) for row in candidate_rows
-            ),
-            "daily_table_single_lane_consistent": _single_lane_consistent(
-                daily_table, single_lane_task_packet
             ),
             "each_strategy_has_multiple_candidate_symbols": all(
                 count >= 2
@@ -474,8 +468,7 @@ def _symbol_readiness_row(
     action_row: dict[str, Any],
     runtime_coverage_row: dict[str, Any],
 ) -> dict[str, Any]:
-    runtime_active = str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
-    runtime_scope_missing = bool(runtime_coverage_row) and not runtime_active
+    runtime_active = _server_runtime_scope_ready(runtime_coverage_row)
     detector_ready = parity_row.get("detector_attached") is True
     watcher_present = parity_row.get("watcher_tick_present") is True or runtime_active
     computed = parity_row.get("computed") is True
@@ -498,6 +491,13 @@ def _symbol_readiness_row(
         tradeability_row=tradeability_row,
     )
     risk_state = _risk_state(parity_row)
+    runtime_scope_missing = bool(runtime_coverage_row) and not runtime_active
+    action_time_scope_missing = (
+        signal_state == "fresh"
+        and scope_state == "live_submit_allowed"
+        and public_facts_state["state"] == "satisfied"
+        and not runtime_active
+    )
     first_blocker = _symbol_first_blocker(
         candidate=candidate,
         action_row=action_row,
@@ -508,14 +508,14 @@ def _symbol_readiness_row(
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
-        runtime_scope_missing=runtime_scope_missing,
+        runtime_scope_missing=runtime_scope_missing or action_time_scope_missing,
     )
     promotion_state = _promotion_state(
         public_facts_state=public_facts_state,
         signal_state=signal_state,
         scope_state=scope_state,
         risk_state=risk_state,
-        runtime_scope_missing=runtime_scope_missing,
+        runtime_scope_missing=runtime_scope_missing or action_time_scope_missing,
     )
     return {
         "strategy_group_id": strategy_group_id,
@@ -712,6 +712,9 @@ def _symbol_next_action(first_blocker: str, candidate: dict[str, Any]) -> str:
         "artifact_missing": "produce_per_symbol_readiness_evidence",
         "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
         "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
+        "runtime_profile_scope_missing": (
+            "bind_or_start_pretrade_runtime_for_candidate_symbol"
+        ),
         "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
         "hard_safety_stop": "resolve_hard_safety_stop",
     }.get(first_blocker, str(candidate.get("next_engineering_action") or "reclassify_symbol_blocker"))
@@ -738,6 +741,11 @@ def _symbol_evidence_ref(
         return (
             "runtime_active_observation_status:candidate_universe_coverage:"
             f"{strategy_group_id}/{symbol} first_blocker={first_blocker}"
+        )
+    if first_blocker == "runtime_profile_scope_missing" and not runtime_coverage_row:
+        return (
+            "runtime_active_observation_status:candidate_universe_coverage:"
+            f"{strategy_group_id}/{symbol} missing_active_watcher_scope"
         )
     if parity_row:
         source_blocker = str(parity_row.get("blocker_class") or "")
@@ -769,6 +777,16 @@ def _runtime_coverage(runtime_active_monitor: dict[str, Any]) -> dict[str, Any]:
         if isinstance(coverage, dict):
             return coverage
     return {}
+
+
+def _server_runtime_scope_ready(runtime_coverage_row: dict[str, Any]) -> bool:
+    active_ids = runtime_coverage_row.get("active_runtime_instance_ids") or []
+    selected_ids = runtime_coverage_row.get("selected_runtime_instance_ids") or []
+    return (
+        str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
+        and bool(active_ids)
+        and bool(selected_ids)
+    )
 
 
 def _candidate_role(strategy_group_id: str, symbol: str) -> str:
@@ -1115,12 +1133,6 @@ def _p0_p1_status(
             f"BRF2-001 candidate_status={row.get('candidate_status')}",
             "keep BRF2 conditional or exit under stop review",
         )
-    if item == "daily_table_single_lane_consistency":
-        return (
-            "cleared" if source_validation.get("single_lane_valid") else "open",
-            "single lane packet source matches Daily Table rank 1",
-            "regenerate Daily Table and Single Lane packet",
-        )
     if item == "no_authority_leakage":
         return ("cleared", "candidate pool is non-executing", "preserve authority boundary")
     if item == "candidate_pool_validator":
@@ -1206,15 +1218,7 @@ def _source_validation(
     action_time_boundary: dict[str, Any],
     single_lane_task_packet: dict[str, Any],
 ) -> dict[str, Any]:
-    rank_1 = _rank_1_row(daily_table)
-    packet_lane = _as_dict(single_lane_task_packet.get("active_lane"))
-    single_lane_valid = (
-        single_lane_task_packet.get("status") == "single_lane_task_packet_ready"
-        and str(packet_lane.get("strategy_group_id") or "")
-        == str(rank_1.get("strategy_group_id") or "")
-        and str(packet_lane.get("symbol") or "") == str(rank_1.get("symbol") or "")
-        and single_lane_task_packet.get("first_blocker") == rank_1.get("first_blocker")
-    )
+    _ = single_lane_task_packet
     sources = {
         "daily_table": daily_table.get("status") == "daily_live_enablement_table_ready"
         and _as_dict(daily_table.get("source_validation")).get("valid") is True,
@@ -1223,39 +1227,11 @@ def _source_validation(
         == "replay_live_parity_audit_ready",
         "action_time_boundary": action_time_boundary.get("status")
         == "strategy_fresh_signal_action_time_boundary_ready",
-        "single_lane_task_packet": single_lane_valid,
     }
     return {
         "valid": all(sources.values()),
         "sources": sources,
-        "single_lane_valid": single_lane_valid,
     }
-
-
-def _single_lane_consistent(
-    daily_table: dict[str, Any], single_lane_task_packet: dict[str, Any]
-) -> bool:
-    return _source_validation(
-        daily_table=daily_table,
-        tradeability={"status": "tradeability_decision_ready"},
-        replay_live_parity={"status": "replay_live_parity_audit_ready"},
-        action_time_boundary={"status": "strategy_fresh_signal_action_time_boundary_ready"},
-        single_lane_task_packet=single_lane_task_packet,
-    )["single_lane_valid"]
-
-
-def _rank_1_row(daily_table: dict[str, Any]) -> dict[str, Any]:
-    for row in _dict_rows(daily_table.get("rows")):
-        if row.get("closest_to_live_rank") == 1:
-            return row
-    return {}
-
-
-def _rank_1_lane(daily_table: dict[str, Any]) -> str:
-    row = _rank_1_row(daily_table)
-    if not row:
-        return ""
-    return f"{row.get('strategy_group_id')}:{row.get('symbol')}"
 
 
 def _read_json(path: Path) -> dict[str, Any]:

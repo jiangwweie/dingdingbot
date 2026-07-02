@@ -217,6 +217,15 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         and row.get("scope_state") != "live_submit_allowed"
     ):
         errors.append(f"{prefix}.action_time_lane requires live_submit_allowed")
+    if (
+        row.get("promotion_state") == "action_time_lane"
+        and not _server_runtime_scope_ready(
+            _as_dict(row.get("server_runtime_coverage"))
+        )
+    ):
+        errors.append(
+            f"{prefix}.action_time_lane requires active server runtime coverage"
+        )
     if row.get("authority_boundary") and "no_finalgate" not in str(
         row.get("authority_boundary")
     ):
@@ -252,6 +261,12 @@ def _validate_pretrade_runtime(
             )
         if "no_finalgate" not in str(row.get("authority_boundary") or ""):
             errors.append(f"action_time_lane_inputs[{index}].authority_boundary is invalid")
+        if not _server_runtime_scope_ready(
+            _as_dict(row.get("server_runtime_coverage"))
+        ):
+            errors.append(
+                f"action_time_lane_inputs[{index}] requires active server runtime coverage"
+            )
     arbitration = _as_dict(artifact.get("arbitration"))
     if arbitration.get("single_real_submit_candidate") is not True:
         errors.append("arbitration.single_real_submit_candidate must be true")
@@ -292,6 +307,16 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _server_runtime_scope_ready(runtime_coverage_row: dict[str, Any]) -> bool:
+    active_ids = runtime_coverage_row.get("active_runtime_instance_ids") or []
+    selected_ids = runtime_coverage_row.get("selected_runtime_instance_ids") or []
+    return (
+        str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
+        and bool(active_ids)
+        and bool(selected_ids)
+    )
 
 
 if __name__ == "__main__":

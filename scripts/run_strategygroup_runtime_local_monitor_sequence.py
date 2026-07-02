@@ -2528,6 +2528,62 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    server_backed_daily_live_enablement_table_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_daily_live_enablement_table.py"),
+        "--tradeability-json",
+        str(strategygroup_tradeability_decision_json),
+        "--replay-live-parity-json",
+        str(replay_live_parity_audit_json),
+        "--action-time-boundary-json",
+        str(strategy_fresh_signal_action_time_boundary_json),
+        "--mi-trial-admission-json",
+        str(mi_trial_admission_decision_json),
+        "--runtime-safety-json",
+        str(strategygroup_runtime_safety_state_json),
+        "--candidate-pool-json",
+        str(strategy_live_candidate_pool_json),
+        "--output-json",
+        str(daily_live_enablement_table_json),
+        "--output-owner-progress",
+        str(daily_live_enablement_table_md),
+    ]
+    steps.append(
+        _run_step(
+            "daily_live_enablement_table",
+            server_backed_daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "validate_daily_live_enablement_table",
+            validate_daily_live_enablement_table_command,
+            daily_live_enablement_table_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "single_lane_task_packet",
+            single_lane_task_packet_command,
+            single_lane_task_packet_json,
+            runner,
+        )
+    )
+
+    steps.append(
+        _run_step(
+            "validate_single_lane_task_packet",
+            validate_single_lane_task_packet_command,
+            single_lane_task_packet_json,
+            runner,
+        )
+    )
+
     artifacts = {
         step["name"]: step.get("artifact") if isinstance(step.get("artifact"), dict) else {}
         for step in steps

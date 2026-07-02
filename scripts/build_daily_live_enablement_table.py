@@ -388,11 +388,30 @@ def _candidate_pool_row(
     return sorted(rows, key=_candidate_pool_row_sort_key)[0]
 
 
-def _candidate_pool_row_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
+def _candidate_pool_row_sort_key(
+    row: dict[str, Any]
+) -> tuple[int, int, int, int, int, str]:
     symbol = str(row.get("symbol") or "")
+    coverage = _as_dict(row.get("server_runtime_coverage"))
+    coverage_ready = str(coverage.get("state") or "") == "active_watcher_scope"
+    promotion_priority = {
+        "action_time_lane": 400,
+        "promotion_candidate": 300,
+        "idle": 100,
+        "blocked": 0,
+    }.get(str(row.get("promotion_state") or ""), 0)
+    role_priority = {
+        "primary": 30,
+        "lead": 20,
+        "secondary": 10,
+        "conditional": 5,
+    }.get(str(row.get("candidate_role") or ""), 0)
     return (
+        -promotion_priority,
         -BLOCKER_STAGE_TIER.get(str(row.get("first_blocker") or ""), 0),
-        1 if symbol.endswith("USDT") else 9,
+        0 if coverage_ready else 1,
+        -role_priority,
+        -int(row.get("mismatch_count") or 0),
         symbol,
     )
 

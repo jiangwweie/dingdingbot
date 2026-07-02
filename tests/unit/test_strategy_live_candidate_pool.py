@@ -164,7 +164,9 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
     assert artifact["summary"]["candidate_count"] == 5
     assert artifact["summary"]["symbol_readiness_count"] >= 10
     assert artifact["summary"]["deploy_ready"] is False
-    assert artifact["summary"]["rank_1_lane"] == "MPG-001:SOLUSDT"
+    assert "rank_1_lane" not in artifact["summary"]
+    assert "rank_1_task_id" not in artifact["summary"]
+    assert "daily_table_single_lane_consistent" not in artifact["checks"]
     rows = {row["strategy_group_id"]: row for row in artifact["candidate_rows"]}
     assert rows["MPG-001"]["candidate_status"] == "candidate_runtime_input_blocked"
     assert rows["CPM-RO-001"]["candidate_status"] == "candidate_market_condition_wait"
@@ -197,7 +199,7 @@ def test_candidate_pool_review_keeps_open_p0_items_visible():
 
     review = {row["item"]: row for row in artifact["p0_p1_review"]}
     assert review["five_strategy_candidate_pool_control_surface"]["status"] == "cleared"
-    assert review["daily_table_single_lane_consistency"]["status"] == "cleared"
+    assert "daily_table_single_lane_consistency" not in review
     assert review["mpg_watcher_closure"]["status"] == "open"
     assert review["sor_watcher_closure"]["status"] == "open"
     assert review["cpm_computed_refresh"]["status"] == "cleared"
@@ -665,6 +667,238 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():
     assert row["promotion_state"] == "idle"
     assert artifact["action_time_lane_inputs"] == []
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "MPG-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["OPUSDT"]}
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 10,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor={"candidate_universe_coverage": {"rows": []}},
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    assert row["first_blocker"] == "runtime_profile_scope_missing"
+    assert row["promotion_state"] == "idle"
+    assert row["evidence_ref"].endswith("MPG-001/OPUSDT missing_active_watcher_scope")
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "MPG-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["OPUSDT"]}
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 10,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "incomplete",
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-mpg-op"],
+                    "selected_runtime_instance_ids": [],
+                    "next_action": "select_pretrade_runtime_for_action_time_symbol",
+                }
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    assert row["first_blocker"] == "runtime_profile_scope_missing"
+    assert row["promotion_state"] == "idle"
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_validator_rejects_action_time_without_server_runtime_scope():
+    tradeability = _tradeability()
+    for item in tradeability["decision_rows"]:
+        if item["strategy_group_id"] == "MPG-001":
+            item["policy_scope"] = {"live_submit_symbols": ["OPUSDT"]}
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 10,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-mpg-op"],
+                    "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    row["server_runtime_coverage"] = {}
+    artifact["action_time_lane_inputs"][0]["server_runtime_coverage"] = {}
+    artifact["action_time_lane_inputs"][0]["active_runtime_instance_ids"] = []
+    artifact["action_time_lane_inputs"][0]["selected_runtime_instance_ids"] = []
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any("action_time_lane requires active server runtime coverage" in error for error in errors)
+    assert any("action_time_lane_inputs[0] requires active server runtime coverage" in error for error in errors)
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    row["server_runtime_coverage"]["selected_runtime_instance_ids"] = []
+    artifact["action_time_lane_inputs"][0]["server_runtime_coverage"][
+        "selected_runtime_instance_ids"
+    ] = []
+    artifact["action_time_lane_inputs"][0]["selected_runtime_instance_ids"] = []
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any("action_time_lane requires active server runtime coverage" in error for error in errors)
+    assert any("action_time_lane_inputs[0] requires active server runtime coverage" in error for error in errors)
 
 
 def test_candidate_pool_no_stale_facts_waives_blocked_public_facts_with_reason():
