@@ -5,7 +5,7 @@
 - Symbol readiness rows: `18`
 - Fresh promotion candidates: `0`
 - Top action-time candidate: `none`
-- P0 cleared: `False`
+- P0 cleared: `True`
 - P1 cleared or waived: `True`
 - Deploy ready: `False`
 - Output JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-strategy-live-candidate-pool.json`
@@ -14,9 +14,9 @@
 | --- | --- | --- | --- | --- |
 | CPM-RO-001 | ETHUSDT | candidate_market_condition_wait | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
 | MPG-001 | OPUSDT | candidate_market_condition_wait | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
-| MI-001 | AVAXUSDT | candidate_engineering_blocked | detector_not_attached | attach_detector_for_candidate_symbol |
+| MI-001 | AVAXUSDT | candidate_market_condition_wait | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
 | SOR-001 | ETHUSDT | candidate_market_condition_wait | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
-| BRF2-001 | BTCUSDT | candidate_engineering_blocked | detector_not_attached | attach_detector_for_candidate_symbol |
+| BRF2-001 | BTCUSDT | candidate_conditional_observation | computed_not_satisfied | continue_observation_with_failed_fact_matrix |
 
 ## Per-Symbol Readiness
 
@@ -30,13 +30,13 @@
 | MPG-001 | AVAXUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | MPG-001 | SOLUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | computed_not_satisfied |
 | MPG-001 | SUIUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
-| MI-001 | AVAXUSDT | missing | absent | trial_scope_proposed | idle | detector_not_attached |
-| MI-001 | ETHUSDT | missing | absent | readonly_only | idle | detector_not_attached |
-| MI-001 | SOLUSDT | missing | absent | readonly_only | idle | detector_not_attached |
+| MI-001 | AVAXUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | computed_not_satisfied |
+| MI-001 | ETHUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
+| MI-001 | SOLUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | SOR-001 | ETHUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | computed_not_satisfied |
 | SOR-001 | AVAXUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | SOR-001 | BTCUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
 | SOR-001 | SOLUSDT | computed_not_satisfied | absent | trial_scope_proposed | idle | computed_not_satisfied |
-| BRF2-001 | BTCUSDT | missing | absent | readonly_only | idle | detector_not_attached |
-| BRF2-001 | AVAXUSDT | missing | absent | readonly_only | idle | detector_not_attached |
-| BRF2-001 | ETHUSDT | missing | absent | readonly_only | idle | detector_not_attached |
+| BRF2-001 | BTCUSDT | computed_not_satisfied | absent | readonly_only | idle | computed_not_satisfied |
+| BRF2-001 | AVAXUSDT | missing | absent | readonly_only | idle | watcher_tick_missing |
+| BRF2-001 | ETHUSDT | missing | absent | readonly_only | idle | watcher_tick_missing |

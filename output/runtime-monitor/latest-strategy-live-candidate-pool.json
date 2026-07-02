@@ -24,7 +24,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "reclaim / pullback recovery long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 4,
+      "daily_rank": 2,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -49,7 +49,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "selective leader continuation long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 5,
+      "daily_rank": 3,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -71,15 +71,15 @@
         "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "engineering",
+      "blocker_owner": "market",
       "candidate_positioning": "relative strength / cross-asset candidate",
-      "candidate_status": "candidate_engineering_blocked",
-      "daily_rank": 2,
-      "evidence": "default_candidate_universe:MI-001/AVAXUSDT",
-      "exit_condition": "exit under WIP stop rule if blocker does not move",
-      "first_blocker": "detector_not_attached",
-      "market_condition": "selected lane must satisfy its fresh eligible signal contract",
-      "next_engineering_action": "attach_detector_for_candidate_symbol",
+      "candidate_status": "candidate_market_condition_wait",
+      "daily_rank": 4,
+      "evidence": "mi_trial_admission_decision:symbol_evidence:MI-001/AVAXUSDT first_blocker=computed_not_satisfied",
+      "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
+      "first_blocker": "computed_not_satisfied",
+      "market_condition": "strategy fact matrix must clear on the next detector tick",
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
       "owner_action_required": "no",
       "selected_symbol": "AVAXUSDT",
       "side": "long",
@@ -99,7 +99,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "session / flow confirmation candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 1,
+      "daily_rank": 5,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -121,15 +121,15 @@
         "status": "not_applicable_current_stage"
       },
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
-      "blocker_owner": "engineering",
+      "blocker_owner": "market",
       "candidate_positioning": "conditional failed-rebound short candidate",
-      "candidate_status": "candidate_engineering_blocked",
-      "daily_rank": 3,
-      "evidence": "default_candidate_universe:BRF2-001/BTCUSDT",
+      "candidate_status": "candidate_conditional_observation",
+      "daily_rank": 1,
+      "evidence": "brf2_runtime_signal_facts:facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
       "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
-      "first_blocker": "detector_not_attached",
+      "first_blocker": "computed_not_satisfied",
       "market_condition": "conditional short only when bullish/squeeze disable state clears",
-      "next_engineering_action": "attach_detector_for_candidate_symbol",
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
       "owner_action_required": "no",
       "selected_symbol": "BTCUSDT",
       "side": "short",
@@ -178,18 +178,18 @@
     "each_strategy_has_multiple_candidate_symbols": true,
     "five_wip_candidates_present": true,
     "order_created": false,
-    "p0_cleared": false,
+    "p0_cleared": true,
     "p1_cleared_or_waived": true,
     "places_order": false,
     "readonly_signal_cannot_order": true,
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T14:42:09.077702+00:00",
+  "generated_at_utc": "2026-07-02T15:01:34.689102+00:00",
   "no_trade_audit": {
     "blocker_counts": {
-      "computed_not_satisfied": 12,
-      "detector_not_attached": 6
+      "computed_not_satisfied": 16,
+      "watcher_tick_missing": 2
     },
     "reason": "candidate_pool_has_no_live_submit_allowed_fresh_satisfied_symbol",
     "selected_action_time_candidate": "none",
@@ -218,9 +218,9 @@
       "status": "cleared"
     },
     {
-      "evidence": "MI-001 first_blocker=detector_not_attached",
+      "evidence": "MI-001 first_blocker=computed_not_satisfied",
       "item": "mi_scope_closure",
-      "next_action": "attach_detector_for_candidate_symbol",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "priority": "P0",
       "status": "cleared"
     },
@@ -232,11 +232,11 @@
       "status": "cleared"
     },
     {
-      "evidence": "BRF2-001 candidate_status=candidate_engineering_blocked",
+      "evidence": "BRF2-001 candidate_status=candidate_conditional_observation",
       "item": "brf2_conditionalization",
       "next_action": "keep BRF2 conditional or exit under stop review",
       "priority": "P0",
-      "status": "open"
+      "status": "cleared"
     },
     {
       "evidence": "candidate pool is non-executing",
@@ -587,7 +587,7 @@
     "deploy_ready": false,
     "fresh_candidate_count": 0,
     "non_authority": true,
-    "p0_cleared": false,
+    "p0_cleared": true,
     "p1_cleared_or_waived": true,
     "symbol_readiness_count": 18,
     "top_action_time_candidate": "none",
@@ -1030,19 +1030,20 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "primary",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:MI-001/AVAXUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
+      "detector_state": "ready",
+      "evidence_ref": "mi_trial_admission_decision:symbol_evidence:MI-001/AVAXUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "per_symbol_replay_live_parity_row"
+        "computed_not_satisfied": [
+          "replay_supported",
+          "strategy_fit"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "trial_scope_proposed",
@@ -1078,19 +1079,20 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "secondary",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:MI-001/ETHUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
+      "detector_state": "ready",
+      "evidence_ref": "mi_trial_admission_decision:symbol_evidence:MI-001/ETHUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "per_symbol_replay_live_parity_row"
+        "computed_not_satisfied": [
+          "replay_supported",
+          "strategy_fit"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
@@ -1126,19 +1128,20 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "secondary",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:MI-001/SOLUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
+      "detector_state": "ready",
+      "evidence_ref": "mi_trial_admission_decision:symbol_evidence:MI-001/SOLUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "per_symbol_replay_live_parity_row"
+        "computed_not_satisfied": [
+          "replay_supported",
+          "strategy_fit"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
@@ -1368,19 +1371,20 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "primary",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:BRF2-001/BTCUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
+      "detector_state": "ready",
+      "evidence_ref": "brf2_runtime_signal_facts:facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "per_symbol_replay_live_parity_row"
+        "computed_not_satisfied": [
+          "rally_context",
+          "rally_failure_trigger_state"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "readonly_only",
@@ -1416,16 +1420,16 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "conditional",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:BRF2-001/AVAXUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "active_observation",
+      "detector_state": "ready",
+      "evidence_ref": "brf2_runtime_signal_facts:missing_symbol_fact_input:BRF2-001/AVAXUSDT first_blocker=watcher_tick_missing",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
         "missing": [
-          "per_symbol_replay_live_parity_row"
+          "computed_public_facts"
         ],
         "satisfied": [],
         "state": "missing"
@@ -1452,7 +1456,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "AVAXUSDT",
       "symbol_or_basket": "AVAXUSDT",
-      "watcher_state": "fresh"
+      "watcher_state": "missing"
     },
     {
       "action_time": {
@@ -1464,16 +1468,16 @@
       "asset_class": "crypto_perpetual",
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "conditional",
-      "detector_state": "missing",
-      "evidence_ref": "default_candidate_universe:BRF2-001/ETHUSDT",
-      "first_blocker": "detector_not_attached",
-      "next_action": "attach_detector_for_candidate_symbol",
-      "observation_scope": "active_observation",
+      "detector_state": "ready",
+      "evidence_ref": "brf2_runtime_signal_facts:missing_symbol_fact_input:BRF2-001/ETHUSDT first_blocker=watcher_tick_missing",
+      "first_blocker": "watcher_tick_missing",
+      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+      "observation_scope": "readonly",
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [],
         "missing": [
-          "per_symbol_replay_live_parity_row"
+          "computed_public_facts"
         ],
         "satisfied": [],
         "state": "missing"
@@ -1500,7 +1504,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "ETHUSDT",
       "symbol_or_basket": "ETHUSDT",
-      "watcher_state": "fresh"
+      "watcher_state": "missing"
     }
   ]
 }

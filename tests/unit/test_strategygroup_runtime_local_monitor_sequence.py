@@ -2417,6 +2417,10 @@ def _maybe_write_strategygroup_closure_step(
         tradeability_path = Path(command[command.index("--tradeability-json") + 1])
         parity_path = Path(command[command.index("--replay-live-parity-json") + 1])
         action_time_path = Path(command[command.index("--action-time-boundary-json") + 1])
+        mi_trial_path = Path(command[command.index("--mi-trial-admission-json") + 1])
+        brf2_facts_path = Path(
+            command[command.index("--brf2-runtime-signal-facts-json") + 1]
+        )
         packet_path = Path(command[command.index("--single-lane-task-packet-json") + 1])
         runtime_active_monitor_path = Path(
             command[command.index("--runtime-active-monitor-json") + 1]
@@ -2428,6 +2432,16 @@ def _maybe_write_strategygroup_closure_step(
             tradeability=json.loads(tradeability_path.read_text(encoding="utf-8")),
             replay_live_parity=json.loads(parity_path.read_text(encoding="utf-8")),
             action_time_boundary=json.loads(action_time_path.read_text(encoding="utf-8")),
+            mi_trial_admission=(
+                json.loads(mi_trial_path.read_text(encoding="utf-8"))
+                if mi_trial_path.exists()
+                else {}
+            ),
+            brf2_runtime_signal_facts=(
+                json.loads(brf2_facts_path.read_text(encoding="utf-8"))
+                if brf2_facts_path.exists()
+                else {}
+            ),
             single_lane_task_packet=json.loads(packet_path.read_text(encoding="utf-8")),
             runtime_active_monitor=(
                 json.loads(runtime_active_monitor_path.read_text(encoding="utf-8"))

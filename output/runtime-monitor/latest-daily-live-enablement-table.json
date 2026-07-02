@@ -10,7 +10,7 @@
     "single_rank_1": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T14:49:16.953694+00:00",
+  "generated_at_utc": "2026-07-02T15:02:43.201124+00:00",
   "interaction": {
     "approaches_real_order": false,
     "level": "L0_local_daily_live_enablement_table",
@@ -52,7 +52,7 @@
         "symbol": "ETHUSDT"
       },
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 3,
+      "closest_to_live_rank": 2,
       "first_blocker": "computed_not_satisfied",
       "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope",
       "live_detector": "computed_not_satisfied",
@@ -111,7 +111,7 @@
         "symbol": "SOLUSDT"
       },
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 4,
+      "closest_to_live_rank": 3,
       "first_blocker": "computed_not_satisfied",
       "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MPG-001/OPUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope",
       "live_detector": "computed_not_satisfied",
@@ -139,7 +139,7 @@
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_pool_reference": {
-        "first_blocker": "detector_not_attached",
+        "first_blocker": "computed_not_satisfied",
         "promotion_state": "idle",
         "server_runtime_coverage": {
           "active_runtime_instance_ids": [
@@ -161,18 +161,18 @@
       },
       "canonical_lane": {},
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 1,
-      "first_blocker": "detector_not_attached",
-      "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MI-001/AVAXUSDT first_blocker=detector_not_attached server_runtime_coverage=active_watcher_scope",
+      "closest_to_live_rank": 4,
+      "first_blocker": "computed_not_satisfied",
+      "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:MI-001/AVAXUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope",
       "live_detector": "not_tested",
       "market_wait_validation": {
         "checks": {},
         "not_applicable": true,
         "valid": false
       },
-      "next_engineering_action": "attach_detector_for_candidate_symbol",
+      "next_engineering_action": "continue_observation_with_failed_fact_matrix",
       "owner_action_required": "no",
-      "rank_reason": "detector_not_attached tier 790 (WIP priority 10 only breaks same-tier ties)",
+      "rank_reason": "computed_not_satisfied tier 500 (WIP priority 10 only breaks same-tier ties)",
       "replay_signal": "not_applicable",
       "runtime_safety_reference": {
         "live_submit_ready": false,
@@ -248,40 +248,40 @@
     {
       "authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
       "candidate_pool_reference": {
-        "first_blocker": "detector_not_attached",
+        "first_blocker": "watcher_tick_missing",
         "promotion_state": "idle",
         "server_runtime_coverage": {
           "active_runtime_instance_ids": [
-            "runtime-BRF2-001-BTCUSDT"
+            "runtime-BRF2-001-AVAXUSDT"
           ],
           "authority_boundary": "candidate_universe_coverage_is_read_only; no_finalgate_no_operation_layer_no_exchange_write",
           "blocker_class": "none",
           "next_action": "continue_pretrade_observation",
           "selected_runtime_instance_ids": [
-            "runtime-BRF2-001-BTCUSDT"
+            "runtime-BRF2-001-AVAXUSDT"
           ],
           "state": "active_watcher_scope",
           "strategy_group_id": "BRF2-001",
-          "symbol": "BTCUSDT"
+          "symbol": "AVAXUSDT"
         },
         "source": "strategy_live_candidate_pool",
         "strategy_group_id": "BRF2-001",
-        "symbol": "BTCUSDT"
+        "symbol": "AVAXUSDT"
       },
       "canonical_lane": {},
       "chain_position": "replay_live_parity",
-      "closest_to_live_rank": 2,
-      "first_blocker": "detector_not_attached",
-      "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:BRF2-001/BTCUSDT first_blocker=detector_not_attached server_runtime_coverage=active_watcher_scope",
+      "closest_to_live_rank": 1,
+      "first_blocker": "watcher_tick_missing",
+      "first_blocker_evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:BRF2-001/AVAXUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
       "live_detector": "not_tested",
       "market_wait_validation": {
         "checks": {},
         "not_applicable": true,
         "valid": false
       },
-      "next_engineering_action": "attach_detector_for_candidate_symbol",
+      "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol",
       "owner_action_required": "no",
-      "rank_reason": "detector_not_attached tier 790 (WIP priority 0 only breaks same-tier ties)",
+      "rank_reason": "watcher_tick_missing tier 800 (WIP priority 0 only breaks same-tier ties)",
       "replay_signal": "unknown_with_reason:no_replay_live_parity_row",
       "runtime_safety_reference": {
         "live_submit_ready": false,
@@ -293,7 +293,7 @@
       "stage": "armed",
       "stop_condition": "blocker moves, repeats through stop review, or symbol exits candidate universe",
       "strategy_group_id": "BRF2-001",
-      "symbol": "BTCUSDT"
+      "symbol": "AVAXUSDT"
     }
   ],
   "safety_invariants": {
@@ -378,9 +378,9 @@
   "summary": {
     "non_authority": true,
     "owner_action_required_count": 0,
-    "rank_1_first_blocker": "detector_not_attached",
-    "rank_1_lane": "MI-001:AVAXUSDT",
-    "rank_1_next_engineering_action": "attach_detector_for_candidate_symbol",
+    "rank_1_first_blocker": "watcher_tick_missing",
+    "rank_1_lane": "BRF2-001:AVAXUSDT",
+    "rank_1_next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol",
     "row_count": 5,
     "source_validation_valid": true,
     "wip_lane_count": 5

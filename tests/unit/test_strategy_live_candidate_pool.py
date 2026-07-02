@@ -149,6 +149,77 @@ def _single_lane() -> dict:
     }
 
 
+def _mi_trial_admission() -> dict:
+    return {
+        "schema": "brc.mi_trial_admission_decision.v1",
+        "status": "mi_trial_admission_decision_ready",
+        "strategy_group_id": "MI-001",
+        "trial_admission_decision": "park",
+        "symbol_evidence": [
+            {
+                "symbol": "AVAXUSDT",
+                "replay_supported": False,
+                "public_facts_ready": True,
+                "liquidity": {
+                    "spread_ok": True,
+                    "min_notional_ok": True,
+                    "qty_step_ok": True,
+                },
+                "funding_not_extreme": True,
+                "strategy_fit": "not_supported_by_current_replay",
+            },
+            {
+                "symbol": "SOLUSDT",
+                "replay_supported": True,
+                "public_facts_ready": False,
+                "liquidity": {
+                    "spread_ok": False,
+                    "min_notional_ok": True,
+                    "qty_step_ok": True,
+                },
+                "funding_not_extreme": True,
+                "strategy_fit": "formal_replay_review_opened",
+            },
+        ],
+    }
+
+
+def _brf2_missing_runtime_signal_facts() -> dict:
+    return {
+        "schema": "brc.brf2_runtime_signal_facts.v1",
+        "status": "brf2_runtime_signal_facts_missing_watcher_input",
+        "strategy_group_id": "BRF2-001",
+        "fact_input_present": False,
+        "watcher_tick_present": False,
+        "first_blocker": {
+            "class": "brf2_watcher_fact_input_missing",
+            "owner": "engineering",
+            "repair_checkpoint": "attach_brf2_watcher_fact_input_producer",
+        },
+    }
+
+
+def _brf2_ready_runtime_signal_facts() -> dict:
+    return {
+        "schema": "brc.brf2_runtime_signal_facts.v1",
+        "status": "brf2_runtime_signal_facts_ready",
+        "strategy_group_id": "BRF2-001",
+        "fact_input_present": True,
+        "watcher_tick_present": True,
+        "signal_context": {"symbol": "BTC/USDT:USDT"},
+        "facts": {
+            "closed_1h_ohlcv": {"status": "ready"},
+            "closed_5m_ohlcv": {"status": "ready"},
+            "rally_context": {"status": "not_satisfied"},
+            "rally_failure_trigger_state": {"status": "not_confirmed"},
+            "short_squeeze_risk_state": {"status": "bounded"},
+            "strong_reclaim_disable_state": {"status": "false"},
+            "liquidity_downshift_state": {"status": "false"},
+            "spread_liquidity_state": {"status": "acceptable"},
+        },
+    }
+
+
 def test_candidate_pool_builds_five_wip_candidate_rows():
     artifact = _builder().build_strategy_live_candidate_pool(
         daily_table=_daily_table(),
@@ -513,6 +584,92 @@ def test_candidate_pool_consumes_sor_detector_facts_for_authorized_symbols():
     assert row["public_facts_state"]["state"] == "computed_not_satisfied"
     assert row["first_blocker"] == "computed_not_satisfied"
     assert row["next_action"] == "continue_observation_with_failed_fact_matrix"
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_consumes_mi_trial_admission_symbol_evidence():
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        mi_trial_admission=_mi_trial_admission(),
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MI-001" and item["symbol"] == "AVAXUSDT"
+    )
+    assert row["detector_state"] == "ready"
+    assert row["watcher_state"] == "fresh"
+    assert row["public_facts_state"]["state"] == "computed_not_satisfied"
+    assert row["public_facts_state"]["computed_not_satisfied"] == [
+        "replay_supported",
+        "strategy_fit",
+    ]
+    assert row["first_blocker"] == "computed_not_satisfied"
+    assert row["next_action"] == "continue_observation_with_failed_fact_matrix"
+    assert "mi_trial_admission_decision:symbol_evidence" in row["evidence_ref"]
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_reclassifies_brf2_runtime_facts_gap_as_watcher_input():
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        brf2_runtime_signal_facts=_brf2_missing_runtime_signal_facts(),
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "BRF2-001" and item["symbol"] == "BTCUSDT"
+    )
+    assert row["detector_state"] == "ready"
+    assert row["watcher_state"] == "missing"
+    assert row["public_facts_state"]["state"] == "missing"
+    assert row["first_blocker"] == "watcher_tick_missing"
+    assert row["next_action"] == "refresh_readonly_watcher_for_candidate_symbol"
+    assert "brf2_runtime_signal_facts:missing_watcher_input" in row["evidence_ref"]
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_marks_brf2_uncovered_symbols_as_watcher_input_gap():
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        brf2_runtime_signal_facts=_brf2_ready_runtime_signal_facts(),
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    rows = {
+        item["symbol"]: item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "BRF2-001"
+    }
+    assert rows["BTCUSDT"]["detector_state"] == "ready"
+    assert rows["BTCUSDT"]["first_blocker"] == "computed_not_satisfied"
+    assert rows["BTCUSDT"]["public_facts_state"]["computed_not_satisfied"] == [
+        "rally_context",
+        "rally_failure_trigger_state",
+    ]
+    assert rows["ETHUSDT"]["detector_state"] == "ready"
+    assert rows["ETHUSDT"]["first_blocker"] == "watcher_tick_missing"
+    assert (
+        "brf2_runtime_signal_facts:missing_symbol_fact_input"
+        in rows["ETHUSDT"]["evidence_ref"]
+    )
+    assert rows["AVAXUSDT"]["first_blocker"] == "watcher_tick_missing"
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
@@ -1223,6 +1380,8 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
     tradeability = tmp_path / "tradeability.json"
     parity = tmp_path / "parity.json"
     action_time = tmp_path / "action_time.json"
+    mi_trial = tmp_path / "mi_trial.json"
+    brf2_facts = tmp_path / "brf2_facts.json"
     single_lane = tmp_path / "single_lane.json"
     output_json = tmp_path / "candidate_pool.json"
     output_md = tmp_path / "candidate_pool.md"
@@ -1230,6 +1389,8 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
     tradeability.write_text(json.dumps(_tradeability()), encoding="utf-8")
     parity.write_text(json.dumps(_parity()), encoding="utf-8")
     action_time.write_text(json.dumps(_action_time()), encoding="utf-8")
+    mi_trial.write_text(json.dumps({}), encoding="utf-8")
+    brf2_facts.write_text(json.dumps({}), encoding="utf-8")
     single_lane.write_text(json.dumps(_single_lane()), encoding="utf-8")
 
     build = subprocess.run(
@@ -1244,6 +1405,10 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
             str(parity),
             "--action-time-boundary-json",
             str(action_time),
+            "--mi-trial-admission-json",
+            str(mi_trial),
+            "--brf2-runtime-signal-facts-json",
+            str(brf2_facts),
             "--single-lane-task-packet-json",
             str(single_lane),
             "--output-json",

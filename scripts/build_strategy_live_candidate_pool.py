@@ -39,6 +39,12 @@ DEFAULT_ACTION_TIME_BOUNDARY_JSON = (
 DEFAULT_SOR_DETECTOR_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-sor-session-detector-facts.json"
 )
+DEFAULT_MI_TRIAL_ADMISSION_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.json"
+)
+DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-facts.json"
+)
 DEFAULT_SINGLE_LANE_TASK_PACKET_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
 )
@@ -93,6 +99,23 @@ ACTION_TIME_BLOCKERS = {
     "fresh_mpg_signal_or_private_action_time_facts",
     "fresh_sor_session_range_signal_absent",
 }
+RESIDUAL_DEPLOY_BLOCKERS = {
+    "artifact_missing",
+    "schema_invalid",
+    "detector_not_attached",
+    "watcher_tick_missing",
+    "scope_not_attached",
+    "replay_live_rule_mismatch",
+    "action_time_boundary_not_reproduced",
+    "policy_scope_missing",
+    "runtime_profile_scope_missing",
+    "active_position_resolution",
+    "hard_safety_stop",
+}
+ACTION_TIME_BLOCKED_STATUSES = {
+    "blocked_public_facts",
+    "blocked_action_time_rehearsal",
+}
 P0_P1_ITEMS = (
     ("P0", "five_strategy_candidate_pool_control_surface"),
     ("P0", "mpg_watcher_closure"),
@@ -121,6 +144,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--sor-detector-json", default=str(DEFAULT_SOR_DETECTOR_JSON))
     parser.add_argument(
+        "--mi-trial-admission-json", default=str(DEFAULT_MI_TRIAL_ADMISSION_JSON)
+    )
+    parser.add_argument(
+        "--brf2-runtime-signal-facts-json",
+        default=str(DEFAULT_BRF2_RUNTIME_SIGNAL_FACTS_JSON),
+    )
+    parser.add_argument(
         "--single-lane-task-packet-json",
         default=str(DEFAULT_SINGLE_LANE_TASK_PACKET_JSON),
     )
@@ -142,6 +172,10 @@ def main(argv: list[str] | None = None) -> int:
         replay_live_parity=_read_json(Path(args.replay_live_parity_json)),
         action_time_boundary=_read_json(Path(args.action_time_boundary_json)),
         sor_detector=_read_json(Path(args.sor_detector_json)),
+        mi_trial_admission=_read_json(Path(args.mi_trial_admission_json)),
+        brf2_runtime_signal_facts=_read_json(
+            Path(args.brf2_runtime_signal_facts_json)
+        ),
         single_lane_task_packet=_read_json(Path(args.single_lane_task_packet_json)),
         runtime_active_monitor=_read_json(Path(args.runtime_active_monitor_json)),
     )
@@ -175,6 +209,8 @@ def build_strategy_live_candidate_pool(
     action_time_boundary: dict[str, Any],
     single_lane_task_packet: dict[str, Any],
     sor_detector: dict[str, Any] | None = None,
+    mi_trial_admission: dict[str, Any] | None = None,
+    brf2_runtime_signal_facts: dict[str, Any] | None = None,
     runtime_active_monitor: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
@@ -220,6 +256,8 @@ def build_strategy_live_candidate_pool(
         replay_live_parity=replay_live_parity,
         action_time_boundary=action_time_boundary,
         sor_detector=sor_detector or {},
+        mi_trial_admission=mi_trial_admission or {},
+        brf2_runtime_signal_facts=brf2_runtime_signal_facts or {},
         tradeability_rows=tradeability_rows,
         runtime_active_monitor=runtime_active_monitor,
     )
@@ -264,7 +302,11 @@ def build_strategy_live_candidate_pool(
         for row in p0_p1_review
         if row["priority"] == "P1"
     )
-    deploy_ready = p0_cleared and p1_cleared_or_waived
+    deploy_ready = (
+        p0_cleared
+        and p1_cleared_or_waived
+        and not _residual_deploy_blockers(candidate_rows)
+    )
     return {
         "schema": SCHEMA,
         "scope": "five_strategy_live_candidate_pool_non_authority",
@@ -390,11 +432,15 @@ def _symbol_readiness_rows(
     replay_live_parity: dict[str, Any],
     action_time_boundary: dict[str, Any],
     sor_detector: dict[str, Any],
+    mi_trial_admission: dict[str, Any],
+    brf2_runtime_signal_facts: dict[str, Any],
     tradeability_rows: dict[str, dict[str, Any]],
     runtime_active_monitor: dict[str, Any],
 ) -> list[dict[str, Any]]:
     parity_rows = _dict_rows(replay_live_parity.get("per_symbol_mismatch_table"))
     sor_facts = _sor_detector_symbol_facts(sor_detector)
+    mi_facts = _mi_trial_admission_symbol_facts(mi_trial_admission)
+    brf2_facts = _brf2_runtime_signal_symbol_facts(brf2_runtime_signal_facts)
     action_rows = _dict_rows(action_time_boundary.get("strategy_rows"))
     runtime_coverage_rows = _dict_rows(
         _runtime_coverage(runtime_active_monitor).get("rows")
@@ -415,6 +461,16 @@ def _symbol_readiness_rows(
                 parity_row = _merge_symbol_fact_row(
                     parity_row,
                     sor_facts.get(symbol, {}),
+                )
+            if strategy_group_id == "MI-001":
+                parity_row = _merge_symbol_fact_row(
+                    parity_row,
+                    mi_facts.get(symbol, {}),
+                )
+            if strategy_group_id == "BRF2-001":
+                parity_row = _merge_symbol_fact_row(
+                    parity_row,
+                    brf2_facts.get(symbol, {}),
                 )
             action_row = _matching_symbol_row(action_rows, strategy_group_id, symbol)
             runtime_coverage_row = _matching_symbol_row(
@@ -491,6 +547,143 @@ def _sor_detector_symbol_facts(detector: dict[str, Any]) -> dict[str, dict[str, 
             ),
         }
     return rows
+
+
+def _mi_trial_admission_symbol_facts(
+    admission: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    if admission.get("status") != "mi_trial_admission_decision_ready":
+        return {}
+    rows: dict[str, dict[str, Any]] = {}
+    for row in _dict_rows(admission.get("symbol_evidence")):
+        symbol = str(row.get("symbol") or "")
+        if not _symbol_authorized("MI-001", symbol):
+            continue
+        failed = _mi_failed_facts(row)
+        rows[symbol] = {
+            "blocker_class": (
+                "computed_not_satisfied" if failed else "market_wait_validated"
+            ),
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "fresh_signal_present": False,
+            "failed_facts": failed,
+            "next_action": (
+                "continue_observation_with_failed_fact_matrix"
+                if failed
+                else "wait_for_fresh_signal_or_refresh_action_time_facts"
+            ),
+            "evidence_source": "mi_trial_admission_decision:symbol_evidence",
+        }
+    return rows
+
+
+def _mi_failed_facts(row: dict[str, Any]) -> list[str]:
+    failed: list[str] = []
+    if row.get("replay_supported") is not True:
+        failed.append("replay_supported")
+    if row.get("public_facts_ready") is not True:
+        failed.append("public_facts_ready")
+    liquidity = _as_dict(row.get("liquidity"))
+    for key in ("spread_ok", "min_notional_ok", "qty_step_ok"):
+        if liquidity.get(key) is not True:
+            failed.append(key)
+    if row.get("funding_not_extreme") is not True:
+        failed.append("funding_not_extreme")
+    if str(row.get("strategy_fit") or "") == "not_supported_by_current_replay":
+        failed.append("strategy_fit")
+    return sorted(set(failed))
+
+
+def _brf2_runtime_signal_symbol_facts(
+    facts_artifact: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    status = str(facts_artifact.get("status") or "")
+    if not status:
+        return {}
+    symbols = DEFAULT_CANDIDATE_UNIVERSE["BRF2-001"]
+    if status == "brf2_runtime_signal_facts_missing_watcher_input":
+        return {
+            symbol: {
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "fresh_signal_present": False,
+                "failed_facts": [],
+                "next_action": "attach_brf2_watcher_fact_input_producer",
+                "evidence_source": "brf2_runtime_signal_facts:missing_watcher_input",
+            }
+            for symbol in symbols
+        }
+    if status != "brf2_runtime_signal_facts_ready":
+        return {}
+    observed_symbol = _normalize_symbol(
+        _as_dict(facts_artifact.get("signal_context")).get("symbol")
+        or _as_dict(facts_artifact.get("source_signal_context")).get("symbol")
+    )
+    failed = _brf2_failed_facts(_as_dict(facts_artifact.get("facts")))
+    rows: dict[str, dict[str, Any]] = {}
+    for symbol in symbols:
+        if observed_symbol and symbol != observed_symbol:
+            rows[symbol] = {
+                "blocker_class": "watcher_tick_missing",
+                "detector_attached": True,
+                "watcher_tick_present": False,
+                "computed": False,
+                "fresh_signal_present": False,
+                "failed_facts": [],
+                "next_action": "attach_brf2_watcher_fact_input_producer",
+                "evidence_source": "brf2_runtime_signal_facts:missing_symbol_fact_input",
+            }
+            continue
+        rows[symbol] = {
+            "blocker_class": (
+                "computed_not_satisfied" if failed else "market_wait_validated"
+            ),
+            "detector_attached": True,
+            "watcher_tick_present": facts_artifact.get("watcher_tick_present") is True,
+            "computed": facts_artifact.get("fact_input_present") is True,
+            "fresh_signal_present": False,
+            "failed_facts": failed,
+            "next_action": (
+                "continue_observation_with_failed_fact_matrix"
+                if failed
+                else "wait_for_fresh_signal_or_refresh_action_time_facts"
+            ),
+            "evidence_source": "brf2_runtime_signal_facts:facts",
+        }
+    return rows
+
+
+def _brf2_failed_facts(facts: dict[str, Any]) -> list[str]:
+    if not facts:
+        return ["brf2_runtime_signal_facts"]
+    failed: list[str] = []
+    accepted = {
+        "closed_1h_ohlcv": {"fresh", "present", "ready"},
+        "closed_5m_ohlcv": {"fresh", "present", "ready"},
+        "rally_context": {"bear_or_weak_reclaim", "ready", "weak_rally"},
+        "rally_failure_trigger_state": {"active", "confirmed", "ready"},
+        "short_squeeze_risk_state": {"bounded", "clear", "clear_or_bounded"},
+        "strong_reclaim_disable_state": {"clear", "false", "inactive"},
+        "liquidity_downshift_state": {"clear", "false", "inactive"},
+        "spread_liquidity_state": {"acceptable", "normal", "ready"},
+    }
+    for fact_key, accepted_statuses in accepted.items():
+        status = str(_as_dict(facts.get(fact_key)).get("status") or "").lower()
+        if status not in accepted_statuses:
+            failed.append(fact_key)
+    return failed
+
+
+def _normalize_symbol(value: Any) -> str:
+    symbol = str(value or "").upper()
+    if not symbol:
+        return ""
+    symbol = symbol.split(":", 1)[0].replace("/", "")
+    return symbol
 
 
 def _candidate_symbols(
@@ -869,6 +1062,12 @@ def _symbol_evidence_ref(
             f"{strategy_group_id}/{symbol} missing_active_watcher_scope"
         )
     if parity_row:
+        evidence_source = str(parity_row.get("evidence_source") or "")
+        if evidence_source:
+            return (
+                f"{evidence_source}:{strategy_group_id}/{symbol} "
+                f"first_blocker={first_blocker}"
+            )
         source_blocker = str(parity_row.get("blocker_class") or "")
         source_detail = (
             f" source_blocker_class={source_blocker}"
@@ -1029,6 +1228,21 @@ def _no_trade_audit(
         "blocker_counts": blocker_counts,
         "selected_action_time_candidate": arbitration["selected_action_time_candidate"],
     }
+
+
+def _residual_deploy_blockers(candidate_rows: list[dict[str, Any]]) -> list[str]:
+    residual: list[str] = []
+    for row in candidate_rows:
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        first_blocker = str(row.get("first_blocker") or "")
+        if first_blocker in RESIDUAL_DEPLOY_BLOCKERS:
+            residual.append(f"{strategy_group_id}:{first_blocker}")
+        readiness_status = str(
+            _as_dict(row.get("action_time_readiness")).get("status") or ""
+        )
+        if readiness_status in ACTION_TIME_BLOCKED_STATUSES:
+            residual.append(f"{strategy_group_id}:action_time:{readiness_status}")
+    return residual
 
 
 def _candidate_universe(

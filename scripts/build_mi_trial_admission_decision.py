@@ -36,7 +36,7 @@ DEFAULT_OUTPUT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.md"
 )
 
-SYMBOLS = ("AVAXUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT")
+SYMBOLS = ("AVAXUSDT", "SOLUSDT", "ETHUSDT")
 
 
 def main(argv: list[str] | None = None) -> int:

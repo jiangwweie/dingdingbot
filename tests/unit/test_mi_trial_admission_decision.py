@@ -38,7 +38,12 @@ def _public_symbol(symbol: str) -> dict:
 
 
 def _public_facts() -> dict:
-    return {"symbols": [_public_symbol(symbol) for symbol in ["AVAXUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT"]]}
+    return {
+        "symbols": [
+            _public_symbol(symbol)
+            for symbol in ["AVAXUSDT", "SOLUSDT", "ETHUSDT"]
+        ]
+    }
 
 
 def _replay() -> dict:
@@ -47,7 +52,7 @@ def _replay() -> dict:
             "should_promote_scope_change": [
                 {
                     "strategy_group_id": "MI-001",
-                    "candidate_symbols": ["AVAXUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT"],
+                    "candidate_symbols": ["AVAXUSDT", "SOLUSDT", "ETHUSDT"],
                 }
             ]
         }
@@ -69,9 +74,8 @@ def test_mi_trial_admission_records_candidate_without_live_authority():
     assert artifact["side"] == "long"
     assert artifact["symbol_scope"]["reviewed_symbols"] == [
         "AVAXUSDT",
-        "ETHUSDT",
         "SOLUSDT",
-        "SUIUSDT",
+        "ETHUSDT",
     ]
     assert artifact["tradeability"]["can_trade_now"] is False
     assert artifact["tradeability"]["first_blocker"] == (
