@@ -74,6 +74,25 @@ def test_output_artifact_scope_rejects_unknown_output():
     assert any("not an approved control snapshot" in error for error in errors)
 
 
+def test_output_artifact_scope_rejects_tracked_non_snapshot_output():
+    module = _load_module()
+    manifest = _manifest()
+
+    errors = module.validate_tracked_output_paths(
+        [
+            "output/runtime-monitor/latest-daily-live-enablement-table.json",
+            "output/runtime-monitor/latest-random-summary.json",
+        ],
+        manifest,
+    )
+
+    assert errors == [
+        "output/runtime-monitor/latest-random-summary.json is tracked but is not "
+        "an approved control snapshot; remove it from the git index or add it to "
+        "the manifest with a source command and validator"
+    ]
+
+
 def test_output_artifact_scope_cli_path_round_trip():
     result = subprocess.run(
         [
@@ -94,3 +113,23 @@ def test_output_artifact_scope_cli_path_round_trip():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_git_status_parser_ignores_output_deletions_for_cleanup():
+    module = _load_module()
+
+    paths = module._changed_output_paths_from_porcelain(
+        "\n".join(
+            [
+                "D  output/runtime-monitor/latest-old-report.json",
+                " D output/runtime-monitor/latest-local-noise.json",
+                " M output/runtime-monitor/latest-daily-live-enablement-table.json",
+                "?? output/runtime-monitor/latest-random-summary.json",
+            ]
+        )
+    )
+
+    assert paths == [
+        "output/runtime-monitor/latest-daily-live-enablement-table.json",
+        "output/runtime-monitor/latest-random-summary.json",
+    ]

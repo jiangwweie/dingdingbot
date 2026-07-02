@@ -27,6 +27,28 @@ logs/
 # Reports (research artifacts, candidate outputs)
 reports/
 
+# Generated runtime output.
+# Git may only track the stable control snapshots listed in
+# config/output_control_snapshots.json. Everything else under output/ is local,
+# volatile, or archive-only evidence.
+output/**
+!output/
+!output/runtime-monitor/
+!output/runtime-monitor/latest-daily-live-enablement-table.json
+!output/runtime-monitor/latest-daily-live-enablement-table.md
+!output/runtime-monitor/latest-strategygroup-tradeability-decision.json
+!output/runtime-monitor/latest-strategygroup-tradeability-decision.md
+!output/runtime-monitor/latest-replay-live-parity-audit.json
+!output/runtime-monitor/latest-replay-live-parity-audit.md
+!output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json
+!output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md
+!output/runtime-monitor/latest-local-monitor-sequence.json
+!output/runtime-monitor/latest-local-monitor-sequence.md
+!output/runtime-monitor/latest-single-lane-task-packet.json
+!output/runtime-monitor/latest-single-lane-task-packet.md
+!output/runtime-monitor/latest-strategy-live-candidate-pool.json
+!output/runtime-monitor/latest-strategy-live-candidate-pool.md
+
 # Coverage
 .coverage
 htmlcov/
