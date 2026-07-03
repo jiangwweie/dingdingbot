@@ -363,7 +363,9 @@ def _runtime_data_gap_from_candidate_pool(candidate_pool: dict[str, Any]) -> dic
         blocker = str(row_dict.get("first_blocker") or "")
         readiness = _as_dict(row_dict.get("action_time_readiness"))
         readiness_status = str(readiness.get("status") or "")
-        if blocker in RUNTIME_DATA_GAP_BLOCKERS or readiness_status in {
+        if blocker in RUNTIME_DATA_GAP_BLOCKERS:
+            return row_dict
+        if blocker not in MARKET_BLOCKERS and readiness_status in {
             "blocked_public_facts",
             "blocked_account_safe_facts",
             "blocked_watcher_tick",

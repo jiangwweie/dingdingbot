@@ -297,6 +297,34 @@ def test_non_market_blocker_notifies(tmp_path: Path) -> None:
     assert artifact["notification"]["sent"] is True
 
 
+def test_market_blocker_with_action_time_public_fact_status_stays_quiet(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+    candidate_pool = json.loads(paths["candidate_pool"].read_text(encoding="utf-8"))
+    candidate_pool["candidate_rows"][0]["first_blocker"] = "computed_not_satisfied"
+    candidate_pool["candidate_rows"][0]["action_time_readiness"] = {
+        "status": "blocked_public_facts",
+        "action_time_path_ready": False,
+        "public_facts_ready": False,
+        "first_blocker": "fresh_cpm_long_signal_absent",
+    }
+    _write(paths["candidate_pool"], candidate_pool)
+
+    artifact = module.build_server_monitor_artifact(
+        _args(module, paths),
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["status"] == "healthy_waiting_quiet"
+    assert artifact["decision"]["decision"] == "quiet"
+    assert "runtime_data_gap:watcher_or_public_facts" not in artifact["decision"][
+        "reasons"
+    ]
+
+
 def test_watcher_or_systemd_failure_notifies(tmp_path: Path) -> None:
     module = _load_module()
     paths = _base_paths(tmp_path)
