@@ -74,8 +74,15 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     text = DROPIN_PATH.read_text(encoding="utf-8")
 
     assert "runtime_signal_watcher_resume_dispatcher.py" in text
+    assert "post-signal-resume-pack.json" in text
+    assert "--resume-pack-json" in text
+    assert "--output-json" in text
     assert "resume-dispatch-artifact.json" in text
     assert "resume-dispatch-packet.json" not in text
+    assert "--report-dir" not in text
+    assert "--resume-dispatch-json" not in text
+    assert "--owner-operator-id" not in text
+    assert "--owner-confirmation-reference" not in text
     assert "--selected-strategy-group-id ${BRC_SELECTED_STRATEGY_GROUP_ID}" not in text
     assert "--execute-preflight" in text
     assert "--execute-operation-layer-submit" in text
