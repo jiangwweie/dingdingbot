@@ -182,6 +182,7 @@ def build_git_deploy_plan(
     releases_dir = f"{deploy_root}/releases"
     reports_dir = f"{deploy_root}/reports/{final_release_name}"
     watcher_reports_dir = f"{deploy_root}/reports/runtime-signal-watcher"
+    runtime_monitor_reports_dir = f"{deploy_root}/reports/runtime-monitor"
     backups_dir = f"{deploy_root}/backups"
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
@@ -206,10 +207,12 @@ def build_git_deploy_plan(
         repo_url=repo_url,
         git_ref=git_ref,
         target_commit=target,
+        deploy_root=deploy_root,
         source_root=source_root,
         source_repo_path=source_repo_path,
         reports_dir=reports_dir,
         watcher_reports_dir=watcher_reports_dir,
+        runtime_monitor_reports_dir=runtime_monitor_reports_dir,
         backups_dir=backups_dir,
         app_current=app_current,
         remote_release_path=remote_release_path,
@@ -319,10 +322,12 @@ def _plan_phases(
     repo_url: str,
     git_ref: str,
     target_commit: str,
+    deploy_root: str,
     source_root: str,
     source_repo_path: str,
     reports_dir: str,
     watcher_reports_dir: str,
+    runtime_monitor_reports_dir: str,
     backups_dir: str,
     app_current: str,
     remote_release_path: str,
@@ -446,10 +451,13 @@ def _plan_phases(
         f"sudo -n systemctl start {q(service_name)}; "
         f"sudo -n systemctl is-active {q(service_name)}; "
         f"{health_wait_command}; "
-        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path)}; "
         f"mkdir -p {q(watcher_reports_dir)}; "
         f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
         f"{deploy_channel_status_json}\nJSON\n"
+        f"mkdir -p {q(runtime_monitor_reports_dir)}; "
+        f"cat > {q(runtime_monitor_reports_dir + '/latest-deploy-health.json')} <<'JSON'\n"
+        f"{deploy_channel_status_json}\nJSON\n"
+        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path, deploy_root=deploy_root)}; "
         f"test -f {q(release_manifest)}; "
         f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
     )

@@ -376,9 +376,15 @@ def _decision_from_sources(
     strategy_group_id = "runtime"
     symbol = "all"
     checkpoint = "server_runtime_monitor"
+    fresh_or_action_time = _candidate_pool_fresh_or_action_time(candidate_pool)
+    account_safe_required = fresh_or_action_time is not None
 
     missing_or_bad_sources = [
-        name for name, error in source_errors.items() if error and name != "deploy_health"
+        name
+        for name, error in source_errors.items()
+        if error
+        and name != "deploy_health"
+        and (name != "account_safe_facts" or account_safe_required)
     ]
     if missing_or_bad_sources:
         reasons.append("runtime_data_gap:" + ",".join(missing_or_bad_sources))
@@ -390,7 +396,7 @@ def _decision_from_sources(
         blocker_class = "runtime_data_gap"
         checkpoint = "public_facts"
 
-    if not _account_safe_facts_ready(account_safe_facts):
+    if account_safe_required and not _account_safe_facts_ready(account_safe_facts):
         reasons.append("runtime_data_gap:account_safe_facts")
         blocker_class = "runtime_data_gap"
         checkpoint = "account_safe_facts"
@@ -410,7 +416,6 @@ def _decision_from_sources(
         blocker_class = "watcher_or_service_failure"
         checkpoint = "systemd"
 
-    fresh_or_action_time = _candidate_pool_fresh_or_action_time(candidate_pool)
     if fresh_or_action_time:
         strategy_group_id = str(
             fresh_or_action_time.get("strategy_group_id")
@@ -424,7 +429,9 @@ def _decision_from_sources(
         )
         event_type = str(fresh_or_action_time.get("_server_monitor_event_type") or "")
         first_blocker = str(fresh_or_action_time.get("first_blocker") or "")
-        if event_type == "action_time_lane_input":
+        if blocker_class != "none":
+            reasons.append("fresh_or_action_time_blocked_by:" + blocker_class)
+        elif event_type == "action_time_lane_input":
             reasons.append("action_time_lane_input_present")
             if (
                 str(fresh_or_action_time.get("scope_state") or "")

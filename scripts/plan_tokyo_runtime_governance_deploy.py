@@ -52,12 +52,16 @@ DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+DEFAULT_RUNTIME_MONITOR_SERVICE_NAME = "brc-runtime-monitor.service"
+DEFAULT_RUNTIME_MONITOR_TIMER_NAME = "brc-runtime-monitor.timer"
 RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service"
 )
 RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.timer"
 )
+RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
+RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
 )
@@ -536,11 +540,18 @@ def _plan_phases(
 def runtime_signal_watcher_dispatcher_dropin_install_command(
     *,
     remote_release_path: str,
+    deploy_root: str = DEFAULT_DEPLOY_ROOT,
 ) -> str:
     q = shlex.quote
+    deploy_root = deploy_root.rstrip("/")
     service_dir = "/etc/systemd/system"
     service_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}"
     timer_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME}"
+    runtime_monitor_service_path = (
+        f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_SERVICE_NAME}"
+    )
+    runtime_monitor_timer_path = f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_TIMER_NAME}"
+    runtime_monitor_reports_dir = f"{deploy_root}/reports/runtime-monitor"
     service_dropin_dir = (
         f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
     )
@@ -565,6 +576,12 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH}"
     )
+    release_runtime_monitor_service_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_SERVICE_REPO_PATH}"
+    )
+    release_runtime_monitor_timer_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_TIMER_REPO_PATH}"
+    )
     release_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
@@ -585,13 +602,19 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"set -eu; "
         f"test -f {q(release_service_path)}; "
         f"test -f {q(release_timer_path)}; "
+        f"test -f {q(release_runtime_monitor_service_path)}; "
+        f"test -f {q(release_runtime_monitor_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
         f"test -f {q(release_dry_run_audit_dropin_path)}; "
         f"test -f {q(release_goal_status_dropin_path)}; "
         f"test -f {q(release_product_state_dropin_path)}; "
         f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
-        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_timer_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n mkdir -p {q(runtime_monitor_reports_dir)}; "
+        f"sudo -n chown ubuntu:ubuntu {q(runtime_monitor_reports_dir)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
         f"sudo -n cp {q(release_dry_run_audit_dropin_path)} {q(dry_run_audit_dropin_path)}; "
@@ -603,9 +626,14 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
-        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}"
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}"
     )
 
 

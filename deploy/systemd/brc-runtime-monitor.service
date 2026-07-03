@@ -10,12 +10,17 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-monitor.env
+ExecStartPre=/bin/mkdir -p /home/ubuntu/brc-deploy/reports/runtime-monitor
+ExecStartPre=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/fetch_binance_usdm_public_facts.py \
+  --symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT \
+  --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json \
+  --output-owner-progress /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.md
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_tokyo_runtime_server_monitor.py \
   --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json \
   --dedupe-state-json /home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json \
   --daily-table-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json \
   --candidate-pool-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json \
-  --public-facts-json /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-binance-usdm-public-facts.json \
+  --public-facts-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json \
   --account-safe-facts-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json \
   --watcher-status-json /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json \
   --deploy-health-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json \

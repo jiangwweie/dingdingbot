@@ -38,6 +38,12 @@ SERVICE_PATH = (
     / "systemd"
     / "brc-runtime-signal-watcher.service"
 )
+RUNTIME_MONITOR_SERVICE_PATH = (
+    REPO_ROOT
+    / "deploy"
+    / "systemd"
+    / "brc-runtime-monitor.service"
+)
 
 
 def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin():
@@ -144,6 +150,22 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "transfers" in text
 
 
+def test_runtime_monitor_service_refreshes_server_public_facts_and_deploy_health():
+    text = RUNTIME_MONITOR_SERVICE_PATH.read_text(encoding="utf-8")
+
+    assert "fetch_binance_usdm_public_facts.py" in text
+    assert "--symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT" in text
+    assert "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
+    assert "--public-facts-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
+    assert "--deploy-health-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json" in text
+    assert "ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor" in text
+    assert "FinalGate" not in text
+    assert "Operation Layer" not in text
+    assert "exchange write" not in text
+    assert "withdrawal" not in text
+    assert "transfer" not in text
+
+
 def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     from scripts.plan_tokyo_runtime_governance_git_deploy import (
         _plan_phases,
@@ -155,10 +177,12 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
         repo_url="https://github.com/example/dingdingbot.git",
         git_ref="release/test",
         target_commit="abc123",
+        deploy_root="/home/ubuntu/brc-deploy",
         source_root="/home/ubuntu/brc-deploy/source",
         source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
         reports_dir="/home/ubuntu/brc-deploy/reports/test",
         watcher_reports_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        runtime_monitor_reports_dir="/home/ubuntu/brc-deploy/reports/runtime-monitor",
         backups_dir="/home/ubuntu/brc-deploy/backups",
         app_current="/home/ubuntu/brc-deploy/app/current",
         remote_release_path="/home/ubuntu/brc-deploy/releases/test",
@@ -195,6 +219,8 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     )
     assert "brc-runtime-signal-watcher.service" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
+    assert "brc-runtime-monitor.service" in commands
+    assert "brc-runtime-monitor.timer" in commands
     assert "40-resume-dispatcher.conf" in commands
     assert "60-dry-run-audit-chain.conf" in commands
     assert "70-goal-status.conf" in commands
@@ -205,4 +231,6 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
+    assert "systemctl start brc-runtime-monitor.service" in commands
     assert "tokyo-deploy-channel-status.json" in commands
+    assert "latest-deploy-health.json" in commands

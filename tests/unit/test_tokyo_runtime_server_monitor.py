@@ -371,7 +371,7 @@ def test_feishu_failure_records_retry_without_trading_state_change(tmp_path: Pat
     assert len(calls) == 2
 
 
-def test_public_or_account_safe_facts_failure_is_runtime_data_gap(
+def test_public_facts_failure_is_runtime_data_gap(
     tmp_path: Path,
 ) -> None:
     module = _load_module()
@@ -388,13 +388,47 @@ def test_public_or_account_safe_facts_failure_is_runtime_data_gap(
     assert artifact["decision"]["blocker_class"] == "runtime_data_gap"
     assert "runtime_data_gap:public_facts" in artifact["decision"]["reasons"]
 
+
+def test_account_safe_facts_missing_is_quiet_until_fresh_or_action_time(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
     _write_healthy_sources(paths)
-    _write(paths["account_safe_facts"], {"status": "account_safe_facts_unavailable"})
-    second = module.build_server_monitor_artifact(
+    paths["account_safe_facts"].unlink()
+
+    artifact = module.build_server_monitor_artifact(
         _args(module, paths),
         notifier=lambda *args: {"sent": True, "status_code": 200},
     )
 
-    assert second["decision"]["decision"] == "notify"
-    assert second["decision"]["blocker_class"] == "runtime_data_gap"
-    assert "runtime_data_gap:account_safe_facts" in second["decision"]["reasons"]
+    assert artifact["decision"]["decision"] == "quiet"
+    assert artifact["status"] == "healthy_waiting_quiet"
+    assert artifact["source_errors"]["account_safe_facts"] == "missing"
+    assert "runtime_data_gap:account_safe_facts" not in artifact["decision"]["reasons"]
+
+
+def test_account_safe_facts_failure_blocks_action_time_lane(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+    candidate_pool = json.loads(paths["candidate_pool"].read_text(encoding="utf-8"))
+    candidate_pool["action_time_lane_inputs"] = [
+        {"strategy_group_id": "SOR-001", "symbol": "ETHUSDT"}
+    ]
+    _write(paths["candidate_pool"], candidate_pool)
+    _write(paths["account_safe_facts"], {"status": "account_safe_facts_unavailable"})
+    artifact = module.build_server_monitor_artifact(
+        _args(module, paths),
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["decision"]["decision"] == "notify"
+    assert artifact["decision"]["blocker_class"] == "runtime_data_gap"
+    assert "runtime_data_gap:account_safe_facts" in artifact["decision"]["reasons"]
+    assert (
+        "fresh_or_action_time_blocked_by:runtime_data_gap"
+        in artifact["decision"]["reasons"]
+    )
