@@ -310,7 +310,7 @@ def _groups_from_candidate_pool(
     for strategy_group_id, symbols in symbols_by_group.items():
         base = dict(base_by_group.get(strategy_group_id) or {})
         base_side = _side(base) if base else ""
-        side = base_side or side_by_group.get(strategy_group_id) or "long"
+        side = side_by_group.get(strategy_group_id) or base_side or "long"
         picker = dict(base.get("picker") or {})
         picker["rank"] = rank_by_group.get(strategy_group_id, picker.get("rank", 999))
         picker["default_mode"] = picker.get("default_mode") or "armed_observation"

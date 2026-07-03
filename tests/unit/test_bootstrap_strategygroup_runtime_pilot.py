@@ -292,6 +292,56 @@ def test_plan_skips_existing_group_and_observe_only_by_default():
     assert artifact["safety_invariants"]["creates_order"] is False
 
 
+def test_candidate_pool_side_overrides_legacy_handoff_side():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {"SOR-001": ["ETHUSDT"]},
+        "symbol_readiness_rows": [
+            {
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+            }
+        ],
+        "candidate_rows": [
+            {
+                "strategy_group_id": "SOR-001",
+                "side": "long",
+                "daily_rank": 1,
+            }
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            strategy_group_ids=("SOR-001",),
+            max_symbols_per_group=1,
+            max_total_new_runtimes=1,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": ["ETHUSDT"]},
+                }
+            ]
+        },
+        active_runtimes=[],
+        candidate_pool=candidate_pool,
+    )
+
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert len(artifact["targets"]) == 1
+    assert artifact["targets"][0]["strategy_group_id"] == "SOR-001"
+    assert artifact["targets"][0]["exchange_symbol"] == "ETHUSDT"
+    assert artifact["targets"][0]["side"] == "long"
+
+
 def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization():
     artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
@@ -402,7 +452,7 @@ def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
         ("MPG-001", "OPUSDT", "long"),
         ("CPM-RO-001", "ETHUSDT", "long"),
         ("CPM-RO-001", "SOLUSDT", "long"),
-        ("SOR-001", "ETHUSDT", "short"),
+        ("SOR-001", "ETHUSDT", "long"),
         ("BRF2-001", "BTCUSDT", "short"),
     ]
     assert not any("RESEARCH" in item["exchange_symbol"] for item in artifact["targets"])
