@@ -253,6 +253,48 @@ def _candidate_pool_symbols(candidate_pool: dict[str, Any]) -> dict[str, list[st
     return result
 
 
+def _candidate_pool_lanes_by_group(
+    candidate_pool: dict[str, Any],
+) -> dict[str, dict[str, list[str]]]:
+    if not candidate_pool:
+        return {}
+    if candidate_pool.get("status") != "strategy_live_candidate_pool_ready":
+        return {}
+    lane_universe = candidate_pool.get("candidate_lane_universe")
+    result: dict[str, dict[str, list[str]]] = {}
+    if isinstance(lane_universe, dict):
+        for group_id, lanes in lane_universe.items():
+            strategy_group_id = str(group_id or "").strip()
+            if not strategy_group_id or not isinstance(lanes, list):
+                continue
+            for lane in lanes:
+                if isinstance(lane, str) and ":" in lane:
+                    symbol, side = lane.rsplit(":", 1)
+                elif isinstance(lane, dict):
+                    symbol = str(lane.get("symbol") or "")
+                    side = str(lane.get("side") or "")
+                else:
+                    continue
+                exchange_symbol = _exchange_symbol(symbol)
+                side = side.strip().lower()
+                if not exchange_symbol.endswith("USDT") or side not in {"long", "short"}:
+                    continue
+                bucket = result.setdefault(strategy_group_id, {})
+                bucket.setdefault(side, [])
+                if exchange_symbol not in bucket[side]:
+                    bucket[side].append(exchange_symbol)
+    if result:
+        return result
+
+    symbols_by_group = _candidate_pool_symbols(candidate_pool)
+    side_by_group = _candidate_pool_side_by_group(candidate_pool)
+    for strategy_group_id, symbols in symbols_by_group.items():
+        side = side_by_group.get(strategy_group_id)
+        if side in {"long", "short"}:
+            result[strategy_group_id] = {side: symbols}
+    return result
+
+
 def _candidate_pool_side_by_group(candidate_pool: dict[str, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for row in candidate_pool.get("symbol_readiness_rows") or []:
@@ -292,8 +334,8 @@ def _groups_from_candidate_pool(
     intake_artifact: dict[str, Any],
     candidate_pool: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    symbols_by_group = _candidate_pool_symbols(candidate_pool)
-    if not symbols_by_group:
+    lanes_by_group = _candidate_pool_lanes_by_group(candidate_pool)
+    if not lanes_by_group:
         return [
             item
             for item in intake_artifact.get("strategy_picker") or []
@@ -304,51 +346,51 @@ def _groups_from_candidate_pool(
         for item in intake_artifact.get("strategy_picker") or []
         if isinstance(item, dict) and _group_id(item)
     }
-    side_by_group = _candidate_pool_side_by_group(candidate_pool)
     rank_by_group = _candidate_pool_rank_by_group(candidate_pool)
     groups: list[dict[str, Any]] = []
-    for strategy_group_id, symbols in symbols_by_group.items():
+    for strategy_group_id, lanes_by_side in lanes_by_group.items():
         base = dict(base_by_group.get(strategy_group_id) or {})
         base_side = _side(base) if base else ""
-        side = side_by_group.get(strategy_group_id) or base_side or "long"
-        picker = dict(base.get("picker") or {})
-        picker["rank"] = rank_by_group.get(strategy_group_id, picker.get("rank", 999))
-        picker["default_mode"] = picker.get("default_mode") or "armed_observation"
-        risk_defaults = (
-            base.get("risk_defaults")
-            if isinstance(base.get("risk_defaults"), dict)
-            else {}
-        )
-        groups.append(
-            {
-                **base,
-                "strategy_group_id": strategy_group_id,
-                "name": base.get("name") or f"{strategy_group_id} Candidate Pool",
-                "intake_status": base.get("intake_status")
-                or "armed_observation_intake_ready",
-                "supported_symbols": symbols,
-                "supported_sides": [side],
-                "signal_ready_rule": {
-                    **(
-                        base.get("signal_ready_rule")
-                        if isinstance(base.get("signal_ready_rule"), dict)
-                        else {}
-                    ),
-                    "side": side,
-                },
-                "risk_defaults": {
-                    "max_notional_per_action_usdt": str(
-                        risk_defaults.get("max_notional_per_action_usdt")
-                        or risk_defaults.get("max_notional_usdt")
-                        or "8"
-                    ),
-                    "max_leverage": str(risk_defaults.get("max_leverage") or "1"),
-                    **risk_defaults,
-                },
-                "picker": picker,
-                "candidate_universe_source": "strategy_live_candidate_pool",
-            }
-        )
+        for side, symbols in sorted(lanes_by_side.items()):
+            side = side or base_side or "long"
+            picker = dict(base.get("picker") or {})
+            picker["rank"] = rank_by_group.get(strategy_group_id, picker.get("rank", 999))
+            picker["default_mode"] = picker.get("default_mode") or "armed_observation"
+            risk_defaults = (
+                base.get("risk_defaults")
+                if isinstance(base.get("risk_defaults"), dict)
+                else {}
+            )
+            groups.append(
+                {
+                    **base,
+                    "strategy_group_id": strategy_group_id,
+                    "name": base.get("name") or f"{strategy_group_id} Candidate Pool",
+                    "intake_status": base.get("intake_status")
+                    or "armed_observation_intake_ready",
+                    "supported_symbols": symbols,
+                    "supported_sides": [side],
+                    "signal_ready_rule": {
+                        **(
+                            base.get("signal_ready_rule")
+                            if isinstance(base.get("signal_ready_rule"), dict)
+                            else {}
+                        ),
+                        "side": side,
+                    },
+                    "risk_defaults": {
+                        "max_notional_per_action_usdt": str(
+                            risk_defaults.get("max_notional_per_action_usdt")
+                            or risk_defaults.get("max_notional_usdt")
+                            or "8"
+                        ),
+                        "max_leverage": str(risk_defaults.get("max_leverage") or "1"),
+                        **risk_defaults,
+                    },
+                    "picker": picker,
+                    "candidate_universe_source": "strategy_live_candidate_pool",
+                }
+            )
     return groups
 
 
@@ -683,6 +725,7 @@ def build_artifact(
             and not (
                 config.renew_exhausted_runtimes and group_has_exhausted_runtime
             )
+            and not candidate_pool_symbols
         ):
             skipped.append(
                 _target_row(

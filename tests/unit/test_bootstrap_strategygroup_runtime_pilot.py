@@ -342,6 +342,65 @@ def test_candidate_pool_side_overrides_legacy_handoff_side():
     assert artifact["targets"][0]["side"] == "long"
 
 
+def test_candidate_pool_lane_universe_bootstraps_missing_side_even_when_group_active():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {"MPG-001": ["OPUSDT"]},
+        "candidate_lane_universe": {"MPG-001": ["OPUSDT:long", "OPUSDT:short"]},
+        "candidate_rows": [
+            {"strategy_group_id": "MPG-001", "daily_rank": 1, "side": "long"},
+        ],
+        "symbol_readiness_rows": [
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "long"},
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "short"},
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            strategy_group_ids=("MPG-001",),
+            max_symbols_per_group=4,
+            max_total_new_runtimes=4,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": ["OPUSDT"]},
+                }
+            ]
+        },
+        active_runtimes=[
+            {
+                "runtime_instance_id": "runtime-mpg-op-long",
+                "strategy_family_id": "MPG-001",
+                "strategy_family_version_id": "MPG-001-v0",
+                "symbol": "OP/USDT:USDT",
+                "side": "long",
+                "status": "active",
+            }
+        ],
+        candidate_pool=candidate_pool,
+    )
+
+    assert [
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"])
+        for item in artifact["targets"]
+    ] == [("MPG-001", "OPUSDT", "short")]
+    skipped = {
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"]): item
+        for item in artifact["skipped"]
+    }
+    assert skipped[("MPG-001", "OPUSDT", "long")]["reason"] == (
+        "runtime_already_active_for_group_symbol_side"
+    )
+
+
 def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization():
     artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
