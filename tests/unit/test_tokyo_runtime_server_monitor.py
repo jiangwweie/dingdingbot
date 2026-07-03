@@ -386,6 +386,44 @@ def test_watcher_oneshot_inactive_success_is_not_systemd_failure(tmp_path: Path)
     assert watcher_row["inactive_success"] is True
 
 
+def test_watcher_oneshot_activating_is_transient_not_systemd_failure(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    paths = _base_paths(tmp_path)
+    _write_healthy_sources(paths)
+
+    args = _args(module, paths)
+    args.skip_systemd = False
+    args.systemd_unit = [
+        "brc-owner-console-backend.service",
+        "brc-runtime-signal-watcher.timer",
+        "brc-runtime-signal-watcher.service",
+    ]
+
+    def runner(unit: str):
+        if unit == "brc-runtime-signal-watcher.service":
+            return module.CommandResult(stdout="activating", stderr="", returncode=0)
+        return module.CommandResult(stdout="active", stderr="", returncode=0)
+
+    artifact = module.build_server_monitor_artifact(
+        args,
+        systemd_runner=runner,
+        notifier=lambda *args: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["status"] == "healthy_waiting_quiet"
+    assert artifact["decision"]["decision"] == "quiet"
+    assert artifact["systemd"]["ready"] is True
+    watcher_row = [
+        row
+        for row in artifact["systemd"]["rows"]
+        if row["unit"] == "brc-runtime-signal-watcher.service"
+    ][0]
+    assert watcher_row["transient_active"] is True
+    assert artifact["notification"]["attempted"] is False
+
+
 def test_watcher_status_failure_notifies(tmp_path: Path) -> None:
     module = _load_module()
     paths = _base_paths(tmp_path)

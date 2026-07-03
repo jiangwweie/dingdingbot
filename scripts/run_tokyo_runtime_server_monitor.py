@@ -235,12 +235,17 @@ def _systemd_status(
             and result.returncode != 0
             and result.stdout == "inactive"
         )
-        ready = active or inactive_success
+        transient_active = (
+            unit in ONESHOT_INACTIVE_OK_UNITS
+            and result.stdout == "activating"
+        )
+        ready = active or inactive_success or transient_active
         rows.append(
             {
                 "unit": unit,
                 "active": active,
                 "inactive_success": inactive_success,
+                "transient_active": transient_active,
                 "ready": ready,
                 "stdout": result.stdout,
                 "stderr_preview": result.stderr[:240],
