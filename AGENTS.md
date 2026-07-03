@@ -26,6 +26,10 @@ docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
 docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
 docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
 docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
+docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md
+docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
+docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
+docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
@@ -79,6 +83,13 @@ the source of production Owner notification decisions.
 deployment boundary: local SSH is the control plane, Tokyo code acquisition uses
 approved git fetch/export or explicitly scoped archive upload paths, and deploy
 success never grants live-submit or exchange-write authority.
+`docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`,
+`docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`,
+`docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`, and
+`docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` define the target
+DB-backed current projection boundary: runtime/trading decisions must not
+depend on repo MD/JSON, each current projection has one owner projector, and
+generated JSON/MD is an export rather than a source of truth.
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
 single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop

@@ -35,6 +35,12 @@ five active StrategyGroups
 -> official FinalGate and Operation Layer only after action-time gates pass
 ```
 
+The detailed mainline MD/JSON read/write inventory is maintained in:
+
+```text
+docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
+```
+
 ## Decision
 
 Dynamic live-enablement state should move behind a DB-backed
@@ -102,6 +108,72 @@ builder D picks one based on file availability
 
 That is not a strategy problem. It is a source-of-truth problem.
 
+## Current Mainline File I/O Map
+
+The current live-enablement chain still has several JSON/MD files acting as
+runtime sources. The target is not to copy these files into PG. The target is
+to replace them with typed events, facts, and current projections, then export
+JSON/MD only for compatibility.
+
+| Mainline node | Current reads | Current writes | Current risk | PG target |
+| --- | --- | --- | --- | --- |
+| Watcher tick / active monitor | systemd runtime, exchange/public inputs, Candidate Pool export as candidate universe, runtime scope files | server report JSON such as `latest-status.json`, local `latest-runtime-active-observation-status.json` | Watcher coverage becomes a file-presence interpretation and a generated view can drive the observer universe | `brc_strategy_group_candidate_scope`, `brc_watcher_runtime_coverage`, plus fact/event rows |
+| Public/account fact collectors | exchange APIs, fallback JSON, live-facts report JSON | `latest-binance-usdm-public-facts.json`, `latest-account-safe-facts.json` | Freshness and fallback source can drift across builders | `brc_runtime_fact_snapshots` with observed/valid-until timestamps |
+| Strategy detector builders | public facts JSON, strategy constants, local artifacts | detector fact JSON/MD such as SOR/MI/BRF2/MPG outputs | Detector output becomes a downstream file authority | `brc_live_signal_events` and fact snapshots |
+| Tradeability Decision | registry baseline JSON, tier policy JSON, runtime safety, replay/live parity, action-time boundary, admission/scope outputs | `latest-strategygroup-tradeability-decision.json/md` | Broad generated read model can become an upstream source for later builders | DB-backed Tradeability read model over current projections |
+| Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | diagnostic/read-model rows separate from watcher coverage |
+| Candidate Pool | Daily Table, Tradeability, replay/live parity, action-time boundary, detector facts, runtime active monitor, Owner auth JSON | `latest-strategy-live-candidate-pool.json/md` | Generated view recomputes source priority and may become authority | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs` |
+| Daily Table | Candidate Pool plus generated fact/readiness outputs | `latest-daily-live-enablement-table.json/md` | Management table can inherit stale generated inputs | DB-backed read-model export from current projections |
+| Single Lane Packet | Daily Table JSON | `latest-single-lane-task-packet.json/md` | Market waits can be accidentally wrapped as closure tasks | Task export only, not runtime authority |
+| Goal Status | report-dir artifacts, optional Candidate Pool JSON, release manifest, legacy pilot status | `strategygroup-runtime-goal-status.json` | Multiple writers and optional Candidate Pool can let legacy scope mismatch overrule new control state | `brc_goal_status_current` single-owner projection |
+| Server monitor | Daily Table, Candidate Pool, public/account facts, watcher/systemd/deploy health JSON, dedupe JSON | server monitor JSON and Feishu dedupe state | Production monitor can become a file aggregator instead of the runtime fact owner | `brc_server_monitor_runs`, `brc_server_monitor_notifications`, current projections |
+
+## Current Conflict Cases
+
+These cases define why the migration must introduce current projection
+ownership, not just a DB table for every existing artifact.
+
+| Conflict | Concrete shape | Why it matters | Target rule |
+| --- | --- | --- | --- |
+| Multiple writers for one current file | `strategygroup-runtime-goal-status.json` can be written by more than one post-step path | Last writer wins even if it used older inputs | One current projection has exactly one owner projector |
+| Optional control source | Goal Status can run with or without `--candidate-pool-json` | Same command can produce different authority conclusions | Candidate Pool/current projection is required once it becomes the control-plane source |
+| Legacy diagnostic promoted to blocker | `pilot_status.watcher_scope_alignment` can still emit scope mismatch after Candidate Pool proves coverage | Old status can hide real waiting/fresh-signal state | Legacy artifacts may write diagnostics only |
+| Watcher universe from generated view | watcher tick reads Candidate Pool export as `--candidate-universe-json` | A previous-cycle read model can define the current observation universe | Watcher reads DB candidate scope/runtime bindings |
+| Generated view consumed as source | Candidate Pool, Daily Table, Packet, Goal Status read each other's JSON outputs | Read models become second-order truth | Builders read repository/current projections; JSON is export |
+| No shared lineage | Candidate Pool and Goal Status do not share a required `projection_run_id` and input watermark | It is hard to prove they describe the same watcher tick | Every projection records run ID, input watermark, source priority, and owner projector |
+| Hard-coded scope | Candidate universes and primary symbols appear in code constants and docs JSON | Owner scope and runtime scope can diverge silently | Candidate scope and runtime bindings are DB current projections |
+
+### Goal Status Case Study
+
+The recent Candidate Pool / Goal Status mismatch is the canonical example.
+
+The intended control order is:
+
+```text
+watcher/facts
+-> Candidate Pool current projection
+-> Daily Table export
+-> Single Lane Packet export
+-> Goal Status current projection
+```
+
+The unsafe transitional shape is:
+
+```text
+legacy pilot/status artifacts
+plus optional Candidate Pool JSON
+plus multiple systemd post-step writers
+-> strategygroup-runtime-goal-status.json
+```
+
+This can report `runtime_scope_mismatch` or
+`selected_strategygroup_scope_mismatch` even after Candidate Pool has proven
+server-backed 5x18 coverage. The fix is not to add another packet. The fix is
+to make Goal Status Current a single-owner projection that depends on the
+Candidate Pool/current readiness projection when that projection is available.
+Legacy scope alignment can remain as `legacy_diagnostics`, but it must not set
+the main current blocker.
+
 ## Alternatives Considered
 
 | Option | Description | Pros | Cons | Decision |
@@ -132,6 +204,59 @@ They must not independently decide whether to read:
 - server report JSON;
 - code constants;
 - local cache files.
+
+### One Current Projection Owner
+
+Every `current_*` state must have exactly one owner projector.
+
+Allowed writers:
+
+- fact collectors write fact snapshots or events;
+- detector builders write signal/fact events;
+- diagnostic tools write diagnostics;
+- one named projector writes each current projection.
+
+Forbidden writers:
+
+- a product-state refresh script must not write the same current state as a
+  final post-step builder;
+- legacy status artifacts must not overwrite current readiness, scope,
+  promotion, action-time, or goal-status projections;
+- generated export writers must not make independent blocker decisions.
+
+The required flow is:
+
+```text
+facts/events/diagnostics
+-> owner projector
+-> current projection
+-> JSON/MD export
+```
+
+The forbidden flow is:
+
+```text
+facts/events
+-> many scripts
+-> many current-like JSON files
+-> later script chooses one
+```
+
+### Projection Lineage Is Required
+
+Every current projection must record:
+
+- `projection_run_id`;
+- `owner_projector`;
+- `input_watermark`;
+- `source_priority`;
+- code version or release head;
+- source fact/event IDs where available;
+- whether legacy diagnostics were read;
+- whether legacy diagnostics affected the current blocker.
+
+For production current projections, legacy diagnostics must not affect the main
+blocker when a fresher DB-backed projection exists.
 
 ### DB Stores Facts, Not Reports
 
@@ -212,6 +337,7 @@ files are read-model snapshots, not the authority source.
 | Fresh signal and promotion | DB signal/promotion tables | generated detector files | Candidate Pool and action-time lane export |
 | Action-time lane input | DB lane input table | generated action-time boundary JSON | action-time export |
 | Runtime safety state | DB safety snapshot table | runtime safety JSON | Runtime Safety State JSON/MD |
+| Goal Status current | DB goal-status current projection | report-dir goal-status JSON | goal-status JSON export |
 | Daily table | DB-backed generated read model | Daily Table JSON | Daily Table JSON/MD |
 | Server monitor notification | DB monitor run and notification tables | dedupe JSON and server monitor JSON | server monitor JSON |
 | Deploy evidence | deploy reports and archive path | same | not a runtime source |
@@ -240,8 +366,11 @@ get_pretrade_readiness_rows(strategy_group_id=None)
 get_promotion_candidates(status=None)
 get_action_time_lane_inputs(status=None)
 get_runtime_safety_state(strategy_group_id, symbol=None)
+get_goal_status_current()
 get_server_monitor_state()
+start_projection_run(model_type, owner_projector, input_watermark)
 write_control_read_model_snapshot(model_type, payload, source_watermark)
+write_goal_status_current(payload, projection_run_id)
 ```
 
 ### Implementation Stages
@@ -266,13 +395,16 @@ flowchart TD
   RuntimeFacts["public/account/runtime facts"] --> DB
   Importer --> DB
   DB --> Repo
+  DB --> ProjectionRuns["Projection run and lineage records"]
   Repo --> Tradeability["Tradeability Decision builder"]
   Repo --> CandidatePool["Candidate Pool builder"]
   Repo --> DailyTable["Daily Table builder"]
+  Repo --> GoalStatus["Goal Status projector"]
   Repo --> ServerMonitor["Tokyo server monitor"]
   Tradeability --> Export["output JSON/MD exports"]
   CandidatePool --> Export
   DailyTable --> Export
+  GoalStatus --> Export
   ServerMonitor --> Notify["Feishu quiet/notify"]
 ```
 

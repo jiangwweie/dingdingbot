@@ -33,6 +33,19 @@ Archives preserve provenance.
 Markdown may explain current intent and boundaries, but it must not become a
 manual substitute for dynamic runtime state.
 
+Dynamic current state must also obey this stricter rule:
+
+```text
+facts/events/diagnostics
+-> one owner projector
+-> current projection
+-> generated JSON/MD export
+```
+
+Generated JSON/MD exports may summarize current projections, but they must not
+become independent runtime truth or compete with another writer for the same
+current state.
+
 ## Authority Model
 
 This information architecture exists to support this authority split:
@@ -76,6 +89,7 @@ Operation Layer evidence, or exchange-write permission.
 | `machine_config` | Structured policy or config consumed by scripts | `docs/current/**/*.json` where scripts read it | Must be schema-like, testable, and stable |
 | `owner_policy` | Owner risk acceptance, tier switches, capital scope, pauses, parks, kills | Future runtime/policy store; during pilot only explicit Owner decisions and bounded docs | Dynamic authorization state; should not live as narrative Markdown long-term |
 | `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher artifacts | Current operational truth, subject to freshness rules |
+| `current_projection` | Single-owner current state over facts/events, such as Candidate Pool readiness, Goal Status, Runtime Safety State, and server monitor state | Target DB-backed current projection; transitional file-backed repository only | Runtime decision source after repository migration; exactly one owner projector |
 | `generated_view` | Strategy Asset State evidence, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
 | `tracked_control_snapshot` | Small generated views that are allowed into routine Live Enablement commits | Paths listed in `config/output_control_snapshots.json` | Commit only with known source command, validator, and named task deliverable |
 | `volatile_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, and local runtime noise | `output/**` paths not listed as tracked control snapshots | Must remain untracked and ignored; regenerate or archive separately |
@@ -112,6 +126,7 @@ Owner decisions.
 | Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
 | Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
 | Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
+| Runtime control state mainline file I/O map | `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` |
 | Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
@@ -193,6 +208,25 @@ They must not become:
 ```text
 generated view -> hand-edited source of truth
 ```
+
+After the DB/repository migration, generated views must also not become:
+
+```text
+generated view A -> generated view B -> runtime decision
+```
+
+The allowed path is:
+
+```text
+DB/API/code facts
+-> RuntimeControlStateRepository
+-> current projection
+-> generated view export
+```
+
+If a legacy artifact is still read for compatibility, it may produce
+diagnostics only. It must not set the main current blocker when a fresher
+current projection exists.
 
 If a generated view and a roadmap disagree, regenerate or update the roadmap to
 reference the generated source. Do not let the stale roadmap redefine current

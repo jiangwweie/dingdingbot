@@ -85,6 +85,10 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_promotion_candidates` | Fresh satisfied promotion candidates | P1 |
 | `brc_action_time_lane_inputs` | Narrowed action-time lane input records | P1 |
 | `brc_runtime_safety_state_snapshots` | Runtime Safety State snapshots | P1 |
+| `brc_projection_runs` | Projection lineage and input watermark records | P0 |
+| `brc_current_projection_ownership` | Single-owner registry for current projections | P0 |
+| `brc_legacy_diagnostics` | Legacy artifact diagnostics that cannot set current blockers | P1 |
+| `brc_goal_status_current` | Current Goal Status projection | P0 |
 | `brc_control_read_model_snapshots` | Generated read-model payload history | P2 |
 | `brc_server_monitor_runs` | Tokyo server monitor run records | P1 |
 | `brc_server_monitor_notifications` | Feishu notification and dedupe state | P1 |
@@ -571,6 +575,99 @@ Writer: action-time lane selector.
 
 Readers: action-time fact refresher, Runtime Safety State, FinalGate preflight.
 
+## Projection Ownership Tables
+
+These tables prevent DB-backed state from reproducing the current JSON-file
+problem. They make current-state ownership, input lineage, and legacy diagnostic
+use explicit.
+
+### `brc_projection_runs`
+
+Purpose: record every run that writes a current projection or exported read
+model.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `projection_run_id` | `String(192)` PK | Stable run ID |
+| `model_type` | `String(96)` | `candidate_pool`, `daily_live_enablement_table`, `goal_status`, `runtime_safety_state`, `server_monitor`, or other read model |
+| `owner_projector` | `String(128)` | One named writer for this projection |
+| `code_version` | `String(128)` nullable | Release head or build version |
+| `input_watermark` | `JSONB` | Source fact/event/projection refs and timestamps |
+| `source_priority` | `JSONB` | Ordered source priority used by the projector |
+| `legacy_diagnostics_read` | `Boolean` | Whether legacy artifacts were inspected |
+| `legacy_diagnostics_affected_current` | `Boolean` | Must be false for production current projections when DB-backed state is fresh |
+| `started_at_ms` | `BIGINT` | Start time |
+| `finished_at_ms` | `BIGINT` nullable | Finish time |
+| `status` | `String(64)` | `running`, `succeeded`, `failed`, `stale_input`, `blocked` |
+| `error_detail` | `Text` nullable | Failure detail |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `ck_brc_projection_runs_legacy_current` | `legacy_diagnostics_affected_current=false` when `status='succeeded'` and production source is DB-backed |
+| `idx_brc_projection_runs_model_time` | `(model_type, started_at_ms)` |
+| `idx_brc_projection_runs_owner_status` | `(owner_projector, status)` |
+
+Writer: owner projector for each current projection.
+
+Readers: exporters, validators, server monitor, audit tools.
+
+### `brc_current_projection_ownership`
+
+Purpose: declare the only allowed writer for each current projection.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `projection_key` | `String(160)` PK | Example: `current:goal_status` |
+| `model_type` | `String(96)` | Projection type |
+| `owner_projector` | `String(128)` | Only writer allowed to mutate current rows |
+| `export_paths` | `JSONB` | Compatibility JSON/MD export paths |
+| `legacy_writer_allowed` | `Boolean` | Must be false in production |
+| `current_source_mode` | `String(32)` | `file_backed`, `hybrid`, or `db_backed` |
+| `sunset_condition` | `Text` nullable | Removal condition for transitional file backing |
+| `updated_at_ms` | `BIGINT` | Last update |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `ck_brc_current_projection_no_legacy_prod` | Production rows require `legacy_writer_allowed=false` |
+| `uq_brc_current_projection_model_owner` | Unique `(model_type, owner_projector)` |
+
+Writer: migration/admin tooling.
+
+Readers: projection validators and deployment acceptance checks.
+
+### `brc_legacy_diagnostics`
+
+Purpose: preserve old artifact observations without allowing them to set the
+main current blocker.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `legacy_diagnostic_id` | `String(192)` PK | Stable diagnostic ID |
+| `source_name` | `String(128)` | Example: `pilot_status.watcher_scope_alignment` |
+| `diagnostic_type` | `String(96)` | `scope_alignment`, `missing_artifact`, `stale_report`, `runtime_report_mismatch` |
+| `strategy_group_id` | `String(128)` nullable | Scope when known |
+| `symbol` | `String(128)` nullable | Scope when known |
+| `side` | `String(32)` nullable | Scope when known |
+| `diagnostic_payload` | `JSONB` | Original diagnostic shape |
+| `may_set_current_blocker` | `Boolean` | Must be false for legacy diagnostics |
+| `observed_at_ms` | `BIGINT` | Observation time |
+| `created_by_projection_run_id` | `String(192)` nullable | Projection that recorded it |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `ck_brc_legacy_diagnostics_no_current_blocker` | `may_set_current_blocker=false` |
+| `idx_brc_legacy_diagnostics_scope_time` | `(strategy_group_id, symbol, side, observed_at_ms)` |
+
+Writer: compatibility importers and diagnostics projectors.
+
+Readers: audit tools and developer diagnostics only.
+
 ## Runtime Safety And Read Model Tables
 
 ### `brc_runtime_safety_state_snapshots`
@@ -614,6 +711,45 @@ Writer: Runtime Safety State builder.
 
 Readers: Daily Table, Candidate Pool, FinalGate preflight, Owner Console.
 
+### `brc_goal_status_current`
+
+Purpose: current StrategyGroup runtime goal-status projection. This is the
+Owner/developer status summary, not a submit authority source.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `goal_status_current_id` | `String(160)` PK | Deterministic current row ID |
+| `projection_run_id` | `String(192)` | Projection run ref |
+| `status` | `String(96)` | `healthy_waiting`, `fresh_signal_processing`, `temporarily_unavailable`, `blocked`, `unknown` |
+| `chain_position` | `String(128)` | Current chain position |
+| `top_strategy_group_id` | `String(128)` nullable | Current nearest lane StrategyGroup |
+| `top_symbol` | `String(128)` nullable | Current nearest lane symbol |
+| `top_side` | `String(32)` nullable | Current nearest lane side |
+| `fresh_signal_present` | `Boolean` | True only from current readiness/signal projection |
+| `ready_for_real_order_action` | `Boolean` | Must be false unless Runtime Safety State allows submit |
+| `selected_strategygroup_scope_ready` | `Boolean` | Scope status from current projection |
+| `watcher_liveness_healthy` | `Boolean` | Watcher/coverage status from current projection |
+| `runtime_coverage_state` | `String(64)` | `complete`, `partial`, `missing`, `stale`, `unknown` |
+| `blockers` | `JSONB` | Main current blockers |
+| `legacy_diagnostic_refs` | `JSONB` | Legacy diagnostics observed but not authoritative |
+| `source_watermark` | `JSONB` | Candidate Pool/readiness/fact/safety refs |
+| `computed_at_ms` | `BIGINT` | Projection time |
+| `valid_until_ms` | `BIGINT` nullable | Freshness expiry |
+| `authority_boundary` | `Text` | Must state no submit authority |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_goal_status_current_single` | Exactly one current row |
+| `ck_brc_goal_status_ready_submit` | `ready_for_real_order_action=true` requires a referenced Runtime Safety State with `submit_allowed=true` |
+| `ck_brc_goal_status_legacy_not_blocker` | `legacy_diagnostic_refs` cannot by itself populate `blockers` when current coverage projection is complete |
+| `idx_brc_goal_status_status_time` | `(status, computed_at_ms)` |
+
+Writer: Goal Status projector only.
+
+Readers: server monitor, Owner Console, diagnostics, goal-status export.
+
 ### `brc_control_read_model_snapshots`
 
 Purpose: store generated read-model payloads before exporting controlled JSON
@@ -622,11 +758,14 @@ snapshots.
 | Column | Type | Rule |
 | --- | --- | --- |
 | `read_model_snapshot_id` | `String(192)` PK | Stable snapshot ID |
-| `model_type` | `String(96)` | `tradeability_decision`, `candidate_pool`, `daily_live_enablement_table`, `runtime_safety_state`, `owner_console_state` |
+| `projection_run_id` | `String(192)` nullable | Projection lineage ref |
+| `model_type` | `String(96)` | `tradeability_decision`, `candidate_pool`, `daily_live_enablement_table`, `runtime_safety_state`, `goal_status`, `owner_console_state` |
 | `schema_version` | `String(128)` | Payload schema |
 | `status` | `String(96)` | Model-specific status |
 | `payload` | `JSONB` | Generated payload |
 | `source_watermark` | `JSONB` | Source rows and versions |
+| `owner_projector` | `String(128)` | Export/read-model writer |
+| `input_watermark` | `JSONB` | Input refs used for this payload |
 | `output_path` | `String(512)` nullable | Export path |
 | `is_current` | `Boolean` | Current snapshot flag |
 | `generated_at_ms` | `BIGINT` | Generated time |
@@ -727,6 +866,9 @@ Readers: notifier retry loop, Owner Console audit.
 | `output/runtime-monitor/latest-strategygroup-tradeability-decision.json` | `brc_control_read_model_snapshots` export |
 | `output/runtime-monitor/latest-strategy-live-candidate-pool.json` | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, plus export |
 | `output/runtime-monitor/latest-daily-live-enablement-table.json` | `brc_control_read_model_snapshots` export |
+| server `strategygroup-runtime-goal-status.json` | `brc_goal_status_current` plus export |
+| projection run metadata currently implicit in script execution | `brc_projection_runs`, `brc_current_projection_ownership` |
+| legacy report diagnostics such as `pilot_status.watcher_scope_alignment` | `brc_legacy_diagnostics` |
 | server monitor dedupe JSON | `brc_server_monitor_notifications` |
 | server monitor latest JSON | `brc_server_monitor_runs` plus export |
 
@@ -736,18 +878,23 @@ Readers: notifier retry loop, Owner Console audit.
 
 Tables:
 
+- `brc_projection_runs`;
+- `brc_current_projection_ownership`;
 - `brc_owner_policy_events`;
 - `brc_owner_policy_current`;
 - `brc_strategy_group_candidate_scope`;
 - `brc_runtime_scope_bindings`;
-- `brc_watcher_runtime_coverage`.
+- `brc_watcher_runtime_coverage`;
+- `brc_goal_status_current`.
 
 Acceptance:
 
 - Candidate universe no longer comes from code constants;
 - Owner pre-trade authorization no longer comes from hand-edited docs JSON as
   runtime source;
-- server runtime coverage has per-symbol rows.
+- server runtime coverage has per-symbol rows;
+- Goal Status has one owner projector and cannot be overwritten by legacy
+  post-step or product-state refresh paths.
 
 ### Batch 2: P1 Strategy And Facts Closure
 
@@ -826,7 +973,9 @@ shape for builders:
   "pretrade_readiness_rows": [],
   "promotion_candidates": [],
   "action_time_lane_inputs": [],
-  "runtime_safety_state": []
+  "runtime_safety_state": [],
+  "goal_status_current": {},
+  "projection_runs": []
 }
 ```
 

@@ -25,6 +25,7 @@ This plan extends the DB-backed control-state design in:
 ```text
 docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
 docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
+docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
 ```
 
 ## Decision
@@ -69,6 +70,41 @@ Current direct runtime-like file dependencies include:
 | `RUNTIME_MONITOR_BASELINE.json` | Daily check, goal progress | Monitor baseline is file-sourced |
 | `output/runtime-monitor/latest-*.json` | Candidate Pool, Daily Table, server monitor, daily checks | Generated outputs become inputs to later decisions |
 | replay corpora under `strategy-group-handoffs/*/replay` | Review and policy scripts | Replay assets are stored in current docs tree |
+
+## Mainline MD/JSON Read/Write Map
+
+This map is the required migration frame for the current StrategyGroup
+live-enablement chain.
+
+| Node | Reads today | Writes today | Key conflict | Target treatment |
+| --- | --- | --- | --- | --- |
+| Watcher active status | systemd/runtime scope, exchange/public inputs, Candidate Pool export as candidate universe | server `latest-status.json`, local active-observation JSON | File existence can be mistaken for runtime coverage truth and previous-cycle export can drive observation | Read candidate scope from DB and write watcher coverage rows/events |
+| Public/account facts | exchange API, fallback JSON, live-facts packet | public/account fact JSON and MD exports | Freshness source differs by consumer | Write `brc_runtime_fact_snapshots` |
+| Detector builders | public facts JSON and strategy-specific files/constants | detector facts JSON/MD | Detector facts become file sources for downstream decisions | Write signal events and fact snapshots |
+| Tradeability Decision | registry baseline JSON, tier policy JSON, runtime safety, replay/live parity, action-time boundary, admission/scope outputs | `latest-strategygroup-tradeability-decision.json/md` | Broad generated read model can become an upstream source for later builders | Project Tradeability over DB current projections |
+| Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | Store diagnostic/read-model rows separate from watcher coverage |
+| Candidate Pool | authorization JSON, Daily Table, Tradeability, detector outputs, active monitor, replay/live and action-time artifacts | `latest-strategy-live-candidate-pool.json/md` | One generated view recomputes many source priorities | Project readiness, promotion, and action-time lane rows |
+| Daily Table | Candidate Pool and other generated outputs | `latest-daily-live-enablement-table.json/md` | Management view can lag or inherit stale generated inputs | Export from current projections |
+| Single Lane Packet | Daily Table JSON | `latest-single-lane-task-packet.json/md` | Market waits can become fake closure work | Export task packet only when blocker is non-market |
+| Goal Status | report-dir artifacts, optional Candidate Pool JSON, release manifest, legacy pilot status | `strategygroup-runtime-goal-status.json` | Multiple writers and legacy scope diagnostics can override current control facts | One `brc_goal_status_current` projector |
+| Server monitor | Candidate Pool, Daily Table, public/account facts, systemd/deploy reports, dedupe JSON | monitor latest JSON and Feishu dedupe JSON | Production monitor becomes a file aggregator | Server monitor runs and notification dedupe tables |
+
+## Conflict Points To Eliminate
+
+| Conflict point | Current symptom | Required closure |
+| --- | --- | --- |
+| Multiple writers for current state | One status JSON can be rewritten by different post-step paths | A current projection has one owner projector |
+| Optional core input | Goal Status can run with or without Candidate Pool | Required current projections must be mandatory inputs |
+| Legacy artifact precedence | `pilot_status.watcher_scope_alignment` can still produce scope mismatch | Legacy artifacts become diagnostics only |
+| Watcher candidate-universe source | Watcher reads Candidate Pool export as candidate universe | Watcher reads DB candidate scope/runtime bindings |
+| Broad read-model source | Tradeability reads many files and then feeds Candidate Pool / Daily Table | Tradeability becomes a DB-backed read model over current projections |
+| Parity diagnostic source | Replay/live parity can influence readiness classification | Parity rows stay diagnostic unless promoted through current detector/coverage projections |
+| Generated output as runtime input | Candidate Pool, Daily Table, Packet, Goal Status read prior JSON outputs | Runtime builders read repository/current projections |
+| Same fact family in multiple directories | Public/account facts can exist under app `output/**` and server report dirs | DB fact snapshots become the source; paths become exports |
+| Missing shared lineage | Candidate Pool and Goal Status may describe different ticks | Every current projection stores `projection_run_id` and `input_watermark` |
+| Mixed output governance | Volatile facts and control snapshots both live under `output/**` | Output becomes export-only and untracked by default |
+| Hard-coded candidate universe | Scope lives in code constants and policy JSON | Candidate scope lives in DB current projection |
+| Docs JSON policy source | Owner authorization and tier policy are file inputs | Owner policy events/current projection become source |
 
 ## Target End State
 
@@ -192,6 +228,7 @@ The migration must happen in this order:
 inventory and classify
 -> stop new direct file dependencies
 -> introduce RuntimeControlStateRepository
+-> introduce current projection ownership and lineage
 -> DB-source P0 policy/scope/coverage
 -> export read models from DB
 -> untrack output/state/report files
@@ -257,6 +294,26 @@ Acceptance:
 | Single read boundary | Main runtime builders no longer own raw docs/output path decisions |
 | Compatibility preserved | Existing focused tests still pass under file-backed source |
 | DB switch ready | Repository source can be selected by config/env without changing builder logic |
+
+### Phase 2B: Current Projection Ownership
+
+Deliverables:
+
+- define one owner projector for each current projection;
+- add projection lineage fields: `projection_run_id`, `input_watermark`,
+  `source_priority`, and `owner_projector`;
+- make legacy artifacts diagnostics-only;
+- make Goal Status consume the Candidate Pool/readiness current projection
+  instead of optional generated JSON.
+
+Acceptance:
+
+| Check | Done when |
+| --- | --- |
+| Single writer | Candidate Pool, Daily Table, Goal Status, Runtime Safety State, and server monitor current states each have one owner projector |
+| No legacy overwrite | Legacy `pilot_status`/watcher-scope alignment cannot set main current blockers when current coverage projection is complete |
+| Shared lineage | Goal Status and Candidate Pool can prove they used the same watcher/fact watermark |
+| Export-only status | `strategygroup-runtime-goal-status.json` is a generated export, not a file source |
 
 ### Phase 3: P0 DB Source Migration
 
@@ -372,6 +429,7 @@ Acceptance:
 | `validate_output_export_only.py` | Ensure output files are not runtime inputs or routine commit candidates |
 | `validate_db_control_state_seed.py` | Verify imported policy/registry/scope rows preserve boundaries |
 | `validate_runtime_control_state_repository.py` | Verify repository returns complete control state and fails closed |
+| `validate_current_projection_ownership.py` | Ensure each current projection has one owner writer and required lineage |
 
 ### Required Test Classes
 
@@ -379,6 +437,7 @@ Acceptance:
 | --- | --- |
 | Repository parity tests | File-backed and DB-backed repository produce same read model during migration |
 | Source-ban tests | Candidate Pool, Daily Table, Tradeability, server monitor do not read raw files |
+| Projection ownership tests | Goal Status cannot be written without Candidate Pool/current readiness lineage once that projection is authoritative |
 | Policy import tests | Owner policy JSON imports to DB without authority expansion |
 | Candidate scope tests | Five StrategyGroups and multi-symbol scopes are DB-backed |
 | Coverage/facts tests | stale/missing facts fail closed at Runtime Safety State |
@@ -490,7 +549,15 @@ Goal: route Candidate Pool, Daily Table, Tradeability, and server monitor throug
 Capability unlocked: runtime builders no longer select raw MD/JSON sources
 ```
 
-### P0-C: Policy And Scope DB Source
+### P0-C: Current Projection Ownership
+
+```text
+Task ID: P0-CURRENT-PROJECTION-OWNERSHIP-CLOSURE
+Goal: make each current projection single-writer with projection_run_id, input_watermark, and legacy diagnostics separated from current blockers
+Capability unlocked: Goal Status, Candidate Pool, Daily Table, Runtime Safety State, and server monitor cannot overwrite each other with stale file authority
+```
+
+### P0-D: Policy And Scope DB Source
 
 ```text
 Task ID: P0-OWNER-POLICY-CANDIDATE-SCOPE-DB-SOURCE
@@ -498,7 +565,7 @@ Goal: migrate Owner authorization, tier policy, candidate universe, and runtime 
 Capability unlocked: five StrategyGroups multi-symbol scope is DB-backed
 ```
 
-### P0-D: Runtime Coverage And Facts DB Source
+### P0-E: Runtime Coverage And Facts DB Source
 
 ```text
 Task ID: P0-RUNTIME-COVERAGE-FACTS-DB-SOURCE
