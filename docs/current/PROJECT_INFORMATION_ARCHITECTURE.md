@@ -62,6 +62,11 @@ live-submit authority from documents or generated artifact metadata.
 views may report blocker classes, but planning and acceptance must interpret
 them through `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 
+Tokyo runtime deployment follows `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
+Deployment evidence is operational checkpoint evidence, not trading authority.
+Deploy success must not be interpreted as live-submit readiness, FinalGate input,
+Operation Layer evidence, or exchange-write permission.
+
 ## Information Classes
 
 | Class | Purpose | Current location | Authority behavior |
@@ -103,6 +108,7 @@ Owner decisions.
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
+| Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
 | Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
 | Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
 | Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |

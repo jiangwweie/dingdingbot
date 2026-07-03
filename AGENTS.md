@@ -25,6 +25,7 @@ docs/current/TRADEABILITY_DECISION_CONTRACT.md
 docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
 docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
 docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
+docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
@@ -74,6 +75,10 @@ monitor ownership boundary: Tokyo server-side readonly timer and Feishu
 notification are the target production path; local heartbeat and local monitor
 sequence are development diagnostic paths only, not production fallback and not
 the source of production Owner notification decisions.
+`docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` defines the Tokyo runtime
+deployment boundary: local SSH is the control plane, Tokyo code acquisition uses
+approved git fetch/export or explicitly scoped archive upload paths, and deploy
+success never grants live-submit or exchange-write authority.
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
 single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop

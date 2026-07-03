@@ -60,6 +60,7 @@ comes only from the selected profile and action-time exchange facts.
 Strategy tradeability uses `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
 Blocker naming uses `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
 Pre-trade runtime uses `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
+Tokyo deployment uses `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 Daily management uses
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`, and active
 lane limits use `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
@@ -373,6 +374,12 @@ monitoring is owned by the Tokyo server-side readonly runtime monitor timer.
 Bounded Tokyo deploy apply should be reserved for a stage-worthy fix,
 deployable milestone, fresh-signal unblock, safety regression repair, or
 explicit Owner request.
+
+Deployment tasks must follow `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
+Local SSH is the control plane; Tokyo code acquisition must use an approved git
+fetch/export path or an explicitly scoped archive upload fallback. Deploy
+success is not live-submit readiness and must not become FinalGate, Operation
+Layer, exchange write, order creation, live profile mutation, or sizing mutation.
 
 ## StrategyGroup Runtime Bootstrap
 

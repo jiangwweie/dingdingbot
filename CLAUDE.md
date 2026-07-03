@@ -24,6 +24,7 @@ docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
 docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
 docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
+docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
@@ -92,6 +93,11 @@ Local monitor sequence and Codex heartbeat work are development diagnostic
 paths only unless a Codex task card explicitly scopes a migration, drift audit,
 or postdeploy verification task. They must not become the normal source of
 Owner notification decisions and must not be treated as a production fallback.
+
+Tokyo deployments must follow `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
+Local SSH is the deployment control plane. Tokyo code acquisition must use an
+approved git fetch/export path or an explicitly scoped archive upload fallback.
+Deploy success is not live-submit readiness or exchange-write authority.
 
 ## Authority Model For Worker Tasks
 
