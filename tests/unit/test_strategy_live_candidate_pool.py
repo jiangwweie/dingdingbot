@@ -1099,6 +1099,9 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
     assert artifact["action_time_lane_inputs"][0]["server_runtime_coverage"][
         "state"
     ] == "active_watcher_scope"
+    assert artifact["action_time_lane_inputs"][0]["next_action"] == (
+        "refresh_private_action_time_facts_before_finalgate"
+    )
     assert artifact["action_time_lane_inputs"][0]["public_facts_state"]["state"] == (
         "satisfied"
     )

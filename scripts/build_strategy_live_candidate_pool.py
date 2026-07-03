@@ -1277,6 +1277,12 @@ def _symbol_next_action(
         and action_next != "wait_for_fresh_signal_then_refresh_private_action_time_facts"
     ):
         return action_next
+    if (
+        first_blocker == "market_wait_validated"
+        and action_next
+        and action_next != "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+    ):
+        return action_next
     return {
         "detector_not_attached": "attach_detector_for_candidate_symbol",
         "watcher_tick_missing": "refresh_readonly_watcher_for_candidate_symbol",
