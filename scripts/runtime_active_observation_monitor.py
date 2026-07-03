@@ -66,6 +66,7 @@ DEFAULT_SIDE_SCOPE = {
     "SOR-001": ("long", "short"),
     "BRF2-001": ("long", "short"),
 }
+DEFAULT_HANDOFF_DIR = ROOT_DIR / "docs/current/strategy-group-handoffs"
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -250,6 +251,7 @@ def _candidate_universe_coverage(
     source: dict[str, Any],
     active: list[dict[str, Any]],
     selected: list[dict[str, Any]],
+    handoff_risk_defaults: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     selected_lanes: dict[tuple[str, str, str], list[str]] = {}
     active_lanes: dict[tuple[str, str, str], list[str]] = {}
@@ -336,6 +338,7 @@ def _candidate_universe_coverage(
                             strategy_group_id=strategy_group_id,
                             symbol=symbol,
                             side=expected_side,
+                            handoff_risk_defaults=handoff_risk_defaults or {},
                         ),
                         "next_action": next_action,
                         "authority_boundary": (
@@ -384,6 +387,7 @@ def _runtime_profile_for_lane(
     strategy_group_id: str,
     symbol: str,
     side: str,
+    handoff_risk_defaults: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     for runtime in runtimes:
         if (
@@ -395,34 +399,79 @@ def _runtime_profile_for_lane(
             profile = runtime.get("runtime_profile")
             if not isinstance(profile, dict):
                 profile = {}
+            risk_defaults = (handoff_risk_defaults or {}).get(strategy_group_id, {})
+            if not isinstance(risk_defaults, dict):
+                risk_defaults = {}
+            runtime_profile_id = (
+                _runtime_value(runtime, "runtime_profile_id", "profile_id")
+                or profile.get("runtime_profile_id")
+                or profile.get("profile_id")
+                or ""
+            )
+            target_notional = (
+                _runtime_value(runtime, "target_notional_usdt", "target_notional")
+                or profile.get("target_notional_usdt")
+                or profile.get("target_notional")
+                or ""
+            )
+            max_notional = (
+                _runtime_value(runtime, "max_notional", "max_notional_usdt")
+                or profile.get("max_notional")
+                or profile.get("max_notional_usdt")
+                or profile.get("max_notional_per_action_usdt")
+                or risk_defaults.get("max_notional_per_action_usdt")
+                or risk_defaults.get("max_notional_usdt")
+                or ""
+            )
+            leverage = (
+                _runtime_value(runtime, "leverage", "max_leverage")
+                or profile.get("leverage")
+                or profile.get("max_leverage")
+                or risk_defaults.get("default_leverage")
+                or risk_defaults.get("max_leverage")
+                or ""
+            )
+            profile_source = (
+                "runtime"
+                if any([runtime_profile_id, target_notional])
+                else "strategy_handoff_risk_defaults_boundary"
+                if any([max_notional, leverage])
+                else "missing_runtime_profile_boundary"
+            )
             return {
-                "runtime_profile_id": str(
-                    _runtime_value(runtime, "runtime_profile_id", "profile_id")
-                    or profile.get("runtime_profile_id")
-                    or profile.get("profile_id")
-                    or ""
-                ),
-                "target_notional_usdt": str(
-                    _runtime_value(runtime, "target_notional_usdt", "target_notional")
-                    or profile.get("target_notional_usdt")
-                    or profile.get("target_notional")
-                    or ""
-                ),
-                "max_notional": str(
-                    _runtime_value(runtime, "max_notional", "max_notional_usdt")
-                    or profile.get("max_notional")
-                    or profile.get("max_notional_usdt")
-                    or profile.get("max_notional_per_action_usdt")
-                    or ""
-                ),
-                "leverage": str(
-                    _runtime_value(runtime, "leverage", "max_leverage")
-                    or profile.get("leverage")
-                    or profile.get("max_leverage")
-                    or ""
+                "runtime_profile_id": str(runtime_profile_id or ""),
+                "target_notional_usdt": str(target_notional or ""),
+                "max_notional": str(max_notional or ""),
+                "leverage": str(leverage or ""),
+                "profile_source": profile_source,
+                "authority_boundary": (
+                    "strategy_handoff_boundary_only; "
+                    "no_live_profile_or_sizing_change"
                 ),
             }
     return {}
+
+
+def _handoff_risk_defaults(path_value: str | None) -> dict[str, dict[str, Any]]:
+    root = Path(path_value or DEFAULT_HANDOFF_DIR).expanduser()
+    result: dict[str, dict[str, Any]] = {}
+    if not root.exists():
+        return result
+    for handoff_path in root.glob("*/handoff.json"):
+        try:
+            payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        strategy_group_id = str(
+            payload.get("strategy_group_id")
+            or payload.get("strategy_family_id")
+            or handoff_path.parent.name
+            or ""
+        )
+        risk_defaults = payload.get("risk_defaults")
+        if strategy_group_id and isinstance(risk_defaults, dict):
+            result[strategy_group_id] = dict(risk_defaults)
+    return result
 
 
 def _normalize_side(value: Any) -> str:
@@ -679,6 +728,9 @@ def _build_monitor_artifact(
         getattr(args, "strategy_family_id", None) or []
     )
     candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
+    handoff_risk_defaults = _handoff_risk_defaults(
+        getattr(args, "strategy_handoff_dir", None)
+    )
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
         runtime_instance_ids=requested_runtime_instance_ids,
@@ -699,6 +751,7 @@ def _build_monitor_artifact(
         source=candidate_universe_source,
         active=active,
         selected=selected,
+        handoff_risk_defaults=handoff_risk_defaults,
     )
 
     runtime_artifacts: list[dict[str, Any]] = []
@@ -987,6 +1040,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Optional Strategy Live Candidate Pool JSON. When present, emit "
             "read-only per-symbol runtime scope coverage."
+        ),
+    )
+    parser.add_argument(
+        "--strategy-handoff-dir",
+        default=str(DEFAULT_HANDOFF_DIR),
+        help=(
+            "Directory containing StrategyGroup handoff.json files used only "
+            "to project existing risk-boundary metadata into read-only "
+            "runtime coverage rows."
         ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)

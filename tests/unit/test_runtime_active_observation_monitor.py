@@ -33,6 +33,7 @@ def _args(**overrides):
         "runtime_instance_id": [],
         "strategy_family_id": [],
         "candidate_universe_json": None,
+        "strategy_handoff_dir": None,
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
         "interval_seconds": 0.0,
@@ -509,6 +510,79 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
     assert long_row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
     assert short_row["state"] == "active_watcher_scope"
     assert short_row["active_runtime_instance_ids"] == ["runtime-sor-eth-short"]
+
+
+def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_path):
+    candidate_pool = tmp_path / "candidate-pool.json"
+    candidate_pool.write_text(
+        json.dumps({"candidate_universe": {"SOR-001": ["SOLUSDT"]}}),
+        encoding="utf-8",
+    )
+    handoff_dir = tmp_path / "handoffs"
+    sor_dir = handoff_dir / "SOR-001"
+    sor_dir.mkdir(parents=True)
+    (sor_dir / "handoff.json").write_text(
+        json.dumps(
+            {
+                "strategy_group_id": "SOR-001",
+                "risk_defaults": {
+                    "interpretation": "pilot_boundary_not_order_sizing_default",
+                    "max_notional_per_action_usdt": "8",
+                    "default_leverage": "1",
+                    "max_leverage": "1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-sor-sol-long",
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                symbol="SOL/USDT:USDT",
+                side="long",
+            ),
+        ]
+    )
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(
+            output_dir=str(tmp_path),
+            strategy_family_id=["SOR-001"],
+            candidate_universe_json=str(candidate_pool),
+            strategy_handoff_dir=str(handoff_dir),
+        ),
+        client=client,
+        runtime_artifact_builder=lambda args: {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "observation_cycle_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    rows = {
+        (item["symbol"], item["side"]): item
+        for item in packet["candidate_universe_coverage"]["rows"]
+    }
+    profile = rows[("SOLUSDT", "long")]["runtime_profile"]
+    assert rows[("SOLUSDT", "long")]["state"] == "active_watcher_scope"
+    assert profile["max_notional"] == "8"
+    assert profile["leverage"] == "1"
+    assert profile["profile_source"] == "strategy_handoff_risk_defaults_boundary"
+    assert profile["authority_boundary"] == (
+        "strategy_handoff_boundary_only; no_live_profile_or_sizing_change"
+    )
 
 
 def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(
