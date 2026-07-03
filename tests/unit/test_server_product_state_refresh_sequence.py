@@ -82,6 +82,15 @@ def test_server_product_state_refresh_sequence_fails_on_required_step_but_contin
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
-    assert report["summary"]["failed_required_step_count"] == 2
-    assert report["summary"]["final_goal_status_attempted"] is True
-    assert calls[-1][1] == "scripts/build_strategygroup_runtime_goal_status.py"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["skipped_after_required_failure_count"] > 0
+    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["final_goal_status_suppressed"] is True
+    assert report["summary"]["blocked_by_required_step"] == "validate_candidate_pool"
+    assert calls[-1][1] == "scripts/validate_strategy_live_candidate_pool.py"
+    skipped_names = [
+        step["name"]
+        for step in report["step_results"]
+        if step["status"] == "skipped_after_required_failure"
+    ]
+    assert "build_goal_status" in skipped_names

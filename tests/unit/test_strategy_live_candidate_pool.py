@@ -1129,6 +1129,27 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
     ]
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
+    spoofed = json.loads(json.dumps(artifact))
+    spoofed["action_time_lane_inputs"][0]["signal_state"] = "absent"
+    spoofed["action_time_lane_inputs"][0]["first_blocker"] = "market_wait_validated"
+
+    errors = _validator().validate_strategy_live_candidate_pool(spoofed)
+
+    assert any(
+        "action_time_lane_inputs[0] must report fresh signal_state" in error
+        for error in errors
+    )
+    assert any(
+        "action_time_lane_inputs[0].first_blocker must match symbol_readiness_rows"
+        in error
+        for error in errors
+    )
+    assert any(
+        "action_time_lane_inputs[0].signal_state must match symbol_readiness_rows"
+        in error
+        for error in errors
+    )
+
 
 def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
     action_time = _action_time()

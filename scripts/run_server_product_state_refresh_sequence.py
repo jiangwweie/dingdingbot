@@ -94,7 +94,22 @@ def run_server_product_state_refresh_sequence(
         env_file=env_file,
     )
     step_results: list[dict[str, Any]] = []
+    blocked_by_required_failure = ""
     for step in steps:
+        if blocked_by_required_failure:
+            step_results.append(
+                {
+                    "name": step.name,
+                    "required": step.required,
+                    "returncode": None,
+                    "status": "skipped_after_required_failure",
+                    "blocked_by": blocked_by_required_failure,
+                    "command": list(step.command),
+                    "stdout_tail": "",
+                    "stderr_tail": "",
+                }
+            )
+            continue
         result = command_runner(step.command)
         step_results.append(
             {
@@ -107,17 +122,32 @@ def run_server_product_state_refresh_sequence(
                 "stderr_tail": _tail(result.stderr),
             }
         )
+        if step.required and result.returncode != 0:
+            blocked_by_required_failure = step.name
 
     failed_required = [
         result
         for result in step_results
-        if result["required"] and result["returncode"] != 0
+        if result["required"]
+        and result["returncode"] is not None
+        and result["returncode"] != 0
     ]
     failed_optional = [
         result
         for result in step_results
-        if not result["required"] and result["returncode"] != 0
+        if not result["required"]
+        and result["returncode"] is not None
+        and result["returncode"] != 0
     ]
+    skipped = [
+        result
+        for result in step_results
+        if result["status"] == "skipped_after_required_failure"
+    ]
+    goal_status_attempted = any(
+        result["name"] == "build_goal_status" and result["returncode"] is not None
+        for result in step_results
+    )
     report = {
         "schema": "brc.server_product_state_refresh_sequence.v1",
         "scope": "server_product_state_refresh_sequence_non_authority",
@@ -134,9 +164,10 @@ def run_server_product_state_refresh_sequence(
             "optional_step_count": sum(1 for step in steps if not step.required),
             "failed_required_step_count": len(failed_required),
             "failed_optional_step_count": len(failed_optional),
-            "final_goal_status_attempted": any(
-                result["name"] == "build_goal_status" for result in step_results
-            ),
+            "skipped_after_required_failure_count": len(skipped),
+            "final_goal_status_attempted": goal_status_attempted,
+            "final_goal_status_suppressed": not goal_status_attempted,
+            "blocked_by_required_step": blocked_by_required_failure,
         },
         "step_results": step_results,
         "safety_invariants": {

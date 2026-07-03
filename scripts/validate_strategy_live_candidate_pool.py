@@ -302,11 +302,19 @@ def _validate_pretrade_runtime(
             )
     promotion_candidates = _dict_rows(artifact.get("promotion_candidates"))
     action_time_inputs = _dict_rows(artifact.get("action_time_lane_inputs"))
+    readiness_by_lane = {
+        (
+            str(row.get("strategy_group_id") or ""),
+            str(row.get("symbol") or ""),
+        ): row
+        for row in symbol_rows
+    }
     if len(action_time_inputs) > 1:
         errors.append("action_time_lane_inputs must contain at most one real-submit candidate")
     for index, row in enumerate(action_time_inputs):
         strategy_group_id = str(row.get("strategy_group_id") or "")
         symbol = str(row.get("symbol") or "")
+        readiness_row = readiness_by_lane.get((strategy_group_id, symbol), {})
         if symbol in PLACEHOLDER_SYMBOLS:
             errors.append(
                 f"action_time_lane_inputs[{index}].symbol must be a real authorized symbol"
@@ -323,6 +331,13 @@ def _validate_pretrade_runtime(
             errors.append(
                 f"action_time_lane_inputs[{index}] has unresolved blocker"
             )
+        errors.extend(
+            _validate_action_time_input_matches_readiness_row(
+                index=index,
+                action_time_input=row,
+                readiness_row=readiness_row,
+            )
+        )
         errors.extend(_validate_row_owner_authorization(
             f"action_time_lane_inputs[{index}]",
             row,
@@ -350,6 +365,38 @@ def _validate_pretrade_runtime(
         row.get("promotion_state") == "promotion_candidate" for row in symbol_rows
     ):
         errors.append("promotion_candidates must match symbol readiness rows")
+    return errors
+
+
+def _validate_action_time_input_matches_readiness_row(
+    *,
+    index: int,
+    action_time_input: dict[str, Any],
+    readiness_row: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    prefix = f"action_time_lane_inputs[{index}]"
+    if not readiness_row:
+        return [f"{prefix} must match a symbol_readiness_rows action_time_lane row"]
+    if action_time_input.get("signal_state") != "fresh":
+        errors.append(f"{prefix} must report fresh signal_state")
+    if readiness_row.get("promotion_state") != "action_time_lane":
+        errors.append(f"{prefix} must come from a promoted action_time_lane row")
+    if readiness_row.get("signal_state") != "fresh":
+        errors.append(f"{prefix} must come from a fresh signal readiness row")
+    for key in ("first_blocker", "signal_state", "scope_state", "side"):
+        if action_time_input.get(key) != readiness_row.get(key):
+            errors.append(f"{prefix}.{key} must match symbol_readiness_rows")
+    if _as_dict(action_time_input.get("public_facts_state")).get("state") != _as_dict(
+        readiness_row.get("public_facts_state")
+    ).get("state"):
+        errors.append(
+            f"{prefix}.public_facts_state.state must match symbol_readiness_rows"
+        )
+    if _as_dict(action_time_input.get("action_time")).get("status") != _as_dict(
+        readiness_row.get("action_time")
+    ).get("status"):
+        errors.append(f"{prefix}.action_time.status must match symbol_readiness_rows")
     return errors
 
 
