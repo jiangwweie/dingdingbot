@@ -557,6 +557,138 @@ def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(t
     assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
 
 
+def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
+    tmp_path,
+    monkeypatch,
+):
+    def supervisor_builder(args):
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        latest = _summary("ready_for_final_gate_preflight", ready=False)
+        latest.update(
+            {
+                "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
+                "blockers": [
+                    "runtime-old:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}"
+                ],
+            }
+        )
+        loop = {
+            "scope": "runtime_active_observation_loop",
+            "status": "ready_for_final_gate_preflight",
+            "stop_reason": "status_changed:ready_for_final_gate_preflight",
+            "iterations_requested": 1,
+            "iterations_completed": 1,
+            "latest_summary": latest,
+            "cycle_summaries": [latest],
+            "blockers": latest["blockers"],
+            "warnings": [],
+            "operator_review_plan": {
+                "not_executed": True,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "monitor_loop_only": True,
+                "prepare_records_created": False,
+                "shadow_candidate_created": False,
+                "runtime_execution_intent_draft_created": False,
+                "recorded_execution_intent_created": False,
+                "submit_authorization_created": False,
+                "protection_plan_created": False,
+                "executable_execution_intent_created": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "attempt_counter_mutated": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+        Path(args.loop_output_json).write_text(json.dumps(loop), encoding="utf-8")
+        (output_dir / "latest-summary.json").write_text(
+            json.dumps(latest), encoding="utf-8"
+        )
+        (output_dir / "latest-status.txt").write_text(
+            "ready_for_final_gate_preflight\n",
+            encoding="utf-8",
+        )
+        return {
+            "scope": "runtime_active_observation_supervisor",
+            "status": "supervisor_completed",
+            "blockers": [],
+            "warnings": [],
+            "safety_invariants": {"forbidden_effects": []},
+        }
+
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_operator_evidence_from_path",
+        lambda **kwargs: {
+            "scope": "runtime_observation_operator_evidence",
+            "status": "strategy_group_signal_review_available",
+            "signal_counts": {"runtime_ready_signal_count": 1},
+            "operator_review_plan": {
+                "next_step": "prepare_candidate_grant_authorization_evidence",
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "operator_evidence_only": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "forbidden_effects": [],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_wakeup_evidence",
+        lambda operator: {
+            "status": "runtime_signal_ready_for_non_executing_prepare",
+            "summary": {"runtime_ready_signal_count": 1},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(
+            tmp_path,
+            allow_prepare_records=True,
+            feishu_webhook_url="https://example.test/hook",
+        ),
+        supervisor_builder=supervisor_builder,
+        notifier=lambda *items: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["post_signal_auto_resume"]["status"] == (
+        "ready_for_non_executing_prepare"
+    )
+    assert artifact["post_signal_auto_resume"]["signal_input_json"] == (
+        "/reports/runtime-sor-btc/signal-input.json"
+    )
+    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
+        "wait_for_prepare_records_then_rebuild_final_gate_status"
+    )
+    assert artifact["watcher_tick_plan"]["places_order"] is False
+    assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["order_created"] is False
+
+
 def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_records(tmp_path):
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(

@@ -291,11 +291,13 @@ def _post_signal_auto_resume_plan(
     blockers = [str(item) for item in status_artifact.get("blockers") or []]
     prepared_authorization_id = status_artifact.get("prepared_authorization_id")
     shadow_candidate_id = status_artifact.get("shadow_candidate_id")
+    signal_input_json = status_artifact.get("signal_input_json")
     summary = _as_dict(wakeup_evidence.get("summary"))
     prepared_authorization_id = (
         prepared_authorization_id or summary.get("prepared_authorization_id")
     )
     shadow_candidate_id = shadow_candidate_id or summary.get("shadow_candidate_id")
+    signal_input_json = signal_input_json or summary.get("signal_input_json")
 
     base = {
         "source": "runtime_signal_watcher_tick",
@@ -303,6 +305,7 @@ def _post_signal_auto_resume_plan(
         "watcher_status_evidence_status": status_status,
         "wakeup_status": wakeup_status,
         "operator_status": operator_status,
+        "signal_input_json": signal_input_json,
         "prepared_authorization_id": prepared_authorization_id,
         "shadow_candidate_id": shadow_candidate_id,
         "allow_prepare_records": bool(args.allow_prepare_records),
@@ -328,7 +331,7 @@ def _post_signal_auto_resume_plan(
             "creates_execution_intent": False,
         }
 
-    if status_status in {"blocked", "stale"}:
+    if status_status == "stale":
         return {
             **base,
             "status": "blocked_observation_evidence",
@@ -343,11 +346,7 @@ def _post_signal_auto_resume_plan(
             "creates_execution_intent": False,
         }
 
-    if latest_status in {
-        "ready_for_final_gate_preflight",
-        "ready_for_disabled_smoke",
-        "disabled_smoke_completed",
-    } or prepared_authorization_id:
+    if prepared_authorization_id:
         return {
             **base,
             "status": "ready_for_action_time_final_gate",
@@ -372,7 +371,11 @@ def _post_signal_auto_resume_plan(
         "runtime_signal_ready_for_non_executing_prepare",
         "prepared_shadow_evidence_ready_for_owner_review",
     }
-    if latest_status in ready_prepare_statuses or wakeup_status in ready_prepare_statuses:
+    if (
+        latest_status in ready_prepare_statuses
+        or wakeup_status in ready_prepare_statuses
+        or bool(signal_input_json)
+    ):
         non_authority_checkpoint = (
             "wait_for_prepare_records_then_rebuild_final_gate_status"
             if args.allow_prepare_records
@@ -391,6 +394,21 @@ def _post_signal_auto_resume_plan(
             "downgrade_mode": "armed_observation_no_real_submit",
             "can_continue_without_owner_chat": True,
             "creates_shadow_candidate": bool(args.allow_prepare_records),
+            "creates_execution_intent": False,
+        }
+
+    if status_status == "blocked":
+        return {
+            **base,
+            "status": "blocked_observation_evidence",
+            "blocked_at": "active_observation_status",
+            "blocked_reason": status_status,
+            "next_recover_condition": "fresh_non_forbidden_observation_artifacts_exist",
+            "non_authority_checkpoint": "refresh_or_restart_active_observation_status",
+            "checkpoint_source": "runtime_signal_watcher_tick",
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "can_continue_without_owner_chat": False,
+            "creates_shadow_candidate": False,
             "creates_execution_intent": False,
         }
 
