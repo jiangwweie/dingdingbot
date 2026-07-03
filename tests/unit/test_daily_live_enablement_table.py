@@ -275,6 +275,65 @@ def test_daily_table_can_rank_from_server_backed_candidate_pool_rows():
     assert _errors(table) == []
 
 
+def test_daily_table_accepts_server_backed_action_time_lane_market_wait():
+    builder = _builder()
+    candidate_pool = _candidate_pool()
+    for row in candidate_pool["symbol_readiness_rows"]:
+        if row["strategy_group_id"] == "SOR-001":
+            row.update(
+                {
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                    "candidate_role": "primary",
+                    "first_blocker": "market_wait_validated",
+                    "next_action": "refresh_private_action_time_facts_before_finalgate",
+                    "stop_condition": "fresh signal expires or action-time lane is selected",
+                    "promotion_state": "action_time_lane",
+                    "signal_state": "fresh",
+                    "scope_state": "live_submit_allowed",
+                    "public_facts_state": {
+                        "state": "satisfied",
+                        "satisfied": ["strategy_public_fact_matrix"],
+                        "missing": [],
+                        "computed_not_satisfied": [],
+                    },
+                    "owner_authorization": {
+                        "pretrade_candidate_allowed": True,
+                        "action_time_rehearsal_allowed": True,
+                        "live_submit_allowed": "scoped",
+                    },
+                    "action_time": {
+                        "status": "ready_for_private_action_time_facts",
+                        "action_time_path_ready": True,
+                    },
+                    "server_runtime_coverage": {
+                        "state": "active_watcher_scope",
+                        "active_runtime_instance_ids": ["runtime-sor-eth"],
+                        "selected_runtime_instance_ids": ["runtime-sor-eth"],
+                    },
+                }
+            )
+
+    table = builder.build_daily_live_enablement_table(
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        mi_trial_admission=_mi(),
+        runtime_safety=_runtime_safety(),
+        candidate_pool=candidate_pool,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    sor_row = next(row for row in table["rows"] if row["strategy_group_id"] == "SOR-001")
+    assert sor_row["stage"] == "action_time"
+    assert sor_row["chain_position"] == "action_time_boundary"
+    assert sor_row["first_blocker"] == "market_wait_validated"
+    assert sor_row["market_wait_validation"]["valid"] is True
+    assert sor_row["market_wait_validation"]["mode"] == "fresh_action_time_lane"
+    assert sor_row["candidate_pool_reference"]["promotion_state"] == "action_time_lane"
+    assert _errors(table) == []
+
+
 def test_daily_table_candidate_pool_tie_breaker_prefers_primary_role():
     builder = _builder()
     candidate_pool = _candidate_pool()

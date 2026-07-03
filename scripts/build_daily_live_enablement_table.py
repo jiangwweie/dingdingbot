@@ -316,6 +316,9 @@ def _daily_row(
     )
     stage = _daily_stage(str(tradeability_row.get("stage") or "research_candidate"))
     chain_position = _chain_position(first_blocker)
+    if str(candidate_pool_row.get("promotion_state") or "") == "action_time_lane":
+        stage = "action_time"
+        chain_position = "action_time_boundary"
     evidence = (
         _candidate_pool_evidence(
             strategy_group_id=strategy_group_id,
@@ -363,7 +366,11 @@ def _daily_row(
         "authority_boundary": AUTHORITY_BOUNDARY,
         "replay_signal": _replay_signal(strategy_group_id, parity_row),
         "live_detector": _live_detector_state(first_blocker, parity_row),
-        "market_wait_validation": _market_wait_validation(tradeability_row),
+        "market_wait_validation": _market_wait_validation_for_row(
+            tradeability_row=tradeability_row,
+            candidate_pool_row=candidate_pool_row,
+            first_blocker=first_blocker,
+        ),
         "runtime_safety_reference": _runtime_safety_reference(
             strategy_group_id, runtime_safety
         ),
@@ -441,6 +448,8 @@ def _candidate_pool_reference(candidate_pool_row: dict[str, Any]) -> dict[str, A
         "symbol": candidate_pool_row.get("symbol"),
         "first_blocker": candidate_pool_row.get("first_blocker"),
         "promotion_state": candidate_pool_row.get("promotion_state"),
+        "signal_state": candidate_pool_row.get("signal_state"),
+        "scope_state": candidate_pool_row.get("scope_state"),
         "server_runtime_coverage": candidate_pool_row.get("server_runtime_coverage")
         or {},
     }
@@ -702,6 +711,46 @@ def _market_wait_validation(tradeability_row: dict[str, Any]) -> dict[str, Any]:
     if not validation:
         return {"valid": False, "not_applicable": True, "checks": {}}
     return validation
+
+
+def _market_wait_validation_for_row(
+    *,
+    tradeability_row: dict[str, Any],
+    candidate_pool_row: dict[str, Any],
+    first_blocker: str,
+) -> dict[str, Any]:
+    if (
+        first_blocker != "market_wait_validated"
+        or str(candidate_pool_row.get("promotion_state") or "") != "action_time_lane"
+    ):
+        return _market_wait_validation(tradeability_row)
+
+    coverage = _as_dict(candidate_pool_row.get("server_runtime_coverage"))
+    public_facts_state = _as_dict(candidate_pool_row.get("public_facts_state"))
+    action_time = _as_dict(candidate_pool_row.get("action_time"))
+    owner_authorization = _as_dict(candidate_pool_row.get("owner_authorization"))
+    checks = {
+        "asset_admission": True,
+        "scope": str(candidate_pool_row.get("scope_state") or "")
+        in {"live_submit_allowed", "conditional_action_time_rehearsal_allowed"},
+        "policy": bool(owner_authorization),
+        "detector": True,
+        "watcher_input": (
+            str(coverage.get("state") or "") == "active_watcher_scope"
+            and bool(coverage.get("active_runtime_instance_ids") or [])
+            and bool(coverage.get("selected_runtime_instance_ids") or [])
+        ),
+        "facts": str(public_facts_state.get("state") or "") == "satisfied",
+        "classification": True,
+        "action_time_path": action_time.get("action_time_path_ready") is True,
+        "fresh_signal": str(candidate_pool_row.get("signal_state") or "") == "fresh",
+    }
+    return {
+        "valid": all(checks.values()),
+        "not_applicable": False,
+        "mode": "fresh_action_time_lane",
+        "checks": checks,
+    }
 
 
 def _runtime_safety_reference(
