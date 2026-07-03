@@ -70,6 +70,39 @@ def _blocked_packet():
     }
 
 
+def _blocked_signal_handoff_packet():
+    return {
+        "status": "blocked",
+        "blocked_stage": None,
+        "blockers": ["order_candidate_id_or_authorization_id_required"],
+        "warnings": ["runtime_live_execution_enabled_operation_layer_handoff"],
+        "signal_input_json": "/tmp/runtime-1-signal-input.json",
+        "api_prepare_plan": {
+            "next_step": "resolve_prepare_blockers",
+            "signal_input_json": "/tmp/runtime-1-signal-input.json",
+            "not_executed": True,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+        "safety_invariants": {
+            "shadow_candidate_created": True,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "executable_execution_intent_created": False,
+            "local_registration_armed": False,
+            "exchange_submit_armed": False,
+            "execute_real_submit": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "position_opened": False,
+            "position_closed": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
 def test_monitor_waiting_signal_runs_requested_cycles_without_side_effects():
     calls = []
 
@@ -109,6 +142,27 @@ def test_monitor_stops_when_ready_for_prepare():
     assert payload["ready_for_prepare"] is True
     assert payload["observation_monitor_plan"]["signal_input_json"] == "/tmp/ready-signal.json"
     assert payload["observation_monitor_plan"]["places_order"] is False
+
+
+def test_monitor_preserves_blocked_prepare_signal_handoff_as_ready_for_prepare():
+    payload = runtime_next_attempt_observation_monitor._build_monitor_artifact(
+        _args(allow_prepare_records=True),
+        artifact_builder=lambda args: _blocked_signal_handoff_packet(),
+    )
+
+    assert payload["status"] == "ready_for_prepare"
+    assert payload["ready_for_prepare"] is True
+    assert payload["blockers"] == []
+    assert payload["warnings"] == [
+        "non_actionable_prepare_blocker:order_candidate_id_or_authorization_id_required",
+        "runtime_live_execution_enabled_operation_layer_handoff",
+    ]
+    assert payload["observation_monitor_plan"]["signal_input_json"] == (
+        "/tmp/runtime-1-signal-input.json"
+    )
+    assert payload["observation_monitor_plan"]["creates_execution_intent"] is False
+    assert payload["safety_invariants"]["shadow_candidate_created"] is True
+    assert payload["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_monitor_stops_on_blocked_by_default():

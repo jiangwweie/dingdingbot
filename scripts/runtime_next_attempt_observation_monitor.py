@@ -27,6 +27,23 @@ from scripts import runtime_next_attempt_observation_api_prepare_flow as observa
 
 READY_STATUSES = {"ready_for_prepare", "ready_for_final_gate_preflight"}
 CONTINUE_STATUSES = {"waiting_for_signal"}
+NON_ACTIONABLE_PREPARE_BLOCKERS = {
+    "order_candidate_id_or_authorization_id_required",
+}
+UNSAFE_PROMOTION_FLAGS = {
+    "exchange_write_called",
+    "order_created",
+    "order_lifecycle_called",
+    "executable_execution_intent_created",
+    "local_registration_armed",
+    "exchange_submit_armed",
+    "execute_real_submit",
+    "attempt_counter_mutated",
+    "runtime_budget_mutated",
+    "position_opened",
+    "position_closed",
+    "withdrawal_or_transfer_created",
+}
 
 
 def _safety(artifact: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -107,6 +124,7 @@ def _build_monitor_artifact(
             artifact = builder(cycle_args)
         except Exception as exc:
             artifact = _blocked_exception_artifact(error=exc)
+        artifact = _promote_blocked_signal_handoff(artifact)
         cycle_artifacts.append(artifact)
         cycle_summaries.append(_cycle_summary(cycle_index=index + 1, artifact=artifact))
 
@@ -177,6 +195,71 @@ def _build_monitor_artifact(
         "observation_monitor_plan": observation_monitor_plan,
         "safety_invariants": _safety(latest),
     }
+
+
+def _promote_blocked_signal_handoff(artifact: dict[str, Any]) -> dict[str, Any]:
+    if str(artifact.get("status") or "") != "blocked":
+        return artifact
+    signal_input_json = _signal_input_json(artifact)
+    if not signal_input_json:
+        return artifact
+    blockers = [str(item) for item in artifact.get("blockers") or []]
+    if any(blocker not in NON_ACTIONABLE_PREPARE_BLOCKERS for blocker in blockers):
+        return artifact
+    safety = artifact.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    if any(bool(safety.get(flag)) for flag in UNSAFE_PROMOTION_FLAGS):
+        return artifact
+
+    promoted = dict(artifact)
+    promoted["status"] = "ready_for_prepare"
+    promoted["blockers"] = []
+    promoted["signal_input_json"] = signal_input_json
+    promoted["warnings"] = sorted(
+        {
+            *[str(item) for item in artifact.get("warnings") or []],
+            *[f"non_actionable_prepare_blocker:{blocker}" for blocker in blockers],
+        }
+    )
+    plan = dict(
+        artifact.get("observation_cycle_plan")
+        or artifact.get("api_prepare_plan")
+        or {}
+    )
+    plan["next_step"] = (
+        plan.get("next_step")
+        or "prepare_fresh_candidate_authorization_evidence"
+    )
+    plan["signal_input_json"] = signal_input_json
+    plan["not_executed"] = True
+    plan["creates_execution_intent"] = False
+    plan["places_order"] = False
+    plan["calls_order_lifecycle"] = False
+    promoted["observation_cycle_plan"] = plan
+    promoted["non_actionable_prepare_blockers"] = blockers
+    return promoted
+
+
+def _signal_input_json(artifact: dict[str, Any]) -> str | None:
+    for candidate in (
+        artifact.get("signal_input_json"),
+        _nested_get(artifact, ("observation_cycle_plan", "signal_input_json")),
+        _nested_get(artifact, ("api_prepare_plan", "signal_input_json")),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
