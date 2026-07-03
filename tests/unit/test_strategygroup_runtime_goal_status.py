@@ -713,6 +713,146 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
 
 
+def test_goal_status_accepts_fresh_signal_inside_candidate_universe_coverage(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "ready_for_final_gate_preflight",
+            "selected_runtime_instance_ids": ["runtime-sor-btc"],
+            "blockers": [],
+            "candidate_universe_coverage": {
+                "status": "complete",
+                "expected_row_count": 1,
+                "active_matched_row_count": 1,
+                "missing_row_count": 0,
+                "rows": [
+                    {
+                        "strategy_group_id": "SOR-001",
+                        "symbol": "BTCUSDT",
+                        "state": "active_watcher_scope",
+                        "blocker_class": "none",
+                        "active_runtime_instance_ids": ["runtime-sor-btc"],
+                        "selected_runtime_instance_ids": ["runtime-sor-btc"],
+                    }
+                ],
+            },
+        },
+    )
+    _write(
+        report_dir / "resume-dispatch-artifact.json",
+        {
+            "status": "ready_for_action_time_final_gate",
+            "dispatch_status": "official_finalgate_preflight_dispatch_ready",
+            "dispatch_action": "call_official_action_time_finalgate_preflight",
+            "blocker_class": "none",
+            "selected_runtime_instance_ids": ["runtime-sor-btc"],
+            "ready_runtime_signals": 1,
+            "blockers": [],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "status": "ready_for_non_executing_prepare",
+            "blockers": [],
+            "watcher_scope_alignment": {
+                "status": "expanded_scope",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-mpg-1",
+                        "strategy_family_id": "MPG-001",
+                        "symbol": "OP/USDT:USDT",
+                        "side": "long",
+                        "status": "waiting_for_signal",
+                    }
+                ],
+                "out_of_scope_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-sor-btc",
+                        "strategy_family_id": "SOR-001",
+                        "symbol": "BTC/USDT:USDT",
+                        "side": "long",
+                        "status": "ready_for_final_gate_preflight",
+                    }
+                ],
+            },
+        },
+    )
+
+    packet = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["status"] == "action_time_finalgate_ready"
+    assert packet["blockers"] == []
+    assert packet["real_order_boundary"]["selected_strategygroup_scope_ready"] is True
+
+
+def test_goal_status_does_not_treat_chain_blockers_as_watcher_liveness(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "watcher_attention",
+            "blockers": [
+                "followup_command_failed:2",
+                "prepared_authorization_id_missing",
+                "runtime-sor-btc:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}",
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "ready_for_final_gate_preflight",
+            "selected_runtime_instance_ids": ["runtime-sor-btc"],
+            "blockers": [
+                "runtime-sor-btc:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}",
+            ],
+        },
+    )
+
+    packet = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["watcher_liveness_healthy"] is True
+    assert not packet["evidence"]["watcher_liveness_blockers"]
+    assert not [
+        blocker
+        for blocker in packet["blockers"]
+        if blocker.startswith("watcher_tick:")
+        or blocker.startswith("latest_summary:")
+    ]
+
+
 def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
     tmp_path: Path,
 ) -> None:

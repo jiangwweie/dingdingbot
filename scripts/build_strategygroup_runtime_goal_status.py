@@ -767,6 +767,24 @@ def _pilot_matched_runtime_instance_ids(artifact: dict[str, Any] | None) -> list
     ]
 
 
+def _candidate_universe_active_runtime_instance_ids(
+    source_artifacts: dict[str, dict[str, Any] | None],
+) -> set[str]:
+    ids: set[str] = set()
+    for key in ("latest_summary", "watcher_tick", "pilot_status"):
+        coverage = _dict(_artifact_data(source_artifacts.get(key)).get("candidate_universe_coverage"))
+        rows = _list(coverage.get("rows"))
+        for row_value in rows:
+            row = _dict(row_value)
+            if row.get("state") != "active_watcher_scope":
+                continue
+            if row.get("blocker_class") not in {"", None, "none"}:
+                continue
+            ids.update(str(item) for item in _list(row.get("active_runtime_instance_ids")) if str(item))
+            ids.update(str(item) for item in _list(row.get("selected_runtime_instance_ids")) if str(item))
+    return ids
+
+
 def _selected_scope_artifact_blockers(
     *,
     source_artifacts: dict[str, dict[str, Any] | None],
@@ -787,6 +805,7 @@ def _selected_scope_artifact_blockers(
     matched_ids = set(_pilot_matched_runtime_instance_ids(source_artifacts.get("pilot_status")))
     if not matched_ids:
         return ["selected_strategygroup_matched_runtime_ids_missing"]
+    covered_ids = _candidate_universe_active_runtime_instance_ids(source_artifacts)
     if alignment_status == "expanded_scope":
         out_of_scope_rows = _list(alignment.get("out_of_scope_runtime_signal_summaries"))
         actionable_out_of_scope = [
@@ -795,10 +814,15 @@ def _selected_scope_artifact_blockers(
             if str(_dict(item).get("status") or "") in FRESH_SIGNAL_STATUSES
             and str(_dict(item).get("runtime_instance_id") or "")
         ]
-        if actionable_out_of_scope:
+        unauthorized_out_of_scope = [
+            runtime_id
+            for runtime_id in actionable_out_of_scope
+            if runtime_id not in covered_ids
+        ]
+        if unauthorized_out_of_scope:
             return [
                 f"fresh_signal_outside_selected_strategygroup_scope:{runtime_id}"
-                for runtime_id in sorted(set(actionable_out_of_scope))
+                for runtime_id in sorted(set(unauthorized_out_of_scope))
             ]
         return []
 
@@ -810,13 +834,47 @@ def _selected_scope_artifact_blockers(
     if not candidate_ids:
         return ["fresh_signal_runtime_instance_id_missing"]
 
-    out_of_scope_ids = sorted(set(candidate_ids) - matched_ids)
+    selected_scope_ids = matched_ids | covered_ids
+    out_of_scope_ids = sorted(set(candidate_ids) - selected_scope_ids)
     if out_of_scope_ids:
         return [
             f"fresh_signal_outside_selected_strategygroup_scope:{runtime_id}"
             for runtime_id in out_of_scope_ids
         ]
     return []
+
+
+def _watcher_operational_liveness_blockers(
+    artifact: dict[str, Any] | None,
+) -> list[str]:
+    operational_fragments = (
+        "loop_command_failed",
+        "supervisor_command_failed",
+        "status_command_failed",
+        "status_artifact_missing",
+        "status_artifact_unreadable",
+        "status_artifact_stale",
+        "blocked_forbidden_effect",
+        "forbidden_effect",
+        "runtime_attempts_exhausted",
+    )
+    ignored_chain_fragments = (
+        "followup_command_failed",
+        "prepared_authorization_id_missing",
+        "order_candidate_id_or_authorization_id_required",
+        "next-attempt-position-order-conflict",
+        "active_position",
+        "open_order",
+        "conflicting_open_order",
+    )
+    blockers: list[str] = []
+    for blocker in _non_waiting_artifact_blockers(artifact):
+        text = blocker.lower()
+        if any(fragment in text for fragment in ignored_chain_fragments):
+            continue
+        if any(fragment in text for fragment in operational_fragments):
+            blockers.append(blocker)
+    return blockers
 
 
 def _watcher_liveness_artifact_blockers(
@@ -828,14 +886,17 @@ def _watcher_liveness_artifact_blockers(
     for name in ("watcher_tick", "latest_summary"):
         artifact = source_artifacts.get(name)
         status = _artifact_status(artifact)
+        operational_blockers = _watcher_operational_liveness_blockers(artifact)
         blockers.extend(
             f"{name}:{item}"
-            for item in _non_waiting_artifact_blockers(artifact)
+            for item in operational_blockers
         )
         if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
+            if status == "watcher_attention" and not operational_blockers:
+                continue
             if status not in {"blocked", "owner_attention_pending"}:
                 blockers.append(f"{name}:unexpected_status:{status}")
-            elif not _non_waiting_artifact_blockers(artifact):
+            elif not operational_blockers:
                 continue
     return sorted(set(blockers))
 
