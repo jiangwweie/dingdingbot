@@ -385,6 +385,7 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
     plan = (
         artifact.get("observation_cycle_plan")
         or artifact.get("observation_monitor_plan")
+        or artifact.get("api_prepare_plan")
         or {}
     )
     return {
@@ -405,8 +406,10 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
         "blockers": list(artifact.get("blockers") or []),
         "warnings": list(artifact.get("warnings") or []),
         "report_path": plan.get("report_path") or artifact.get("output_json"),
-        "signal_input_json": plan.get("signal_input_json"),
-        "prepared_authorization_id": plan.get("prepared_authorization_id"),
+        "signal_input_json": artifact.get("signal_input_json")
+        or plan.get("signal_input_json"),
+        "prepared_authorization_id": artifact.get("prepared_authorization_id")
+        or plan.get("prepared_authorization_id"),
         "signal_summary": _signal_summary(artifact),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "created_records": {
@@ -576,6 +579,12 @@ def _build_monitor_artifact(
                 f"{row['strategy_group_id']}:{row['symbol']}"
             )
 
+    signal_input_json = _first_summary_text(summaries, "signal_input_json")
+    prepared_authorization_id = _first_summary_text(
+        summaries,
+        "prepared_authorization_id",
+    )
+
     return {
         "scope": "runtime_active_observation_monitor",
         "status": status,
@@ -599,6 +608,8 @@ def _build_monitor_artifact(
         "observation_monitor_plan": {
             "next_step": _next_step(status),
             "not_executed": True,
+            "signal_input_json": signal_input_json,
+            "prepared_authorization_id": prepared_authorization_id,
             "creates_shadow_candidate": any(
                 bool(
                     (artifact.get("safety_invariants") or {}).get(
@@ -622,6 +633,14 @@ def _build_monitor_artifact(
             artifacts=runtime_artifacts,
         ),
     }
+
+
+def _first_summary_text(summaries: list[dict[str, Any]], key: str) -> str | None:
+    for item in summaries:
+        text = str(item.get(key) or "").strip()
+        if text:
+            return text
+    return None
 
 
 def _next_step(status: str) -> str:
@@ -674,6 +693,40 @@ def _downgrade_non_actionable_observation_blockers(
     ):
         return artifact
 
+    signal_input_json = _artifact_signal_input_json(artifact)
+    if signal_input_json:
+        promoted = dict(artifact)
+        promoted["status"] = "ready_for_prepare"
+        promoted["blockers"] = []
+        promoted["warnings"] = sorted(
+            {
+                *[str(warning) for warning in artifact.get("warnings") or []],
+                *[
+                    f"non_actionable_prepare_blocker:{blocker}"
+                    for blocker in blockers
+                ],
+            }
+        )
+        promoted["signal_input_json"] = signal_input_json
+        plan = dict(
+            artifact.get("api_prepare_plan")
+            or artifact.get("observation_cycle_plan")
+            or artifact.get("observation_monitor_plan")
+            or {}
+        )
+        plan["next_step"] = (
+            plan.get("next_step")
+            or "prepare_fresh_candidate_authorization_evidence"
+        )
+        plan["signal_input_json"] = signal_input_json
+        plan["not_executed"] = True
+        plan["creates_execution_intent"] = False
+        plan["places_order"] = False
+        plan["calls_order_lifecycle"] = False
+        promoted["observation_monitor_plan"] = plan
+        promoted["non_actionable_observation_blockers"] = blockers
+        return promoted
+
     downgraded = dict(artifact)
     downgraded["status"] = "waiting_for_signal"
     downgraded["blockers"] = []
@@ -698,6 +751,28 @@ def _downgrade_non_actionable_observation_blockers(
     downgraded["observation_monitor_plan"] = plan
     downgraded["non_actionable_observation_blockers"] = blockers
     return downgraded
+
+
+def _artifact_signal_input_json(artifact: dict[str, Any]) -> str | None:
+    for candidate in (
+        artifact.get("signal_input_json"),
+        _nested_get(artifact, ("api_prepare_plan", "signal_input_json")),
+        _nested_get(artifact, ("observation_cycle_plan", "signal_input_json")),
+        _nested_get(artifact, ("observation_monitor_plan", "signal_input_json")),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
 
 
 def _is_observe_only_review_artifact(artifact: dict[str, Any]) -> bool:

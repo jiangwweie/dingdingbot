@@ -684,6 +684,86 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
     assert summary["forbidden_effects"]["order_lifecycle_called"] is False
 
 
+def test_active_monitor_preserves_signal_input_when_prepare_records_need_candidate_authorization(tmp_path):
+    client = _FakeClient([_runtime("runtime-active-1")])
+    signal_path = tmp_path / "signal-input.json"
+
+    def builder(args):
+        return {
+            "status": "blocked",
+            "blocked_stage": None,
+            "signal_input_json": str(signal_path),
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["order_candidate_id_or_authorization_id_required"],
+            "warnings": ["runtime_live_execution_enabled_operation_layer_handoff"],
+            "api_prepare_plan": {
+                "next_step": "resolve_prepare_blockers",
+                "signal_input_json": str(signal_path),
+                "not_executed": True,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "latest_artifact": {
+                "observation_payload": {
+                    "signal_artifact": {
+                        "evaluation_result": {
+                            "status": "ready_for_semantic_binding",
+                            "can_call_semantic_binding": True,
+                            "semantics_binding_found": True,
+                            "strategy_candidate_mode": (
+                                "shadow_order_candidate_allowed"
+                            ),
+                            "output": {
+                                "signal_type": "would_enter",
+                                "required_execution_mode": "observe_only",
+                                "side": "long",
+                                "reason_codes": ["mpg_breakout_close_confirmed"],
+                                "human_summary": "MPG-001 v0 signal detected.",
+                                "confidence": "0.61",
+                                "data_quality": {"status": "ok"},
+                            },
+                        },
+                    },
+                },
+            },
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": False,
+                "recorded_execution_intent_created": False,
+                "submit_authorization_created": False,
+                "protection_plan_created": False,
+                "executable_execution_intent_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "attempt_counter_mutated": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(allow_prepare_records=True, output_dir=str(tmp_path)),
+        client=client,
+        runtime_artifact_builder=builder,
+    )
+
+    assert packet["status"] == "ready_for_prepare"
+    assert packet["blockers"] == []
+    assert packet["observation_monitor_plan"]["signal_input_json"] == str(signal_path)
+    assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
+    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    summary = packet["runtime_summaries"][0]
+    assert summary["status"] == "ready_for_prepare"
+    assert summary["signal_input_json"] == str(signal_path)
+    assert summary["blockers"] == []
+    assert summary["signal_summary"]["signal_type"] == "would_enter"
+
+
 def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
     client = _FakeClient([_runtime("runtime-active-1")])
     seen = []
