@@ -68,6 +68,12 @@ class RemoteBranchProbeResult:
     attempts: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class CanonicalRepoUrl:
+    value: str
+    normalized_from: str | None = None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
@@ -118,6 +124,8 @@ def build_git_deploy_plan(
 ) -> dict[str, Any]:
     """Build a non-executing git deployment command plan."""
 
+    canonical_repo_url = _canonical_git_fetch_repo_url(repo_url)
+    repo_url = canonical_repo_url.value
     head = _git(repo_root, "rev-parse", "HEAD").stdout
     short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD").stdout
     branch = _git(repo_root, "branch", "--show-current").stdout
@@ -134,6 +142,8 @@ def build_git_deploy_plan(
     blockers: list[str] = []
     warnings: list[str] = []
 
+    if canonical_repo_url.normalized_from:
+        warnings.append("git_repo_url_normalized_to_https_for_remote_fetch")
     if tracked_dirty:
         warnings.append(
             "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
@@ -150,6 +160,8 @@ def build_git_deploy_plan(
         blockers.append("target_migration_count_less_than_remote_baseline")
     if not repo_url.strip():
         blockers.append("git_repo_url_required")
+    elif not _repo_url_uses_https(repo_url):
+        blockers.append("git_repo_url_must_use_https")
     if git_ref.startswith("refs/"):
         blockers.append("git_deploy_v1_requires_branch_name_not_full_ref")
     if not git_ref.strip():
@@ -164,7 +176,12 @@ def build_git_deploy_plan(
         blocker=None,
         attempts=[],
     )
-    if repo_url.strip() and git_ref.strip() and not git_ref.startswith("refs/"):
+    if (
+        repo_url.strip()
+        and _repo_url_uses_https(repo_url)
+        and git_ref.strip()
+        and not git_ref.startswith("refs/")
+    ):
         remote_ref_probe = _remote_branch_probe(repo_url=repo_url, branch=git_ref)
         remote_ref_head = remote_ref_probe.head
         if remote_ref_probe.blocker:
@@ -597,6 +614,27 @@ def _release_manifest_payload(
             "archive_uploaded": False,
         },
     }
+
+
+def _canonical_git_fetch_repo_url(repo_url: str) -> CanonicalRepoUrl:
+    stripped = repo_url.strip()
+    if stripped.startswith("git@github.com:"):
+        path = stripped.removeprefix("git@github.com:")
+        return CanonicalRepoUrl(
+            value=f"https://github.com/{path}",
+            normalized_from=stripped,
+        )
+    if stripped.startswith("ssh://git@github.com/"):
+        path = stripped.removeprefix("ssh://git@github.com/")
+        return CanonicalRepoUrl(
+            value=f"https://github.com/{path}",
+            normalized_from=stripped,
+        )
+    return CanonicalRepoUrl(value=stripped)
+
+
+def _repo_url_uses_https(repo_url: str) -> bool:
+    return repo_url.strip().startswith("https://")
 
 
 def _remote_branch_probe(*, repo_url: str, branch: str) -> RemoteBranchProbeResult:

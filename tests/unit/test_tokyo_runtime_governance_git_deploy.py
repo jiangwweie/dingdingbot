@@ -317,6 +317,110 @@ def test_git_deploy_default_ref_is_live_safe_program_branch():
     assert execute_module.DEFAULT_GIT_REF == "program/live-safe-v1"
 
 
+def test_git_deploy_plan_normalizes_github_ssh_repo_url_to_https():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    probed_repo_urls: list[str] = []
+    module._tracked_dirty = lambda repo_root: False
+
+    def fake_remote_branch_probe(*, repo_url, branch):
+        probed_repo_urls.append(repo_url)
+        return module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"{head}\trefs/heads/{branch}",
+                }
+            ],
+        )
+
+    module._remote_branch_probe = fake_remote_branch_probe
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="git@github.com:jiangwweie/dingdingbot.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python",
+        api_base="http://127.0.0.1:18080",
+        previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=76,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["status"] == "ready_for_owner_authorized_remote_git_deploy_plan"
+    assert report["inputs"]["repo_url"] == (
+        "https://github.com/jiangwweie/dingdingbot.git"
+    )
+    assert probed_repo_urls == ["https://github.com/jiangwweie/dingdingbot.git"]
+    assert "git_repo_url_normalized_to_https_for_remote_fetch" in (
+        report["checks"]["warnings"]
+    )
+    all_commands = "\n".join(
+        command
+        for phase in report["plan_phases"]
+        for command in phase["commands"]
+    )
+    assert "git@github.com" not in all_commands
+    assert "https://github.com/jiangwweie/dingdingbot.git" in all_commands
+
+
+def test_git_deploy_plan_blocks_non_https_non_github_repo_url_without_probe():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    module._tracked_dirty = lambda repo_root: False
+    probe_called = False
+
+    def fake_remote_branch_probe(*, repo_url, branch):
+        nonlocal probe_called
+        probe_called = True
+        return module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[],
+        )
+
+    module._remote_branch_probe = fake_remote_branch_probe
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="ssh://git@example.com/private/repo.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python",
+        api_base="http://127.0.0.1:18080",
+        previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=76,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["status"] == "blocked"
+    assert "git_repo_url_must_use_https" in report["checks"]["blockers"]
+    assert report["checks"]["remote_ref_probe"]["status"] == "skipped"
+    assert probe_called is False
+
+
 def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     report = _ready_git_plan()
 
