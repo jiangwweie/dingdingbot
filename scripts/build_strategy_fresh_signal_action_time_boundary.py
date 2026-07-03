@@ -49,6 +49,9 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_OUTPUT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md"
 )
+DEFAULT_ACCOUNT_SAFE_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-account-safe-facts.json"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mpg-evidence-json", default=str(DEFAULT_MPG_EVIDENCE_JSON))
     parser.add_argument("--sor-evidence-json", default=str(DEFAULT_SOR_EVIDENCE_JSON))
     parser.add_argument("--sor-detector-json", default=str(DEFAULT_SOR_DETECTOR_JSON))
+    parser.add_argument(
+        "--account-safe-facts-json", default=str(DEFAULT_ACCOUNT_SAFE_FACTS_JSON)
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -72,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         mpg_evidence=_read_optional_json(Path(args.mpg_evidence_json)),
         sor_evidence=_read_optional_json(Path(args.sor_evidence_json)),
         sor_detector=_read_optional_json(Path(args.sor_detector_json)),
+        account_safe_facts=_read_optional_json(Path(args.account_safe_facts_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -104,6 +111,7 @@ def build_strategy_fresh_signal_action_time_boundary(
     mpg_evidence: dict[str, Any],
     sor_evidence: dict[str, Any],
     sor_detector: dict[str, Any] | None = None,
+    account_safe_facts: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
@@ -116,7 +124,7 @@ def build_strategy_fresh_signal_action_time_boundary(
             readiness=mpg_readiness,
             evidence=mpg_evidence,
         ),
-        _sor_row(sor_evidence, sor_detector or {}),
+        _sor_row(sor_evidence, sor_detector or {}, account_safe_facts or {}),
     ]
     return {
         "schema": "brc.strategy_fresh_signal_action_time_boundary.v1",
@@ -291,7 +299,11 @@ def _evidence_row(
     )
 
 
-def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, Any]:
+def _sor_row(
+    evidence: dict[str, Any],
+    detector: dict[str, Any],
+    account_safe_facts: dict[str, Any],
+) -> dict[str, Any]:
     detector_summary = _as_dict(detector.get("summary"))
     detector_rows = [
         row
@@ -301,12 +313,22 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
     selected_row = _sor_selected_detector_row(detector_rows)
     selected_symbol = str(selected_row.get("symbol") or "SOLUSDT")
     fresh = int(detector_summary.get("fresh_session_signal_count") or 0) > 0
-    public_ready = (
-        evidence.get("runtime_artifact_ready") is True
-        and _sor_detector_row_public_ready(selected_row)
+    detector_public_ready = _sor_detector_row_public_ready(selected_row)
+    evidence_ready = evidence.get("runtime_artifact_ready") is True
+    public_ready = detector_public_ready and (evidence_ready or fresh)
+    candidate_shape = (
+        evidence.get("candidate_evidence_shape_ready") is True
+        or (fresh and public_ready)
     )
-    candidate_shape = evidence.get("candidate_evidence_shape_ready") is True
-    rehearsal_ready = evidence.get("fresh_signal_rehearsal_ready") is True
+    rehearsal_ready = (
+        evidence.get("fresh_signal_rehearsal_ready") is True
+        or (fresh and public_ready)
+    )
+    account_safe_checks = _as_dict(account_safe_facts.get("checks"))
+    private_ready = (
+        fresh
+        and account_safe_checks.get("private_action_time_facts_ready") is True
+    )
     would_enter = public_ready and candidate_shape and rehearsal_ready
     first_blocker = (
         "watcher_tick_missing"
@@ -331,6 +353,15 @@ def _sor_row(evidence: dict[str, Any], detector: dict[str, Any]) -> dict[str, An
         candidate_evidence_shape_ready=candidate_shape,
         dry_run_submit_rehearsal_ready=rehearsal_ready,
         would_enter_finalgate_if_private_facts_ready=would_enter,
+        private_action_time_facts_ready=private_ready,
+        active_position_or_open_order_clear=account_safe_checks.get(
+            "active_position_or_open_order_clear"
+        )
+        is True,
+        action_time_available_balance=account_safe_checks.get(
+            "action_time_available_balance"
+        )
+        is True,
         first_blocker=first_blocker,
         blocker_owner="runtime" if fresh or not public_ready else "market",
     )
@@ -349,6 +380,9 @@ def _row(
     would_enter_finalgate_if_private_facts_ready: bool,
     first_blocker: str,
     blocker_owner: str,
+    private_action_time_facts_ready: bool = False,
+    active_position_or_open_order_clear: bool = False,
+    action_time_available_balance: bool = False,
 ) -> dict[str, Any]:
     return {
         "strategy_group_id": strategy_group_id,
@@ -358,7 +392,11 @@ def _row(
         "current_signal_state": current_signal_state,
         "required_facts_readiness": {
             "public_facts_ready": public_facts_ready,
-            "private_action_time_facts_ready": False,
+            "private_action_time_facts_ready": private_action_time_facts_ready,
+            "active_position_or_open_order_clear": (
+                active_position_or_open_order_clear
+            ),
+            "action_time_available_balance": action_time_available_balance,
             "private_action_time_fact_keys_pending": [
                 "active_position_or_open_order_clear",
                 "action_time_available_balance",

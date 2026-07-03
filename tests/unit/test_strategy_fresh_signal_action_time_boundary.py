@@ -106,8 +106,20 @@ def _evidence(strategy_group_id: str) -> dict:
     }
 
 
+def _account_safe_facts() -> dict:
+    return {
+        "status": "runtime_account_safe_facts_ready",
+        "checks": {
+            "private_action_time_facts_ready": True,
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+        },
+    }
+
+
 def _sor_detector(
     *,
+    fresh: bool = False,
     latest_candle: bool = True,
     missing_required_trigger_facts: list[str] | None = None,
 ) -> dict:
@@ -119,13 +131,17 @@ def _sor_detector(
     return {
         "status": "sor_session_detector_facts_ready",
         "summary": {
-            "fresh_session_signal_count": 0,
-            "first_blocker": "fresh_sor_session_range_signal_absent",
+            "fresh_session_signal_count": 1 if fresh else 0,
+            "first_blocker": (
+                "private_action_time_facts_required"
+                if fresh
+                else "fresh_sor_session_range_signal_absent"
+            ),
         },
         "symbol_detector_rows": [
             {
                 "symbol": "SOLUSDT",
-                "fresh_session_range_signal": False,
+                "fresh_session_range_signal": fresh,
                 "public_facts_ready": True,
                 "latest_candle_close_time_utc": (
                     "2026-06-30T01:59:59+00:00" if latest_candle else None
@@ -244,6 +260,58 @@ def test_sor_boundary_uses_session_detector_first_blocker():
     assert sor["first_blocker"] == "fresh_sor_session_range_signal_absent"
     assert sor["blocker_owner"] == "market"
     assert sor["action_time_path_ready"] is True
+
+
+def test_sor_boundary_builds_nonexecuting_shape_from_fresh_detector_without_activation_evidence():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=False),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness(),
+        mpg_evidence=_evidence("MPG-001"),
+        sor_evidence={},
+        sor_detector=_sor_detector(fresh=True, missing_required_trigger_facts=[]),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
+    assert sor["symbol"] == "SOLUSDT"
+    assert sor["fresh_signal_present"] is True
+    assert sor["required_facts_readiness"]["public_facts_ready"] is True
+    assert sor["candidate_evidence_shape_ready"] is True
+    assert sor["dry_run_submit_rehearsal_ready"] is True
+    assert sor["action_time_path_ready"] is True
+    assert sor["first_blocker"] == "private_action_time_facts_required"
+    assert sor["calls_finalgate"] is False
+    assert sor["calls_operation_layer"] is False
+    assert sor["calls_exchange_write"] is False
+    assert sor["order_created"] is False
+
+
+def test_sor_boundary_marks_private_facts_ready_from_account_safe_facts():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        cpm_capture=_cpm_capture(fresh=False),
+        cpm_rehearsal=_cpm_rehearsal(),
+        mpg_readiness=_mpg_readiness(),
+        mpg_evidence=_evidence("MPG-001"),
+        sor_evidence={},
+        sor_detector=_sor_detector(fresh=True, missing_required_trigger_facts=[]),
+        account_safe_facts=_account_safe_facts(),
+        generated_at_utc="2026-06-30T00:00:00+00:00",
+    )
+
+    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
+    readiness = sor["required_facts_readiness"]
+    assert readiness["private_action_time_facts_ready"] is True
+    assert readiness["active_position_or_open_order_clear"] is True
+    assert readiness["action_time_available_balance"] is True
+    assert sor["action_time_path_ready"] is True
+    assert sor["calls_finalgate"] is False
+    assert sor["calls_operation_layer"] is False
+    assert sor["calls_exchange_write"] is False
 
 
 def test_sor_boundary_requires_selected_detector_public_facts_and_candle_tick():

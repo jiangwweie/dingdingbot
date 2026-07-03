@@ -125,10 +125,7 @@ def _action_time() -> dict:
                 "action_time_path_ready": True,
                 "first_blocker": "fresh_cpm_long_signal_absent",
                 "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
-                "required_facts_readiness": {
-                    "public_facts_ready": True,
-                    "private_action_time_facts_ready": False,
-                },
+                "required_facts_readiness": _action_time_private_facts_ready(),
             },
         ],
     }
@@ -244,6 +241,15 @@ def _brf2_per_symbol_runtime_signal_facts() -> dict:
     return base
 
 
+def _action_time_private_facts_ready() -> dict:
+    return {
+        "public_facts_ready": True,
+        "private_action_time_facts_ready": True,
+        "active_position_or_open_order_clear": True,
+        "action_time_available_balance": True,
+    }
+
+
 def test_candidate_pool_builds_five_wip_candidate_rows():
     artifact = _builder().build_strategy_live_candidate_pool(
         daily_table=_daily_table(),
@@ -348,10 +354,7 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
                 "action_time_path_ready": False,
                 "first_blocker": "fresh_cpm_long_signal_absent",
                 "next_action": "wait_for_fresh_signal_then_refresh_private_action_time_facts",
-                "required_facts_readiness": {
-                    "public_facts_ready": True,
-                    "private_action_time_facts_ready": False,
-                },
+                "required_facts_readiness": _action_time_private_facts_ready(),
             },
             {
                 "strategy_group_id": "CPM-RO-001",
@@ -359,10 +362,7 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
                 "action_time_path_ready": True,
                 "first_blocker": "private_action_time_facts_required",
                 "next_action": "refresh_private_action_time_facts_before_finalgate",
-                "required_facts_readiness": {
-                    "public_facts_ready": True,
-                    "private_action_time_facts_ready": False,
-                },
+                "required_facts_readiness": _action_time_private_facts_ready(),
             },
         ]
     )
@@ -824,10 +824,7 @@ def test_candidate_pool_blocks_authorized_fresh_signal_without_server_runtime_sc
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -887,10 +884,7 @@ def test_candidate_pool_uses_owner_authorization_for_live_submit_scope():
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -951,10 +945,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
                 "action_time_path_ready": True,
                 "first_blocker": "private_action_time_facts_required",
                 "next_action": "refresh_private_action_time_facts_before_finalgate",
-                "required_facts_readiness": {
-                    "public_facts_ready": True,
-                    "private_action_time_facts_ready": False,
-                },
+                "required_facts_readiness": _action_time_private_facts_ready(),
             },
             {
                 "strategy_group_id": "MPG-001",
@@ -962,10 +953,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
                 "action_time_path_ready": True,
                 "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
                 "next_action": "refresh_private_action_time_facts_before_finalgate",
-                "required_facts_readiness": {
-                    "public_facts_ready": True,
-                    "private_action_time_facts_ready": False,
-                },
+                "required_facts_readiness": _action_time_private_facts_ready(),
             },
         ]
     )
@@ -1052,7 +1040,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         in {("CPM-RO-001", "SOLUSDT"), ("MPG-001", "OPUSDT")}
     ]
     assert {row["first_blocker"] for row in selected_rows} == {
-        "runtime_profile_scope_missing"
+        "market_wait_validated"
     }
     assert artifact["arbitration"]["eligible_action_time_candidate_count"] == 2
     assert artifact["arbitration"]["single_real_submit_candidate"] is True
@@ -1076,10 +1064,7 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
             "action_time_path_ready": True,
             "first_blocker": "private_action_time_facts_required",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1152,10 +1137,7 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
             "action_time_path_ready": True,
             "first_blocker": "private_action_time_facts_required",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1223,10 +1205,7 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1400,10 +1379,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1476,10 +1452,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent()
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1537,10 +1510,7 @@ def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()
@@ -1608,10 +1578,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
-            "required_facts_readiness": {
-                "public_facts_ready": True,
-                "private_action_time_facts_ready": False,
-            },
+            "required_facts_readiness": _action_time_private_facts_ready(),
         }
     )
     parity = _parity()

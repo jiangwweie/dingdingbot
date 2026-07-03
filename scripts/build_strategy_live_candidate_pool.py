@@ -128,6 +128,7 @@ ACTION_TIME_SCOPE_STATES = {
 ACTION_TIME_INPUT_BLOCKERS = {
     "action_time_boundary_not_reproduced",
     "active_position_resolution",
+    "action_time_private_facts_missing",
     "artifact_missing",
     "detector_not_attached",
     "watcher_tick_missing",
@@ -1235,8 +1236,12 @@ def _fresh_action_time_blocker(action_row: dict[str, Any]) -> str:
     if action_row.get("action_time_path_ready") is not True:
         return "action_time_boundary_not_reproduced"
     if readiness.get("private_action_time_facts_ready") is not True:
-        return "runtime_profile_scope_missing"
-    return "active_position_resolution"
+        return "action_time_private_facts_missing"
+    if readiness.get("active_position_or_open_order_clear") is not True:
+        return "active_position_resolution"
+    if readiness.get("action_time_available_balance") is not True:
+        return "action_time_private_facts_missing"
+    return "market_wait_validated"
 
 
 def _promotion_state(
@@ -1270,6 +1275,9 @@ def _symbol_next_action(first_blocker: str, candidate: dict[str, Any]) -> str:
         "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
         "runtime_profile_scope_missing": (
             "bind_or_start_pretrade_runtime_for_candidate_symbol"
+        ),
+        "action_time_private_facts_missing": (
+            "refresh_private_action_time_facts_before_finalgate"
         ),
         "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
         "hard_safety_stop": "resolve_hard_safety_stop",

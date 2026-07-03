@@ -117,6 +117,7 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "--symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT" in text
     assert "--fallback-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
     assert "build_sor_session_scope_detector.py" in text
+    assert "build_strategy_fresh_signal_action_time_boundary.py" in text
     assert "build_mi_trial_admission_decision.py" in text
     assert "build_brf2_runtime_signal_facts.py --strategy-source live_market --public-facts-json \"$PUBLIC\"" in text
     assert "build_strategygroup_runtime_safety_state.py" in text
@@ -128,6 +129,9 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
         "build_sor_session_scope_detector.py"
     )
     assert text.index("build_sor_session_scope_detector.py") < text.index(
+        "build_strategy_fresh_signal_action_time_boundary.py"
+    )
+    assert text.index("build_strategy_fresh_signal_action_time_boundary.py") < text.index(
         "build_strategy_live_candidate_pool.py"
     )
     assert text.index("build_brf2_runtime_signal_facts.py") < text.index(
@@ -146,6 +150,18 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "--collect-live-facts-before-refresh" in text
     assert "--live-facts-output" in text
     assert "strategy-group-live-facts-input.json" in text
+    assert "build_runtime_account_safe_facts.py" in text
+    assert "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json" in text
+    assert (
+        "build_strategy_fresh_signal_action_time_boundary.py "
+        "--account-safe-facts-json \"$ACCOUNT\""
+    ) in text
+    assert text.index("build_runtime_account_safe_facts.py") > text.index(
+        "refresh_strategygroup_runtime_product_state_artifacts.py"
+    )
+    assert text.rindex("build_strategy_fresh_signal_action_time_boundary.py") < text.rindex(
+        "build_strategy_live_candidate_pool.py"
+    )
     assert "--refresh-chain-closure-status" in text
     assert "runtime-execution-chain-closure-status.json" in text
     assert "--refresh-live-closure-evidence" in text
