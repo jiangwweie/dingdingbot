@@ -259,7 +259,10 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
     if (
         row.get("promotion_state") == "action_time_lane"
         and not _server_runtime_scope_ready(
-            _as_dict(row.get("server_runtime_coverage"))
+            _as_dict(row.get("server_runtime_coverage")),
+            strategy_group_id=str(row.get("strategy_group_id") or ""),
+            symbol=str(row.get("symbol") or ""),
+            side=str(row.get("side") or ""),
         )
     ):
         errors.append(
@@ -272,6 +275,7 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
             coverage=coverage,
             strategy_group_id=str(row.get("strategy_group_id") or ""),
             symbol=str(row.get("symbol") or ""),
+            side=str(row.get("side") or ""),
         )
     )
     if row.get("authority_boundary") and "no_finalgate" not in str(
@@ -345,7 +349,10 @@ def _validate_pretrade_runtime(
         if "no_finalgate" not in str(row.get("authority_boundary") or ""):
             errors.append(f"action_time_lane_inputs[{index}].authority_boundary is invalid")
         if not _server_runtime_scope_ready(
-            _as_dict(row.get("server_runtime_coverage"))
+            _as_dict(row.get("server_runtime_coverage")),
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=str(row.get("side") or ""),
         ):
             errors.append(
                 f"action_time_lane_inputs[{index}] requires active server runtime coverage"
@@ -356,6 +363,7 @@ def _validate_pretrade_runtime(
                 coverage=_as_dict(row.get("server_runtime_coverage")),
                 strategy_group_id=strategy_group_id,
                 symbol=symbol,
+                side=str(row.get("side") or ""),
             )
         )
     arbitration = _as_dict(artifact.get("arbitration"))
@@ -570,6 +578,7 @@ def _validate_server_runtime_coverage_identity(
     coverage: dict[str, Any],
     strategy_group_id: str,
     symbol: str,
+    side: str,
 ) -> list[str]:
     if not coverage:
         return [f"{prefix} is required"]
@@ -578,6 +587,9 @@ def _validate_server_runtime_coverage_identity(
         errors.append(f"{prefix}.strategy_group_id must match row strategy_group_id")
     if str(coverage.get("symbol") or "") != symbol:
         errors.append(f"{prefix}.symbol must match row symbol")
+    coverage_side = str(coverage.get("side") or coverage.get("expected_side") or "")
+    if coverage_side != side:
+        errors.append(f"{prefix}.side must match row side")
     if str(coverage.get("state") or "") not in SERVER_RUNTIME_COVERAGE_STATES:
         errors.append(f"{prefix}.state is invalid")
     blocker = str(coverage.get("blocker_class") or "")
@@ -590,14 +602,33 @@ def _validate_server_runtime_coverage_identity(
     return errors
 
 
-def _server_runtime_scope_ready(runtime_coverage_row: dict[str, Any]) -> bool:
+def _server_runtime_scope_ready(
+    runtime_coverage_row: dict[str, Any],
+    *,
+    strategy_group_id: str | None = None,
+    symbol: str | None = None,
+    side: str | None = None,
+) -> bool:
     active_ids = runtime_coverage_row.get("active_runtime_instance_ids") or []
     selected_ids = runtime_coverage_row.get("selected_runtime_instance_ids") or []
-    return (
-        str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
-        and bool(active_ids)
-        and bool(selected_ids)
+    if str(runtime_coverage_row.get("state") or "") != "active_watcher_scope":
+        return False
+    if not active_ids or not selected_ids:
+        return False
+    if strategy_group_id is not None and (
+        str(runtime_coverage_row.get("strategy_group_id") or "") != strategy_group_id
+    ):
+        return False
+    if symbol is not None and str(runtime_coverage_row.get("symbol") or "") != symbol:
+        return False
+    coverage_side = str(
+        runtime_coverage_row.get("side")
+        or runtime_coverage_row.get("expected_side")
+        or ""
     )
+    if side is not None and coverage_side != side:
+        return False
+    return True
 
 
 if __name__ == "__main__":

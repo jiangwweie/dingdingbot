@@ -515,6 +515,9 @@ def _symbol_readiness_rows(
             action_rows=action_rows,
         )
         for symbol in symbols:
+            candidate_side = str(
+                candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")
+            )
             parity_row = _matching_symbol_row(parity_rows, strategy_group_id, symbol)
             if strategy_group_id == "SOR-001":
                 parity_row = _merge_symbol_fact_row(
@@ -536,11 +539,13 @@ def _symbol_readiness_rows(
                 runtime_coverage_rows,
                 strategy_group_id,
                 symbol,
-            ) or _missing_runtime_coverage_row(strategy_group_id, symbol)
+                candidate_side,
+            ) or _missing_runtime_coverage_row(strategy_group_id, symbol, candidate_side)
             runtime_coverage_row = _normalize_runtime_coverage_row(
                 runtime_coverage_row,
                 strategy_group_id,
                 symbol,
+                candidate_side,
             )
             result.append(
                 _symbol_readiness_row(
@@ -947,40 +952,80 @@ def _symbol_owner_authorization(
 
 
 def _matching_symbol_row(
-    rows: list[dict[str, Any]], strategy_group_id: str, symbol: str
+    rows: list[dict[str, Any]],
+    strategy_group_id: str,
+    symbol: str,
+    side: str | None = None,
 ) -> dict[str, Any]:
+    fallback: dict[str, Any] = {}
     for row in rows:
         if (
             str(row.get("strategy_group_id") or "") == strategy_group_id
             and str(row.get("symbol") or "") == symbol
         ):
-            return row
+            if side is None or str(row.get("side") or side) == side:
+                return row
+            if not fallback:
+                fallback = row
+    if fallback:
+        return fallback
     return {}
 
 
-def _missing_runtime_coverage_row(strategy_group_id: str, symbol: str) -> dict[str, Any]:
+def _runtime_coverage_side_mismatch(row: dict[str, Any], side: str) -> bool:
+    coverage_side = str(row.get("side") or row.get("expected_side") or "")
+    return bool(coverage_side and side and coverage_side != side)
+
+
+def _missing_runtime_coverage_row(
+    strategy_group_id: str, symbol: str, side: str
+) -> dict[str, Any]:
     return {
         "strategy_group_id": strategy_group_id,
         "symbol": symbol,
+        "side": side,
+        "expected_side": side,
         "state": "runtime_profile_scope_missing",
         "blocker_class": "runtime_profile_scope_missing",
         "active_runtime_instance_ids": [],
         "selected_runtime_instance_ids": [],
+        "matched_runtime_sides": [],
+        "side_mismatch_runtime_instance_ids": [],
         "next_action": "bind_or_start_pretrade_runtime_for_candidate_symbol",
         "authority_boundary": AUTHORITY_BOUNDARY,
     }
 
 
 def _normalize_runtime_coverage_row(
-    row: dict[str, Any], strategy_group_id: str, symbol: str
+    row: dict[str, Any], strategy_group_id: str, symbol: str, side: str
 ) -> dict[str, Any]:
     normalized = dict(row)
     normalized.setdefault("strategy_group_id", strategy_group_id)
     normalized.setdefault("symbol", symbol)
+    normalized.setdefault("side", side)
+    normalized.setdefault("expected_side", side)
     normalized.setdefault("state", "runtime_profile_scope_missing")
     normalized.setdefault("blocker_class", "runtime_profile_scope_missing")
     normalized.setdefault("active_runtime_instance_ids", [])
     normalized.setdefault("selected_runtime_instance_ids", [])
+    normalized.setdefault("matched_runtime_sides", [])
+    normalized.setdefault("side_mismatch_runtime_instance_ids", [])
+    if _runtime_coverage_side_mismatch(normalized, side):
+        mismatched_side = str(
+            normalized.get("side") or normalized.get("expected_side") or ""
+        )
+        matched_runtime_sides = list(normalized.get("matched_runtime_sides") or [])
+        if mismatched_side and mismatched_side not in matched_runtime_sides:
+            matched_runtime_sides.append(mismatched_side)
+        normalized["matched_runtime_sides"] = sorted(
+            str(item) for item in matched_runtime_sides if str(item or "")
+        )
+        normalized["side"] = side
+        normalized["expected_side"] = side
+        normalized["state"] = "runtime_profile_scope_missing"
+        normalized["blocker_class"] = "runtime_profile_scope_missing"
+        normalized["selected_runtime_instance_ids"] = []
+        normalized["next_action"] = "bind_or_repair_runtime_profile_scope_side"
     normalized.setdefault(
         "next_action",
         "bind_or_start_pretrade_runtime_for_candidate_symbol",
@@ -1001,7 +1046,15 @@ def _symbol_readiness_row(
     runtime_coverage_row: dict[str, Any],
     owner_pretrade_authorization: dict[str, Any],
 ) -> dict[str, Any]:
-    runtime_active = _server_runtime_scope_ready(runtime_coverage_row)
+    candidate_side = str(
+        candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")
+    )
+    runtime_active = _server_runtime_scope_ready(
+        runtime_coverage_row,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=candidate_side,
+    )
     detector_ready = parity_row.get("detector_attached") is True
     watcher_present = (
         parity_row.get("watcher_tick_present") is True
@@ -1065,7 +1118,7 @@ def _symbol_readiness_row(
         "symbol_or_basket": symbol,
         "symbol": symbol,
         "asset_class": "crypto_perpetual",
-        "side": str(candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")),
+        "side": candidate_side,
         "candidate_role": _candidate_role(strategy_group_id, symbol),
         "observation_scope": (
             "active_observation" if watcher_present else "readonly"
@@ -1391,14 +1444,33 @@ def _runtime_coverage(runtime_active_monitor: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _server_runtime_scope_ready(runtime_coverage_row: dict[str, Any]) -> bool:
+def _server_runtime_scope_ready(
+    runtime_coverage_row: dict[str, Any],
+    *,
+    strategy_group_id: str | None = None,
+    symbol: str | None = None,
+    side: str | None = None,
+) -> bool:
     active_ids = runtime_coverage_row.get("active_runtime_instance_ids") or []
     selected_ids = runtime_coverage_row.get("selected_runtime_instance_ids") or []
-    return (
-        str(runtime_coverage_row.get("state") or "") == "active_watcher_scope"
-        and bool(active_ids)
-        and bool(selected_ids)
+    if str(runtime_coverage_row.get("state") or "") != "active_watcher_scope":
+        return False
+    if not active_ids or not selected_ids:
+        return False
+    if strategy_group_id is not None and (
+        str(runtime_coverage_row.get("strategy_group_id") or "") != strategy_group_id
+    ):
+        return False
+    if symbol is not None and str(runtime_coverage_row.get("symbol") or "") != symbol:
+        return False
+    coverage_side = str(
+        runtime_coverage_row.get("side")
+        or runtime_coverage_row.get("expected_side")
+        or ""
     )
+    if side is not None and coverage_side != side:
+        return False
+    return True
 
 
 def _candidate_role(strategy_group_id: str, symbol: str) -> str:
@@ -1603,7 +1675,10 @@ def _sync_candidate_rows_with_symbol_readiness(
             by_strategy.get(strategy_group_id, []),
         )
         if not summary or not _server_runtime_scope_ready(
-            _as_dict(summary.get("server_runtime_coverage"))
+            _as_dict(summary.get("server_runtime_coverage")),
+            strategy_group_id=str(summary.get("strategy_group_id") or ""),
+            symbol=str(summary.get("symbol") or ""),
+            side=str(summary.get("side") or ""),
         ):
             synced.append(candidate)
             continue

@@ -451,6 +451,69 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_active_monitor_requires_candidate_universe_side_match(tmp_path):
+    candidate_pool = tmp_path / "candidate-pool.json"
+    candidate_pool.write_text(
+        json.dumps({"candidate_universe": {"SOR-001": ["ETHUSDT"]}}),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-sor-eth-short",
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                symbol="ETH/USDT:USDT",
+                side="short",
+            ),
+        ]
+    )
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(
+            output_dir=str(tmp_path),
+            strategy_family_id=["SOR-001"],
+            candidate_universe_json=str(candidate_pool),
+        ),
+        client=client,
+        runtime_artifact_builder=lambda args: {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "observation_cycle_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    coverage = packet["candidate_universe_coverage"]
+    row = coverage["rows"][0]
+    assert packet["monitored_runtime_count"] == 0
+    assert packet["candidate_universe_excluded_runtime_instance_ids"] == [
+        "runtime-sor-eth-short"
+    ]
+    assert coverage["status"] == "incomplete"
+    assert coverage["active_matched_row_count"] == 0
+    assert row["strategy_group_id"] == "SOR-001"
+    assert row["symbol"] == "ETHUSDT"
+    assert row["side"] == "long"
+    assert row["state"] == "runtime_profile_scope_missing"
+    assert row["blocker_class"] == "runtime_profile_scope_missing"
+    assert row["active_runtime_instance_ids"] == []
+    assert row["selected_runtime_instance_ids"] == []
+    assert row["matched_runtime_sides"] == ["short"]
+    assert row["side_mismatch_runtime_instance_ids"] == [
+        "runtime-sor-eth-short"
+    ]
+    assert row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
+
+
 def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(
     tmp_path,
 ):

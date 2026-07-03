@@ -1051,6 +1051,19 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
             "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
         },
     ]
+    sor_detector = {
+        "status": "sor_session_detector_facts_ready",
+        "symbol_detector_rows": [
+            {
+                "symbol": "ETHUSDT",
+                "public_facts_ready": True,
+                "latest_candle_close_time_utc": "2026-07-02T00:15:00+00:00",
+                "fresh_session_range_signal": True,
+                "fresh_signal_present": True,
+                "missing_required_trigger_facts": [],
+            }
+        ],
+    }
     runtime_active_monitor = {
         "candidate_universe_coverage": {
             "status": "complete",
@@ -1085,6 +1098,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         tradeability=tradeability,
         replay_live_parity=parity,
         action_time_boundary=action_time,
+        sor_detector=sor_detector,
         single_lane_task_packet=_single_lane(),
         runtime_active_monitor=runtime_active_monitor,
         generated_at_utc="2026-07-01T00:00:00+00:00",
@@ -1661,6 +1675,101 @@ def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
+def test_candidate_pool_blocks_action_time_when_server_runtime_side_mismatches():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "SOR-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["ETHUSDT"]}
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "fresh_sor_session_range_signal_absent",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": _action_time_private_facts_ready(),
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "failed_facts": [],
+            "mismatch_count": 10,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+    sor_detector = {
+        "status": "sor_session_detector_facts_ready",
+        "symbol_detector_rows": [
+            {
+                "symbol": "ETHUSDT",
+                "public_facts_ready": True,
+                "latest_candle_close_time_utc": "2026-07-02T00:15:00+00:00",
+                "fresh_session_range_signal": True,
+                "fresh_signal_present": True,
+                "missing_required_trigger_facts": [],
+            }
+        ],
+    }
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "side": "short",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-sor-eth-short"],
+                    "selected_runtime_instance_ids": ["runtime-sor-eth-short"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        sor_detector=sor_detector,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "SOR-001" and item["symbol"] == "ETHUSDT"
+    )
+    assert row["side"] == "long"
+    assert row["server_runtime_coverage"]["side"] == "long"
+    assert row["server_runtime_coverage"]["matched_runtime_sides"] == ["short"]
+    assert row["server_runtime_coverage"]["state"] == (
+        "runtime_profile_scope_missing"
+    )
+    assert row["server_runtime_coverage"]["next_action"] == (
+        "bind_or_repair_runtime_profile_scope_side"
+    )
+    assert row["first_blocker"] == "runtime_profile_scope_missing"
+    assert row["promotion_state"] == "idle"
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_validator_rejects_action_time_without_server_runtime_scope():
     tradeability = _tradeability()
     for item in tradeability["decision_rows"]:
@@ -1759,6 +1868,36 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
     assert any(
         "server_runtime_coverage.strategy_group_id must match row strategy_group_id"
         in error
+        for error in errors
+    )
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    row["server_runtime_coverage"]["side"] = "short"
+    artifact["action_time_lane_inputs"][0]["server_runtime_coverage"][
+        "side"
+    ] = "short"
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any(
+        "server_runtime_coverage.side must match row side" in error
+        for error in errors
+    )
+    assert any(
+        "requires active server runtime coverage" in error
         for error in errors
     )
 

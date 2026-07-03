@@ -52,6 +52,13 @@ DEFAULT_CANDIDATE_UNIVERSE = {
     "SOR-001": ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"),
     "BRF2-001": ("BTCUSDT", "ETHUSDT", "AVAXUSDT"),
 }
+STRATEGY_SIDE = {
+    "CPM-RO-001": "long",
+    "MPG-001": "long",
+    "MI-001": "long",
+    "SOR-001": "long",
+    "BRF2-001": "short",
+}
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -206,22 +213,23 @@ def _filter_selected_to_candidate_universe(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     if not candidate_universe:
         return selected, []
-    allowed_pairs = {
-        (str(strategy_group_id), str(symbol))
+    allowed_lanes = {
+        (str(strategy_group_id), str(symbol), _expected_side(strategy_group_id))
         for strategy_group_id, symbols in candidate_universe.items()
         for symbol in symbols
     }
     filtered: list[dict[str, Any]] = []
     excluded_runtime_ids: list[str] = []
     for runtime in selected:
-        pair = (
+        lane = (
             str(_runtime_value(runtime, "strategy_family_id", "family") or ""),
             _compact_symbol(_runtime_value(runtime, "symbol")),
+            _normalize_side(_runtime_value(runtime, "side")),
         )
         runtime_id = str(
             _runtime_value(runtime, "runtime_instance_id", "runtime_id") or ""
         )
-        if pair in allowed_pairs:
+        if lane in allowed_lanes:
             filtered.append(runtime)
         elif runtime_id:
             excluded_runtime_ids.append(runtime_id)
@@ -235,24 +243,54 @@ def _candidate_universe_coverage(
     active: list[dict[str, Any]],
     selected: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    selected_pairs: dict[tuple[str, str], list[str]] = {}
-    active_pairs: dict[tuple[str, str], list[str]] = {}
-    for bucket, runtimes in ((active_pairs, active), (selected_pairs, selected)):
+    selected_lanes: dict[tuple[str, str, str], list[str]] = {}
+    active_lanes: dict[tuple[str, str, str], list[str]] = {}
+    selected_pairs: dict[tuple[str, str], list[dict[str, str]]] = {}
+    active_pairs: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for lane_bucket, pair_bucket, runtimes in (
+        (active_lanes, active_pairs, active),
+        (selected_lanes, selected_pairs, selected),
+    ):
         for runtime in runtimes:
             strategy_group_id = str(
                 _runtime_value(runtime, "strategy_family_id", "family") or ""
             )
             symbol = _compact_symbol(_runtime_value(runtime, "symbol"))
+            side = _normalize_side(_runtime_value(runtime, "side"))
             runtime_id = str(
                 _runtime_value(runtime, "runtime_instance_id", "runtime_id") or ""
             )
             if strategy_group_id and symbol:
-                bucket.setdefault((strategy_group_id, symbol), []).append(runtime_id)
+                lane_bucket.setdefault((strategy_group_id, symbol, side), []).append(
+                    runtime_id
+                )
+                pair_bucket.setdefault((strategy_group_id, symbol), []).append(
+                    {"runtime_instance_id": runtime_id, "side": side}
+                )
     rows: list[dict[str, Any]] = []
     for strategy_group_id in sorted(candidate_universe):
         for symbol in sorted(set(candidate_universe[strategy_group_id])):
-            selected_matches = selected_pairs.get((strategy_group_id, symbol), [])
-            active_matches = active_pairs.get((strategy_group_id, symbol), [])
+            expected_side = _expected_side(strategy_group_id)
+            lane_key = (strategy_group_id, symbol, expected_side)
+            pair_key = (strategy_group_id, symbol)
+            selected_matches = selected_lanes.get(lane_key, [])
+            active_matches = active_lanes.get(lane_key, [])
+            selected_pair_matches = selected_pairs.get(pair_key, [])
+            active_pair_matches = active_pairs.get(pair_key, [])
+            matched_runtime_sides = sorted(
+                {
+                    item["side"]
+                    for item in active_pair_matches + selected_pair_matches
+                    if item.get("side")
+                }
+            )
+            side_mismatch_runtime_instance_ids = [
+                item["runtime_instance_id"]
+                for item in active_pair_matches + selected_pair_matches
+                if item.get("runtime_instance_id")
+                and item.get("side")
+                and item.get("side") != expected_side
+            ]
             if selected_matches:
                 state = "active_watcher_scope"
                 blocker_class = "none"
@@ -264,15 +302,25 @@ def _candidate_universe_coverage(
             else:
                 state = "runtime_profile_scope_missing"
                 blocker_class = "runtime_profile_scope_missing"
-                next_action = "bind_or_start_pretrade_runtime_for_candidate_symbol"
+                next_action = (
+                    "bind_or_repair_runtime_profile_scope_side"
+                    if side_mismatch_runtime_instance_ids
+                    else "bind_or_start_pretrade_runtime_for_candidate_symbol"
+                )
             rows.append(
                 {
                     "strategy_group_id": strategy_group_id,
                     "symbol": symbol,
+                    "side": expected_side,
                     "state": state,
                     "blocker_class": blocker_class,
                     "active_runtime_instance_ids": active_matches,
                     "selected_runtime_instance_ids": selected_matches,
+                    "expected_side": expected_side,
+                    "matched_runtime_sides": matched_runtime_sides,
+                    "side_mismatch_runtime_instance_ids": (
+                        side_mismatch_runtime_instance_ids
+                    ),
                     "next_action": next_action,
                     "authority_boundary": (
                         "candidate_universe_coverage_is_read_only; "
@@ -301,6 +349,14 @@ def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
         if value is not None and value != "":
             return value
     return None
+
+
+def _expected_side(strategy_group_id: Any) -> str:
+    return STRATEGY_SIDE.get(str(strategy_group_id), "")
+
+
+def _normalize_side(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
 def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse.Namespace:
