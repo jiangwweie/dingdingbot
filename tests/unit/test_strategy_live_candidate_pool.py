@@ -809,6 +809,75 @@ def test_candidate_pool_blocks_fresh_signal_when_action_time_boundary_not_reprod
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
 
 
+def test_candidate_pool_maps_missing_private_action_time_facts_to_contract_blocker():
+    sor_detector = {
+        "status": "sor_session_detector_facts_ready",
+        "symbol_detector_rows": [
+            {
+                "symbol": "ETHUSDT",
+                "public_facts_ready": True,
+                "latest_candle_close_time_utc": "2026-07-02T00:15:00+00:00",
+                "fresh_session_range_signal": True,
+                "missing_required_trigger_facts": [],
+            }
+        ],
+    }
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "private_action_time_facts_required",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": {
+                "public_facts_ready": True,
+                "private_action_time_facts_ready": False,
+            },
+        }
+    )
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-sor-eth"],
+                    "selected_runtime_instance_ids": ["runtime-sor-eth"],
+                    "next_action": "continue_pretrade_observation",
+                }
+            ],
+        }
+    }
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=action_time,
+        sor_detector=sor_detector,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "SOR-001" and item["symbol"] == "ETHUSDT"
+    )
+    assert row["signal_state"] == "fresh"
+    assert row["public_facts_state"]["state"] == "satisfied"
+    assert row["first_blocker"] == "action_time_boundary_not_reproduced"
+    assert row["next_action"] == "refresh_private_action_time_facts_before_finalgate"
+    assert row["promotion_state"] == "idle"
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_blocks_authorized_fresh_signal_without_server_runtime_scope():
     daily_table = json.loads(json.dumps(_daily_table()))
     mpg_daily = next(

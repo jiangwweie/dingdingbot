@@ -128,7 +128,6 @@ ACTION_TIME_SCOPE_STATES = {
 ACTION_TIME_INPUT_BLOCKERS = {
     "action_time_boundary_not_reproduced",
     "active_position_resolution",
-    "action_time_private_facts_missing",
     "artifact_missing",
     "detector_not_attached",
     "watcher_tick_missing",
@@ -1066,7 +1065,7 @@ def _symbol_readiness_row(
         "owner_authorization": owner_authorization,
         "promotion_state": promotion_state,
         "first_blocker": first_blocker,
-        "next_action": _symbol_next_action(first_blocker, candidate),
+        "next_action": _symbol_next_action(first_blocker, candidate, action_row),
         "stop_condition": _symbol_stop_condition(first_blocker),
         "evidence_ref": _symbol_evidence_ref(
             strategy_group_id=strategy_group_id,
@@ -1236,11 +1235,11 @@ def _fresh_action_time_blocker(action_row: dict[str, Any]) -> str:
     if action_row.get("action_time_path_ready") is not True:
         return "action_time_boundary_not_reproduced"
     if readiness.get("private_action_time_facts_ready") is not True:
-        return "action_time_private_facts_missing"
+        return "action_time_boundary_not_reproduced"
     if readiness.get("active_position_or_open_order_clear") is not True:
         return "active_position_resolution"
     if readiness.get("action_time_available_balance") is not True:
-        return "action_time_private_facts_missing"
+        return "action_time_boundary_not_reproduced"
     return "market_wait_validated"
 
 
@@ -1266,7 +1265,18 @@ def _promotion_state(
     return "promotion_candidate"
 
 
-def _symbol_next_action(first_blocker: str, candidate: dict[str, Any]) -> str:
+def _symbol_next_action(
+    first_blocker: str,
+    candidate: dict[str, Any],
+    action_row: dict[str, Any] | None = None,
+) -> str:
+    action_next = str(_as_dict(action_row).get("next_action") or "")
+    if (
+        first_blocker == "action_time_boundary_not_reproduced"
+        and action_next
+        and action_next != "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+    ):
+        return action_next
     return {
         "detector_not_attached": "attach_detector_for_candidate_symbol",
         "watcher_tick_missing": "refresh_readonly_watcher_for_candidate_symbol",
@@ -1276,8 +1286,8 @@ def _symbol_next_action(first_blocker: str, candidate: dict[str, Any]) -> str:
         "runtime_profile_scope_missing": (
             "bind_or_start_pretrade_runtime_for_candidate_symbol"
         ),
-        "action_time_private_facts_missing": (
-            "refresh_private_action_time_facts_before_finalgate"
+        "action_time_boundary_not_reproduced": (
+            "repair_non_executing_action_time_rehearsal_path"
         ),
         "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
         "hard_safety_stop": "resolve_hard_safety_stop",
