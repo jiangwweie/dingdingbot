@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Run the server-side product-state refresh sequence after watcher ticks.
 
-The sequence is read-only from a trading-authority perspective. It refreshes
-control read models and records step-level results; it does not call FinalGate,
-Operation Layer, exchange write APIs, OrderLifecycle, withdrawals, transfers,
-credential mutation, live profile changes, or order sizing changes.
+The sequence is non-authority from a trading perspective. It refreshes control
+read models and may materialize one Candidate Pool action-time lane into
+non-executing prepare evidence. It does not call FinalGate, Operation Layer,
+exchange write APIs, OrderLifecycle, withdrawals, transfers, credential
+mutation, live profile changes, or order sizing changes.
 """
 
 from __future__ import annotations
@@ -278,6 +279,43 @@ def _refresh_steps(
         RefreshStep("build_action_time_boundary_account", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py", "--account-safe-facts-json", str(account)), required=False),
         RefreshStep("build_candidate_pool_after_account", (python, "scripts/build_strategy_live_candidate_pool.py", "--runtime-active-monitor-json", str(status))),
         RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
+        RefreshStep(
+            "materialize_action_time_lane",
+            (
+                python,
+                "scripts/materialize_candidate_pool_action_time_lane.py",
+                "--candidate-pool-json",
+                str(candidate_pool),
+                "--report-dir",
+                str(report_dir),
+                "--output-json",
+                str(report_dir / "action-time-lane-materialization.json"),
+                "--materialization-dir",
+                str(report_dir / "action-time-lane-materialization"),
+                "--api-base",
+                api_base,
+                "--env-file",
+                str(env_file),
+                "--source",
+                "live_market",
+                "--allow-prepare-records",
+            ),
+        ),
+        RefreshStep(
+            "build_readiness_pack_after_materialization",
+            (
+                python,
+                "scripts/build_runtime_signal_watcher_readiness_pack.py",
+                "--report-dir",
+                str(report_dir),
+                "--output-dir",
+                str(report_dir),
+                "--stale-after-seconds",
+                "180",
+                "--label",
+                "tokyo-runtime-signal-watcher",
+            ),
+        ),
         RefreshStep("build_daily_table_after_account", (python, "scripts/build_daily_live_enablement_table.py", "--candidate-pool-json", str(candidate_pool))),
         RefreshStep("validate_daily_table_after_account", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
         RefreshStep("build_single_lane_task_packet_after_account", (python, "scripts/build_single_lane_task_packet.py")),
