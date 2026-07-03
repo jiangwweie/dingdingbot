@@ -773,6 +773,18 @@ def _candidate_pool_fresh_row(
     return {}
 
 
+def _candidate_pool_fresh_row_scope_ready(
+    source_artifacts: dict[str, dict[str, Any] | None],
+) -> bool:
+    row = _candidate_pool_fresh_row(source_artifacts)
+    coverage = _dict(row.get("server_runtime_coverage"))
+    return (
+        str(coverage.get("state") or "") == "active_watcher_scope"
+        and bool(_list(coverage.get("active_runtime_instance_ids")))
+        and bool(_list(coverage.get("selected_runtime_instance_ids")))
+    )
+
+
 def _selected_runtime_instance_ids(artifact: dict[str, Any] | None) -> list[str]:
     return [
         str(item)
@@ -815,6 +827,8 @@ def _selected_scope_artifact_blockers(
     fresh_signal_present: bool,
 ) -> list[str]:
     if not fresh_signal_present:
+        return []
+    if _candidate_pool_fresh_row_scope_ready(source_artifacts):
         return []
 
     pilot = _artifact_data(source_artifacts.get("pilot_status"))

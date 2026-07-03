@@ -729,8 +729,33 @@ def test_goal_status_uses_candidate_pool_action_time_lane_as_fresh_signal(
                     "symbol": "ETHUSDT",
                     "next_action": "refresh_private_action_time_facts_before_finalgate",
                     "signal_state": "fresh",
+                    "server_runtime_coverage": {
+                        "state": "active_watcher_scope",
+                        "active_runtime_instance_ids": ["runtime-sor-eth"],
+                        "selected_runtime_instance_ids": ["runtime-sor-eth"],
+                    },
                 }
             ],
+        },
+    )
+    _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "status": "blocked_runtime_scope_mismatch",
+            "watcher_scope_alignment": {
+                "status": "mismatch",
+                "selected_strategy_group_id": "MPG-001",
+                "selected_symbols": ["COINUSDT"],
+                "matched_runtime_signal_summaries": [],
+                "out_of_scope_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-sor-eth",
+                        "strategy_family_id": "SOR-001",
+                        "symbol": "ETH/USDT:USDT",
+                        "status": "blocked",
+                    }
+                ],
+            },
         },
     )
 
@@ -743,6 +768,7 @@ def test_goal_status_uses_candidate_pool_action_time_lane_as_fresh_signal(
 
     assert packet["status"] == "fresh_signal_processing"
     assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["non_authority_checkpoint"] == (
         "refresh_private_action_time_facts_before_finalgate"
     )
