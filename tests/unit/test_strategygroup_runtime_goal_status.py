@@ -782,6 +782,105 @@ def test_goal_status_uses_candidate_pool_action_time_lane_as_fresh_signal(
     assert packet["safety_invariants"]["calls_exchange_write"] is False
 
 
+def test_goal_status_prefers_covered_candidate_pool_over_legacy_scope_mismatch(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    coverage_rows = []
+    readiness_rows = []
+    candidates = {
+        "CPM-RO-001": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+        "MPG-001": ["OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+        "MI-001": ["AVAXUSDT", "ETHUSDT", "SOLUSDT"],
+        "SOR-001": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"],
+        "BRF2-001": ["BTCUSDT", "AVAXUSDT", "ETHUSDT"],
+    }
+    for strategy_group_id, symbols in candidates.items():
+        for symbol in symbols:
+            runtime_id = f"runtime-{strategy_group_id}-{symbol}"
+            coverage = {
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "state": "active_watcher_scope",
+                "blocker_class": "none",
+                "active_runtime_instance_ids": [runtime_id],
+                "selected_runtime_instance_ids": [runtime_id],
+            }
+            coverage_rows.append(coverage)
+            readiness_rows.append(
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "symbol": symbol,
+                    "side": "long",
+                    "signal_state": "absent",
+                    "first_blocker": "computed_not_satisfied",
+                    "promotion_state": "idle",
+                    "server_runtime_coverage": coverage,
+                    "next_action": "continue_observation_with_failed_fact_matrix",
+                }
+            )
+    candidate_pool = tmp_path / "candidate-pool.json"
+    _write(
+        candidate_pool,
+        {
+            "status": "strategy_live_candidate_pool_ready",
+            "action_time_lane_inputs": [],
+            "promotion_candidates": [],
+            "server_runtime_coverage": {
+                "status": "complete",
+                "expected_row_count": 18,
+                "active_matched_row_count": 18,
+                "missing_row_count": 0,
+                "rows": coverage_rows,
+            },
+            "symbol_readiness_rows": readiness_rows,
+        },
+    )
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "ready_for_non_executing_prepare",
+            "selected_runtime_instance_ids": ["runtime-legacy-teq"],
+            "ready_runtime_signals": 1,
+            "blockers": [],
+        },
+    )
+    _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "status": "blocked_runtime_scope_mismatch",
+            "watcher_scope_alignment": {
+                "status": "mismatch",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [],
+                "out_of_scope_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-legacy-teq",
+                        "strategy_family_id": "TEQ-001",
+                        "symbol": "INTC/USDT:USDT",
+                        "status": "ready_for_non_executing_prepare",
+                    }
+                ],
+            },
+        },
+    )
+
+    packet = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+        candidate_pool_json=candidate_pool,
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["checks"]["fresh_signal_present"] is False
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["blockers"] == []
+    assert packet["evidence"]["selected_scope_blockers"] == []
+    assert packet["evidence"]["candidate_pool_action_time_lane_input_count"] == 0
+
+
 def test_goal_status_accepts_fresh_signal_inside_candidate_universe_coverage(
     tmp_path: Path,
 ) -> None:

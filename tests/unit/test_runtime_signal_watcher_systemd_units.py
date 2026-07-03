@@ -96,18 +96,13 @@ def test_signal_watcher_dry_run_audit_dropin_is_non_executing():
     assert "transfers" in text
 
 
-def test_signal_watcher_goal_status_dropin_is_read_only_summary():
+def test_signal_watcher_goal_status_dropin_does_not_write_final_status():
     text = GOAL_STATUS_DROPIN_PATH.read_text(encoding="utf-8")
 
-    assert "build_strategygroup_runtime_goal_status.py" in text
-    assert "strategygroup-runtime-goal-status.json" in text
-    assert "--release-manifest /home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json" in text
-    assert "--expected-head" not in text
-    assert "FinalGate" in text
-    assert "Operation" in text
-    assert "exchange write" in text
-    assert "withdrawals" in text
-    assert "transfers" in text
+    assert "Retired as a final goal-status writer" in text
+    assert "ExecStartPost=" not in text
+    assert "build_strategygroup_runtime_goal_status.py" not in text
+    assert "--candidate-pool-json" in text
 
 
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
@@ -176,9 +171,11 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "runtime-live-closure-evidence.json" in text
     assert "runtime-live-closure-evidence-verification.json" in text
     assert "runtime-live-closure-evidence-refresh.json" in text
-    assert "--refresh-goal-status" in text
+    assert "--refresh-goal-status" not in text
+    assert "--goal-status-output-json" not in text
     assert "strategygroup-runtime-goal-status.json" in text
     assert "--release-manifest /home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json" in text
+    assert text.count("build_strategygroup_runtime_goal_status.py") == 1
     assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text

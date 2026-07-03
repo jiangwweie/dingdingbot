@@ -707,6 +707,8 @@ def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str
 def _has_fresh_signal(source_artifacts: dict[str, dict[str, Any] | None]) -> bool:
     if _candidate_pool_fresh_row(source_artifacts):
         return True
+    if _candidate_pool_authoritative_no_fresh_signal(source_artifacts):
+        return False
     authoritative_names = (
         "latest_summary",
         "post_signal_resume",
@@ -785,6 +787,56 @@ def _candidate_pool_fresh_row_scope_ready(
     )
 
 
+def _candidate_pool_runtime_coverage_ready(
+    source_artifacts: dict[str, dict[str, Any] | None],
+) -> bool:
+    candidate_pool = _artifact_data(source_artifacts.get("candidate_pool"))
+    if candidate_pool.get("status") != "strategy_live_candidate_pool_ready":
+        return False
+    coverage = _dict(candidate_pool.get("server_runtime_coverage"))
+    if coverage.get("status") != "complete":
+        return False
+    expected = coverage.get("expected_row_count")
+    active_matched = coverage.get("active_matched_row_count")
+    missing = coverage.get("missing_row_count")
+    if not isinstance(expected, int) or expected <= 0:
+        return False
+    if active_matched != expected or missing != 0:
+        return False
+    rows = _list(coverage.get("rows"))
+    if len(rows) != expected:
+        return False
+    for value in rows:
+        row = _dict(value)
+        if row.get("state") != "active_watcher_scope":
+            return False
+        if row.get("blocker_class") not in {"", None, "none"}:
+            return False
+        if not _list(row.get("active_runtime_instance_ids")):
+            return False
+        if not _list(row.get("selected_runtime_instance_ids")):
+            return False
+    return True
+
+
+def _candidate_pool_authoritative_no_fresh_signal(
+    source_artifacts: dict[str, dict[str, Any] | None],
+) -> bool:
+    candidate_pool = _artifact_data(source_artifacts.get("candidate_pool"))
+    if candidate_pool.get("status") != "strategy_live_candidate_pool_ready":
+        return False
+    if not _candidate_pool_runtime_coverage_ready(source_artifacts):
+        return False
+    if _list(candidate_pool.get("action_time_lane_inputs")):
+        return False
+    if _list(candidate_pool.get("promotion_candidates")):
+        return False
+    return not any(
+        str(_dict(row).get("signal_state") or "") == "fresh"
+        for row in _list(candidate_pool.get("symbol_readiness_rows"))
+    )
+
+
 def _selected_runtime_instance_ids(artifact: dict[str, Any] | None) -> list[str]:
     return [
         str(item)
@@ -829,6 +881,8 @@ def _selected_scope_artifact_blockers(
     if not fresh_signal_present:
         return []
     if _candidate_pool_fresh_row_scope_ready(source_artifacts):
+        return []
+    if _candidate_pool_runtime_coverage_ready(source_artifacts):
         return []
 
     pilot = _artifact_data(source_artifacts.get("pilot_status"))
