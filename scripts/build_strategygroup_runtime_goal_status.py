@@ -18,8 +18,12 @@ import time
 from typing import Any
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json"
+DEFAULT_CANDIDATE_POOL_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
+)
 
 SOURCE_ARTIFACT_FILES = {
     "watcher_tick": "watcher-tick.json",
@@ -32,7 +36,7 @@ SOURCE_ARTIFACT_FILES = {
     "pilot_status": "strategygroup-runtime-pilot-status.json",
     "live_facts_readiness": "strategy-group-live-facts-readiness.json",
 }
-OPTIONAL_SOURCE_ARTIFACT_KEYS = {"wakeup"}
+OPTIONAL_SOURCE_ARTIFACT_KEYS = {"wakeup", "candidate_pool"}
 
 DANGEROUS_TRUE_KEYS = {
     "exchange_write_called",
@@ -701,6 +705,8 @@ def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str
 
 
 def _has_fresh_signal(source_artifacts: dict[str, dict[str, Any] | None]) -> bool:
+    if _candidate_pool_fresh_row(source_artifacts):
+        return True
     authoritative_names = (
         "latest_summary",
         "post_signal_resume",
@@ -747,6 +753,24 @@ def _has_fresh_signal(source_artifacts: dict[str, dict[str, Any] | None]) -> boo
         _dispatch_artifact_status(source_artifacts.get("resume_dispatch")),
     }
     return bool(statuses & FRESH_SIGNAL_STATUSES)
+
+
+def _candidate_pool_fresh_row(
+    source_artifacts: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    candidate_pool = _artifact_data(source_artifacts.get("candidate_pool"))
+    if candidate_pool.get("status") != "strategy_live_candidate_pool_ready":
+        return {}
+    for key in ("action_time_lane_inputs", "promotion_candidates"):
+        for row in _list(candidate_pool.get(key)):
+            row_dict = _dict(row)
+            if row_dict:
+                return row_dict
+    for row in _list(candidate_pool.get("symbol_readiness_rows")):
+        row_dict = _dict(row)
+        if str(row_dict.get("signal_state") or "") == "fresh":
+            return row_dict
+    return {}
 
 
 def _selected_runtime_instance_ids(artifact: dict[str, Any] | None) -> list[str]:
@@ -1035,6 +1059,18 @@ def _current_artifact_status(
             "fresh signal 已进入 action-time FinalGate 检查点",
             False,
         )
+    candidate_pool_fresh = _candidate_pool_fresh_row(source_artifacts)
+    if candidate_pool_fresh:
+        next_action = str(
+            candidate_pool_fresh.get("next_action")
+            or "refresh_private_action_time_facts_before_finalgate"
+        )
+        return (
+            "fresh_signal_processing",
+            next_action,
+            "Candidate Pool 已选出 fresh action-time lane，继续非执行 action-time 前置链路",
+            False,
+        )
     if chain_statuses & {
         "ready_for_non_executing_prepare",
         "runtime_signal_ready_for_non_executing_prepare",
@@ -1075,11 +1111,17 @@ def build_goal_status_artifact(
     report_dir: Path,
     release_manifest: Path | None = None,
     expected_head: str | None = None,
+    candidate_pool_json: Path | None = None,
 ) -> dict[str, Any]:
     source_artifacts = {
         key: _read_source_artifact(report_dir, key, filename)
         for key, filename in SOURCE_ARTIFACT_FILES.items()
     }
+    source_artifacts["candidate_pool"] = (
+        _read_json(candidate_pool_json)
+        if candidate_pool_json and candidate_pool_json.exists()
+        else None
+    )
     manifest_artifact = _read_json(release_manifest) if release_manifest else None
     deployed_head = _release_head(manifest_artifact)
     expected_head = expected_head or deployed_head
@@ -1270,6 +1312,14 @@ def build_goal_status_artifact(
             "latest_summary_status": _artifact_status(source_artifacts["latest_summary"]),
             "watcher_tick_status": _artifact_status(source_artifacts["watcher_tick"]),
             "post_signal_resume_status": _artifact_status(source_artifacts["post_signal_resume"]),
+            "candidate_pool_status": _artifact_status(source_artifacts["candidate_pool"]),
+            "candidate_pool_action_time_lane_input_count": len(
+                _list(
+                    _artifact_data(source_artifacts["candidate_pool"]).get(
+                        "action_time_lane_inputs"
+                    )
+                )
+            ),
             "resume_dispatch_status": _artifact_status(source_artifacts["resume_dispatch"]),
             "resume_dispatch_action": _artifact_data(source_artifacts["resume_dispatch"]).get(
                 "dispatch_action"
@@ -1349,6 +1399,11 @@ def main() -> int:
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--release-manifest", type=Path)
     parser.add_argument("--expected-head")
+    parser.add_argument(
+        "--candidate-pool-json",
+        type=Path,
+        default=DEFAULT_CANDIDATE_POOL_JSON,
+    )
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -1363,6 +1418,7 @@ def main() -> int:
         report_dir=report_dir,
         release_manifest=args.release_manifest,
         expected_head=args.expected_head,
+        candidate_pool_json=args.candidate_pool_json,
     )
     _write_json(output_json, artifact)
     if args.json:

@@ -713,6 +713,49 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
 
 
+def test_goal_status_uses_candidate_pool_action_time_lane_as_fresh_signal(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    candidate_pool = tmp_path / "candidate-pool.json"
+    _write(
+        candidate_pool,
+        {
+            "status": "strategy_live_candidate_pool_ready",
+            "action_time_lane_inputs": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "next_action": "refresh_private_action_time_facts_before_finalgate",
+                    "signal_state": "fresh",
+                }
+            ],
+        },
+    )
+
+    packet = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+        candidate_pool_json=candidate_pool,
+    )
+
+    assert packet["status"] == "fresh_signal_processing"
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["non_authority_checkpoint"] == (
+        "refresh_private_action_time_facts_before_finalgate"
+    )
+    assert packet["evidence"]["candidate_pool_status"] == (
+        "strategy_live_candidate_pool_ready"
+    )
+    assert packet["evidence"]["candidate_pool_action_time_lane_input_count"] == 1
+    assert packet["blockers"] == []
+    assert packet["safety_invariants"]["calls_finalgate"] is False
+    assert packet["safety_invariants"]["calls_operation_layer"] is False
+    assert packet["safety_invariants"]["calls_exchange_write"] is False
+
+
 def test_goal_status_accepts_fresh_signal_inside_candidate_universe_coverage(
     tmp_path: Path,
 ) -> None:

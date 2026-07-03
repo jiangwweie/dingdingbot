@@ -146,6 +146,14 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "validate_daily_live_enablement_table.py" in text
     assert "build_single_lane_task_packet.py" in text
     assert "validate_single_lane_task_packet.py" in text
+    assert "build_strategygroup_runtime_goal_status.py" in text
+    assert (
+        "--candidate-pool-json output/runtime-monitor/latest-strategy-live-candidate-pool.json"
+        in text
+    )
+    assert text.rindex("build_strategygroup_runtime_goal_status.py") > text.rindex(
+        "validate_single_lane_task_packet.py"
+    )
     assert "refresh_strategygroup_runtime_product_state_artifacts.py" in text
     assert "--collect-live-facts-before-refresh" in text
     assert "--live-facts-output" in text
