@@ -868,8 +868,13 @@ def _watcher_operational_liveness_blockers(
         "conflicting_open_order",
     )
     blockers: list[str] = []
+    watcher_status_evidence_status = str(
+        _artifact_data(artifact).get("watcher_status_evidence_status") or ""
+    )
     for blocker in _non_waiting_artifact_blockers(artifact):
         text = blocker.lower()
+        if "loop_command_failed" in text and watcher_status_evidence_status == "ok":
+            continue
         if any(fragment in text for fragment in ignored_chain_fragments):
             continue
         if any(fragment in text for fragment in operational_fragments):
@@ -893,6 +898,8 @@ def _watcher_liveness_artifact_blockers(
         )
         if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
             if status == "watcher_attention" and not operational_blockers:
+                continue
+            if status == "owner_notified" and not operational_blockers:
                 continue
             if status not in {"blocked", "owner_attention_pending"}:
                 blockers.append(f"{name}:unexpected_status:{status}")

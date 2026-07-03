@@ -853,6 +853,51 @@ def test_goal_status_does_not_treat_chain_blockers_as_watcher_liveness(
     ]
 
 
+def test_goal_status_ignores_loop_command_failed_when_status_evidence_is_ok(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_artifacts(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "owner_notified",
+            "watcher_status_evidence_status": "ok",
+            "blockers": [
+                "loop_command_failed:2",
+                "runtime-old:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}",
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "blocked",
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "blockers": [
+                "runtime-old:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}",
+            ],
+        },
+    )
+
+    packet = build_goal_status_artifact(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["checks"]["watcher_liveness_healthy"] is True
+    assert packet["evidence"]["watcher_liveness_blockers"] == []
+    assert "watcher_tick:loop_command_failed:2" not in packet["blockers"]
+    assert "watcher_tick:unexpected_status:owner_notified" not in packet["blockers"]
+
+
 def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
     tmp_path: Path,
 ) -> None:
