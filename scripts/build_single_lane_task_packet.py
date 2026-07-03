@@ -95,6 +95,12 @@ AUTHORITY_BOUNDARY = (
     "single_lane_task_packet_is_non_executing; "
     "no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change"
 )
+MARKET_WAIT_BLOCKERS = {
+    "computed_not_satisfied",
+    "market_wait_validated",
+}
+READY_STATUS = "single_lane_task_packet_ready"
+MARKET_WAIT_STATUS = "single_lane_task_packet_not_applicable_market_wait"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -147,7 +153,12 @@ def build_single_lane_task_packet(
     first_blocker = str(row.get("first_blocker") or "")
     chain_position = str(row.get("chain_position") or "")
     next_action = str(row.get("next_engineering_action") or "")
-    task_id = _task_id(strategy_group_id, first_blocker)
+    market_wait = first_blocker in MARKET_WAIT_BLOCKERS
+    task_id = (
+        _market_wait_packet_id(strategy_group_id, first_blocker)
+        if market_wait
+        else _task_id(strategy_group_id, first_blocker)
+    )
     allowed_files = _unique(
         BASE_ALLOWED_FILES + CHAIN_ALLOWED_FILES.get(chain_position, [])
     )
@@ -158,7 +169,7 @@ def build_single_lane_task_packet(
     )
     return {
         "schema": SCHEMA,
-        "status": "single_lane_task_packet_ready",
+        "status": MARKET_WAIT_STATUS if market_wait else READY_STATUS,
         "generated_at_utc": generated,
         "source": source,
         "source_rank": 1,
@@ -173,15 +184,31 @@ def build_single_lane_task_packet(
         "chain_position": chain_position,
         "first_blocker": first_blocker,
         "evidence": str(row.get("first_blocker_evidence") or ""),
-        "expected_state_change": expected_change,
+        "expected_state_change": (
+            _market_wait_expected_state_change(
+                strategy_group_id=strategy_group_id,
+                symbol=symbol,
+                first_blocker=first_blocker,
+            )
+            if market_wait
+            else expected_change
+        ),
         "next_action": next_action,
         "allowed_files": allowed_files,
         "forbidden_files": FORBIDDEN_FILES,
         "stop_condition": str(row.get("stop_condition") or ""),
         "tests": _tests_for(chain_position),
         "done_when": (
-            f"{strategy_group_id}/{symbol} no longer has {first_blocker}, "
-            "or the Daily Table reclassifies the same lane to a more precise first blocker."
+            _market_wait_done_when(
+                strategy_group_id=strategy_group_id,
+                symbol=symbol,
+                first_blocker=first_blocker,
+            )
+            if market_wait
+            else (
+                f"{strategy_group_id}/{symbol} no longer has {first_blocker}, "
+                "or the Daily Table reclassifies the same lane to a more precise first blocker."
+            )
         ),
         "authority_boundary": AUTHORITY_BOUNDARY,
         "source_authority_boundary": str(
@@ -216,6 +243,14 @@ def _task_id(strategy_group_id: str, first_blocker: str) -> str:
     return f"P0-{strategy}-{blocker}-CLOSURE"
 
 
+def _market_wait_packet_id(strategy_group_id: str, first_blocker: str) -> str:
+    strategy = re.sub(r"[^A-Z0-9]+", "-", strategy_group_id.upper()).strip("-")
+    blocker = re.sub(r"[^A-Z0-9]+", "-", first_blocker.upper()).strip("-")
+    if not strategy or not blocker:
+        return "SINGLE-LANE-MARKET-WAIT-NOT-APPLICABLE"
+    return f"OBSERVE-{strategy}-{blocker}"
+
+
 def _expected_state_change(
     *,
     strategy_group_id: str,
@@ -226,6 +261,30 @@ def _expected_state_change(
         f"{strategy_group_id}/{symbol} first_blocker changes from "
         f"{first_blocker} to the next precise blocker, market_wait_validated, "
         "or lane exit under the WIP stop rule."
+    )
+
+
+def _market_wait_expected_state_change(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    first_blocker: str,
+) -> str:
+    return (
+        f"{strategy_group_id}/{symbol} remains under observation while "
+        f"{first_blocker} is market-owned; no engineering closure task is created."
+    )
+
+
+def _market_wait_done_when(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    first_blocker: str,
+) -> str:
+    return (
+        f"{strategy_group_id}/{symbol} exits market wait when detector facts change, "
+        f"or Daily Table reclassifies {first_blocker} to a non-market first blocker."
     )
 
 
@@ -270,6 +329,7 @@ def _markdown(artifact: dict[str, Any]) -> str:
     lines = [
         "## Single Lane Task Packet",
         "",
+        f"- Status: `{artifact.get('status')}`",
         f"- Task ID: `{artifact.get('task_id')}`",
         (
             "- Active lane: "

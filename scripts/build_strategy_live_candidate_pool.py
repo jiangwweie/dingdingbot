@@ -1699,16 +1699,16 @@ def _action_time_readiness(action_row: dict[str, Any]) -> dict[str, Any]:
     path_ready = action_row.get("action_time_path_ready") is True
     public_ready = readiness.get("public_facts_ready") is True
     private_ready = _action_time_private_facts_ready(action_row)
+    if not public_ready:
+        status = "blocked_public_facts"
+    elif path_ready and private_ready:
+        status = "ready_for_finalgate_preflight"
+    elif path_ready:
+        status = "ready_for_private_action_time_facts"
+    else:
+        status = "blocked_action_time_rehearsal"
     return {
-        "status": (
-            "ready_for_finalgate_preflight"
-            if path_ready and private_ready
-            else "ready_for_private_action_time_facts"
-            if path_ready
-            else "blocked_public_facts"
-            if not public_ready
-            else "blocked_action_time_rehearsal"
-        ),
+        "status": status,
         "action_time_path_ready": path_ready,
         "public_facts_ready": public_ready,
         "private_action_time_facts_ready": private_ready,

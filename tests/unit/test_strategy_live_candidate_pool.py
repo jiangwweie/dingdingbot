@@ -1819,6 +1819,45 @@ def test_candidate_pool_validator_rejects_authority_leakage():
     assert any("calls_exchange_write" in error for error in errors)
 
 
+def test_action_time_readiness_requires_public_facts_for_finalgate_preflight():
+    readiness = _builder()._action_time_readiness(
+        {
+            "action_time_path_ready": True,
+            "required_facts_readiness": {
+                "public_facts_ready": False,
+                "private_action_time_facts_ready": True,
+                "active_position_or_open_order_clear": True,
+                "action_time_available_balance": True,
+            },
+        }
+    )
+
+    assert readiness["status"] == "blocked_public_facts"
+    assert readiness["public_facts_ready"] is False
+    assert readiness["private_action_time_facts_ready"] is True
+
+
+def test_candidate_pool_validator_rejects_preflight_ready_without_public_facts():
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=_tradeability(),
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        single_lane_task_packet=_single_lane(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    artifact["candidate_rows"][0]["action_time_readiness"] = {
+        "status": "ready_for_finalgate_preflight",
+        "action_time_path_ready": True,
+        "public_facts_ready": False,
+        "private_action_time_facts_ready": True,
+    }
+
+    errors = _validator().validate_strategy_live_candidate_pool(artifact)
+
+    assert any("public_facts_ready" in error for error in errors)
+
+
 def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
     daily = tmp_path / "daily.json"
     tradeability = tmp_path / "tradeability.json"

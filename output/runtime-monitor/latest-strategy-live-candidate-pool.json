@@ -24,7 +24,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "reclaim / pullback recovery long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 2,
+      "daily_rank": 1,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -49,7 +49,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "selective leader continuation long candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 3,
+      "daily_rank": 2,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:MPG-001/OPUSDT first_blocker=computed_not_satisfied source_blocker_class=scope_not_attached watcher_tick_present=False",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -74,7 +74,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "relative strength / cross-asset candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 4,
+      "daily_rank": 3,
       "evidence": "mi_trial_admission_decision:symbol_evidence:MI-001/AVAXUSDT first_blocker=computed_not_satisfied",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -99,7 +99,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "session / flow confirmation candidate",
       "candidate_status": "candidate_market_condition_wait",
-      "daily_rank": 5,
+      "daily_rank": 4,
       "evidence": "output/runtime-monitor/latest-replay-live-parity-audit.json:SOR-001/ETHUSDT first_blocker=computed_not_satisfied watcher_tick_present=True",
       "exit_condition": "exit if repeated detector windows keep failing the same fact matrix",
       "first_blocker": "computed_not_satisfied",
@@ -124,7 +124,7 @@
       "blocker_owner": "market",
       "candidate_positioning": "conditional failed-rebound short candidate",
       "candidate_status": "candidate_conditional_observation",
-      "daily_rank": 1,
+      "daily_rank": 5,
       "evidence": "brf2_runtime_signal_facts:per_symbol_facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
       "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
       "first_blocker": "computed_not_satisfied",
@@ -185,7 +185,7 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T15:37:32.343666+00:00",
+  "generated_at_utc": "2026-07-03T05:55:48.033344+00:00",
   "no_trade_audit": {
     "blocker_counts": {
       "computed_not_satisfied": 18

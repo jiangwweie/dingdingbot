@@ -124,6 +124,41 @@ def test_single_lane_packet_validator_rejects_exchange_authority():
     assert any("calls_exchange_write" in error for error in errors)
 
 
+def test_single_lane_packet_does_not_create_closure_task_for_market_blocker():
+    table = _daily_table()
+    rank_one = table["rows"][0]
+    rank_one["first_blocker"] = "computed_not_satisfied"
+    rank_one["next_engineering_action"] = "continue_observation_with_failed_fact_matrix"
+
+    packet = _builder().build_single_lane_task_packet(
+        daily_table=table,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    assert packet["status"] == "single_lane_task_packet_not_applicable_market_wait"
+    assert packet["task_id"] == "OBSERVE-MPG-001-COMPUTED-NOT-SATISFIED"
+    assert not packet["task_id"].startswith("P0-")
+    assert not packet["task_id"].endswith("-CLOSURE")
+    assert "no engineering closure task is created" in packet["expected_state_change"]
+    assert _validator().validate_single_lane_task_packet(packet) == []
+
+
+def test_single_lane_packet_validator_rejects_market_blocker_closure_task():
+    table = _daily_table()
+    rank_one = table["rows"][0]
+    rank_one["first_blocker"] = "market_wait_validated"
+    packet = _builder().build_single_lane_task_packet(
+        daily_table=table,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+    packet["status"] = "single_lane_task_packet_ready"
+    packet["task_id"] = "P0-MPG-001-MARKET-WAIT-VALIDATED-CLOSURE"
+
+    errors = _validator().validate_single_lane_task_packet(packet)
+
+    assert any("market blocker" in error for error in errors)
+
+
 def test_single_lane_packet_cli_and_validator_cli_round_trip(tmp_path: Path):
     daily_table = tmp_path / "daily.json"
     packet_json = tmp_path / "packet.json"

@@ -155,6 +155,22 @@ def _validate_candidate_row(index: int, row: dict[str, Any]) -> list[str]:
     readiness = _as_dict(row.get("action_time_readiness"))
     if not readiness.get("status"):
         errors.append(f"{prefix}.action_time_readiness.status is required")
+    if readiness.get("status") == "ready_for_finalgate_preflight":
+        if readiness.get("action_time_path_ready") is not True:
+            errors.append(
+                f"{prefix}.action_time_readiness.action_time_path_ready "
+                "must be true for ready_for_finalgate_preflight"
+            )
+        if readiness.get("public_facts_ready") is not True:
+            errors.append(
+                f"{prefix}.action_time_readiness.public_facts_ready "
+                "must be true for ready_for_finalgate_preflight"
+            )
+        if readiness.get("private_action_time_facts_ready") is not True:
+            errors.append(
+                f"{prefix}.action_time_readiness.private_action_time_facts_ready "
+                "must be true for ready_for_finalgate_preflight"
+            )
     if row.get("authority_boundary"):
         boundary = str(row.get("authority_boundary"))
         if "no_finalgate" not in boundary or "no_operation_layer" not in boundary:

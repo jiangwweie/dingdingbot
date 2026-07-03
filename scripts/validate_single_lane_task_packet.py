@@ -17,6 +17,9 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.build_daily_live_enablement_table import CONTRACT_BLOCKER_CLASSES  # noqa: E402
 from scripts.build_single_lane_task_packet import (  # noqa: E402
     AUTHORITY_BOUNDARY,
+    MARKET_WAIT_BLOCKERS,
+    MARKET_WAIT_STATUS,
+    READY_STATUS,
     SCHEMA,
 )
 
@@ -67,8 +70,11 @@ def validate_single_lane_task_packet(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if artifact.get("schema") != SCHEMA:
         errors.append(f"schema must be {SCHEMA}")
-    if artifact.get("status") != "single_lane_task_packet_ready":
-        errors.append("status must be single_lane_task_packet_ready")
+    status = str(artifact.get("status") or "")
+    if status not in {READY_STATUS, MARKET_WAIT_STATUS}:
+        errors.append(
+            f"status must be {READY_STATUS} or {MARKET_WAIT_STATUS}"
+        )
     if artifact.get("source_rank") != 1:
         errors.append("source_rank must be 1")
     if not str(artifact.get("source") or ""):
@@ -95,6 +101,14 @@ def validate_single_lane_task_packet(artifact: dict[str, Any]) -> list[str]:
     blocker = str(artifact.get("first_blocker") or "")
     if blocker not in CONTRACT_BLOCKER_CLASSES:
         errors.append("first_blocker must be a contract blocker")
+    task_id = str(artifact.get("task_id") or "")
+    if blocker in MARKET_WAIT_BLOCKERS:
+        if status != MARKET_WAIT_STATUS:
+            errors.append("market blocker must use not_applicable_market_wait status")
+        if task_id.startswith("P0-") or task_id.endswith("-CLOSURE"):
+            errors.append("market blocker must not generate a P0 closure task")
+    elif status != READY_STATUS:
+        errors.append("non-market blocker must use single_lane_task_packet_ready")
     if artifact.get("authority_boundary") != AUTHORITY_BOUNDARY:
         errors.append("authority_boundary is invalid")
     if artifact.get("owner_action_required") not in {"yes", "no"}:

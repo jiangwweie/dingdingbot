@@ -1,11 +1,12 @@
 ## Single Lane Task Packet
 
-- Task ID: `P0-CPM-RO-001-COMPUTED-NOT-SATISFIED-CLOSURE`
+- Status: `single_lane_task_packet_not_applicable_market_wait`
+- Task ID: `OBSERVE-CPM-RO-001-COMPUTED-NOT-SATISFIED`
 - Active lane: `CPM-RO-001 / ETHUSDT / long`
 - Chain position: `replay_live_parity`
 - First blocker: `computed_not_satisfied`
 - Evidence: `output/runtime-monitor/latest-strategy-live-candidate-pool.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope`
-- Expected state change: `CPM-RO-001/ETHUSDT first_blocker changes from computed_not_satisfied to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.`
+- Expected state change: `CPM-RO-001/ETHUSDT remains under observation while computed_not_satisfied is market-owned; no engineering closure task is created.`
 - Next action: `continue_observation_with_failed_fact_matrix`
 - Stop condition: `blocker moves, repeats through stop review, or symbol exits candidate universe`
 - Authority boundary: `single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change`
@@ -44,4 +45,4 @@
 
 ### Done When
 
-`CPM-RO-001/ETHUSDT no longer has computed_not_satisfied, or the Daily Table reclassifies the same lane to a more precise first blocker.`
+`CPM-RO-001/ETHUSDT exits market wait when detector facts change, or Daily Table reclassifies computed_not_satisfied to a non-market first blocker.`

@@ -1,7 +1,7 @@
 # Daily Live Enablement Table
 
 - Source JSON: `/Users/jiangwei/Documents/final/output/runtime-monitor/latest-daily-live-enablement-table.json`
-- Generated: `2026-07-03T05:55:48.033344+00:00`
+- Generated: `2026-07-03T06:16:57.022103+00:00`
 - Rank 1 lane: `CPM-RO-001:ETHUSDT`
 
 | Rank | StrategyGroup | Symbol | Stage | First blocker | Owner action | Next action | Stop condition |
