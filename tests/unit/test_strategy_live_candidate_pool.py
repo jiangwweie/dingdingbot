@@ -263,7 +263,7 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
     assert artifact["schema"] == "brc.strategy_live_candidate_pool.v1"
     assert artifact["status"] == "strategy_live_candidate_pool_ready"
     assert artifact["summary"]["candidate_count"] == 5
-    assert artifact["summary"]["symbol_readiness_count"] == 18
+    assert artifact["summary"]["symbol_readiness_count"] == 36
     assert artifact["summary"]["deploy_ready"] is False
     assert "rank_1_lane" not in artifact["summary"]
     assert "rank_1_task_id" not in artifact["summary"]
@@ -436,11 +436,11 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
     )
 
     rows = {
-        (row["strategy_group_id"], row["symbol"]): row
+        (row["strategy_group_id"], row["symbol"], row["side"]): row
         for row in artifact["symbol_readiness_rows"]
     }
-    op = rows[("MPG-001", "OPUSDT")]
-    sol = rows[("MPG-001", "SOLUSDT")]
+    op = rows[("MPG-001", "OPUSDT", "long")]
+    sol = rows[("MPG-001", "SOLUSDT", "long")]
     assert op["first_blocker"] == "detector_not_attached"
     assert op["evidence_ref"] == "default_candidate_universe:MPG-001/OPUSDT"
     assert op["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
@@ -526,10 +526,17 @@ def test_candidate_pool_prefers_computed_failed_facts_over_missing_watcher_tick(
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-op"],
                     "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],
@@ -1074,19 +1081,33 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
                 {
                     "strategy_group_id": "CPM-RO-001",
                     "symbol": "SOLUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-cpm-sol"],
                     "selected_runtime_instance_ids": ["runtime-cpm-sol"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-cpm-sol-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 },
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-op"],
                     "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 },
             ],
@@ -1127,6 +1148,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         for row in artifact["symbol_readiness_rows"]
         if (row["strategy_group_id"], row["symbol"])
         in {("CPM-RO-001", "SOLUSDT"), ("MPG-001", "OPUSDT")}
+        and row["side"] == "long"
     ]
     assert {row["first_blocker"] for row in selected_rows} == {
         "action_time_preflight_ready"
@@ -1198,10 +1220,17 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
                 {
                     "strategy_group_id": "BRF2-001",
                     "symbol": "BTCUSDT",
+                    "side": "short",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-brf2-btc"],
                     "selected_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-brf2-btc-short",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],
@@ -1221,7 +1250,9 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
     row = next(
         item
         for item in artifact["symbol_readiness_rows"]
-        if item["strategy_group_id"] == "BRF2-001" and item["symbol"] == "BTCUSDT"
+        if item["strategy_group_id"] == "BRF2-001"
+        and item["symbol"] == "BTCUSDT"
+        and item["side"] == "short"
     )
     assert row["scope_state"] == "conditional_action_time_rehearsal_allowed"
     assert row["owner_authorization"]["live_submit_allowed"] == "conditional_hard_gated"
@@ -1271,10 +1302,17 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
                 {
                     "strategy_group_id": "BRF2-001",
                     "symbol": "BTCUSDT",
+                    "side": "short",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-brf2-btc"],
                     "selected_runtime_instance_ids": ["runtime-brf2-btc"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-brf2-btc-short",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],
@@ -1339,10 +1377,17 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-op"],
                     "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],
@@ -1439,10 +1484,17 @@ def test_candidate_pool_blocks_action_time_when_active_position_resolution_neede
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-op"],
                     "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],
@@ -1807,10 +1859,17 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-op"],
                     "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
                     "next_action": "continue_pretrade_observation",
                 }
             ],

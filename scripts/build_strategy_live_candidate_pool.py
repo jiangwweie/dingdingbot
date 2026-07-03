@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -103,6 +104,9 @@ STRATEGY_SIDE = {
     "SOR-001": "long",
     "BRF2-001": "short",
 }
+DEFAULT_SIDE_SCOPE = {
+    strategy_group_id: ("long", "short") for strategy_group_id in WIP_LANES
+}
 ACTION_TIME_BLOCKERS = {
     "private_action_time_facts_required",
     "fresh_mpg_signal_or_private_action_time_facts",
@@ -138,6 +142,7 @@ ACTION_TIME_INPUT_BLOCKERS = {
     "watcher_tick_missing",
     "scope_not_attached",
     "policy_scope_missing",
+    "runtime_profile_scope_missing",
     "hard_safety_stop",
     "replay_live_rule_mismatch",
 }
@@ -274,6 +279,10 @@ def build_strategy_live_candidate_pool(
         or str(daily_table.get("generated_at_utc") or "")
         or datetime.now(timezone.utc).isoformat()
     )
+    action_time_boundary = {
+        **action_time_boundary,
+        "generated_at_utc": str(action_time_boundary.get("generated_at_utc") or generated),
+    }
     source_validation = _source_validation(
         daily_table=daily_table,
         tradeability=tradeability,
@@ -381,6 +390,16 @@ def build_strategy_live_candidate_pool(
             "active_strategy_groups": list(WIP_LANES),
             "candidate_symbols_per_strategy_group": {
                 strategy_group_id: len(
+                    {
+                        row["symbol"]
+                        for row in symbol_readiness_rows
+                        if row["strategy_group_id"] == strategy_group_id
+                    }
+                )
+                for strategy_group_id in WIP_LANES
+            },
+            "candidate_lanes_per_strategy_group": {
+                strategy_group_id: len(
                     [
                         row
                         for row in symbol_readiness_rows
@@ -394,6 +413,7 @@ def build_strategy_live_candidate_pool(
             ),
         },
         "candidate_universe": _candidate_universe(symbol_readiness_rows),
+        "candidate_lane_universe": _candidate_lane_universe(symbol_readiness_rows),
         "server_runtime_coverage": _runtime_coverage(runtime_active_monitor),
         "candidate_rows": candidate_rows,
         "symbol_readiness_rows": symbol_readiness_rows,
@@ -508,6 +528,11 @@ def _symbol_readiness_rows(
     for candidate in candidate_rows:
         strategy_group_id = str(candidate.get("strategy_group_id") or "")
         daily_row = daily_rows.get(strategy_group_id, {})
+        candidate_sides = _candidate_side_scope(
+            strategy_group_id,
+            owner_pretrade_authorization,
+            fallback=str(candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")),
+        )
         symbols = _candidate_symbols(
             strategy_group_id=strategy_group_id,
             selected_symbol=str(candidate.get("selected_symbol") or ""),
@@ -515,9 +540,6 @@ def _symbol_readiness_rows(
             action_rows=action_rows,
         )
         for symbol in symbols:
-            candidate_side = str(
-                candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")
-            )
             parity_row = _matching_symbol_row(parity_rows, strategy_group_id, symbol)
             if strategy_group_id == "SOR-001":
                 parity_row = _merge_symbol_fact_row(
@@ -535,31 +557,41 @@ def _symbol_readiness_rows(
                     brf2_facts.get(symbol, {}),
                 )
             action_row = _matching_symbol_row(action_rows, strategy_group_id, symbol)
-            runtime_coverage_row = _matching_symbol_row(
-                runtime_coverage_rows,
-                strategy_group_id,
-                symbol,
-                candidate_side,
-            ) or _missing_runtime_coverage_row(strategy_group_id, symbol, candidate_side)
-            runtime_coverage_row = _normalize_runtime_coverage_row(
-                runtime_coverage_row,
-                strategy_group_id,
-                symbol,
-                candidate_side,
-            )
-            result.append(
-                _symbol_readiness_row(
-                    strategy_group_id=strategy_group_id,
-                    symbol=symbol,
-                    candidate=candidate,
-                    daily_row=daily_row,
-                    tradeability_row=tradeability_rows.get(strategy_group_id, {}),
-                    parity_row=parity_row,
-                    action_row=action_row,
-                    runtime_coverage_row=runtime_coverage_row,
-                    owner_pretrade_authorization=owner_pretrade_authorization,
+            action_row = {
+                **action_row,
+                "_artifact_generated_at_utc": str(
+                    action_time_boundary.get("generated_at_utc") or ""
+                ),
+            }
+            for candidate_side in candidate_sides:
+                runtime_coverage_row = _matching_symbol_row(
+                    runtime_coverage_rows,
+                    strategy_group_id,
+                    symbol,
+                    candidate_side,
+                ) or _missing_runtime_coverage_row(
+                    strategy_group_id, symbol, candidate_side
                 )
-            )
+                runtime_coverage_row = _normalize_runtime_coverage_row(
+                    runtime_coverage_row,
+                    strategy_group_id,
+                    symbol,
+                    candidate_side,
+                )
+                result.append(
+                    _symbol_readiness_row(
+                        strategy_group_id=strategy_group_id,
+                        symbol=symbol,
+                        side=candidate_side,
+                        candidate=candidate,
+                        daily_row=daily_row,
+                        tradeability_row=tradeability_rows.get(strategy_group_id, {}),
+                        parity_row=parity_row,
+                        action_row=action_row,
+                        runtime_coverage_row=runtime_coverage_row,
+                        owner_pretrade_authorization=owner_pretrade_authorization,
+                    )
+                )
     return result
 
 
@@ -841,6 +873,27 @@ def _symbol_authorized(strategy_group_id: str, symbol: str) -> bool:
     return symbol in authorized
 
 
+def _candidate_side_scope(
+    strategy_group_id: str,
+    authorization: dict[str, Any],
+    *,
+    fallback: str,
+) -> tuple[str, ...]:
+    row = _as_dict(_as_dict(authorization.get("strategy_groups")).get(strategy_group_id))
+    sides = [
+        str(item).strip().lower()
+        for item in row.get("side_scope") or []
+        if str(item or "").strip()
+    ]
+    if not sides:
+        sides = [str(fallback or STRATEGY_SIDE.get(strategy_group_id) or "unknown")]
+    allowed: list[str] = []
+    for side in sides:
+        if side in {"long", "short"} and side not in allowed:
+            allowed.append(side)
+    return tuple(allowed or ("unknown",))
+
+
 def _owner_authorization_summary(
     authorization: dict[str, Any],
 ) -> dict[str, Any]:
@@ -910,6 +963,10 @@ def _owner_authorization_valid(authorization: dict[str, Any]) -> bool:
             symbols
         ):
             return False
+        if set(str(item) for item in row.get("side_scope") or []) != set(
+            DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
+        ):
+            return False
     return True
 
 
@@ -917,6 +974,7 @@ def _symbol_owner_authorization(
     authorization: dict[str, Any],
     strategy_group_id: str,
     symbol: str,
+    side: str,
 ) -> dict[str, Any]:
     if not _owner_authorization_valid(authorization):
         return {
@@ -924,29 +982,37 @@ def _symbol_owner_authorization(
             "action_time_rehearsal_allowed": False,
             "live_submit_allowed": "none",
             "real_submit_required_gates": [],
+            "side_scope": [],
             "authority_boundary": "owner_pretrade_authorization_missing_or_invalid",
         }
     strategy_groups = _as_dict(authorization.get("strategy_groups"))
     row = _as_dict(strategy_groups.get(strategy_group_id))
     symbols = {str(item) for item in row.get("candidate_symbols") or []}
+    sides = {str(item) for item in row.get("side_scope") or []}
     symbol_allowed = symbol in symbols and _symbol_authorized(strategy_group_id, symbol)
+    side_allowed = side in sides
     return {
         "pretrade_candidate_allowed": bool(
-            symbol_allowed and row.get("pretrade_candidate_allowed") is True
+            symbol_allowed
+            and side_allowed
+            and row.get("pretrade_candidate_allowed") is True
         ),
         "action_time_rehearsal_allowed": bool(
-            symbol_allowed and row.get("action_time_rehearsal_allowed") is True
+            symbol_allowed
+            and side_allowed
+            and row.get("action_time_rehearsal_allowed") is True
         ),
         "live_submit_allowed": (
             str(row.get("live_submit_allowed") or "none")
-            if symbol_allowed
+            if symbol_allowed and side_allowed
             else "none"
         ),
         "real_submit_required_gates": [
             str(item) for item in row.get("real_submit_required_gates") or []
         ]
-        if symbol_allowed
+        if symbol_allowed and side_allowed
         else [],
+        "side_scope": sorted(sides),
         "authority_boundary": str(authorization.get("authority_boundary") or ""),
     }
 
@@ -963,9 +1029,14 @@ def _matching_symbol_row(
             str(row.get("strategy_group_id") or "") == strategy_group_id
             and str(row.get("symbol") or "") == symbol
         ):
-            if side is None or str(row.get("side") or side) == side:
+            row_side = str(row.get("side") or row.get("expected_side") or "")
+            if side is None:
                 return row
-            if not fallback:
+            if row_side == side:
+                return row
+            if not row_side and side == STRATEGY_SIDE.get(strategy_group_id):
+                return row
+            if row_side and not fallback:
                 fallback = row
     if fallback:
         return fallback
@@ -1038,6 +1109,7 @@ def _symbol_readiness_row(
     *,
     strategy_group_id: str,
     symbol: str,
+    side: str,
     candidate: dict[str, Any],
     daily_row: dict[str, Any],
     tradeability_row: dict[str, Any],
@@ -1046,9 +1118,7 @@ def _symbol_readiness_row(
     runtime_coverage_row: dict[str, Any],
     owner_pretrade_authorization: dict[str, Any],
 ) -> dict[str, Any]:
-    candidate_side = str(
-        candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown")
-    )
+    candidate_side = str(side or candidate.get("side") or STRATEGY_SIDE.get(strategy_group_id, "unknown"))
     runtime_active = _server_runtime_scope_ready(
         runtime_coverage_row,
         strategy_group_id=strategy_group_id,
@@ -1076,6 +1146,7 @@ def _symbol_readiness_row(
     scope_state = _scope_state(
         strategy_group_id=strategy_group_id,
         symbol=symbol,
+        side=candidate_side,
         candidate=candidate,
         daily_row=daily_row,
         tradeability_row=tradeability_row,
@@ -1085,8 +1156,10 @@ def _symbol_readiness_row(
         owner_pretrade_authorization,
         strategy_group_id,
         symbol,
+        candidate_side,
     )
     risk_state = _risk_state(parity_row)
+    runtime_profile_ready = _runtime_profile_ready(runtime_coverage_row)
     action_time_scope_missing = (
         signal_state == "fresh"
         and scope_state in ACTION_TIME_SCOPE_STATES
@@ -1105,6 +1178,8 @@ def _symbol_readiness_row(
         risk_state=risk_state,
         runtime_scope_missing=action_time_scope_missing,
     )
+    if first_blocker == "action_time_preflight_ready" and not runtime_profile_ready:
+        first_blocker = "runtime_profile_scope_missing"
     promotion_state = _promotion_state(
         public_facts_state=public_facts_state,
         signal_state=signal_state,
@@ -1127,6 +1202,7 @@ def _symbol_readiness_row(
         "watcher_state": "fresh" if watcher_present else "missing",
         "public_facts_state": public_facts_state,
         "signal_state": signal_state,
+        "fresh_signal_timestamp_utc": _fresh_signal_timestamp(action_row, parity_row),
         "risk_state": risk_state,
         "scope_state": scope_state,
         "owner_authorization": owner_authorization,
@@ -1144,6 +1220,13 @@ def _symbol_readiness_row(
         ),
         "action_time": _action_time_readiness(action_row),
         "server_runtime_coverage": runtime_coverage_row or {},
+        "lane_fingerprint": _lane_fingerprint(
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=candidate_side,
+            signal_state=signal_state,
+            fresh_signal_timestamp_utc=_fresh_signal_timestamp(action_row, parity_row),
+        ),
         "authority_boundary": AUTHORITY_BOUNDARY,
     }
 
@@ -1201,6 +1284,7 @@ def _scope_state(
     *,
     strategy_group_id: str,
     symbol: str,
+    side: str,
     candidate: dict[str, Any],
     daily_row: dict[str, Any],
     tradeability_row: dict[str, Any],
@@ -1210,6 +1294,7 @@ def _scope_state(
         owner_pretrade_authorization,
         strategy_group_id,
         symbol,
+        side,
     )
     if (
         owner_authorization.get("pretrade_candidate_allowed") is True
@@ -1424,7 +1509,11 @@ def _symbol_evidence_ref(
             f"{strategy_group_id}/{symbol} first_blocker={first_blocker}"
             f"{source_detail} watcher_tick_present={parity_row.get('watcher_tick_present')}"
         )
-    if action_row:
+    if action_row and (
+        action_row.get("strategy_group_id")
+        or action_row.get("first_blocker")
+        or action_row.get("action_time_path_ready") is not None
+    ):
         return (
             "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json:"
             f"{strategy_group_id}/{symbol} first_blocker={action_row.get('first_blocker')}"
@@ -1473,6 +1562,104 @@ def _server_runtime_scope_ready(
     return True
 
 
+def _fresh_signal_timestamp(
+    action_row: dict[str, Any],
+    parity_row: dict[str, Any],
+) -> str:
+    for key in (
+        "event_time_utc",
+        "fresh_signal_time_utc",
+        "latest_candle_close_time_utc",
+    ):
+        value = parity_row.get(key)
+        if str(value or "").strip():
+            return str(value)
+    for key in (
+        "fresh_signal_time_utc",
+        "latest_candle_close_time_utc",
+        "_artifact_generated_at_utc",
+    ):
+        value = action_row.get(key)
+        if str(value or "").strip():
+            return str(value)
+    return ""
+
+
+def _lane_fingerprint(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    signal_state: str,
+    fresh_signal_timestamp_utc: str,
+) -> str:
+    seed = "|".join(
+        [
+            strategy_group_id,
+            symbol,
+            side,
+            signal_state,
+            fresh_signal_timestamp_utc,
+        ]
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+
+
+def _runtime_profile(row: dict[str, Any]) -> dict[str, Any]:
+    coverage = _as_dict(row.get("server_runtime_coverage"))
+    profile = _as_dict(coverage.get("runtime_profile"))
+    max_notional = (
+        profile.get("max_notional")
+        or profile.get("max_notional_usdt")
+        or profile.get("max_notional_per_action_usdt")
+        or coverage.get("max_notional")
+        or coverage.get("max_notional_usdt")
+        or coverage.get("max_notional_per_action_usdt")
+    )
+    target_notional = (
+        profile.get("target_notional_usdt")
+        or profile.get("target_notional")
+        or coverage.get("target_notional_usdt")
+        or coverage.get("target_notional")
+        or max_notional
+    )
+    leverage = (
+        profile.get("leverage")
+        or profile.get("max_leverage")
+        or coverage.get("leverage")
+        or coverage.get("max_leverage")
+    )
+    runtime_profile_id = (
+        profile.get("runtime_profile_id")
+        or profile.get("profile_id")
+        or coverage.get("runtime_profile_id")
+        or coverage.get("profile_id")
+    )
+    return {
+        "runtime_profile_id": str(runtime_profile_id or ""),
+        "target_notional_usdt": str(target_notional or ""),
+        "max_notional": str(max_notional or ""),
+        "leverage": str(leverage or ""),
+        "profile_source": (
+            "server_runtime_coverage"
+            if any([runtime_profile_id, target_notional, max_notional, leverage])
+            else "missing_runtime_profile_boundary"
+        ),
+        "authority_boundary": (
+            "selected_runtime_profile_boundary_only; "
+            "no_live_profile_or_sizing_change"
+        ),
+    }
+
+
+def _runtime_profile_ready(runtime_coverage_row: dict[str, Any]) -> bool:
+    profile = _runtime_profile({"server_runtime_coverage": runtime_coverage_row})
+    return all(
+        str(profile.get(key) or "").strip()
+        for key in ("target_notional_usdt", "max_notional", "leverage")
+    )
+
+
 def _candidate_role(strategy_group_id: str, symbol: str) -> str:
     if symbol == PRIMARY_SYMBOLS.get(strategy_group_id):
         return "primary"
@@ -1487,10 +1674,13 @@ def _symbol_role(strategy_group_id: str, symbol: str) -> int:
 
 def _action_time_lane_input(row: dict[str, Any]) -> dict[str, Any]:
     server_runtime_coverage = _as_dict(row.get("server_runtime_coverage"))
+    runtime_profile = _runtime_profile(row)
     return {
         "strategy_group_id": row["strategy_group_id"],
         "symbol": row["symbol"],
         "side": row["side"],
+        "fresh_signal_timestamp_utc": row.get("fresh_signal_timestamp_utc") or "",
+        "lane_fingerprint": row.get("lane_fingerprint") or "",
         "active_runtime_instance_ids": list(
             server_runtime_coverage.get("active_runtime_instance_ids") or []
         ),
@@ -1498,7 +1688,7 @@ def _action_time_lane_input(row: dict[str, Any]) -> dict[str, Any]:
             server_runtime_coverage.get("selected_runtime_instance_ids") or []
         ),
         "server_runtime_coverage": server_runtime_coverage,
-        "runtime_profile": "selected_profile_required_at_action_time",
+        "runtime_profile": runtime_profile,
         "scope_state": row["scope_state"],
         "owner_authorization": row["owner_authorization"],
         "first_blocker": row["first_blocker"],
@@ -1522,6 +1712,7 @@ def _select_action_time_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None
         key=lambda row: (
             _strategy_priority(str(row.get("strategy_group_id") or "")),
             str(row.get("symbol") or ""),
+            str(row.get("side") or ""),
         ),
     )[0]
 
@@ -1619,6 +1810,23 @@ def _candidate_universe(
     for row in symbol_readiness_rows:
         universe.setdefault(row["strategy_group_id"], []).append(row["symbol"])
     return {key: sorted(set(values)) for key, values in universe.items()}
+
+
+def _candidate_lane_universe(
+    symbol_readiness_rows: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    universe: dict[str, list[dict[str, str]]] = {}
+    for row in symbol_readiness_rows:
+        universe.setdefault(row["strategy_group_id"], []).append(
+            {"symbol": row["symbol"], "side": row["side"]}
+        )
+    return {
+        key: sorted(
+            {f"{item['symbol']}:{item['side']}" for item in values},
+            key=lambda item: tuple(item.split(":", 1)),
+        )
+        for key, values in universe.items()
+    }
 
 
 def _candidate_row(
@@ -1732,6 +1940,7 @@ def _strategy_summary_symbol_row(
             promotion_priority.get(str(row.get("promotion_state") or ""), 9),
             _symbol_role(strategy_group_id, str(row.get("symbol") or "")),
             str(row.get("symbol") or ""),
+            str(row.get("side") or ""),
         ),
     )[0]
 

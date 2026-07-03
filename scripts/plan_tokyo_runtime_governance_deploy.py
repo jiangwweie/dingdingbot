@@ -63,7 +63,7 @@ RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
 RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
 RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
-    "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
 )
 RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf"
@@ -555,7 +555,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     service_dropin_dir = (
         f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
     )
-    service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    service_dropin_path = f"{service_dropin_dir}/90-resume-dispatcher-after-refresh.conf"
     dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
     goal_status_dropin_path = f"{service_dropin_dir}/70-goal-status.conf"
     product_state_dropin_path = f"{service_dropin_dir}/80-product-state-refresh.conf"
@@ -567,6 +567,9 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     )
     stale_product_state_refresh_dropin_path = (
         f"{service_dropin_dir}/50-product-state-refresh.conf"
+    )
+    stale_resume_dispatcher_dropin_path = (
+        f"{service_dropin_dir}/40-resume-dispatcher.conf"
     )
     release_service_path = (
         f"{remote_release_path.rstrip('/')}/"
@@ -624,6 +627,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
         f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_resume_dispatcher_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "

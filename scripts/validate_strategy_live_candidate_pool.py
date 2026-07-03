@@ -23,6 +23,7 @@ from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
     ACTION_TIME_SCOPE_STATES,
     AUTHORITY_BOUNDARY,
     DEFAULT_CANDIDATE_UNIVERSE,
+    DEFAULT_SIDE_SCOPE,
     OWNER_AUTHORIZATION_SCHEMA,
     PLACEHOLDER_SYMBOLS,
     SCHEMA,
@@ -304,12 +305,27 @@ def _validate_pretrade_runtime(
                 "pretrade_runtime candidate symbol count must match authorized "
                 f"universe for {strategy_group_id}"
             )
+    lane_counts = runtime.get("candidate_lanes_per_strategy_group")
+    if not isinstance(lane_counts, dict):
+        errors.append("pretrade_runtime.candidate_lanes_per_strategy_group is required")
+        lane_counts = {}
+    for strategy_group_id in WIP_LANES:
+        count = int(lane_counts.get(strategy_group_id) or 0)
+        expected = len(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())) * len(
+            DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
+        )
+        if count != expected:
+            errors.append(
+                "pretrade_runtime candidate lane count must match authorized "
+                f"universe for {strategy_group_id}"
+            )
     promotion_candidates = _dict_rows(artifact.get("promotion_candidates"))
     action_time_inputs = _dict_rows(artifact.get("action_time_lane_inputs"))
     readiness_by_lane = {
         (
             str(row.get("strategy_group_id") or ""),
             str(row.get("symbol") or ""),
+            str(row.get("side") or ""),
         ): row
         for row in symbol_rows
     }
@@ -318,7 +334,8 @@ def _validate_pretrade_runtime(
     for index, row in enumerate(action_time_inputs):
         strategy_group_id = str(row.get("strategy_group_id") or "")
         symbol = str(row.get("symbol") or "")
-        readiness_row = readiness_by_lane.get((strategy_group_id, symbol), {})
+        side = str(row.get("side") or "")
+        readiness_row = readiness_by_lane.get((strategy_group_id, symbol, side), {})
         if symbol in PLACEHOLDER_SYMBOLS:
             errors.append(
                 f"action_time_lane_inputs[{index}].symbol must be a real authorized symbol"
@@ -388,13 +405,32 @@ def _validate_action_time_input_matches_readiness_row(
         return [f"{prefix} must match a symbol_readiness_rows action_time_lane row"]
     if action_time_input.get("signal_state") != "fresh":
         errors.append(f"{prefix} must report fresh signal_state")
+    if not str(action_time_input.get("fresh_signal_timestamp_utc") or ""):
+        errors.append(f"{prefix}.fresh_signal_timestamp_utc is required")
+    if not str(action_time_input.get("lane_fingerprint") or ""):
+        errors.append(f"{prefix}.lane_fingerprint is required")
     if readiness_row.get("promotion_state") != "action_time_lane":
         errors.append(f"{prefix} must come from a promoted action_time_lane row")
     if readiness_row.get("signal_state") != "fresh":
         errors.append(f"{prefix} must come from a fresh signal readiness row")
-    for key in ("first_blocker", "signal_state", "scope_state", "side"):
+    for key in (
+        "first_blocker",
+        "signal_state",
+        "scope_state",
+        "side",
+        "fresh_signal_timestamp_utc",
+        "lane_fingerprint",
+    ):
         if action_time_input.get(key) != readiness_row.get(key):
             errors.append(f"{prefix}.{key} must match symbol_readiness_rows")
+    runtime_profile = _as_dict(action_time_input.get("runtime_profile"))
+    for key in ("target_notional_usdt", "max_notional", "leverage"):
+        if not str(runtime_profile.get(key) or ""):
+            errors.append(f"{prefix}.runtime_profile.{key} is required")
+    if "no_live_profile_or_sizing_change" not in str(
+        runtime_profile.get("authority_boundary") or ""
+    ):
+        errors.append(f"{prefix}.runtime_profile.authority_boundary is invalid")
     if _as_dict(action_time_input.get("public_facts_state")).get("state") != _as_dict(
         readiness_row.get("public_facts_state")
     ).get("state"):
@@ -413,10 +449,13 @@ def _validate_authorized_candidate_universe(
 ) -> list[str]:
     errors: list[str] = []
     actual: dict[str, set[str]] = {}
+    actual_lanes: dict[str, set[tuple[str, str]]] = {}
     for row in symbol_rows:
         strategy_group_id = str(row.get("strategy_group_id") or "")
         symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "")
         actual.setdefault(strategy_group_id, set()).add(symbol)
+        actual_lanes.setdefault(strategy_group_id, set()).add((symbol, side))
         if symbol in PLACEHOLDER_SYMBOLS:
             errors.append(
                 f"symbol_readiness_rows contains placeholder symbol {symbol}"
@@ -429,6 +468,16 @@ def _validate_authorized_candidate_universe(
                 "symbol_readiness_rows must match authorized universe for "
                 f"{strategy_group_id}: expected={sorted(expected_symbols)} "
                 f"actual={sorted(actual_symbols)}"
+            )
+        expected_lanes = {
+            (symbol, side)
+            for symbol in DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())
+            for side in DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
+        }
+        if actual_lanes.get(strategy_group_id, set()) != expected_lanes:
+            errors.append(
+                "symbol_readiness_rows must match authorized side universe for "
+                f"{strategy_group_id}"
             )
     return errors
 
@@ -495,6 +544,10 @@ def _validate_row_owner_authorization(
             f"{prefix}.owner_authorization.action_time_rehearsal_allowed must be true"
         )
     mode = str(authorization.get("live_submit_allowed") or "")
+    side = str(row.get("side") or "")
+    side_scope = {str(item) for item in authorization.get("side_scope") or []}
+    if side not in side_scope:
+        errors.append(f"{prefix}.owner_authorization.side_scope must include row side")
     gates = {
         str(item)
         for item in authorization.get("real_submit_required_gates") or []

@@ -58,6 +58,9 @@ class LaneSelection:
     strategy_family_version_id: str
     symbol: str
     side: str
+    fresh_signal_timestamp_utc: str
+    lane_fingerprint: str
+    runtime_profile: dict[str, Any]
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -151,6 +154,16 @@ def _select_lane(candidate_pool: dict[str, Any]) -> tuple[LaneSelection | None, 
         blockers.append("action_time_lane_symbol_missing")
     if not side:
         blockers.append("action_time_lane_side_missing")
+    fresh_signal_timestamp_utc = str(lane.get("fresh_signal_timestamp_utc") or "").strip()
+    lane_fingerprint = str(lane.get("lane_fingerprint") or "").strip()
+    if not fresh_signal_timestamp_utc:
+        blockers.append("action_time_lane_fresh_signal_timestamp_missing")
+    if not lane_fingerprint:
+        blockers.append("action_time_lane_fingerprint_missing")
+    runtime_profile = _as_dict(lane.get("runtime_profile"))
+    for key in ("target_notional_usdt", "max_notional", "leverage"):
+        if not str(runtime_profile.get(key) or "").strip():
+            blockers.append(f"runtime_profile_boundary_missing:{key}")
     if blockers:
         return None, blockers
     strategy_family_version_id = _first_text(
@@ -166,6 +179,9 @@ def _select_lane(candidate_pool: dict[str, Any]) -> tuple[LaneSelection | None, 
             strategy_family_version_id=str(strategy_family_version_id),
             symbol=str(symbol),
             side=str(side),
+            fresh_signal_timestamp_utc=fresh_signal_timestamp_utc,
+            lane_fingerprint=lane_fingerprint,
+            runtime_profile=runtime_profile,
         ),
         [],
     )
@@ -189,9 +205,9 @@ def _prepare_args(
         strategy_family_id=selection.strategy_group_id,
         carrier_id=None,
         quantity=None,
-        target_notional_usdt=None,
-        max_notional=None,
-        leverage=None,
+        target_notional_usdt=selection.runtime_profile.get("target_notional_usdt"),
+        max_notional=selection.runtime_profile.get("max_notional"),
+        leverage=selection.runtime_profile.get("leverage"),
         max_attempts=None,
         protection_mode=None,
         review_requirement=None,
@@ -206,7 +222,8 @@ def _prepare_args(
         candidate_id=None,
         context_id=(
             "candidate-pool-action-time-lane:"
-            f"{selection.strategy_group_id}:{selection.symbol}:{selection.side}"
+            f"{selection.strategy_group_id}:{selection.symbol}:{selection.side}:"
+            f"{selection.lane_fingerprint}"
         ),
         owner_operator_id=args.owner_operator_id,
         owner_confirmation_reference=args.owner_confirmation_reference,
@@ -220,6 +237,54 @@ def _prepare_args(
         next_attempt_strategy_family_id=selection.strategy_group_id,
         next_attempt_carrier_id=None,
     )
+
+
+def _load_signal_input_identity(path_value: Any) -> dict[str, str]:
+    path = Path(str(path_value or "")).expanduser()
+    try:
+        payload = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    return {
+        "runtime_instance_id": str(payload.get("runtime_instance_id") or ""),
+        "strategy_group_id": str(
+            payload.get("strategy_group_id")
+            or payload.get("strategy_family_id")
+            or payload.get("family")
+            or ""
+        ),
+        "strategy_family_version_id": str(
+            payload.get("strategy_family_version_id")
+            or payload.get("carrier_id")
+            or ""
+        ),
+        "symbol": str(payload.get("symbol") or payload.get("next_attempt_symbol") or ""),
+        "side": str(payload.get("side") or payload.get("signal_side") or ""),
+    }
+
+
+def _prepare_identity_errors(
+    *,
+    selection: LaneSelection,
+    signal_input_json: Any,
+) -> list[str]:
+    identity = _load_signal_input_identity(signal_input_json)
+    expected = {
+        "strategy_group_id": selection.strategy_group_id,
+        "symbol": selection.symbol,
+        "side": selection.side,
+    }
+    errors: list[str] = []
+    for key, expected_value in expected.items():
+        if identity.get(key) != expected_value:
+            errors.append(f"prepare_artifact_identity_mismatch:{key}")
+    runtime_id = identity.get("runtime_instance_id")
+    if runtime_id and runtime_id != selection.runtime_instance_id:
+        errors.append("prepare_artifact_identity_mismatch:runtime_instance_id")
+    version_id = identity.get("strategy_family_version_id")
+    if version_id and version_id != selection.strategy_family_version_id:
+        errors.append("prepare_artifact_identity_mismatch:strategy_family_version_id")
+    return errors
 
 
 def _ids_from_prepare(prepare_artifact: dict[str, Any]) -> dict[str, Any]:
@@ -261,8 +326,11 @@ def _upsert_runtime_summary(
         "side": selection.side,
         "status": READY_PREPARE_STATUS,
         "signal_state": "fresh",
+        "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "lane_fingerprint": selection.lane_fingerprint,
         "promotion_state": "action_time_lane",
         "first_blocker": READY_BLOCKER,
+        "runtime_profile": selection.runtime_profile,
         "signal_input_json": signal_input_json,
         "prepared_authorization_id": prepared_authorization_id,
         "shadow_candidate_id": shadow_candidate_id,
@@ -357,6 +425,9 @@ def _patch_status_artifacts(
         "strategy_group_id": selection.strategy_group_id,
         "symbol": selection.symbol,
         "side": selection.side,
+        "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "lane_fingerprint": selection.lane_fingerprint,
+        "runtime_profile": selection.runtime_profile,
         "signal_input_json": signal_input_json,
         "shadow_candidate_id": shadow_candidate_id,
         "prepared_authorization_id": prepared_authorization_id,
@@ -457,16 +528,28 @@ def materialize_action_time_lane(
     signal_input_json = _first_text(prepare_artifact.get("signal_input_json"), signal_path)
     prepared_authorization_id = ids["prepared_authorization_id"]
     shadow_candidate_id = ids["shadow_candidate_id"]
+    identity_errors = (
+        _prepare_identity_errors(
+            selection=selection,
+            signal_input_json=signal_input_json,
+        )
+        if signal_input_json
+        else []
+    )
     if (
         prepare_artifact.get("status") != READY_PREPARE_STATUS
         or not signal_input_json
         or not prepared_authorization_id
+        or identity_errors
     ):
         payload = {
             **base,
             "status": "blocked",
-            "blockers": list(prepare_artifact.get("blockers") or [])
-            or ["prepare_artifact_not_ready_for_finalgate_preflight"],
+            "blockers": (
+                list(prepare_artifact.get("blockers") or [])
+                + identity_errors
+                or ["prepare_artifact_not_ready_for_finalgate_preflight"]
+            ),
             "lane": selection.lane,
             "runtime_instance_id": selection.runtime_instance_id,
             "prepare_artifact": prepare_artifact,
@@ -498,6 +581,9 @@ def materialize_action_time_lane(
         "strategy_group_id": selection.strategy_group_id,
         "symbol": selection.symbol,
         "side": selection.side,
+        "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "lane_fingerprint": selection.lane_fingerprint,
+        "runtime_profile": selection.runtime_profile,
         "prepare_artifact": prepare_artifact,
         "status_artifact_status": status_artifact.get("status"),
         "operator_status": operator.get("status"),

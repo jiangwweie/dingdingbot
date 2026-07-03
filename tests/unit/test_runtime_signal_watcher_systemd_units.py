@@ -9,7 +9,7 @@ DROPIN_PATH = (
     / "deploy"
     / "systemd"
     / "brc-runtime-signal-watcher.service.d"
-    / "40-resume-dispatcher.conf"
+    / "90-resume-dispatcher-after-refresh.conf"
 )
 DRY_RUN_AUDIT_DROPIN_PATH = (
     REPO_ROOT
@@ -197,6 +197,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "brc-runtime-monitor.service" in commands
     assert "brc-runtime-monitor.timer" in commands
+    assert "90-resume-dispatcher-after-refresh.conf" in commands
     assert "40-resume-dispatcher.conf" in commands
     assert "60-dry-run-audit-chain.conf" in commands
     assert "70-goal-status.conf" in commands

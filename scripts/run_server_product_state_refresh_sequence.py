@@ -275,8 +275,8 @@ def _refresh_steps(
             ),
             required=False,
         ),
-        RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), "--output-json", str(account)), required=False),
-        RefreshStep("build_action_time_boundary_account", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py", "--account-safe-facts-json", str(account)), required=False),
+        RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), "--output-json", str(account))),
+        RefreshStep("build_action_time_boundary_account", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py", "--account-safe-facts-json", str(account))),
         RefreshStep("build_candidate_pool_after_account", (python, "scripts/build_strategy_live_candidate_pool.py", "--runtime-active-monitor-json", str(status))),
         RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
         RefreshStep(

@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
     AUTHORITY_BOUNDARY,
     DEFAULT_CANDIDATE_UNIVERSE,
+    DEFAULT_SIDE_SCOPE,
 )
 
 
@@ -82,17 +83,24 @@ def validate_runtime_candidate_universe_coverage(
         (
             str(row.get("strategy_group_id") or ""),
             str(row.get("symbol") or ""),
+            str(row.get("side") or row.get("expected_side") or ""),
         ): row
         for row in rows
     }
     row_pairs = set(by_pair)
     for pair in sorted(expected_pairs - row_pairs):
-        errors.append(f"candidate_universe_coverage missing row {pair[0]}/{pair[1]}")
+        errors.append(
+            "candidate_universe_coverage missing row "
+            f"{pair[0]}/{pair[1]}/{pair[2]}"
+        )
     for pair in sorted(row_pairs - expected_pairs):
-        errors.append(f"candidate_universe_coverage unexpected row {pair[0]}/{pair[1]}")
+        errors.append(
+            "candidate_universe_coverage unexpected row "
+            f"{pair[0]}/{pair[1]}/{pair[2]}"
+        )
     for pair in sorted(expected_pairs & row_pairs):
         row = by_pair[pair]
-        prefix = f"candidate_universe_coverage {pair[0]}/{pair[1]}"
+        prefix = f"candidate_universe_coverage {pair[0]}/{pair[1]}/{pair[2]}"
         if row.get("state") != "active_watcher_scope":
             errors.append(f"{prefix} state must be active_watcher_scope")
         if row.get("blocker_class") not in {"", None, "none"}:
@@ -118,11 +126,12 @@ def _coverage(artifact: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _expected_pairs() -> set[tuple[str, str]]:
+def _expected_pairs() -> set[tuple[str, str, str]]:
     return {
-        (strategy_group_id, symbol)
+        (strategy_group_id, symbol, side)
         for strategy_group_id, symbols in DEFAULT_CANDIDATE_UNIVERSE.items()
         for symbol in symbols
+        for side in DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
     }
 
 

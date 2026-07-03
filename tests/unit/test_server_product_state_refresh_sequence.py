@@ -141,3 +141,44 @@ def test_server_product_state_refresh_sequence_fails_closed_on_materializer_fail
     ]
     assert "build_readiness_pack_after_materialization" in skipped_names
     assert "build_goal_status" in skipped_names
+
+
+def test_server_product_state_refresh_sequence_requires_account_safe_facts(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if any(
+            item.endswith("build_runtime_account_safe_facts.py")
+            for item in command
+        ):
+            return module.CommandResult(
+                returncode=1,
+                stdout="",
+                stderr="account facts unavailable",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["blocked_by_required_step"] == "build_account_safe_facts"
+    assert report["summary"]["final_goal_status_attempted"] is False
+    assert calls[-1][1] == "scripts/build_runtime_account_safe_facts.py"
+    skipped_names = [
+        step["name"]
+        for step in report["step_results"]
+        if step["status"] == "skipped_after_required_failure"
+    ]
+    assert "materialize_action_time_lane" in skipped_names
+    assert "build_goal_status" in skipped_names

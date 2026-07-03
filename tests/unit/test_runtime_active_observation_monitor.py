@@ -369,7 +369,7 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
         in packet["warnings"]
     )
     assert packet["candidate_universe_coverage"]["active_matched_row_count"] == 2
-    assert packet["candidate_universe_coverage"]["missing_row_count"] == 1
+    assert packet["candidate_universe_coverage"]["missing_row_count"] == 4
 
 
 def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
@@ -430,15 +430,15 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
 
     coverage = packet["candidate_universe_coverage"]
     rows = {
-        (row["strategy_group_id"], row["symbol"]): row
+        (row["strategy_group_id"], row["symbol"], row["side"]): row
         for row in coverage["rows"]
     }
     assert coverage["status"] == "incomplete"
-    assert coverage["expected_row_count"] == 4
+    assert coverage["expected_row_count"] == 8
     assert coverage["active_matched_row_count"] == 2
-    assert rows[("MPG-001", "SOLUSDT")]["state"] == "active_watcher_scope"
-    assert rows[("SOR-001", "ETHUSDT")]["state"] == "active_watcher_scope"
-    assert rows[("MPG-001", "OPUSDT")]["blocker_class"] == (
+    assert rows[("MPG-001", "SOLUSDT", "long")]["state"] == "active_watcher_scope"
+    assert rows[("SOR-001", "ETHUSDT", "long")]["state"] == "active_watcher_scope"
+    assert rows[("MPG-001", "OPUSDT", "long")]["blocker_class"] == (
         "runtime_profile_scope_missing"
     )
     assert (
@@ -451,7 +451,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_active_monitor_requires_candidate_universe_side_match(tmp_path):
+def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_path):
     candidate_pool = tmp_path / "candidate-pool.json"
     candidate_pool.write_text(
         json.dumps({"candidate_universe": {"SOR-001": ["ETHUSDT"]}}),
@@ -494,24 +494,21 @@ def test_active_monitor_requires_candidate_universe_side_match(tmp_path):
 
     coverage = packet["candidate_universe_coverage"]
     row = coverage["rows"][0]
-    assert packet["monitored_runtime_count"] == 0
-    assert packet["candidate_universe_excluded_runtime_instance_ids"] == [
-        "runtime-sor-eth-short"
-    ]
+    assert packet["monitored_runtime_count"] == 1
+    assert packet["candidate_universe_excluded_runtime_instance_ids"] == []
     assert coverage["status"] == "incomplete"
-    assert coverage["active_matched_row_count"] == 0
-    assert row["strategy_group_id"] == "SOR-001"
-    assert row["symbol"] == "ETHUSDT"
-    assert row["side"] == "long"
-    assert row["state"] == "runtime_profile_scope_missing"
-    assert row["blocker_class"] == "runtime_profile_scope_missing"
-    assert row["active_runtime_instance_ids"] == []
-    assert row["selected_runtime_instance_ids"] == []
-    assert row["matched_runtime_sides"] == ["short"]
-    assert row["side_mismatch_runtime_instance_ids"] == [
+    assert coverage["active_matched_row_count"] == 1
+    rows = {(item["symbol"], item["side"]): item for item in coverage["rows"]}
+    long_row = rows[("ETHUSDT", "long")]
+    short_row = rows[("ETHUSDT", "short")]
+    assert long_row["state"] == "runtime_profile_scope_missing"
+    assert long_row["matched_runtime_sides"] == ["short"]
+    assert long_row["side_mismatch_runtime_instance_ids"] == [
         "runtime-sor-eth-short"
     ]
-    assert row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
+    assert long_row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
+    assert short_row["state"] == "active_watcher_scope"
+    assert short_row["active_runtime_instance_ids"] == ["runtime-sor-eth-short"]
 
 
 def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(

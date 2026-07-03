@@ -59,6 +59,13 @@ STRATEGY_SIDE = {
     "SOR-001": "long",
     "BRF2-001": "short",
 }
+DEFAULT_SIDE_SCOPE = {
+    "CPM-RO-001": ("long", "short"),
+    "MPG-001": ("long", "short"),
+    "MI-001": ("long", "short"),
+    "SOR-001": ("long", "short"),
+    "BRF2-001": ("long", "short"),
+}
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -214,9 +221,10 @@ def _filter_selected_to_candidate_universe(
     if not candidate_universe:
         return selected, []
     allowed_lanes = {
-        (str(strategy_group_id), str(symbol), _expected_side(strategy_group_id))
+        (str(strategy_group_id), str(symbol), side)
         for strategy_group_id, symbols in candidate_universe.items()
         for symbol in symbols
+        for side in _expected_sides(strategy_group_id)
     }
     filtered: list[dict[str, Any]] = []
     excluded_runtime_ids: list[str] = []
@@ -270,64 +278,72 @@ def _candidate_universe_coverage(
     rows: list[dict[str, Any]] = []
     for strategy_group_id in sorted(candidate_universe):
         for symbol in sorted(set(candidate_universe[strategy_group_id])):
-            expected_side = _expected_side(strategy_group_id)
-            lane_key = (strategy_group_id, symbol, expected_side)
-            pair_key = (strategy_group_id, symbol)
-            selected_matches = selected_lanes.get(lane_key, [])
-            active_matches = active_lanes.get(lane_key, [])
-            selected_pair_matches = selected_pairs.get(pair_key, [])
-            active_pair_matches = active_pairs.get(pair_key, [])
-            matched_runtime_sides = sorted(
-                {
-                    item["side"]
-                    for item in active_pair_matches + selected_pair_matches
-                    if item.get("side")
-                }
-            )
-            side_mismatch_runtime_instance_ids = [
-                item["runtime_instance_id"]
-                for item in active_pair_matches + selected_pair_matches
-                if item.get("runtime_instance_id")
-                and item.get("side")
-                and item.get("side") != expected_side
-            ]
-            if selected_matches:
-                state = "active_watcher_scope"
-                blocker_class = "none"
-                next_action = "continue_pretrade_observation"
-            elif active_matches:
-                state = "active_runtime_filtered_out"
-                blocker_class = "runtime_profile_scope_missing"
-                next_action = "include_candidate_runtime_in_watcher_scope"
-            else:
-                state = "runtime_profile_scope_missing"
-                blocker_class = "runtime_profile_scope_missing"
-                next_action = (
-                    "bind_or_repair_runtime_profile_scope_side"
-                    if side_mismatch_runtime_instance_ids
-                    else "bind_or_start_pretrade_runtime_for_candidate_symbol"
+            for expected_side in _expected_sides(strategy_group_id):
+                lane_key = (strategy_group_id, symbol, expected_side)
+                pair_key = (strategy_group_id, symbol)
+                selected_matches = selected_lanes.get(lane_key, [])
+                active_matches = active_lanes.get(lane_key, [])
+                selected_pair_matches = selected_pairs.get(pair_key, [])
+                active_pair_matches = active_pairs.get(pair_key, [])
+                matched_runtime_sides = sorted(
+                    {
+                        item["side"]
+                        for item in active_pair_matches + selected_pair_matches
+                        if item.get("side")
+                    }
                 )
-            rows.append(
-                {
-                    "strategy_group_id": strategy_group_id,
-                    "symbol": symbol,
-                    "side": expected_side,
-                    "state": state,
-                    "blocker_class": blocker_class,
-                    "active_runtime_instance_ids": active_matches,
-                    "selected_runtime_instance_ids": selected_matches,
-                    "expected_side": expected_side,
-                    "matched_runtime_sides": matched_runtime_sides,
-                    "side_mismatch_runtime_instance_ids": (
-                        side_mismatch_runtime_instance_ids
-                    ),
-                    "next_action": next_action,
-                    "authority_boundary": (
-                        "candidate_universe_coverage_is_read_only; "
-                        "no_finalgate_no_operation_layer_no_exchange_write"
-                    ),
-                }
-            )
+                side_mismatch_runtime_instance_ids = sorted(
+                    {
+                        item["runtime_instance_id"]
+                        for item in active_pair_matches + selected_pair_matches
+                        if item.get("runtime_instance_id")
+                        and item.get("side")
+                        and item.get("side") != expected_side
+                    }
+                )
+                if selected_matches:
+                    state = "active_watcher_scope"
+                    blocker_class = "none"
+                    next_action = "continue_pretrade_observation"
+                elif active_matches:
+                    state = "active_runtime_filtered_out"
+                    blocker_class = "runtime_profile_scope_missing"
+                    next_action = "include_candidate_runtime_in_watcher_scope"
+                else:
+                    state = "runtime_profile_scope_missing"
+                    blocker_class = "runtime_profile_scope_missing"
+                    next_action = (
+                        "bind_or_repair_runtime_profile_scope_side"
+                        if side_mismatch_runtime_instance_ids
+                        else "bind_or_start_pretrade_runtime_for_candidate_symbol"
+                    )
+                rows.append(
+                    {
+                        "strategy_group_id": strategy_group_id,
+                        "symbol": symbol,
+                        "side": expected_side,
+                        "state": state,
+                        "blocker_class": blocker_class,
+                        "active_runtime_instance_ids": active_matches,
+                        "selected_runtime_instance_ids": selected_matches,
+                        "expected_side": expected_side,
+                        "matched_runtime_sides": matched_runtime_sides,
+                        "side_mismatch_runtime_instance_ids": (
+                            side_mismatch_runtime_instance_ids
+                        ),
+                        "runtime_profile": _runtime_profile_for_lane(
+                            selected + active,
+                            strategy_group_id=strategy_group_id,
+                            symbol=symbol,
+                            side=expected_side,
+                        ),
+                        "next_action": next_action,
+                        "authority_boundary": (
+                            "candidate_universe_coverage_is_read_only; "
+                            "no_finalgate_no_operation_layer_no_exchange_write"
+                        ),
+                    }
+                )
     missing_rows = [row for row in rows if row["blocker_class"] != "none"]
     return {
         "status": "complete" if not missing_rows else "incomplete",
@@ -353,6 +369,60 @@ def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
 
 def _expected_side(strategy_group_id: Any) -> str:
     return STRATEGY_SIDE.get(str(strategy_group_id), "")
+
+
+def _expected_sides(strategy_group_id: Any) -> tuple[str, ...]:
+    return DEFAULT_SIDE_SCOPE.get(
+        str(strategy_group_id),
+        (STRATEGY_SIDE.get(str(strategy_group_id), ""),),
+    )
+
+
+def _runtime_profile_for_lane(
+    runtimes: list[dict[str, Any]],
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> dict[str, str]:
+    for runtime in runtimes:
+        if (
+            str(_runtime_value(runtime, "strategy_family_id", "family") or "")
+            == strategy_group_id
+            and _compact_symbol(_runtime_value(runtime, "symbol")) == symbol
+            and _normalize_side(_runtime_value(runtime, "side")) == side
+        ):
+            profile = runtime.get("runtime_profile")
+            if not isinstance(profile, dict):
+                profile = {}
+            return {
+                "runtime_profile_id": str(
+                    _runtime_value(runtime, "runtime_profile_id", "profile_id")
+                    or profile.get("runtime_profile_id")
+                    or profile.get("profile_id")
+                    or ""
+                ),
+                "target_notional_usdt": str(
+                    _runtime_value(runtime, "target_notional_usdt", "target_notional")
+                    or profile.get("target_notional_usdt")
+                    or profile.get("target_notional")
+                    or ""
+                ),
+                "max_notional": str(
+                    _runtime_value(runtime, "max_notional", "max_notional_usdt")
+                    or profile.get("max_notional")
+                    or profile.get("max_notional_usdt")
+                    or profile.get("max_notional_per_action_usdt")
+                    or ""
+                ),
+                "leverage": str(
+                    _runtime_value(runtime, "leverage", "max_leverage")
+                    or profile.get("leverage")
+                    or profile.get("max_leverage")
+                    or ""
+                ),
+            }
+    return {}
 
 
 def _normalize_side(value: Any) -> str:

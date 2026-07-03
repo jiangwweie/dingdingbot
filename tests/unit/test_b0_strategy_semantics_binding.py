@@ -273,7 +273,7 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert cpm.proven_alpha is False
     assert cpm.reference_implementation is True
     assert cpm.allows_shadow_order_candidate is True
-    assert cpm.supported_sides == ["long"]
+    assert cpm.supported_sides == ["long", "short"]
     assert cpm.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
 
     assert brf.allows_shadow_order_candidate is True
@@ -309,12 +309,12 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert vcb.exit_policy.runner_required is True
 
     assert mi.allows_shadow_order_candidate is True
-    assert mi.supported_sides == ["long"]
+    assert mi.supported_sides == ["long", "short"]
     assert mi.metadata["pilot_strategygroup_route"] is True
     assert mi.metadata["reference_role"] == "relative_strength_impulse_long"
 
     assert brf2.allows_shadow_order_candidate is True
-    assert brf2.supported_sides == ["short"]
+    assert brf2.supported_sides == ["long", "short"]
     assert brf2.metadata["pilot_strategygroup_route"] is True
     assert brf2.metadata["short_side_conservative_profile_required"] is True
     assert brf2.metadata["reference_role"] == (
@@ -486,7 +486,7 @@ async def test_cpm_strategy_output_can_flow_to_semantic_shadow_candidate():
     assert candidate.protection_preview.stop_price_reference == Decimal("2425")
 
 
-async def test_cpm_short_strategy_output_is_rejected_by_long_only_semantics():
+async def test_cpm_short_strategy_output_is_accepted_by_owner_dual_side_semantics():
     fake_shadow = _FakeShadowService(
         _evaluation(
             family_id="CPM-RO-001",
@@ -496,16 +496,17 @@ async def test_cpm_short_strategy_output_is_rejected_by_long_only_semantics():
     )
     service = StrategySemanticsShadowBindingService(shadow_service=fake_shadow)
 
-    with pytest.raises(StrategySemanticsBindingError, match="not supported"):
-        await service.create_semantic_order_candidate_from_strategy_output(
-            _strategy_output(side=SignalSide.SHORT),
-            context=_context(
-                family_id="CPM-RO-001",
-                version_id="CPM-RO-001-v0",
-                side="short",
-            ),
-            stop_price_reference=Decimal("2600"),
-        )
+    candidate = await service.create_semantic_order_candidate_from_strategy_output(
+        _strategy_output(side=SignalSide.SHORT),
+        context=_context(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            side="short",
+        ),
+        stop_price_reference=Decimal("2600"),
+    )
+
+    assert candidate.side == SignalSide.SHORT
 
 
 async def test_non_entry_strategy_output_cannot_create_shadow_candidate():
