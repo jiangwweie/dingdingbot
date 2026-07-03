@@ -1,6 +1,6 @@
 ---
 name: runtime-signal-forensics
-description: Use this skill whenever the user asks what signal the system detected yesterday/recently, why no trade happened, whether a theoretically tradable signal was missed, whether the reason was market-no-opportunity versus engineering/scope/safety blockage, or asks for a plain-language market/strategy/action-time explanation. This skill should trigger even if the user does not use words like "forensics" or "no-trade"; phrases such as "昨天检测了什么", "有没有该交易没交易", "是不是市场没机会", "为什么没进交易链路", "推到哪一步", and "举个例子" require this workflow.
+description: Use this skill whenever the user asks what signal the system detected yesterday/recently, why no trade happened, whether a theoretically tradable signal was missed, whether the reason was market-no-opportunity versus engineering/scope/safety blockage, why the Owner did not receive a Feishu/server-monitor notification, or asks for a plain-language market/strategy/action-time explanation. This skill should trigger even if the user does not use words like "forensics" or "no-trade"; phrases such as "昨天检测了什么", "有没有该交易没交易", "是不是市场没机会", "为什么没进交易链路", "推到哪一步", "为什么没收到通知", and "举个例子" require this workflow.
 user-invocable: true
 ---
 
@@ -23,6 +23,7 @@ chain-position work. It turns runtime artifacts into a plain explanation of:
 - market facts that were satisfied or not satisfied;
 - how far the signal moved in the trading chain;
 - the concrete reason it did not become a real order;
+- whether server-side monitor and Feishu notification reflected the event;
 - whether Owner authorization is required.
 
 ## Required Context
@@ -51,13 +52,19 @@ Use this authority order:
 
 1. Tokyo `reports/runtime-signal-watcher/*` files and watcher journal.
 2. Tokyo `app/current/output/runtime-monitor/*` generated views.
-3. Tokyo server-side monitor reports.
-4. Local `output/runtime-monitor/*` only as fallback or comparison.
-5. Docs/contracts only to explain allowed meanings, not to invent facts.
+3. Tokyo server-side monitor reports and monitor journal.
+4. Tokyo release manifest and deploy-health reports.
+5. Local `output/runtime-monitor/*` only as fallback or comparison.
+6. Docs/contracts only to explain allowed meanings, not to invent facts.
 
 Never claim "market had no opportunity all day" unless the queried time window
 has continuous watcher/monitor coverage or an explicit daily artifact proving
 no fresh eligible signal for that window.
+
+Never claim "the system did not notify" as equivalent to "the system did not
+detect a signal." Notification is a separate layer after detection and monitor
+classification. Always inspect the server monitor artifact and its
+`notification` object before explaining missed notifications.
 
 ## Read-Only Collection
 
@@ -75,10 +82,14 @@ For Tokyo, collect:
 /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/resume-dispatch-artifact.json
 /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json
 /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json
+/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json
+/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json
+/home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json
 /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json
 /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json
 /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-single-lane-task-packet.json
 /home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json
+/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json
 ```
 
 For a date-window question, also collect:
@@ -86,11 +97,33 @@ For a date-window question, also collect:
 ```text
 journalctl -u brc-runtime-signal-watcher.service --since <start> --until <end>
 journalctl -u brc-runtime-monitor.service --since <start> --until <end>
+systemctl status --no-pager brc-runtime-signal-watcher.service
+systemctl status --no-pager brc-runtime-monitor.service
+systemctl list-timers --all --no-pager brc-runtime-signal-watcher.timer brc-runtime-monitor.timer
 find /home/ubuntu/brc-deploy/reports/runtime-signal-watcher -maxdepth 1 -type f -newermt <start> ! -newermt <end>
 find /home/ubuntu/brc-deploy/reports/runtime-monitor -maxdepth 1 -type f -newermt <start> ! -newermt <end>
 ```
 
 If the server lacks `jq`, use Python JSON parsing.
+
+For Feishu notification questions, verify only variable presence, not secret
+values:
+
+```text
+/home/ubuntu/brc-deploy/env/runtime-monitor.env
+/home/ubuntu/brc-deploy/env/live-readonly.env
+```
+
+Look only for these variable names and mask values:
+
+```text
+BRC_RUNTIME_MONITOR_FEISHU_WEBHOOK_URL
+BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL
+FEISHU_WEBHOOK_URL
+BRC_RUNTIME_MONITOR_FEISHU_WEBHOOK_SECRET
+BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET
+FEISHU_WEBHOOK_SECRET
+```
 
 ## Interpretation Rules
 
@@ -113,6 +146,7 @@ Use this drill-down order:
 
 ```text
 detected signal?
+-> is Candidate Pool newer than Server Monitor?
 -> runtime lane or strategy-group preview?
 -> if preview: does it have no_runtime_start / no_execution_permission?
 -> if runtime lane: status waiting_for_signal, blocked, ready_for_prepare, or ready_for_final_gate_preflight?
@@ -121,6 +155,8 @@ detected signal?
 -> FinalGate reached?
 -> Operation Layer reached?
 -> protected submit attempted?
+-> did server monitor classify quiet or notify?
+-> if notify: was Feishu configured, attempted, sent, suppressed, or skipped?
 ```
 
 For each missing object, name the previous object and the exact reason it did
@@ -132,6 +168,86 @@ signal_input_json is missing because the runtime lane is blocked by
 NEXT-ATTEMPT-POSITION-ORDER-CONFLICT. That is a reconciliation/safety gap, not
 a market no-signal conclusion.
 ```
+
+### Artifact Freshness
+
+Before using a monitor or control artifact as evidence, compare
+`generated_at_utc` across:
+
+| Artifact | Path |
+| --- | --- |
+| Candidate Pool | `/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json` |
+| Daily Table | `/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json` |
+| Server Monitor | `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json` |
+| Refresh Sequence | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/server-product-state-refresh-sequence.json` |
+| Goal Status | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` |
+
+If Candidate Pool or Daily Table is newer than Server Monitor, do not use the
+older Server Monitor artifact to prove "quiet", "no signal", or "no
+notification." Say the monitor artifact is stale relative to the current
+control state, then run or inspect the next server-monitor tick if the task
+allows read-only validation.
+
+If Server Monitor is newer and says `notify_required`, distinguish the reason:
+
+| Reason class | Meaning |
+| --- | --- |
+| `action_time_boundary` | A fresh/action-time lane exists and Owner should be notified |
+| `promotion_candidate` | A fresh candidate exists but has not narrowed to action-time |
+| `runtime_data_gap` | Public/account/watcher facts are unavailable or stale |
+| `watcher_or_service_failure` | Watcher status or systemd is truly unhealthy |
+| `deploy_or_readiness_failure` | Deploy-health or readiness source is not healthy |
+
+### Server Monitor And Feishu
+
+Treat detection, monitor classification, and notification send as three
+separate layers:
+
+| Layer | Evidence | What it answers |
+| --- | --- | --- |
+| Detection | Candidate Pool, Daily Table, watcher artifacts | Did a fresh/action-time signal exist? |
+| Monitor classification | `latest-server-side-runtime-monitor.json.decision` | Should the Owner be notified? |
+| Notification send | `latest-server-side-runtime-monitor.json.notification` and dedupe state | Was Feishu configured, attempted, sent, suppressed, or skipped? |
+
+When explaining "why did I not receive a notification", report:
+
+- `decision.notify`;
+- `decision.blocker_class`;
+- `decision.checkpoint`;
+- `notification.configured`;
+- `notification.attempted`;
+- `notification.sent`;
+- `notification.duplicate_suppressed`;
+- `notification.skipped_reason`;
+- whether `runtime-monitor.env` exists and contains a webhook variable name.
+
+Do not ask the Owner to judge raw monitor artifacts. Translate them into one
+sentence such as:
+
+```text
+The system detected SOR-001 / SOLUSDT / long and the server monitor correctly
+classified it as `notify_required`, but Feishu was not configured:
+`notification.configured=false`, `skipped_reason=feishu_webhook_url_missing`.
+```
+
+### Systemd OneShot Rules
+
+The runtime watcher and server monitor services are systemd `oneshot` services.
+Interpret them this way:
+
+| systemd state | Meaning | Notify as failure? |
+| --- | --- | --- |
+| `active` while running | Service is currently executing | no |
+| `activating` for watcher/monitor oneshot | Transient execution window | no, unless it stays stuck across repeated samples or journal shows failure |
+| `inactive/dead` with latest `status=0/SUCCESS` | Normal completed oneshot run | no |
+| `failed` or non-zero ExecStart/ExecStartPost | Real service failure | yes |
+
+If an old Server Monitor artifact reports
+`systemd_unit_not_active:brc-runtime-signal-watcher.service:activating`, check a
+later watcher status/journal sample before calling it a real failure. If the
+later watcher run ended successfully and the monitor script now reports
+`systemd.ready=true`, classify the earlier item as a transient monitor race,
+not as a trading-chain blocker.
 
 ### Signal Categories
 
@@ -160,6 +276,11 @@ Classify every detected item into one of these categories:
 - A candidate-pool row with `signal_state=absent` is stronger than a broad
   product-state phrase such as `fresh_signal_present=true` unless the latter
   names a concrete StrategyGroup, symbol, side, and candidate/auth record.
+- A stale Server Monitor `healthy_waiting_quiet` artifact is weaker than a newer
+  Candidate Pool with `action_time_lane_inputs`.
+- A missing Feishu send is not evidence that no signal existed. It may mean
+  `notification.configured=false`, `duplicate_suppressed=true`, or a send
+  failure.
 - A runtime lane with `NEXT-ATTEMPT-POSITION-ORDER-CONFLICT` is not a market
   conclusion. It means PG/runtime/exchange position or order state must be
   reconciled before a new candidate can be trusted.
@@ -176,7 +297,7 @@ Use this decision tree:
 ```text
 continuous watcher coverage for the date?
   no -> cannot prove market had no opportunity for the whole window
-  yes -> any fresh/live-submit-allowed satisfied candidate?
+  yes -> any fresh/live-submit-allowed satisfied candidate in Candidate Pool?
     no -> market/no-signal for covered window
     yes -> did it reach action_time_lane_input?
       no -> engineering/scope/classification boundary
@@ -187,6 +308,9 @@ continuous watcher coverage for the date?
           yes -> did Operation Layer command plan exist?
             no -> operation-layer handoff boundary
             yes -> if no order, inspect protected submit result
+monitor notification expected?
+  no -> explain quiet/market wait
+  yes -> inspect notification.configured / attempted / sent / skipped_reason
 ```
 
 ## Report Structure
@@ -199,6 +323,7 @@ Answer in Chinese. Use this exact high-level structure:
 ## 昨天/当前检测到了什么
 ## 有没有理论可交易但没交易
 ## 为什么没有交易
+## 通知为什么有/没有发出
 ## 具体例子
 ## 是否需要 Owner 授权
 ## 后续应记录成什么
@@ -220,6 +345,11 @@ When explaining three or more blockers, include:
 | Blocker | Plain meaning | Exact missing field/evidence | Owner action required |
 | --- | --- | --- | --- |
 
+When explaining notification behavior, include:
+
+| Layer | Status | Evidence | Meaning |
+| --- | --- | --- | --- |
+
 ## Required Answer Checks
 
 Before final response, verify:
@@ -227,7 +357,12 @@ Before final response, verify:
 - The answer says whether the date-window coverage is proven or incomplete.
 - The answer names every detected `would_enter`, `promotion_candidate`, or
   `action_time_lane_input`.
+- The answer compares Candidate Pool, Daily Table, Server Monitor, Refresh
+  Sequence, and Goal Status freshness before making a no-signal or no-notify
+  claim.
 - The answer distinguishes market-not-satisfied from system-blocked.
+- The answer distinguishes detection from server-monitor classification and
+  Feishu delivery.
 - The answer does not stop at "missing prepared_authorization_id"; it explains
   why that ID was not created.
 - The answer says whether the signal was an active runtime lane or a
@@ -241,6 +376,12 @@ Before final response, verify:
 - The answer names how far the signal moved: watcher, candidate pool,
   promotion, action-time, candidate/auth, FinalGate, Operation Layer, or submit.
 - The answer says whether Owner authorization is needed.
+- If notification is discussed, the answer reports `decision.notify`,
+  `notification.configured`, `notification.attempted`, `notification.sent`,
+  `notification.duplicate_suppressed`, and `notification.skipped_reason`.
+- If systemd is discussed, the answer treats watcher/monitor `activating` or
+  `inactive/dead` oneshot states as transient/success only after checking
+  journal or latest status, and reports true `failed` states separately.
 - The answer cites concrete artifact paths or journal facts.
 - The answer preserves authority boundaries:
   `no FinalGate bypass / no Operation Layer bypass / no exchange write`.
