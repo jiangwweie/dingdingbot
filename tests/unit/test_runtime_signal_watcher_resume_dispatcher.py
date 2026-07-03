@@ -321,6 +321,60 @@ def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
     assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_dispatcher_non_executing_prepare_uses_signal_input_runtime_id():
+    resume = _resume_pack("ready_for_non_executing_prepare")
+    resume["selected_runtime_instance_ids"] = ["runtime-old-1", "runtime-sor-btc"]
+    resume["signal_input_json"] = "/reports/runtime-sor-btc/signal-input.json"
+    resume["artifact_paths"] = {
+        "readiness_handoff_evidence": "/reports/runtime-sor-btc/readiness-handoff-evidence.json",
+    }
+    resume["action_time_resume"].update(
+        {
+            "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
+            "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
+            "allowed_auto_actions": [
+                "prepare_fresh_candidate_authorization_evidence"
+            ],
+            "requires_fresh_candidate_authorization_evidence": True,
+        }
+    )
+    resume["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "runtime-old-1",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "signal_input_json": "/reports/runtime-old-1/signal-input.json",
+            "status": "blocked",
+        },
+        {
+            "runtime_instance_id": "runtime-sor-btc",
+            "strategy_family_id": "SOR-001",
+            "strategy_family_version_id": "SOR-001-v0",
+            "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
+            "status": "ready_for_final_gate_preflight",
+        },
+    ]
+    resume["owner_state"] = {
+        "status": "ready_for_non_executing_prepare",
+        "blocker_class": "none",
+    }
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        selected_strategy_group_id=None,
+    )
+
+    assert artifact["status"] == "ready_for_non_executing_prepare"
+    assert artifact["command_plan"]["runtime_instance_id"] == "runtime-sor-btc"
+    assert artifact["command_plan"]["signal_input_json"] == (
+        "/reports/runtime-sor-btc/signal-input.json"
+    )
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+
+
 def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
     resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
     resume["action_time_resume"]["allowed_auto_actions"] = [

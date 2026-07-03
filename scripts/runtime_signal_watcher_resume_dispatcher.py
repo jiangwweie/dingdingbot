@@ -1047,6 +1047,19 @@ def _non_executing_prepare_runtime_instance_id(
     resume_pack: dict[str, Any],
     action_time_resume: dict[str, Any],
 ) -> str | None:
+    signal_input_json = _non_executing_prepare_signal_input_json(
+        resume_pack=resume_pack,
+        action_time_resume=action_time_resume,
+    )
+    if signal_input_json:
+        for item in _list(resume_pack.get("runtime_signal_summaries")):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("signal_input_json") or "").strip() != signal_input_json:
+                continue
+            runtime_id = _first_text(item.get("runtime_instance_id"))
+            if runtime_id:
+                return runtime_id
     return _first_text(
         action_time_resume.get("runtime_instance_id"),
         resume_pack.get("runtime_instance_id"),
