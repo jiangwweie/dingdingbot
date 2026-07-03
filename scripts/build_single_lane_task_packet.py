@@ -240,6 +240,8 @@ def _task_id(strategy_group_id: str, first_blocker: str) -> str:
     blocker = re.sub(r"[^A-Z0-9]+", "-", first_blocker.upper()).strip("-")
     if not strategy or not blocker:
         return "P0-SINGLE-LANE-TASK-PACKET-INVALID"
+    if first_blocker == "action_time_preflight_ready":
+        return f"P0-{strategy}-ACTION-TIME-PREFLIGHT-INPUT"
     return f"P0-{strategy}-{blocker}-CLOSURE"
 
 
@@ -257,6 +259,12 @@ def _expected_state_change(
     symbol: str,
     first_blocker: str,
 ) -> str:
+    if first_blocker == "action_time_preflight_ready":
+        return (
+            f"{strategy_group_id}/{symbol} produces a non-executing FinalGate "
+            "preflight input, or reclassifies to the next precise blocker before "
+            "any live submit authority is granted."
+        )
     return (
         f"{strategy_group_id}/{symbol} first_blocker changes from "
         f"{first_blocker} to the next precise blocker, market_wait_validated, "

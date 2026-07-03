@@ -275,7 +275,7 @@ def test_daily_table_can_rank_from_server_backed_candidate_pool_rows():
     assert _errors(table) == []
 
 
-def test_daily_table_accepts_server_backed_action_time_lane_market_wait():
+def test_daily_table_accepts_server_backed_action_time_preflight_lane():
     builder = _builder()
     candidate_pool = _candidate_pool()
     for row in candidate_pool["symbol_readiness_rows"]:
@@ -285,7 +285,7 @@ def test_daily_table_accepts_server_backed_action_time_lane_market_wait():
                     "symbol": "ETHUSDT",
                     "side": "long",
                     "candidate_role": "primary",
-                    "first_blocker": "market_wait_validated",
+                    "first_blocker": "action_time_preflight_ready",
                     "next_action": "refresh_private_action_time_facts_before_finalgate",
                     "stop_condition": "fresh signal expires or action-time lane is selected",
                     "promotion_state": "action_time_lane",
@@ -327,9 +327,10 @@ def test_daily_table_accepts_server_backed_action_time_lane_market_wait():
     sor_row = next(row for row in table["rows"] if row["strategy_group_id"] == "SOR-001")
     assert sor_row["stage"] == "action_time"
     assert sor_row["chain_position"] == "action_time_boundary"
-    assert sor_row["first_blocker"] == "market_wait_validated"
-    assert sor_row["market_wait_validation"]["valid"] is True
-    assert sor_row["market_wait_validation"]["mode"] == "fresh_action_time_lane"
+    assert sor_row["first_blocker"] == "action_time_preflight_ready"
+    assert sor_row["next_engineering_action"] == (
+        "refresh_private_action_time_facts_before_finalgate"
+    )
     assert sor_row["candidate_pool_reference"]["promotion_state"] == "action_time_lane"
     assert _errors(table) == []
 

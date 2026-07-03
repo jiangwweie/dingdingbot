@@ -159,6 +159,28 @@ def test_single_lane_packet_validator_rejects_market_blocker_closure_task():
     assert any("market blocker" in error for error in errors)
 
 
+def test_single_lane_packet_creates_preflight_task_for_action_time_ready_lane():
+    table = _daily_table()
+    rank_one = table["rows"][0]
+    rank_one["chain_position"] = "action_time_boundary"
+    rank_one["first_blocker"] = "action_time_preflight_ready"
+    rank_one["next_engineering_action"] = (
+        "prepare_non_executing_finalgate_preflight_input"
+    )
+
+    packet = _builder().build_single_lane_task_packet(
+        daily_table=table,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    assert packet["status"] == "single_lane_task_packet_ready"
+    assert packet["task_id"] == "P0-MPG-001-ACTION-TIME-PREFLIGHT-INPUT"
+    assert packet["next_action"] == "prepare_non_executing_finalgate_preflight_input"
+    assert "non-executing FinalGate preflight input" in packet["expected_state_change"]
+    assert packet["safety_invariants"]["calls_finalgate"] is False
+    assert _validator().validate_single_lane_task_packet(packet) == []
+
+
 def test_single_lane_packet_cli_and_validator_cli_round_trip(tmp_path: Path):
     daily_table = tmp_path / "daily.json"
     packet_json = tmp_path / "packet.json"

@@ -14,11 +14,19 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import time
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    FileBackedRuntimeControlStateRepository,
+)
+
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json"
 DEFAULT_CANDIDATE_POOL_JSON = (
@@ -1180,17 +1188,15 @@ def build_goal_status_artifact(
     release_manifest: Path | None = None,
     expected_head: str | None = None,
     candidate_pool_json: Path | None = None,
+    repository: FileBackedRuntimeControlStateRepository | None = None,
 ) -> dict[str, Any]:
-    source_artifacts = {
-        key: _read_source_artifact(report_dir, key, filename)
-        for key, filename in SOURCE_ARTIFACT_FILES.items()
-    }
-    source_artifacts["candidate_pool"] = (
-        _read_json(candidate_pool_json)
-        if candidate_pool_json and candidate_pool_json.exists()
-        else None
+    control_state_repository = repository or FileBackedRuntimeControlStateRepository()
+    source_artifacts = control_state_repository.goal_status_source_artifacts(
+        report_dir=report_dir,
+        source_artifact_files=SOURCE_ARTIFACT_FILES,
+        candidate_pool_json=candidate_pool_json,
     )
-    manifest_artifact = _read_json(release_manifest) if release_manifest else None
+    manifest_artifact = control_state_repository.release_manifest(release_manifest)
     deployed_head = _release_head(manifest_artifact)
     expected_head = expected_head or deployed_head
     deployment_blockers: list[str] = []

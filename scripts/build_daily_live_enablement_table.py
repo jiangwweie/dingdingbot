@@ -16,6 +16,12 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    FileBackedRuntimeControlStateRepository,
+)
 
 DEFAULT_TRADEABILITY_JSON = (
     REPO_ROOT
@@ -62,6 +68,7 @@ CONTRACT_BLOCKER_CLASSES = {
     "policy_scope_missing",
     "runtime_profile_scope_missing",
     "market_wait_validated",
+    "action_time_preflight_ready",
     "active_position_resolution",
     "hard_safety_stop",
     "review_only_warning",
@@ -97,6 +104,7 @@ SOURCE_EXPECTATIONS = {
     },
 }
 BLOCKER_STAGE_TIER = {
+    "action_time_preflight_ready": 1100,
     "market_wait_validated": 1000,
     "action_time_boundary_not_reproduced": 900,
     "runtime_profile_scope_missing": 890,
@@ -136,17 +144,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
+    repository = FileBackedRuntimeControlStateRepository()
+    inputs = repository.daily_table_inputs(
+        tradeability_json=Path(args.tradeability_json),
+        replay_live_parity_json=Path(args.replay_live_parity_json),
+        action_time_boundary_json=Path(args.action_time_boundary_json),
+        mi_trial_admission_json=Path(args.mi_trial_admission_json),
+        runtime_safety_json=Path(args.runtime_safety_json),
+        candidate_pool_json=Path(args.candidate_pool_json)
+        if args.candidate_pool_json
+        else None,
+    )
     artifact = build_daily_live_enablement_table(
-        tradeability=_read_optional_json(Path(args.tradeability_json)),
-        replay_live_parity=_read_optional_json(Path(args.replay_live_parity_json)),
-        action_time_boundary=_read_optional_json(Path(args.action_time_boundary_json)),
-        mi_trial_admission=_read_optional_json(Path(args.mi_trial_admission_json)),
-        runtime_safety=_read_optional_json(Path(args.runtime_safety_json)),
-        candidate_pool=(
-            _read_optional_json(Path(args.candidate_pool_json))
-            if args.candidate_pool_json
-            else {}
-        ),
+        tradeability=inputs["tradeability"],
+        replay_live_parity=inputs["replay_live_parity"],
+        action_time_boundary=inputs["action_time_boundary"],
+        mi_trial_admission=inputs["mi_trial_admission"],
+        runtime_safety=inputs["runtime_safety"],
+        candidate_pool=inputs["candidate_pool"],
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -577,6 +592,7 @@ def _chain_position(first_blocker: str) -> str:
         return "symbol_scope_decision"
     if first_blocker in {
         "action_time_boundary_not_reproduced",
+        "action_time_preflight_ready",
         "runtime_profile_scope_missing",
         "active_position_resolution",
     }:
@@ -656,6 +672,8 @@ def _stop_condition(
         return "watcher/public facts tick is present for the selected lane"
     if first_blocker == "action_time_boundary_not_reproduced":
         return "non-executing action-time rehearsal reaches candidate/auth boundary"
+    if first_blocker == "action_time_preflight_ready":
+        return "non-executing FinalGate preflight input is prepared or lane reclassifies"
     if first_blocker == "artifact_missing":
         return "required current artifact is generated through monitor sequence"
     if first_blocker == "schema_invalid":
@@ -673,6 +691,7 @@ def _next_action_for_blocker(first_blocker: str) -> str:
         "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
         "replay_live_rule_mismatch": "normalize_replay_live_rules_or_record_revision",
         "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
+        "action_time_preflight_ready": "prepare_non_executing_finalgate_preflight_input",
         "policy_scope_missing": "record_scoped_owner_policy",
         "runtime_profile_scope_missing": "bind_runtime_profile_scope",
         "market_wait_validated": "continue_armed_observation_until_fresh_signal",
@@ -693,7 +712,7 @@ def _replay_signal(strategy_group_id: str, parity_row: dict[str, Any]) -> str:
 def _live_detector_state(first_blocker: str, parity_row: dict[str, Any]) -> str:
     if not parity_row:
         return "not_tested"
-    if first_blocker == "market_wait_validated":
+    if first_blocker in {"market_wait_validated", "action_time_preflight_ready"}:
         return "matched"
     if first_blocker in {
         "computed_not_satisfied",

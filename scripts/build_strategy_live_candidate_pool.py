@@ -15,6 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    FileBackedRuntimeControlStateRepository,
+)
+
 from scripts.build_daily_live_enablement_table import (  # noqa: E402
     AUTHORITY_BOUNDARY as DAILY_AUTHORITY_BOUNDARY,
     CONTRACT_BLOCKER_CLASSES,
@@ -112,6 +116,7 @@ RESIDUAL_DEPLOY_BLOCKERS = {
     "scope_not_attached",
     "replay_live_rule_mismatch",
     "action_time_boundary_not_reproduced",
+    "action_time_preflight_ready",
     "policy_scope_missing",
     "runtime_profile_scope_missing",
     "active_position_resolution",
@@ -197,21 +202,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
+    repository = FileBackedRuntimeControlStateRepository()
+    inputs = repository.candidate_pool_inputs(
+        daily_table_json=Path(args.daily_table_json),
+        tradeability_json=Path(args.tradeability_json),
+        replay_live_parity_json=Path(args.replay_live_parity_json),
+        action_time_boundary_json=Path(args.action_time_boundary_json),
+        sor_detector_json=Path(args.sor_detector_json),
+        mi_trial_admission_json=Path(args.mi_trial_admission_json),
+        brf2_runtime_signal_facts_json=Path(args.brf2_runtime_signal_facts_json),
+        single_lane_task_packet_json=Path(args.single_lane_task_packet_json),
+        runtime_active_monitor_json=Path(args.runtime_active_monitor_json),
+        owner_pretrade_authorization_json=Path(args.owner_pretrade_authorization_json),
+    )
     artifact = build_strategy_live_candidate_pool(
-        daily_table=_read_json(Path(args.daily_table_json)),
-        tradeability=_read_json(Path(args.tradeability_json)),
-        replay_live_parity=_read_json(Path(args.replay_live_parity_json)),
-        action_time_boundary=_read_json(Path(args.action_time_boundary_json)),
-        sor_detector=_read_json(Path(args.sor_detector_json)),
-        mi_trial_admission=_read_json(Path(args.mi_trial_admission_json)),
-        brf2_runtime_signal_facts=_read_json(
-            Path(args.brf2_runtime_signal_facts_json)
-        ),
-        single_lane_task_packet=_read_json(Path(args.single_lane_task_packet_json)),
-        runtime_active_monitor=_read_json(Path(args.runtime_active_monitor_json)),
-        owner_pretrade_authorization=_read_json(
-            Path(args.owner_pretrade_authorization_json)
-        ),
+        daily_table=inputs["daily_table"],
+        tradeability=inputs["tradeability"],
+        replay_live_parity=inputs["replay_live_parity"],
+        action_time_boundary=inputs["action_time_boundary"],
+        sor_detector=inputs["sor_detector"],
+        mi_trial_admission=inputs["mi_trial_admission"],
+        brf2_runtime_signal_facts=inputs["brf2_runtime_signal_facts"],
+        single_lane_task_packet=inputs["single_lane_task_packet"],
+        runtime_active_monitor=inputs["runtime_active_monitor"],
+        owner_pretrade_authorization=inputs["owner_pretrade_authorization"],
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -1234,13 +1248,15 @@ def _fresh_action_time_blocker(action_row: dict[str, Any]) -> str:
     readiness = _as_dict(action_row.get("required_facts_readiness"))
     if action_row.get("action_time_path_ready") is not True:
         return "action_time_boundary_not_reproduced"
+    if readiness.get("public_facts_ready") is not True:
+        return "action_time_boundary_not_reproduced"
     if readiness.get("private_action_time_facts_ready") is not True:
         return "action_time_boundary_not_reproduced"
     if readiness.get("active_position_or_open_order_clear") is not True:
         return "active_position_resolution"
     if readiness.get("action_time_available_balance") is not True:
         return "action_time_boundary_not_reproduced"
-    return "market_wait_validated"
+    return "action_time_preflight_ready"
 
 
 def _promotion_state(
@@ -1272,7 +1288,7 @@ def _symbol_next_action(
 ) -> str:
     action_next = str(_as_dict(action_row).get("next_action") or "")
     if (
-        first_blocker == "market_wait_validated"
+        first_blocker == "action_time_preflight_ready"
         and _action_time_private_facts_ready(_as_dict(action_row))
     ):
         return "prepare_non_executing_finalgate_preflight_input"
@@ -1300,6 +1316,9 @@ def _symbol_next_action(
         "action_time_boundary_not_reproduced": (
             "repair_non_executing_action_time_rehearsal_path"
         ),
+        "action_time_preflight_ready": (
+            "prepare_non_executing_finalgate_preflight_input"
+        ),
         "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
         "hard_safety_stop": "resolve_hard_safety_stop",
     }.get(first_blocker, str(candidate.get("next_engineering_action") or "reclassify_symbol_blocker"))
@@ -1308,6 +1327,8 @@ def _symbol_next_action(
 def _symbol_stop_condition(first_blocker: str) -> str:
     if first_blocker == "market_wait_validated":
         return "fresh signal expires or action-time lane is selected"
+    if first_blocker == "action_time_preflight_ready":
+        return "preflight input is prepared, stale facts appear, or lane is reclassified"
     if first_blocker == "scope_not_attached":
         return "scope proposal accepted, explicitly deferred, or symbol parked"
     return "blocker moves, repeats through stop review, or symbol exits candidate universe"
@@ -1648,6 +1669,7 @@ def _candidate_status(strategy_group_id: str, first_blocker: str) -> str:
         "scope_not_attached": "candidate_scope_decision_pending",
         "computed_not_satisfied": "candidate_market_condition_wait",
         "market_wait_validated": "candidate_market_wait_validated",
+        "action_time_preflight_ready": "candidate_action_time_preflight_ready",
         "policy_scope_missing": "candidate_owner_policy_pending",
         "hard_safety_stop": "candidate_safety_blocked",
     }.get(first_blocker, "candidate_engineering_blocked")
@@ -1656,6 +1678,8 @@ def _candidate_status(strategy_group_id: str, first_blocker: str) -> str:
 def _blocker_owner(first_blocker: str) -> str:
     if first_blocker in {"computed_not_satisfied", "market_wait_validated"}:
         return "market"
+    if first_blocker == "action_time_preflight_ready":
+        return "engineering"
     if first_blocker == "policy_scope_missing":
         return "owner"
     if first_blocker == "hard_safety_stop":

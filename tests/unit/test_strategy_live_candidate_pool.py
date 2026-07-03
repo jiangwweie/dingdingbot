@@ -1115,7 +1115,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         in {("CPM-RO-001", "SOLUSDT"), ("MPG-001", "OPUSDT")}
     ]
     assert {row["first_blocker"] for row in selected_rows} == {
-        "market_wait_validated"
+        "action_time_preflight_ready"
     }
     assert artifact["arbitration"]["eligible_action_time_candidate_count"] == 2
     assert artifact["arbitration"]["single_real_submit_candidate"] is True

@@ -108,75 +108,16 @@ def test_signal_watcher_goal_status_dropin_does_not_write_final_status():
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
-    assert "fetch_binance_usdm_public_facts.py" in text
-    assert "--symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT" in text
-    assert "--fallback-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
-    assert "build_sor_session_scope_detector.py" in text
-    assert "build_strategy_fresh_signal_action_time_boundary.py" in text
-    assert "build_mi_trial_admission_decision.py" in text
-    assert "build_brf2_runtime_signal_facts.py --strategy-source live_market --public-facts-json \"$PUBLIC\"" in text
-    assert "build_strategygroup_runtime_safety_state.py" in text
-    assert "validate_runtime_candidate_universe_coverage.py \"$STATUS\"" in text
-    assert "build_strategy_live_candidate_pool.py" in text
-    assert "--runtime-active-monitor-json \"$STATUS\"" in text
-    assert "latest-status.json" in text
-    assert text.index("fetch_binance_usdm_public_facts.py") < text.index(
-        "build_sor_session_scope_detector.py"
-    )
-    assert text.index("build_sor_session_scope_detector.py") < text.index(
-        "build_strategy_fresh_signal_action_time_boundary.py"
-    )
-    assert text.index("build_strategy_fresh_signal_action_time_boundary.py") < text.index(
-        "build_strategy_live_candidate_pool.py"
-    )
-    assert text.index("build_brf2_runtime_signal_facts.py") < text.index(
-        "build_strategy_live_candidate_pool.py"
-    )
-    assert text.index("validate_runtime_candidate_universe_coverage.py") < text.index(
-        "build_strategy_live_candidate_pool.py"
-    )
-    assert "validate_strategy_live_candidate_pool.py" in text
-    assert "build_daily_live_enablement_table.py" in text
-    assert "--candidate-pool-json output/runtime-monitor/latest-strategy-live-candidate-pool.json" in text
-    assert "validate_daily_live_enablement_table.py" in text
-    assert "build_single_lane_task_packet.py" in text
-    assert "validate_single_lane_task_packet.py" in text
-    assert "build_strategygroup_runtime_goal_status.py" in text
-    assert (
-        "--candidate-pool-json output/runtime-monitor/latest-strategy-live-candidate-pool.json"
-        in text
-    )
-    assert text.rindex("build_strategygroup_runtime_goal_status.py") > text.rindex(
-        "validate_single_lane_task_packet.py"
-    )
-    assert "refresh_strategygroup_runtime_product_state_artifacts.py" in text
-    assert "--collect-live-facts-before-refresh" in text
-    assert "--live-facts-output" in text
-    assert "strategy-group-live-facts-input.json" in text
-    assert "build_runtime_account_safe_facts.py" in text
-    assert "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json" in text
-    assert (
-        "build_strategy_fresh_signal_action_time_boundary.py "
-        "--account-safe-facts-json \"$ACCOUNT\""
-    ) in text
-    assert text.index("build_runtime_account_safe_facts.py") > text.index(
-        "refresh_strategygroup_runtime_product_state_artifacts.py"
-    )
-    assert text.rindex("build_strategy_fresh_signal_action_time_boundary.py") < text.rindex(
-        "build_strategy_live_candidate_pool.py"
-    )
-    assert "--refresh-chain-closure-status" in text
-    assert "runtime-execution-chain-closure-status.json" in text
-    assert "--refresh-live-closure-evidence" in text
-    assert "runtime-live-closure-evidence.json" in text
-    assert "runtime-live-closure-evidence-verification.json" in text
-    assert "runtime-live-closure-evidence-refresh.json" in text
+    assert "run_server_product_state_refresh_sequence.py" in text
+    assert "server-product-state-refresh-sequence.json" in text
+    assert "--report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher" in text
+    assert "--runtime-monitor-dir /home/ubuntu/brc-deploy/reports/runtime-monitor" in text
+    assert "--env-file /home/ubuntu/brc-deploy/env/live-readonly.env" in text
+    assert "/bin/sh -lc" not in text
+    assert "set -eu;" not in text
+    assert "build_strategygroup_runtime_goal_status.py" not in text
     assert "--refresh-goal-status" not in text
     assert "--goal-status-output-json" not in text
-    assert "strategygroup-runtime-goal-status.json" in text
-    assert "--release-manifest /home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json" in text
-    assert text.count("build_strategygroup_runtime_goal_status.py") == 1
-    assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text
     assert "Operation" in text
