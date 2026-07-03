@@ -13,11 +13,15 @@ class _FakeClient:
         profile_status: str = "ready_for_owner_codex_confirmation",
         runtime_draft_status: int = 200,
         admission_result_field: str = "admission_result",
+        existing_version_body: dict | None = None,
+        profile_warnings: list[str] | None = None,
     ) -> None:
         self.calls: list[dict] = []
         self.profile_status = profile_status
         self.runtime_draft_status = runtime_draft_status
         self.admission_result_field = admission_result_field
+        self.existing_version_body = existing_version_body
+        self.profile_warnings = list(profile_warnings or [])
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -35,6 +39,8 @@ class _FakeClient:
         ):
             return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
         if method == "GET" and "/strategy-family-versions/" in path:
+            if self.existing_version_body is not None:
+                return {"http_status": 200, "body": dict(self.existing_version_body)}
             return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
         if method == "POST" and path == "/api/brc/strategy-families":
             return {
@@ -46,6 +52,15 @@ class _FakeClient:
                 "http_status": 200,
                 "body": {
                     "strategy_family_version_id": body["strategy_family_version_id"]
+                },
+            }
+        if method == "POST" and path.endswith("/scope-sync"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "strategy_family_version_id": path.split("/")[-2],
+                    "supported_symbols": list(body["supported_symbols"]),
+                    "supported_timeframes": list(body["supported_timeframes"]),
                 },
             }
         if path.endswith("/admissions/evidence-packets"):
@@ -104,6 +119,7 @@ class _FakeClient:
                     "min_liquidation_stop_buffer": "25",
                     "boundary": {"min_liquidation_stop_buffer": "25"},
                     "metadata": {},
+                    "warnings": self.profile_warnings,
                 },
             }
         if path.endswith("/strategy-runtime-promotion-confirmations"):
@@ -286,6 +302,67 @@ def test_short_bootstrap_confirms_conservative_short_profile():
     assert promotion_calls
     runtime_confirmations = promotion_calls[0]["body"]["runtime_confirmations"]
     assert runtime_confirmations["short_side_conservative_profile_confirmed"] is True
+
+
+def test_long_bootstrap_confirms_conservative_short_profile_when_required():
+    client = _FakeClient(profile_warnings=["short_side_conservative_profile_required"])
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            side="long",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    promotion_calls = [
+        call for call in client.calls if call["path"].endswith("promotion-confirmations")
+    ]
+    assert promotion_calls
+    runtime_confirmations = promotion_calls[0]["body"]["runtime_confirmations"]
+    assert runtime_confirmations["short_side_conservative_profile_confirmed"] is True
+
+
+def test_bootstrap_syncs_existing_strategy_family_version_scope_for_candidate_symbols():
+    client = _FakeClient(
+        existing_version_body={
+            "strategy_family_version_id": "SOR-001-v0",
+            "strategy_family_id": "SOR-001",
+            "supported_symbols": ["XAG/USDT:USDT"],
+            "supported_timeframes": ["1h"],
+        }
+    )
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            strategy_family_id="SOR-001",
+            strategy_family_version_id="SOR-001-v0",
+            symbol="ETH/USDT:USDT",
+            supported_symbols=["ETH/USDT:USDT", "SOL/USDT:USDT"],
+            side="long",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    sync_calls = [call for call in client.calls if call["path"].endswith("/scope-sync")]
+    assert sync_calls
+    assert sync_calls[0]["body"]["supported_symbols"] == [
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+    ]
+    assert (
+        "strategy_family_version_scope_synced_for_candidate_universe"
+        in report["warnings"]
+    )
 
 
 def test_bootstrap_can_override_liquidation_buffer_for_low_price_symbol():

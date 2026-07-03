@@ -176,6 +176,7 @@ class RuntimeLiveBootstrapApiFlow:
             allowed_statuses={200, 404},
         )
         if result.get("http_status") == 200:
+            self._sync_existing_strategy_family_version_scope(result)
             self.state.remember(
                 "strategy_family_version_id",
                 self._config.strategy_family_version_id,
@@ -420,7 +421,17 @@ class RuntimeLiveBootstrapApiFlow:
                 "trusted_account_fact_source_confirmed",
             ]
         )
-        if self._config.side.lower() == "short":
+        profile_warnings = {str(item) for item in profile_body.get("warnings") or []}
+        profile_metadata = (
+            profile_body.get("metadata")
+            if isinstance(profile_body.get("metadata"), dict)
+            else {}
+        )
+        if (
+            self._config.side.lower() == "short"
+            or "short_side_conservative_profile_required" in profile_warnings
+            or profile_metadata.get("short_side_conservative_profile_required") is True
+        ):
             runtime_confirmations["short_side_conservative_profile_confirmed"] = True
         confirmation = self._step(
             "create_runtime_promotion_confirmation",
@@ -531,6 +542,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "status": body_value.get("status") if isinstance(body_value, dict) else None,
                 "step_result": _step_result(name, body_value),
                 "ids": _id_summary(body_value),
+                "error_detail": _error_detail(body_value),
                 "blockers": body_value.get("blockers", []) if isinstance(body_value, dict) else [],
                 "warnings": body_value.get("warnings", []) if isinstance(body_value, dict) else [],
             }
@@ -541,6 +553,49 @@ class RuntimeLiveBootstrapApiFlow:
             self.state.add_blockers(body_value.get("blockers"))
             self.state.add_warnings(body_value.get("warnings"))
         return result
+
+    def _sync_existing_strategy_family_version_scope(self, result: dict[str, Any]) -> None:
+        body = _body(result)
+        if not body:
+            return
+        expected_symbols = _supported_symbols(self._config)
+        expected_timeframes = [self._config.timeframe]
+        symbols_missing = [
+            symbol
+            for symbol in expected_symbols
+            if symbol not in set(str(item) for item in body.get("supported_symbols") or [])
+        ]
+        timeframes_missing = [
+            timeframe
+            for timeframe in expected_timeframes
+            if timeframe
+            not in set(str(item) for item in body.get("supported_timeframes") or [])
+        ]
+        if not symbols_missing and not timeframes_missing:
+            return
+        synced = self._step(
+            "sync_existing_strategy_family_version_scope",
+            "POST",
+            (
+                "/api/brc/strategy-family-versions/"
+                f"{self._config.strategy_family_version_id}/scope-sync"
+            ),
+            body={
+                "supported_symbols": expected_symbols,
+                "supported_timeframes": expected_timeframes,
+                "actor": self._config.owner_operator_id,
+                "reason": (
+                    "Owner authorized current StrategyGroup candidate universe "
+                    "for pre-trade runtime scope."
+                ),
+            },
+        )
+        if synced.get("http_status") == 200:
+            self.state.add_warnings(
+                [
+                    "strategy_family_version_scope_synced_for_candidate_universe"
+                ]
+            )
 
     def _report(self) -> dict[str, Any]:
         return {
@@ -718,6 +773,17 @@ def _profile_override_metadata(config: BootstrapConfig) -> dict[str, Any]:
 def _body(result: dict[str, Any]) -> dict[str, Any]:
     body = result.get("body")
     return body if isinstance(body, dict) else {}
+
+
+def _error_detail(body: dict[str, Any]) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    value = body.get("message") or body.get("detail") or body.get("error")
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
 
 
 def _step_result(name: str, body: dict[str, Any]) -> dict[str, Any]:

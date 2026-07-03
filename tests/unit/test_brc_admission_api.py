@@ -122,6 +122,15 @@ class _FakeAdmissionService:
     async def create_strategy_family_version(self, **kwargs):
         return self.version
 
+    async def sync_strategy_family_version_scope(self, strategy_family_version_id: str, **kwargs):
+        self.version = self.version.model_copy(
+            update={
+                "supported_symbols": list(kwargs.get("supported_symbols") or []),
+                "supported_timeframes": list(kwargs.get("supported_timeframes") or []),
+            }
+        )
+        return self.version
+
     async def create_admission_evidence(self, **kwargs):
         return self.evidence
 
@@ -163,6 +172,10 @@ def test_brc_admission_api_routes_are_registered_without_trading_surface():
     }
 
     assert "/api/brc/strategy-families" in routes
+    assert (
+        "/api/brc/strategy-family-versions/{strategy_family_version_id}/scope-sync"
+        in routes
+    )
     assert "/api/brc/admissions/requests/{admission_request_id}/evaluate" in routes
     assert "/api/brc/admissions/risk-acceptances" in routes
     assert "/api/brc/admissions/trial-bindings" in routes
@@ -199,6 +212,20 @@ def test_brc_admission_create_and_evaluate_endpoints(monkeypatch):
             families = client.get("/api/brc/strategy-families")
             assert families.status_code == 200
             assert families.json()[0]["strategy_family_id"] == "sf-test"
+
+            scope_sync = client.post(
+                "/api/brc/strategy-family-versions/sfv-test/scope-sync",
+                json={
+                    "supported_symbols": ["ETH/USDT:USDT", "SOL/USDT:USDT"],
+                    "supported_timeframes": ["1h"],
+                    "reason": "unit candidate universe scope sync",
+                },
+            )
+            assert scope_sync.status_code == 200
+            assert scope_sync.json()["supported_symbols"] == [
+                "ETH/USDT:USDT",
+                "SOL/USDT:USDT",
+            ]
 
             request = client.post(
                 "/api/brc/admissions/requests",

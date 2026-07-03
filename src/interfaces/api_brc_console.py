@@ -940,6 +940,13 @@ class BrcStrategyFamilyVersionCreateRequest(BaseModel):
     created_by: str = Field(default="owner", max_length=128)
 
 
+class BrcStrategyFamilyVersionScopeSyncRequest(BaseModel):
+    supported_symbols: list[str] = Field(default_factory=list)
+    supported_timeframes: list[str] = Field(default_factory=list)
+    actor: str = Field(default="owner", max_length=128)
+    reason: str = Field(default="", max_length=1024)
+
+
 class BrcAdmissionEvidenceCreateRequest(BaseModel):
     strategy_family_version_id: str = Field(min_length=1, max_length=128)
     payload_json: dict[str, Any] = Field(default_factory=dict)
@@ -6547,6 +6554,28 @@ async def create_brc_strategy_family_version(
         return await service.create_strategy_family_version(
             strategy_family_id=strategy_family_id,
             **body.model_dump(),
+        )
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.post(
+    "/strategy-family-versions/{strategy_family_version_id}/scope-sync",
+    response_model=StrategyFamilyVersion,
+)
+async def sync_brc_strategy_family_version_scope(
+    strategy_family_version_id: str,
+    body: BrcStrategyFamilyVersionScopeSyncRequest,
+) -> StrategyFamilyVersion:
+    service = await _get_admission_service()
+    try:
+        return await service.sync_strategy_family_version_scope(
+            strategy_family_version_id,
+            supported_symbols=body.supported_symbols,
+            supported_timeframes=body.supported_timeframes,
+            actor=body.actor,
+            reason=body.reason,
         )
     except Exception as exc:
         _raise_admission_error(exc)
