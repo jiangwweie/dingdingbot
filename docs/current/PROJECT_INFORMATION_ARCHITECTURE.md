@@ -103,6 +103,10 @@ Owner decisions.
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
+| Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
+| Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
+| Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
+| Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
 | Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
@@ -246,6 +250,32 @@ The long-term system should record Owner policy as explicit, scoped events:
 During the current pilot, these policy events may be represented by explicit
 Owner decisions plus current docs. They should not be hidden in routine
 Markdown summaries.
+
+## DB-Backed Runtime Control State Direction
+
+Dynamic StrategyGroup runtime-control state should migrate behind the
+`RuntimeControlStateRepository` boundary defined in
+`docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`.
+
+The repo file-source elimination plan is defined in
+`docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`.
+
+The target table design is defined in
+`docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`.
+
+The strategy governance pipeline DB design is defined in
+`docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md`. It is a P1 design
+for converting strategy research, handoff packs, and admission artifacts into
+DB-backed strategy candidate and governance state after the P0 repository and
+runtime-control DB source boundary is in place.
+
+This direction does not move governance Markdown, replay fixtures, deploy
+configuration, or historical archives into DB. It moves dynamic registry
+consumption, Owner policy, candidate universe, runtime scope, watcher coverage,
+fact snapshots, pre-trade readiness, promotion candidates, action-time lane
+inputs, runtime safety state, and server monitor notification state away from
+raw JSON/file reads and into DB-backed control state. Generated JSON/MD files
+remain exports and checkpoint evidence only.
 
 ## Architecture Boundary
 
