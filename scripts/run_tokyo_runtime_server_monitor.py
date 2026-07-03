@@ -56,6 +56,10 @@ DEFAULT_SYSTEMD_UNITS = (
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
 )
+ONESHOT_INACTIVE_OK_UNITS = {
+    "brc-runtime-signal-watcher.service",
+    "brc-runtime-monitor.service",
+}
 MARKET_BLOCKERS = {
     "computed_not_satisfied",
     "market_wait_validated",
@@ -226,16 +230,24 @@ def _systemd_status(
     for unit in units:
         result = run(unit)
         active = result.returncode == 0 and result.stdout == "active"
+        inactive_success = (
+            unit in ONESHOT_INACTIVE_OK_UNITS
+            and result.returncode != 0
+            and result.stdout == "inactive"
+        )
+        ready = active or inactive_success
         rows.append(
             {
                 "unit": unit,
                 "active": active,
+                "inactive_success": inactive_success,
+                "ready": ready,
                 "stdout": result.stdout,
                 "stderr_preview": result.stderr[:240],
                 "returncode": result.returncode,
             }
         )
-        if not active:
+        if not ready:
             blockers.append(f"systemd_unit_not_active:{unit}:{result.stdout or result.returncode}")
     return {
         "checked": bool(units),
