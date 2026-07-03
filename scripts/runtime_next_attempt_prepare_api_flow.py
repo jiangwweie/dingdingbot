@@ -81,6 +81,7 @@ def _build_flow_config(args: argparse.Namespace) -> FlowConfig:
         record_gateway_readiness=False,
         execute_real_submit=False,
         record_post_submit_accounting=False,
+        allow_live_runtime_handoff_prepare=True,
     )
 
 
@@ -94,7 +95,16 @@ def _summarize_prepare_report(report: dict[str, Any]) -> dict[str, Any]:
         and bool(ids.get("execution_intent_id"))
         and bool(ids.get("runtime_execution_intent_draft_id"))
     )
-    step_names = [str(item.get("name") or "") for item in steps if isinstance(item, dict)]
+    shadow_candidate_created = bool(
+        ids.get("order_candidate_id") or ids.get("shadow_candidate_id")
+    )
+    if not shadow_candidate_created:
+        shadow_candidate_created = any(
+            str(item.get("name") or "") == "create_shadow_candidate_from_signal_input"
+            and str(item.get("status") or "") == "shadow_candidate_created"
+            for item in steps
+            if isinstance(item, dict)
+        )
     return {
         "scope": "runtime_next_attempt_prepare_artifact",
         "status": "ready_for_final_gate_preflight" if ready else "blocked",
@@ -121,7 +131,7 @@ def _summarize_prepare_report(report: dict[str, Any]) -> dict[str, Any]:
             "calls_order_lifecycle": False,
         },
         "created_records": {
-            "shadow_candidate_created": "create_shadow_candidate_from_signal_input" in step_names,
+            "shadow_candidate_created": shadow_candidate_created,
             "runtime_execution_intent_draft_created": bool(
                 ids.get("runtime_execution_intent_draft_id")
             ),

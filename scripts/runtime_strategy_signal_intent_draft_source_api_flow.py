@@ -105,6 +105,9 @@ def _request_body(args: argparse.Namespace) -> dict[str, Any]:
         "signal_input": signal_source.signal_input,
         "allow_shadow_candidate_creation": True,
         "allow_intent_draft_creation": True,
+        "allow_live_runtime_handoff_prepare": bool(
+            args.allow_live_runtime_handoff_prepare
+        ),
         "owner_reviewed": True,
         "owner_confirmed_for_intent": True,
         "metadata": metadata,
@@ -221,6 +224,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--context-id")
     parser.add_argument("--expires-at-ms", type=int)
     parser.add_argument("--active-positions-count", type=int)
+    parser.add_argument(
+        "--allow-live-runtime-handoff-prepare",
+        action="store_true",
+    )
     parser.add_argument("--metadata-json")
     return parser.parse_args(argv)
 

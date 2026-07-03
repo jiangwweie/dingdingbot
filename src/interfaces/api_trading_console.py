@@ -310,6 +310,7 @@ class StrategyRuntimeInspectionView(BaseModel):
 class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     allow_shadow_candidate_creation: bool = False
+    allow_live_runtime_handoff_prepare: bool = False
     candidate_id: str | None = None
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
@@ -320,6 +321,7 @@ class RuntimeStrategySignalIntentDraftSourceRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     allow_shadow_candidate_creation: Literal[True] = True
     allow_intent_draft_creation: Literal[True] = True
+    allow_live_runtime_handoff_prepare: bool = False
     owner_reviewed: Literal[True] = True
     owner_confirmed_for_intent: Literal[True] = True
     candidate_id: str | None = None
@@ -987,6 +989,9 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
             runtime=runtime,
             candidate_id=request.candidate_id,
             allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
+            allow_live_runtime_handoff_prepare=(
+                request.allow_live_runtime_handoff_prepare
+            ),
             context_id=request.context_id,
             expires_at_ms=request.expires_at_ms,
             metadata={
@@ -1033,6 +1038,9 @@ async def runtime_strategy_signal_intent_draft_source_for_signal_input(
             runtime=runtime,
             allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
             allow_intent_draft_creation=request.allow_intent_draft_creation,
+            allow_live_runtime_handoff_prepare=(
+                request.allow_live_runtime_handoff_prepare
+            ),
             owner_reviewed=request.owner_reviewed,
             owner_confirmed_for_intent=request.owner_confirmed_for_intent,
             candidate_id=request.candidate_id,

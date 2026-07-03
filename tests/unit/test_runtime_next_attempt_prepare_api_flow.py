@@ -85,6 +85,28 @@ def test_next_attempt_prepare_summary_blocks_without_authorization():
     assert payload["blockers"] == ["authorization_id_missing"]
 
 
+def test_next_attempt_prepare_summary_does_not_infer_shadow_candidate_from_observe_only_step():
+    report = {
+        "ids": {},
+        "steps": [
+            {
+                "name": "create_shadow_candidate_from_signal_input",
+                "status": "observe_only",
+            }
+        ],
+        "blockers": ["order_candidate_id_or_authorization_id_required"],
+        "warnings": ["runtime_live_execution_enabled_operation_layer_handoff"],
+        "next_attempt_gate": {"status": "clear_for_preflight"},
+    }
+
+    payload = runtime_next_attempt_prepare_api_flow._summarize_prepare_report(report)
+
+    assert payload["status"] == "blocked"
+    assert payload["created_records"]["shadow_candidate_created"] is False
+    assert payload["created_records"]["runtime_execution_intent_draft_created"] is False
+    assert payload["created_records"]["submit_authorization_created"] is False
+
+
 def test_next_attempt_prepare_cli_redirects_inner_report_stdout(monkeypatch, capsys):
     class FakeClient:
         def __init__(self, *, api_base):

@@ -109,6 +109,7 @@ class RuntimeStrategySignalSchedulerAssemblyService:
         output: StrategyFamilySignalOutput,
         *,
         candidate_id: str | None = None,
+        allow_live_runtime_handoff_prepare: bool = False,
     ) -> RuntimeStrategySignalSchedulerReadiness:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -144,13 +145,41 @@ class RuntimeStrategySignalSchedulerAssemblyService:
             blockers.append("strategy_signal_not_would_enter")
             status = RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY
         elif self._runtime_is_live_operation_layer_handoff(output):
-            status = (
-                RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING
-            )
-            warnings.append("runtime_live_execution_enabled_operation_layer_handoff")
+            if allow_live_runtime_handoff_prepare:
+                status = RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED
+                warnings.append(
+                    "runtime_live_execution_enabled_operation_layer_handoff_prepare"
+                )
+                self._append_runtime_blockers(
+                    signal_input,
+                    output,
+                    blockers,
+                    allow_live_runtime_handoff_prepare=True,
+                )
+                self._append_fact_source_blockers(
+                    required_market_fact_keys,
+                    blockers,
+                    warnings,
+                )
+                if not blockers:
+                    status = (
+                        RuntimeStrategySignalSchedulerReadinessStatus
+                        .READY_FOR_NON_EXECUTING_PLANNER
+                    )
+            else:
+                status = (
+                    RuntimeStrategySignalSchedulerReadinessStatus
+                    .LIVE_RUNTIME_HANDOFF_PENDING
+                )
+                warnings.append("runtime_live_execution_enabled_operation_layer_handoff")
         else:
             status = RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED
-            self._append_runtime_blockers(signal_input, output, blockers)
+            self._append_runtime_blockers(
+                signal_input,
+                output,
+                blockers,
+                allow_live_runtime_handoff_prepare=False,
+            )
             self._append_fact_source_blockers(required_market_fact_keys, blockers, warnings)
             if not blockers:
                 status = (
@@ -201,6 +230,8 @@ class RuntimeStrategySignalSchedulerAssemblyService:
         signal_input: StrategyFamilySignalInput,
         output: StrategyFamilySignalOutput,
         blockers: list[str],
+        *,
+        allow_live_runtime_handoff_prepare: bool,
     ) -> None:
         runtime = self._runtime
         if runtime is None:
@@ -216,9 +247,9 @@ class RuntimeStrategySignalSchedulerAssemblyService:
             blockers.append("runtime_symbol_mismatch")
         if runtime.side != output.side.value:
             blockers.append("runtime_side_mismatch")
-        if not runtime.shadow_mode:
+        if not runtime.shadow_mode and not allow_live_runtime_handoff_prepare:
             blockers.append("runtime_shadow_mode_required_for_b0_scheduler_planning")
-        if runtime.execution_enabled:
+        if runtime.execution_enabled and not allow_live_runtime_handoff_prepare:
             blockers.append("runtime_execution_enabled_not_allowed_for_b0_scheduler_planning")
         if signal_input.symbol != output.symbol:
             blockers.append("signal_input_output_symbol_mismatch")

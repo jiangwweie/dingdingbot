@@ -120,6 +120,7 @@ class FlowConfig:
     exchange_submit_action_authorization_id: str | None = None
     deployment_readiness_evidence_id: str | None = None
     exchange_submit_adapter_result_id: str | None = None
+    allow_live_runtime_handoff_prepare: bool = False
 
 
 @dataclass
@@ -337,11 +338,17 @@ class FirstRealSubmitApiFlow:
         body = {
             "signal_input": signal_input,
             "allow_shadow_candidate_creation": True,
+            "allow_live_runtime_handoff_prepare": (
+                self._config.allow_live_runtime_handoff_prepare
+            ),
             "candidate_id": self._config.candidate_id,
             "context_id": self._config.context_id,
             "metadata": {
                 "source": "runtime_first_real_submit_api_flow",
                 "owner_authorized_first_real_submit": self._config.execute_real_submit,
+                "live_runtime_handoff_prepare_allowed": (
+                    self._config.allow_live_runtime_handoff_prepare
+                ),
             },
         }
         result = self._step(

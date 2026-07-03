@@ -551,6 +551,7 @@ def _args(tmp_path, **overrides):
         "context_id": "context-rtf014",
         "expires_at_ms": None,
         "active_positions_count": 0,
+        "allow_live_runtime_handoff_prepare": False,
         "metadata_json": None,
     }
     values.update(overrides)
@@ -580,6 +581,7 @@ def test_intent_draft_source_api_flow_posts_ready_source_request(tmp_path):
     assert call["body"]["signal_input"]["evaluation_id"] == "eval-rtf014"
     assert call["body"]["allow_shadow_candidate_creation"] is True
     assert call["body"]["allow_intent_draft_creation"] is True
+    assert call["body"]["allow_live_runtime_handoff_prepare"] is False
     assert call["body"]["owner_reviewed"] is True
     assert call["body"]["owner_confirmed_for_intent"] is True
     assert call["body"]["active_positions_count"] == 0
