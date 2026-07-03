@@ -279,6 +279,99 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
     assert packet["selected_runtime_instance_ids"] == ["runtime-mpg", "runtime-teq"]
 
 
+def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_path):
+    candidate_pool = tmp_path / "candidate-pool.json"
+    candidate_pool.write_text(
+        json.dumps(
+            {
+                "candidate_universe": {
+                    "MPG-001": ["OPUSDT", "SOLUSDT"],
+                    "SOR-001": ["ETHUSDT"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-mpg-op",
+                strategy_family_id="MPG-001",
+                strategy_family_version_id="MPG-001-v0",
+                symbol="OP/USDT:USDT",
+                side="long",
+            ),
+            _runtime(
+                "runtime-mpg-coin",
+                strategy_family_id="MPG-001",
+                strategy_family_version_id="MPG-001-v0",
+                symbol="COIN/USDT:USDT",
+                side="long",
+            ),
+            _runtime(
+                "runtime-sor-eth",
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                symbol="ETH/USDT:USDT",
+                side="long",
+            ),
+            _runtime(
+                "runtime-sor-xag",
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                symbol="XAG/USDT:USDT",
+                side="long",
+            ),
+        ]
+    )
+    seen = []
+
+    def builder(args):
+        seen.append(args.runtime_instance_id)
+        return {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "observation_cycle_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(
+            output_dir=str(tmp_path),
+            strategy_family_id=["MPG-001", "SOR-001"],
+            candidate_universe_json=str(candidate_pool),
+        ),
+        client=client,
+        runtime_artifact_builder=builder,
+    )
+
+    assert seen == ["runtime-mpg-op", "runtime-sor-eth"]
+    assert packet["active_runtime_count"] == 4
+    assert packet["monitored_runtime_count"] == 2
+    assert packet["selected_runtime_instance_ids"] == [
+        "runtime-mpg-op",
+        "runtime-sor-eth",
+    ]
+    assert packet["candidate_universe_excluded_runtime_instance_ids"] == [
+        "runtime-mpg-coin",
+        "runtime-sor-xag",
+    ]
+    assert (
+        "runtime_excluded_by_candidate_universe:runtime-mpg-coin"
+        in packet["warnings"]
+    )
+    assert packet["candidate_universe_coverage"]["active_matched_row_count"] == 2
+    assert packet["candidate_universe_coverage"]["missing_row_count"] == 1
+
+
 def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
     candidate_pool = tmp_path / "candidate-pool.json"
     candidate_pool.write_text(

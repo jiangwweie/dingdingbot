@@ -200,6 +200,34 @@ def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, li
     return fallback, source
 
 
+def _filter_selected_to_candidate_universe(
+    selected: list[dict[str, Any]],
+    candidate_universe: dict[str, list[str]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not candidate_universe:
+        return selected, []
+    allowed_pairs = {
+        (str(strategy_group_id), str(symbol))
+        for strategy_group_id, symbols in candidate_universe.items()
+        for symbol in symbols
+    }
+    filtered: list[dict[str, Any]] = []
+    excluded_runtime_ids: list[str] = []
+    for runtime in selected:
+        pair = (
+            str(_runtime_value(runtime, "strategy_family_id", "family") or ""),
+            _compact_symbol(_runtime_value(runtime, "symbol")),
+        )
+        runtime_id = str(
+            _runtime_value(runtime, "runtime_instance_id", "runtime_id") or ""
+        )
+        if pair in allowed_pairs:
+            filtered.append(runtime)
+        elif runtime_id:
+            excluded_runtime_ids.append(runtime_id)
+    return filtered, excluded_runtime_ids
+
+
 def _candidate_universe_coverage(
     *,
     candidate_universe: dict[str, list[str]],
@@ -524,13 +552,22 @@ def _build_monitor_artifact(
     requested_strategy_family_ids = list(
         getattr(args, "strategy_family_id", None) or []
     )
+    candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
         runtime_instance_ids=requested_runtime_instance_ids,
         strategy_family_ids=requested_strategy_family_ids,
         max_runtimes=int(args.max_runtimes or 100),
     )
-    candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
+    enforce_candidate_universe_scope = (
+        candidate_universe_source.get("source") == "candidate_universe_json"
+        and candidate_universe_source.get("loaded") is True
+    )
+    selected, candidate_universe_excluded_runtime_instance_ids = (
+        _filter_selected_to_candidate_universe(selected, candidate_universe)
+        if enforce_candidate_universe_scope
+        else (selected, [])
+    )
     candidate_universe_coverage = _candidate_universe_coverage(
         candidate_universe=candidate_universe,
         source=candidate_universe_source,
@@ -567,6 +604,8 @@ def _build_monitor_artifact(
     warnings: list[str] = []
     for runtime_id in missing_runtime_instance_ids:
         warnings.append(f"requested_runtime_not_active_or_not_found:{runtime_id}")
+    for runtime_id in candidate_universe_excluded_runtime_instance_ids:
+        warnings.append(f"runtime_excluded_by_candidate_universe:{runtime_id}")
     effective_timeout = _effective_observation_timeout_seconds(args)
     if float(args.timeout_seconds or 10.0) != effective_timeout:
         warnings.append(
@@ -596,6 +635,9 @@ def _build_monitor_artifact(
             str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
             for runtime in selected
         ],
+        "candidate_universe_excluded_runtime_instance_ids": (
+            candidate_universe_excluded_runtime_instance_ids
+        ),
         "candidate_universe_coverage": candidate_universe_coverage,
         "allow_prepare_records": args.allow_prepare_records,
         "max_cycles_per_runtime": args.max_cycles_per_runtime,
