@@ -113,12 +113,26 @@ def test_signal_watcher_goal_status_dropin_is_read_only_summary():
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
+    assert "fetch_binance_usdm_public_facts.py" in text
+    assert "--symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT" in text
+    assert "--fallback-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
+    assert "build_sor_session_scope_detector.py" in text
     assert "build_mi_trial_admission_decision.py" in text
+    assert "build_brf2_runtime_signal_facts.py --strategy-source live_market --public-facts-json \"$PUBLIC\"" in text
     assert "build_strategygroup_runtime_safety_state.py" in text
     assert "validate_runtime_candidate_universe_coverage.py \"$STATUS\"" in text
     assert "build_strategy_live_candidate_pool.py" in text
     assert "--runtime-active-monitor-json \"$STATUS\"" in text
     assert "latest-status.json" in text
+    assert text.index("fetch_binance_usdm_public_facts.py") < text.index(
+        "build_sor_session_scope_detector.py"
+    )
+    assert text.index("build_sor_session_scope_detector.py") < text.index(
+        "build_strategy_live_candidate_pool.py"
+    )
+    assert text.index("build_brf2_runtime_signal_facts.py") < text.index(
+        "build_strategy_live_candidate_pool.py"
+    )
     assert text.index("validate_runtime_candidate_universe_coverage.py") < text.index(
         "build_strategy_live_candidate_pool.py"
     )

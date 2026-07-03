@@ -64,6 +64,21 @@ def _fresh_fact_artifact() -> dict:
     }
 
 
+def _public_facts() -> dict:
+    return {
+        "status": "binance_usdm_public_facts_ready",
+        "symbols": [
+            {
+                "symbol": symbol,
+                "public_facts_ready": True,
+                "spread_ok": True,
+                "mark_price_observed_at_utc": "2026-06-23T00:00:00+00:00",
+            }
+            for symbol in ("BTCUSDT", "AVAXUSDT", "ETHUSDT")
+        ],
+    }
+
+
 def _required_facts_mapping() -> dict:
     return {
         "status": "brf2_required_facts_mapping_ready",
@@ -327,6 +342,31 @@ def test_brf2_runtime_signal_facts_default_fallback_builds_preview_input():
     assert artifact["source_path"] == "generated:sample:strategy_group_preview"
     assert artifact["checks"]["fact_input_present"] is True
     assert artifact["checks"]["brf2_source_row_present"] is True
+    _assert_checks_do_not_mirror_execution_authority(artifact)
+
+
+def test_brf2_runtime_signal_facts_builds_public_proxy_per_symbol_inputs():
+    module = _load_module()
+
+    artifact = module.build_brf2_runtime_signal_facts(
+        source_artifact={},
+        source_path=Path("missing.json"),
+        public_facts=_public_facts(),
+        generated_at_utc="2026-06-23T00:00:00+00:00",
+    )
+
+    assert artifact["status"] == module.READY_STATUS
+    assert artifact["fact_input_present"] is True
+    assert artifact["watcher_tick_present"] is True
+    assert artifact["fact_authority"] == module.READONLY_PROXY_FACT_AUTHORITY
+    rows = {row["symbol"]: row for row in artifact["per_symbol_facts"]}
+    assert set(rows) == {"BTCUSDT", "AVAXUSDT", "ETHUSDT"}
+    assert rows["AVAXUSDT"]["fact_authority"] == module.READONLY_PROXY_FACT_AUTHORITY
+    assert rows["AVAXUSDT"]["facts"]["rally_context"]["status"] == "not_satisfied"
+    assert rows["AVAXUSDT"]["facts"]["rally_failure_trigger_state"]["status"] == (
+        "not_confirmed"
+    )
+    assert artifact["checks"]["per_symbol_fact_count"] == 3
     _assert_checks_do_not_mirror_execution_authority(artifact)
 
 

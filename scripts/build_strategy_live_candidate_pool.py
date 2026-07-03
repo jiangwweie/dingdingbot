@@ -665,6 +665,47 @@ def _brf2_runtime_signal_symbol_facts(
         }
     if status != "brf2_runtime_signal_facts_ready":
         return {}
+    per_symbol_rows = _dict_rows(facts_artifact.get("per_symbol_facts"))
+    if per_symbol_rows:
+        rows: dict[str, dict[str, Any]] = {}
+        for row in per_symbol_rows:
+            symbol = _normalize_symbol(row.get("symbol"))
+            if not _symbol_authorized("BRF2-001", symbol):
+                continue
+            failed = _brf2_failed_facts(_as_dict(row.get("facts")))
+            watcher_tick_present = row.get("watcher_tick_present") is True
+            computed = row.get("fact_input_present") is True and watcher_tick_present
+            rows[symbol] = {
+                "blocker_class": (
+                    "computed_not_satisfied" if failed else "market_wait_validated"
+                ),
+                "detector_attached": True,
+                "watcher_tick_present": watcher_tick_present,
+                "computed": computed,
+                "fresh_signal_present": row.get("fresh_signal_present") is True,
+                "failed_facts": failed if computed else [],
+                "next_action": (
+                    "continue_observation_with_failed_fact_matrix"
+                    if failed
+                    else "wait_for_fresh_signal_or_refresh_action_time_facts"
+                ),
+                "evidence_source": "brf2_runtime_signal_facts:per_symbol_facts",
+            }
+        for symbol in symbols:
+            rows.setdefault(
+                symbol,
+                {
+                    "blocker_class": "watcher_tick_missing",
+                    "detector_attached": True,
+                    "watcher_tick_present": False,
+                    "computed": False,
+                    "fresh_signal_present": False,
+                    "failed_facts": [],
+                    "next_action": "attach_brf2_watcher_fact_input_producer",
+                    "evidence_source": "brf2_runtime_signal_facts:missing_symbol_fact_input",
+                },
+            )
+        return rows
     observed_symbol = _normalize_symbol(
         _as_dict(facts_artifact.get("signal_context")).get("symbol")
         or _as_dict(facts_artifact.get("source_signal_context")).get("symbol")

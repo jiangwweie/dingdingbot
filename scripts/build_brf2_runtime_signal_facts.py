@@ -43,12 +43,16 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_OUTPUT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-facts.md"
 )
+DEFAULT_PUBLIC_FACTS_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
+)
 
 SCHEMA = "brc.brf2_runtime_signal_facts.v1"
 READY_STATUS = "brf2_runtime_signal_facts_ready"
 MISSING_STATUS = "brf2_runtime_signal_facts_missing_watcher_input"
 READONLY_PROXY_FACT_AUTHORITY = "readonly_proxy_not_action_time_required_fact"
 RUNTIME_READONLY_FACT_AUTHORITY = "runtime_watcher_readonly_not_action_time_required_fact"
+DEFAULT_SYMBOLS = ("BTCUSDT", "AVAXUSDT", "ETHUSDT")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=["sample", "local_sqlite_read_only", "live_market"],
         default="local_sqlite_read_only",
     )
+    parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
@@ -70,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     artifact = build_brf2_runtime_signal_facts(
         source_artifact=source_artifact,
         source_path=source_path,
+        public_facts=_read_optional_json(Path(args.public_facts_json)),
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
@@ -95,19 +101,27 @@ def build_brf2_runtime_signal_facts(
     *,
     source_artifact: dict[str, Any],
     source_path: Path | None = None,
+    public_facts: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     explicit_facts = _explicit_brf2_facts(source_artifact)
     source_row = _source_brf2_row(source_artifact)
     derived_facts = _derived_brf2_facts(source_row)
     fact_artifact = explicit_facts or derived_facts
-    fact_input_present = bool(fact_artifact)
-    watcher_tick_present = fact_input_present or bool(source_row)
     source_is_brf_reference_row = _is_brf_reference_row(source_row)
+    per_symbol_facts = _per_symbol_facts(
+        fact_artifact=fact_artifact,
+        source_row=source_row,
+        public_facts=public_facts or {},
+    )
+    fact_input_present = bool(fact_artifact) or bool(per_symbol_facts)
+    watcher_tick_present = fact_input_present or bool(source_row)
     fact_authority = _fact_authority(
         fact_artifact=fact_artifact,
         source_is_brf_reference_row=source_is_brf_reference_row,
     )
+    if not fact_authority and per_symbol_facts:
+        fact_authority = READONLY_PROXY_FACT_AUTHORITY
     source_signal_context = _signal_context(fact_artifact, source_row)
     first_blocker = (
         {
@@ -135,6 +149,7 @@ def build_brf2_runtime_signal_facts(
         "source_path": str(source_path or ""),
         "source_signal_context": source_signal_context,
         "signal_context": source_signal_context,
+        "per_symbol_facts": per_symbol_facts,
         "fact_authority": fact_authority,
         "fact_authority_boundary": _fact_authority_boundary(
             fact_authority=fact_authority,
@@ -150,6 +165,7 @@ def build_brf2_runtime_signal_facts(
             "source_strategy_group_id": str(source_row.get("strategy_group_id") or ""),
             "source_is_brf_reference_row": source_is_brf_reference_row,
             "missing_watcher_input": not fact_input_present,
+            "per_symbol_fact_count": len(per_symbol_facts),
             "derived_proxy_not_action_time_authority": (
                 fact_authority == READONLY_PROXY_FACT_AUTHORITY
             ),
@@ -169,6 +185,56 @@ def _explicit_brf2_facts(source_artifact: dict[str, Any]) -> dict[str, Any]:
     ):
         return source_artifact
     return {}
+
+
+def _per_symbol_facts(
+    *,
+    fact_artifact: dict[str, Any],
+    source_row: dict[str, Any],
+    public_facts: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    source_context = _signal_context(fact_artifact, source_row)
+    source_symbol = _normalize_symbol(
+        source_context.get("symbol") or source_row.get("symbol")
+    )
+    if source_symbol:
+        rows[source_symbol] = {
+            "strategy_group_id": "BRF2-001",
+            "symbol": source_symbol,
+            "watcher_tick_present": True,
+            "fact_input_present": bool(fact_artifact),
+            "fresh_signal_present": False,
+            "signal_context": source_context,
+            "facts": _facts(fact_artifact),
+            "fact_authority": _fact_authority(
+                fact_artifact=fact_artifact,
+                source_is_brf_reference_row=_is_brf_reference_row(source_row),
+            ),
+        }
+
+    public_by_symbol = {
+        _normalize_symbol(row.get("symbol")): row
+        for row in public_facts.get("symbols") or []
+        if isinstance(row, dict)
+    }
+    for symbol in DEFAULT_SYMBOLS:
+        if symbol in rows:
+            continue
+        public_row = public_by_symbol.get(symbol, {})
+        if public_row.get("public_facts_ready") is not True:
+            continue
+        rows[symbol] = {
+            "strategy_group_id": "BRF2-001",
+            "symbol": symbol,
+            "watcher_tick_present": True,
+            "fact_input_present": True,
+            "fresh_signal_present": False,
+            "signal_context": _public_proxy_signal_context(symbol, public_row),
+            "facts": _public_proxy_facts(public_row),
+            "fact_authority": READONLY_PROXY_FACT_AUTHORITY,
+        }
+    return [rows[symbol] for symbol in DEFAULT_SYMBOLS if symbol in rows]
 
 
 def _source_brf2_row(source_artifact: dict[str, Any]) -> dict[str, Any]:
@@ -415,6 +481,95 @@ def _derived_signal_context(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _public_proxy_signal_context(
+    symbol: str, public_row: dict[str, Any]
+) -> dict[str, str]:
+    observed_at = str(
+        public_row.get("mark_price_observed_at_utc")
+        or public_row.get("observed_at_utc")
+        or ""
+    )
+    return {
+        "signal_observation_id": f"brf2-public-proxy:{symbol}:{observed_at}",
+        "runtime_instance_id": "",
+        "symbol": symbol,
+        "exchange_symbol": symbol,
+        "market": "binance_usdm",
+        "timeframe": "public_contract_tick_proxy",
+        "closed_at_utc": observed_at,
+        "source": "binance_usdm_public_readonly_proxy_not_action_time_required_fact",
+        "source_strategy_group_id": "BRF2-001",
+        "source_candidate_id": f"BRF2-001-{symbol}",
+        "source_signal_type": "no_fresh_failed_rebound_signal",
+    }
+
+
+def _public_proxy_facts(public_row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "closed_1h_ohlcv": _fact(
+            status="ready",
+            fresh=True,
+            source="binance_usdm_public_contract_tick_proxy",
+            detail={
+                "proxy_is_not_action_time_live_required_fact": True,
+                "mark_price_observed_at_utc": public_row.get(
+                    "mark_price_observed_at_utc"
+                ),
+            },
+        ),
+        "closed_5m_ohlcv": _fact(
+            status="ready",
+            fresh=True,
+            source="binance_usdm_public_contract_tick_proxy",
+            detail={
+                "proxy_is_not_action_time_live_required_fact": True,
+                "mark_price_observed_at_utc": public_row.get(
+                    "mark_price_observed_at_utc"
+                ),
+            },
+        ),
+        "rally_context": _fact(
+            status="not_satisfied",
+            fresh=True,
+            source="brf2_public_proxy_no_failed_rebound_setup",
+            detail={"reason": "failed_rebound_rally_context_not_observed"},
+        ),
+        "rally_failure_trigger_state": _fact(
+            status="not_confirmed",
+            fresh=True,
+            source="brf2_public_proxy_no_failed_rebound_setup",
+            detail={"reason": "failure_trigger_not_confirmed"},
+        ),
+        "short_squeeze_risk_state": _fact(
+            status="bounded",
+            fresh=True,
+            source="brf2_public_proxy_conditional_rehearsal_guard",
+            detail={"action_time_hard_gate_still_required": True},
+        ),
+        "strong_reclaim_disable_state": _fact(
+            status="false",
+            fresh=True,
+            source="brf2_public_proxy_conditional_rehearsal_guard",
+        ),
+        "rally_extension_invalidates_failure_state": _fact(
+            status="false",
+            fresh=True,
+            source="brf2_public_proxy_conditional_rehearsal_guard",
+        ),
+        "liquidity_downshift_state": _fact(
+            status="false",
+            fresh=True,
+            source="binance_usdm_public_contract_tick_proxy",
+        ),
+        "spread_liquidity_state": _fact(
+            status="acceptable",
+            fresh=True,
+            source="binance_usdm_public_contract_tick_proxy",
+            detail={"spread_ok": public_row.get("spread_ok") is True},
+        ),
+    }
+
+
 def _signal_context(fact_artifact: dict[str, Any], source_row: dict[str, Any]) -> dict[str, str]:
     context = _as_dict(fact_artifact.get("signal_context"))
     return {
@@ -445,6 +600,13 @@ def _signal_context(fact_artifact: dict[str, Any], source_row: dict[str, Any]) -
             context.get("source_signal_type") or source_row.get("signal_type") or ""
         ),
     }
+
+
+def _normalize_symbol(value: Any) -> str:
+    symbol = str(value or "").upper()
+    if not symbol:
+        return ""
+    return symbol.split(":", 1)[0].replace("/", "")
 
 
 def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
