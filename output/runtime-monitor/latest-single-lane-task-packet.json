@@ -1,28 +1,28 @@
 {
   "schema": "brc.single_lane_task_packet.v1",
   "status": "single_lane_task_packet_ready",
-  "generated_at_utc": "2026-07-02T15:37:32.343666+00:00",
+  "generated_at_utc": "2026-07-03T05:55:48.033344+00:00",
   "source": "output/runtime-monitor/latest-daily-live-enablement-table.json",
   "source_rank": 1,
   "source_row_fingerprint": {
-    "strategy_group_id": "BRF2-001",
-    "symbol": "AVAXUSDT",
-    "first_blocker": "watcher_tick_missing",
+    "strategy_group_id": "CPM-RO-001",
+    "symbol": "ETHUSDT",
+    "first_blocker": "computed_not_satisfied",
     "closest_to_live_rank": 1,
-    "next_engineering_action": "refresh_readonly_watcher_for_candidate_symbol"
+    "next_engineering_action": "continue_observation_with_failed_fact_matrix"
   },
-  "task_id": "P0-BRF2-001-WATCHER-TICK-MISSING-CLOSURE",
+  "task_id": "P0-CPM-RO-001-COMPUTED-NOT-SATISFIED-CLOSURE",
   "active_lane": {
-    "strategy_group_id": "BRF2-001",
-    "symbol": "AVAXUSDT",
-    "side": "short",
+    "strategy_group_id": "CPM-RO-001",
+    "symbol": "ETHUSDT",
+    "side": "long",
     "stage": "armed"
   },
   "chain_position": "replay_live_parity",
-  "first_blocker": "watcher_tick_missing",
-  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:BRF2-001/AVAXUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope",
-  "expected_state_change": "BRF2-001/AVAXUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
-  "next_action": "refresh_readonly_watcher_for_candidate_symbol",
+  "first_blocker": "computed_not_satisfied",
+  "evidence": "output/runtime-monitor/latest-strategy-live-candidate-pool.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope",
+  "expected_state_change": "CPM-RO-001/ETHUSDT first_blocker changes from computed_not_satisfied to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.",
+  "next_action": "continue_observation_with_failed_fact_matrix",
   "allowed_files": [
     "scripts/build_single_lane_task_packet.py",
     "scripts/validate_single_lane_task_packet.py",
@@ -62,7 +62,7 @@
     "python3 scripts/validate_output_artifact_scope.py --git-status",
     "git diff --check"
   ],
-  "done_when": "BRF2-001/AVAXUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.",
+  "done_when": "CPM-RO-001/ETHUSDT no longer has computed_not_satisfied, or the Daily Table reclassifies the same lane to a more precise first blocker.",
   "authority_boundary": "single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
   "source_authority_boundary": "daily_table_is_read_model; no_finalgate_no_operation_layer_no_exchange_write",
   "owner_action_required": "no",

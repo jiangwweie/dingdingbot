@@ -125,7 +125,7 @@
       "candidate_positioning": "conditional failed-rebound short candidate",
       "candidate_status": "candidate_conditional_observation",
       "daily_rank": 1,
-      "evidence": "brf2_runtime_signal_facts:facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
+      "evidence": "brf2_runtime_signal_facts:per_symbol_facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
       "exit_condition": "exit mainline if bullish/squeeze disable remains active through the stop review window",
       "first_blocker": "computed_not_satisfied",
       "market_condition": "conditional short only when bullish/squeeze disable state clears",
@@ -185,11 +185,10 @@
     "single_real_submit_candidate": true,
     "source_validation_passed": true
   },
-  "generated_at_utc": "2026-07-02T15:07:40.034099+00:00",
+  "generated_at_utc": "2026-07-02T15:37:32.343666+00:00",
   "no_trade_audit": {
     "blocker_counts": {
-      "computed_not_satisfied": 16,
-      "watcher_tick_missing": 2
+      "computed_not_satisfied": 18
     },
     "reason": "candidate_pool_has_no_live_submit_allowed_fresh_satisfied_symbol",
     "selected_action_time_candidate": "none",
@@ -1524,6 +1523,7 @@
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
+          "breakout_level_crossed",
           "follow_through_confirmed"
         ],
         "missing": [],
@@ -1590,6 +1590,7 @@
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
+          "breakout_level_crossed",
           "follow_through_confirmed"
         ],
         "missing": [],
@@ -1631,7 +1632,7 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "primary",
       "detector_state": "ready",
-      "evidence_ref": "brf2_runtime_signal_facts:facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
+      "evidence_ref": "brf2_runtime_signal_facts:per_symbol_facts:BRF2-001/BTCUSDT first_blocker=computed_not_satisfied",
       "first_blocker": "computed_not_satisfied",
       "next_action": "continue_observation_with_failed_fact_matrix",
       "observation_scope": "active_observation",
@@ -1657,9 +1658,12 @@
       "promotion_state": "idle",
       "public_facts_state": {
         "computed_not_satisfied": [
+          "closed_1h_ohlcv",
+          "liquidity_downshift_state",
           "rally_context",
           "rally_failure_trigger_state",
-          "short_squeeze_risk_state"
+          "short_squeeze_risk_state",
+          "spread_liquidity_state"
         ],
         "missing": [],
         "satisfied": [],
@@ -1700,10 +1704,10 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "conditional",
       "detector_state": "ready",
-      "evidence_ref": "brf2_runtime_signal_facts:missing_symbol_fact_input:BRF2-001/AVAXUSDT first_blocker=watcher_tick_missing",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "evidence_ref": "brf2_runtime_signal_facts:per_symbol_facts:BRF2-001/AVAXUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
       "owner_authorization": {
         "action_time_rehearsal_allowed": true,
         "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
@@ -1725,12 +1729,14 @@
       },
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "computed_public_facts"
+        "computed_not_satisfied": [
+          "rally_context",
+          "rally_failure_trigger_state",
+          "short_squeeze_risk_state"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "conditional_action_time_rehearsal_allowed",
@@ -1754,7 +1760,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "AVAXUSDT",
       "symbol_or_basket": "AVAXUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     },
     {
       "action_time": {
@@ -1767,10 +1773,10 @@
       "authority_boundary": "live_candidate_pool_is_read_model; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change",
       "candidate_role": "conditional",
       "detector_state": "ready",
-      "evidence_ref": "brf2_runtime_signal_facts:missing_symbol_fact_input:BRF2-001/ETHUSDT first_blocker=watcher_tick_missing",
-      "first_blocker": "watcher_tick_missing",
-      "next_action": "refresh_readonly_watcher_for_candidate_symbol",
-      "observation_scope": "readonly",
+      "evidence_ref": "brf2_runtime_signal_facts:per_symbol_facts:BRF2-001/ETHUSDT first_blocker=computed_not_satisfied",
+      "first_blocker": "computed_not_satisfied",
+      "next_action": "continue_observation_with_failed_fact_matrix",
+      "observation_scope": "active_observation",
       "owner_authorization": {
         "action_time_rehearsal_allowed": true,
         "authority_boundary": "owner_pretrade_authorization_only; finalgate_required; operation_layer_required; no_exchange_write_bypass; no_live_profile_or_sizing_change",
@@ -1792,12 +1798,14 @@
       },
       "promotion_state": "idle",
       "public_facts_state": {
-        "computed_not_satisfied": [],
-        "missing": [
-          "computed_public_facts"
+        "computed_not_satisfied": [
+          "rally_context",
+          "rally_failure_trigger_state",
+          "short_squeeze_risk_state"
         ],
+        "missing": [],
         "satisfied": [],
-        "state": "missing"
+        "state": "computed_not_satisfied"
       },
       "risk_state": "acceptable",
       "scope_state": "conditional_action_time_rehearsal_allowed",
@@ -1821,7 +1829,7 @@
       "strategy_group_id": "BRF2-001",
       "symbol": "ETHUSDT",
       "symbol_or_basket": "ETHUSDT",
-      "watcher_state": "missing"
+      "watcher_state": "fresh"
     }
   ]
 }

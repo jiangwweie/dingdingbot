@@ -1,12 +1,12 @@
 ## Single Lane Task Packet
 
-- Task ID: `P0-BRF2-001-WATCHER-TICK-MISSING-CLOSURE`
-- Active lane: `BRF2-001 / AVAXUSDT / short`
+- Task ID: `P0-CPM-RO-001-COMPUTED-NOT-SATISFIED-CLOSURE`
+- Active lane: `CPM-RO-001 / ETHUSDT / long`
 - Chain position: `replay_live_parity`
-- First blocker: `watcher_tick_missing`
-- Evidence: `output/runtime-monitor/latest-strategy-live-candidate-pool.json:BRF2-001/AVAXUSDT first_blocker=watcher_tick_missing server_runtime_coverage=active_watcher_scope`
-- Expected state change: `BRF2-001/AVAXUSDT first_blocker changes from watcher_tick_missing to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.`
-- Next action: `refresh_readonly_watcher_for_candidate_symbol`
+- First blocker: `computed_not_satisfied`
+- Evidence: `output/runtime-monitor/latest-strategy-live-candidate-pool.json:CPM-RO-001/ETHUSDT first_blocker=computed_not_satisfied server_runtime_coverage=active_watcher_scope`
+- Expected state change: `CPM-RO-001/ETHUSDT first_blocker changes from computed_not_satisfied to the next precise blocker, market_wait_validated, or lane exit under the WIP stop rule.`
+- Next action: `continue_observation_with_failed_fact_matrix`
 - Stop condition: `blocker moves, repeats through stop review, or symbol exits candidate universe`
 - Authority boundary: `single_lane_task_packet_is_non_executing; no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change`
 
@@ -44,4 +44,4 @@
 
 ### Done When
 
-`BRF2-001/AVAXUSDT no longer has watcher_tick_missing, or the Daily Table reclassifies the same lane to a more precise first blocker.`
+`CPM-RO-001/ETHUSDT no longer has computed_not_satisfied, or the Daily Table reclassifies the same lane to a more precise first blocker.`

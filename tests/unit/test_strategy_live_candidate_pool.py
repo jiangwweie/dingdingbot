@@ -388,7 +388,7 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
     review = {row["item"]: row for row in artifact["p0_p1_review"]}
     assert rows["CPM-RO-001"]["selected_symbol"] == "AVAXUSDT"
     assert rows["CPM-RO-001"]["action_time_readiness"]["status"] == (
-        "ready_for_private_action_time_facts"
+        "ready_for_finalgate_preflight"
     )
     assert rows["CPM-RO-001"]["action_time_readiness"]["first_blocker"] == (
         "private_action_time_facts_required"
@@ -1100,7 +1100,10 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         "state"
     ] == "active_watcher_scope"
     assert artifact["action_time_lane_inputs"][0]["next_action"] == (
-        "refresh_private_action_time_facts_before_finalgate"
+        "prepare_non_executing_finalgate_preflight_input"
+    )
+    assert artifact["action_time_lane_inputs"][0]["action_time"]["status"] == (
+        "ready_for_finalgate_preflight"
     )
     assert artifact["action_time_lane_inputs"][0]["public_facts_state"]["state"] == (
         "satisfied"

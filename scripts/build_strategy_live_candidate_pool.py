@@ -1272,6 +1272,11 @@ def _symbol_next_action(
 ) -> str:
     action_next = str(_as_dict(action_row).get("next_action") or "")
     if (
+        first_blocker == "market_wait_validated"
+        and _action_time_private_facts_ready(_as_dict(action_row))
+    ):
+        return "prepare_non_executing_finalgate_preflight_input"
+    if (
         first_blocker == "action_time_boundary_not_reproduced"
         and action_next
         and action_next != "wait_for_fresh_signal_then_refresh_private_action_time_facts"
@@ -1693,9 +1698,12 @@ def _action_time_readiness(action_row: dict[str, Any]) -> dict[str, Any]:
     readiness = _as_dict(action_row.get("required_facts_readiness"))
     path_ready = action_row.get("action_time_path_ready") is True
     public_ready = readiness.get("public_facts_ready") is True
+    private_ready = _action_time_private_facts_ready(action_row)
     return {
         "status": (
-            "ready_for_private_action_time_facts"
+            "ready_for_finalgate_preflight"
+            if path_ready and private_ready
+            else "ready_for_private_action_time_facts"
             if path_ready
             else "blocked_public_facts"
             if not public_ready
@@ -1703,12 +1711,19 @@ def _action_time_readiness(action_row: dict[str, Any]) -> dict[str, Any]:
         ),
         "action_time_path_ready": path_ready,
         "public_facts_ready": public_ready,
-        "private_action_time_facts_ready": (
-            readiness.get("private_action_time_facts_ready") is True
-        ),
+        "private_action_time_facts_ready": private_ready,
         "first_blocker": str(action_row.get("first_blocker") or ""),
         "next_action": str(action_row.get("next_action") or ""),
     }
+
+
+def _action_time_private_facts_ready(action_row: dict[str, Any]) -> bool:
+    readiness = _as_dict(action_row.get("required_facts_readiness"))
+    return (
+        readiness.get("private_action_time_facts_ready") is True
+        and readiness.get("active_position_or_open_order_clear") is True
+        and readiness.get("action_time_available_balance") is True
+    )
 
 
 def _exit_condition(strategy_group_id: str, first_blocker: str) -> str:

@@ -38,5 +38,5 @@
 | SOR-001 | BTCUSDT | computed_not_satisfied | absent | live_submit_allowed | idle | computed_not_satisfied |
 | SOR-001 | SOLUSDT | computed_not_satisfied | absent | live_submit_allowed | idle | computed_not_satisfied |
 | BRF2-001 | BTCUSDT | computed_not_satisfied | absent | conditional_action_time_rehearsal_allowed | idle | computed_not_satisfied |
-| BRF2-001 | AVAXUSDT | missing | absent | conditional_action_time_rehearsal_allowed | idle | watcher_tick_missing |
-| BRF2-001 | ETHUSDT | missing | absent | conditional_action_time_rehearsal_allowed | idle | watcher_tick_missing |
+| BRF2-001 | AVAXUSDT | computed_not_satisfied | absent | conditional_action_time_rehearsal_allowed | idle | computed_not_satisfied |
+| BRF2-001 | ETHUSDT | computed_not_satisfied | absent | conditional_action_time_rehearsal_allowed | idle | computed_not_satisfied |
