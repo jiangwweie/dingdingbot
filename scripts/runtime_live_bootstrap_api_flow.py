@@ -421,18 +421,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "trusted_account_fact_source_confirmed",
             ]
         )
-        profile_warnings = {str(item) for item in profile_body.get("warnings") or []}
-        profile_metadata = (
-            profile_body.get("metadata")
-            if isinstance(profile_body.get("metadata"), dict)
-            else {}
-        )
-        if (
-            self._config.side.lower() == "short"
-            or "short_side_conservative_profile_required" in profile_warnings
-            or profile_metadata.get("short_side_conservative_profile_required") is True
-        ):
-            runtime_confirmations["short_side_conservative_profile_confirmed"] = True
+        runtime_confirmations["short_side_conservative_profile_confirmed"] = True
         confirmation = self._step(
             "create_runtime_promotion_confirmation",
             "POST",
