@@ -127,6 +127,7 @@ ACTION_TIME_SCOPE_STATES = {
 }
 ACTION_TIME_INPUT_BLOCKERS = {
     "action_time_boundary_not_reproduced",
+    "active_position_resolution",
     "artifact_missing",
     "detector_not_attached",
     "watcher_tick_missing",
