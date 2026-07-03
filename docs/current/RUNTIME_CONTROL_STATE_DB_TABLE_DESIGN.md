@@ -592,6 +592,8 @@ model.
 | `model_type` | `String(96)` | `candidate_pool`, `daily_live_enablement_table`, `goal_status`, `runtime_safety_state`, `server_monitor`, or other read model |
 | `owner_projector` | `String(128)` | One named writer for this projection |
 | `code_version` | `String(128)` nullable | Release head or build version |
+| `source_mode` | `String(32)` | `file_backed`, `hybrid`, or `db_backed` |
+| `projection_target` | `String(64)` | `production_current`, `diagnostic`, or `export` |
 | `input_watermark` | `JSONB` | Source fact/event/projection refs and timestamps |
 | `source_priority` | `JSONB` | Ordered source priority used by the projector |
 | `legacy_diagnostics_read` | `Boolean` | Whether legacy artifacts were inspected |
@@ -605,7 +607,9 @@ Checks and indexes:
 
 | Constraint/index | Rule |
 | --- | --- |
-| `ck_brc_projection_runs_legacy_current` | `legacy_diagnostics_affected_current=false` when `status='succeeded'` and production source is DB-backed |
+| `ck_brc_projection_runs_source_mode` | `source_mode` in `file_backed`, `hybrid`, `db_backed` |
+| `ck_brc_projection_runs_target` | `projection_target` in `production_current`, `diagnostic`, `export` |
+| `ck_brc_projection_runs_legacy_current` | `legacy_diagnostics_affected_current=false` when `source_mode='db_backed'`, `projection_target='production_current'`, and `status='succeeded'` |
 | `idx_brc_projection_runs_model_time` | `(model_type, started_at_ms)` |
 | `idx_brc_projection_runs_owner_status` | `(owner_projector, status)` |
 
@@ -621,6 +625,7 @@ Purpose: declare the only allowed writer for each current projection.
 | --- | --- | --- |
 | `projection_key` | `String(160)` PK | Example: `current:goal_status` |
 | `model_type` | `String(96)` | Projection type |
+| `projection_scope_key` | `String(256)` | Non-null scope key, for example `global`, `strategy_group:MPG-001`, or `strategy_group_symbol:MPG-001:OPUSDT` |
 | `owner_projector` | `String(128)` | Only writer allowed to mutate current rows |
 | `export_paths` | `JSONB` | Compatibility JSON/MD export paths |
 | `legacy_writer_allowed` | `Boolean` | Must be false in production |
@@ -633,7 +638,9 @@ Checks and indexes:
 | Constraint/index | Rule |
 | --- | --- |
 | `ck_brc_current_projection_no_legacy_prod` | Production rows require `legacy_writer_allowed=false` |
-| `uq_brc_current_projection_model_owner` | Unique `(model_type, owner_projector)` |
+| `ck_brc_current_projection_scope_key_nonempty` | `projection_scope_key` must be non-empty |
+| `uq_brc_current_projection_model_scope` | Unique `(model_type, projection_scope_key)`; this is the one-owner constraint |
+| `idx_brc_current_projection_owner` | `(owner_projector, model_type)` |
 
 Writer: migration/admin tooling.
 
