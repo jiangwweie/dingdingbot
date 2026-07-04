@@ -48,7 +48,7 @@ inspection of:
 | runtime fact builders | `scripts/fetch_binance_usdm_public_facts.py`, `scripts/build_runtime_account_safe_facts.py` |
 | detector/fresh-signal builders | `scripts/build_sor_session_scope_detector.py`, `scripts/build_strategy_fresh_signal_action_time_boundary.py`, `scripts/build_mi_trial_admission_decision.py`, `scripts/build_brf2_runtime_signal_facts.py` |
 | monitor/product refresh | `scripts/run_tokyo_runtime_server_monitor.py`, `scripts/refresh_strategygroup_runtime_product_state_artifacts.py` |
-| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py`, `scripts/materialize_candidate_pool_action_time_lane.py`, `scripts/materialize_action_time_ticket.py` |
+| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py`, `scripts/materialize_candidate_pool_action_time_lane.py`, `scripts/materialize_action_time_ticket.py`, `scripts/materialize_ticket_bound_post_submit_closure.py` |
 
 This document focuses on the **Tokyo watcher post-step / pre-trade runtime /
 server monitor mainline**. It does not inventory every local diagnostic or
@@ -65,7 +65,7 @@ historical research script.
 | 70 | `brc-runtime-signal-watcher.service.d/70-goal-status.conf` | none in current worktree | none in current worktree | Retired final Goal Status writer | Must remain no-writer after `brc_goal_status_current` exists |
 | 80-A | first product-state sequence | watcher `latest-status.json` for runtime coverage validation, server-side public-facts fallback JSON for detector/fact builders, PG runtime control state for Candidate Pool / Daily Table / Single Lane Packet | server-side public facts, SOR detector, MI admission, BRF2 facts, Candidate Pool export, Daily Table export, Single Lane Packet export | Rebuilds pre-trade control exports from PG-backed current projections without repo `output/runtime-monitor/latest-*` current inputs | DB fact/event writes plus current projection exports |
 | 80-B | `refresh_strategygroup_runtime_product_state_artifacts.py` | handoff dir, env file, dry-run/goal/live-facts/deploy report JSON | live-facts input, source-readiness, pilot status, chain closure, live-closure evidence, product refresh packet | Product-state and closure evidence refresh | fact/event rows, legacy diagnostics, closure evidence refs |
-| 80-C | final product-state sequence | live-facts input and account-safe facts for account/action-time fact builders; PG runtime control state for Candidate Pool / materializers / Daily Table / Single Lane Packet / Goal Status | server-side account-safe facts, action-time boundary, Candidate Pool export, action-time lane materialization export, Action-Time Ticket materialization export, Daily Table export, Single Lane Packet export, Goal Status export | Final same-tick control refresh; validators may read generated server-side exports, but control builders and ticket issuer use PG current state | owner projectors write current projections and Action-Time Ticket rows; JSON is export only |
+| 80-C | final product-state sequence | live-facts input and account-safe facts for account/action-time fact builders; PG runtime control state for Candidate Pool / materializers / Daily Table / Single Lane Packet / Goal Status | server-side account-safe facts, action-time boundary, Candidate Pool export, action-time lane materialization export, Action-Time Ticket materialization export, Runtime Safety State export, ticket-bound post-submit closure export, Daily Table export, Single Lane Packet export, Goal Status export | Final same-tick control refresh; validators may read generated server-side exports, but control builders, ticket issuer, Runtime Safety projector, and post-submit closure materializer use PG current state | owner projectors write current projections, Action-Time Ticket rows, Runtime Safety snapshots, and post-submit closure rows; JSON is export only |
 
 ## Server Monitor Systemd Map
 
@@ -213,6 +213,7 @@ Each current state needs one owner:
 | Goal Status current | Goal Status projector | product-state refresh, legacy 70 post-step, server monitor |
 | Runtime Safety State | Runtime Safety projector | Candidate Pool, Goal Status |
 | Protected Submit Attempt | ticket-bound protected submit adapter | dispatcher, reconciliation, settlement, review |
+| Post-submit closure | ticket-bound post-submit closure materializer | Candidate Pool, Daily Table, Goal Status, old authorization finalize |
 | Server monitor current | server monitor runner | local heartbeat, local monitor sequence |
 
 ### Rule 3: Legacy Files Become Diagnostics

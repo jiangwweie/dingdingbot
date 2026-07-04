@@ -139,11 +139,65 @@ def materialize_ticket_bound_post_submit_closure(
     )
 
 
+def materialize_latest_ticket_bound_post_submit_closure(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    now_ms = int(now_ms or time.time() * 1000)
+    try:
+        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+    except RuntimeControlStateRepositoryError as exc:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=[f"runtime_control_state_invalid:{exc}"],
+            closure={},
+            next_action="repair_pg_runtime_control_state",
+        )
+
+    submitted_attempts = [
+        dict(row)
+        for row in _rows(control_state.get("ticket_bound_protected_submit_attempts"))
+        if row.get("status") == "submitted"
+    ]
+    if not submitted_attempts:
+        return _result(
+            "not_applicable_no_submitted_attempt",
+            now_ms=now_ms,
+            blockers=[],
+            closure={},
+            next_action="wait_for_ticket_bound_protected_submit",
+        )
+
+    existing_attempt_ids = {
+        str(row.get("protected_submit_attempt_id") or "")
+        for row in _rows(control_state.get("ticket_bound_post_submit_closures"))
+        if row.get("protected_submit_attempt_id")
+    }
+    unclosed_submitted = [
+        row
+        for row in submitted_attempts
+        if str(row.get("protected_submit_attempt_id") or "") not in existing_attempt_ids
+    ]
+    target = max(
+        unclosed_submitted or submitted_attempts,
+        key=_attempt_sort_key,
+    )
+    return materialize_ticket_bound_post_submit_closure(
+        conn,
+        protected_submit_attempt_id=str(target.get("protected_submit_attempt_id") or ""),
+        now_ms=now_ms,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
-    parser.add_argument("--protected-submit-attempt-id", required=True)
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--protected-submit-attempt-id")
+    selector.add_argument("--latest-submitted", action="store_true")
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--json", action="store_true")
@@ -169,11 +223,17 @@ def main(argv: list[str] | None = None) -> int:
     engine = sa.create_engine(args.database_url)
     try:
         with engine.begin() as conn:
-            report = materialize_ticket_bound_post_submit_closure(
-                conn,
-                protected_submit_attempt_id=args.protected_submit_attempt_id,
-                now_ms=args.now_ms,
-            )
+            if args.latest_submitted:
+                report = materialize_latest_ticket_bound_post_submit_closure(
+                    conn,
+                    now_ms=args.now_ms,
+                )
+            else:
+                report = materialize_ticket_bound_post_submit_closure(
+                    conn,
+                    protected_submit_attempt_id=args.protected_submit_attempt_id,
+                    now_ms=args.now_ms,
+                )
     except sa.exc.SQLAlchemyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -186,6 +246,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(report["status"])
     return 1 if report["status"] == "blocked" else 0
+
+
+def _attempt_sort_key(attempt: dict[str, Any]) -> tuple[int, int, str]:
+    return (
+        _int_value(attempt.get("updated_at_ms")),
+        _int_value(attempt.get("created_at_ms")),
+        str(attempt.get("protected_submit_attempt_id") or ""),
+    )
 
 
 def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
@@ -396,6 +464,13 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:

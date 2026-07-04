@@ -321,6 +321,12 @@ protected_submit_attempt_id
 post_submit_closure_id
 ```
 
+The server product-state refresh sequence may auto-materialize the latest
+submitted protected submit attempt into a post-submit closure by reading PG
+current state. It must not infer this identity from Candidate Pool, Daily Table,
+Goal Status, generated JSON, repo documents, or loose StrategyGroup / symbol /
+side fields.
+
 Watcher, monitor, projector, Candidate Pool, Daily Table, Goal Status,
 FinalGate, reconciliation, and review paths must not write exchange orders.
 

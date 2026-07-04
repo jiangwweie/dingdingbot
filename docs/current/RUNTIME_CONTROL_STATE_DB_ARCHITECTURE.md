@@ -585,6 +585,9 @@ Close the official pre-submit chain:
 - Operation Layer input as `ticket_id + finalgate_pass_id` only;
 - protected submit input as `ticket_id + operation_submit_command_id` only;
 - post-submit closure input as `protected_submit_attempt_id` only;
+- server-side latest-submitted post-submit closure selection from PG current
+  state only, not from Candidate Pool, Daily Table, Goal Status, generated
+  JSON, repo documents, or loose StrategyGroup / symbol / side fields;
 - protection and reconciliation lineage back to the ticket.
 
 ### Step 4: Old-Source Removal

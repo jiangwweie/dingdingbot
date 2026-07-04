@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_post_submit_closure as closure
@@ -89,14 +91,85 @@ def test_post_submit_closure_is_idempotent(
     assert second["post_submit_closure_id"] == first["post_submit_closure_id"]
 
 
-def _submitted_attempt(conn):
+def test_latest_post_submit_closure_noops_without_submitted_attempt(
+    pg_control_connection,
+):
+    payload = closure.materialize_latest_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "not_applicable_no_submitted_attempt"
+    assert payload["blockers"] == []
+    assert payload["next_action"] == "wait_for_ticket_bound_protected_submit"
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_ticket_bound_post_submit_closures")
+    ).scalar_one() == 0
+
+
+def test_latest_post_submit_closure_materializes_newest_unclosed_submitted_attempt(
+    pg_control_connection,
+):
+    _, first = _submitted_attempt(pg_control_connection)
+    second = _clone_submitted_attempt(
+        pg_control_connection,
+        first,
+        ticket_suffix="2",
+        attempt_offset_ms=1000,
+    )
+    existing = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=first["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    payload = closure.materialize_latest_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert existing["protected_submit_attempt_id"] == first["protected_submit_attempt_id"]
+    assert payload["status"] == "reconciliation_pending"
+    assert payload["protected_submit_attempt_id"] == second["protected_submit_attempt_id"]
+    assert "idempotent_existing_closure" not in payload
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_ticket_bound_post_submit_closures")
+    ).scalar_one() == 2
+
+
+def test_latest_post_submit_closure_returns_existing_when_all_submitted_closed(
+    pg_control_connection,
+):
+    _, prepared = _submitted_attempt(pg_control_connection)
+    first = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    payload = closure.materialize_latest_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert payload["status"] == first["status"]
+    assert payload["protected_submit_attempt_id"] == prepared["protected_submit_attempt_id"]
+    assert payload["idempotent_existing_closure"] is True
+    assert payload["post_submit_closure_id"] == first["post_submit_closure_id"]
+
+
+def _submitted_attempt(
+    conn,
+    *,
+    attempt_offset_ms: int = 0,
+):
     ids = _create_ready_protected_submit(conn)
     prepared = submit.prepare_ticket_bound_protected_submit_attempt(
         conn,
         ticket_id=ids["ticket_id"],
         operation_submit_command_id=ids["operation_submit_command_id"],
         submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
+        now_ms=NOW_MS + 4000 + attempt_offset_ms,
     )
     submit.record_ticket_bound_protected_submit_result(
         conn,
@@ -133,9 +206,58 @@ def _submitted_attempt(conn):
                 },
             ],
         },
-        now_ms=NOW_MS + 5000,
+        now_ms=NOW_MS + 5000 + attempt_offset_ms,
     )
     return ids, prepared
+
+
+def _clone_submitted_attempt(
+    conn,
+    prepared: dict,
+    *,
+    ticket_suffix: str,
+    attempt_offset_ms: int,
+) -> dict:
+    row = conn.execute(
+        text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_protected_submit_attempts
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).mappings().one()
+    values = dict(row)
+    values["protected_submit_attempt_id"] = (
+        f"{prepared['protected_submit_attempt_id']}:{ticket_suffix}"
+    )
+    values["ticket_id"] = f"{values['ticket_id']}:{ticket_suffix}"
+    values["operation_submit_command_id"] = (
+        f"{values['operation_submit_command_id']}:{ticket_suffix}"
+    )
+    values["created_at_ms"] = NOW_MS + 4000 + attempt_offset_ms
+    values["updated_at_ms"] = NOW_MS + 5000 + attempt_offset_ms
+    submit_request = _json_value(values["submit_request"])
+    submit_result = _json_value(values["submit_result"])
+    submit_request["ticket_id"] = values["ticket_id"]
+    submit_request["operation_submit_command_id"] = values["operation_submit_command_id"]
+    submit_result["ticket_id"] = values["ticket_id"]
+    submit_result["operation_submit_command_id"] = values["operation_submit_command_id"]
+    values["submit_request"] = json.dumps(submit_request, sort_keys=True)
+    values["submit_result"] = json.dumps(submit_result, sort_keys=True)
+    columns = ", ".join(values)
+    placeholders = ", ".join(f":{key}" for key in values)
+    conn.execute(
+        text(
+            f"""
+            INSERT INTO brc_ticket_bound_protected_submit_attempts ({columns})
+            VALUES ({placeholders})
+            """
+        ),
+        values,
+    )
+    return values
 
 
 def _closure_row(conn):
