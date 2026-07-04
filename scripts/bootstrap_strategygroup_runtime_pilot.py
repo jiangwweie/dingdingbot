@@ -22,10 +22,15 @@ import sys
 import time
 from typing import Any
 
+import sqlalchemy as sa
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    PgBackedRuntimeControlStateRepository,
+)
 from scripts.build_strategy_group_handoff_intake_artifact import (  # noqa: E402
     DEFAULT_HANDOFF_DIR,
     build_artifact as build_handoff_intake_artifact,
@@ -46,6 +51,7 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_PLAYBOOK_ID = "PB-BRC-STRATEGYGROUP-RUNTIME-PILOT-V1"
 DEFAULT_MAX_SYMBOLS_PER_GROUP = 1
 DEFAULT_MAX_TOTAL_NEW_RUNTIMES = 4
+PG_SOURCE_REF = "pg_runtime_control_state:candidate_scope"
 BOOTSTRAPPABLE_INTAKE_STATUSES = {
     "armed_observation_intake_ready",
     "conditional_armed_observation_intake_ready",
@@ -88,6 +94,376 @@ def _read_json(path: str | Path | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return payload
+
+
+def _is_postgres_dsn(database_url: str) -> bool:
+    return database_url.startswith(("postgresql://", "postgresql+psycopg://"))
+
+
+def _read_control_state_from_pg(
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool = False,
+) -> dict[str, Any]:
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for runtime bootstrap")
+    if not _is_postgres_dsn(database_url) and not allow_non_postgres_for_test:
+        raise RuntimeError("DB-backed runtime bootstrap requires PostgreSQL DSN")
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            return PgBackedRuntimeControlStateRepository(conn).read_control_state()
+    finally:
+        engine.dispose()
+
+
+def _dict_rows(control_state: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in control_state.get(key) or []
+        if isinstance(row, dict)
+    ]
+
+
+def _risk_defaults_from_policy(policy: dict[str, Any] | None) -> dict[str, str]:
+    policy = policy if isinstance(policy, dict) else {}
+    return {
+        "max_notional_per_action_usdt": str(
+            policy.get("max_notional") or policy.get("max_notional_usdt") or "8"
+        ),
+        "max_leverage": str(policy.get("leverage") or "1"),
+    }
+
+
+def _required_policy_risk_defaults(policy: dict[str, Any] | None) -> dict[str, str]:
+    if not policy:
+        raise RuntimeError("owner policy current row is required for runtime bootstrap")
+    policy_current_id = str(policy.get("policy_current_id") or "unknown_policy")
+    raw_notional = policy.get("max_notional") or policy.get("max_notional_usdt")
+    raw_leverage = policy.get("leverage")
+    if raw_notional in (None, "") or raw_leverage in (None, ""):
+        raise RuntimeError(
+            f"{policy_current_id} missing max_notional or leverage scope"
+        )
+    try:
+        max_notional = Decimal(str(raw_notional))
+        max_leverage = Decimal(str(raw_leverage))
+    except Exception as exc:
+        raise RuntimeError(
+            f"{policy_current_id} has invalid max_notional or leverage scope"
+        ) from exc
+    if max_notional <= 0 or max_leverage <= 0:
+        raise RuntimeError(
+            f"{policy_current_id} has non-positive max_notional or leverage scope"
+        )
+    return {
+        "max_notional_per_action_usdt": str(max_notional),
+        "max_leverage": str(max_leverage),
+    }
+
+
+def _active_runtime_bindings_by_candidate(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for binding in _dict_rows(control_state, "runtime_scope_bindings"):
+        if binding.get("status") != "active":
+            continue
+        candidate_scope_id = str(binding.get("candidate_scope_id") or "").strip()
+        if not candidate_scope_id:
+            raise RuntimeError("active runtime scope binding missing candidate_scope_id")
+        if candidate_scope_id in result:
+            raise RuntimeError(
+                f"{candidate_scope_id} has multiple active runtime scope bindings"
+            )
+        result[candidate_scope_id] = binding
+    return result
+
+
+def _require_closed_runtime_scope_binding(
+    *,
+    row: dict[str, Any],
+    binding: dict[str, Any] | None,
+    policy: dict[str, Any] | None,
+) -> None:
+    candidate_scope_id = str(row.get("candidate_scope_id") or "unknown_candidate")
+    if not binding:
+        raise RuntimeError(f"{candidate_scope_id} has no active runtime scope binding")
+    for key in ("strategy_group_id", "symbol", "side", "policy_current_id"):
+        if str(binding.get(key) or "") != str(row.get(key) or ""):
+            raise RuntimeError(f"{candidate_scope_id} runtime binding mismatches {key}")
+    required_flags = (
+        "selected_strategygroup_scope",
+        "symbol_side_scope_closed",
+        "notional_leverage_scope_closed",
+        "live_submit_allowed",
+    )
+    for flag in required_flags:
+        if binding.get(flag) is not True:
+            raise RuntimeError(f"{candidate_scope_id} runtime binding missing {flag}")
+    if not policy:
+        raise RuntimeError(f"{candidate_scope_id} has no current owner policy")
+    for key in ("strategy_group_id", "symbol", "side"):
+        if str(policy.get(key) or "") != str(row.get(key) or ""):
+            raise RuntimeError(f"{candidate_scope_id} owner policy mismatches {key}")
+    if policy.get("enabled_state") != "enabled":
+        raise RuntimeError(f"{candidate_scope_id} owner policy is not enabled")
+    if policy.get("pretrade_candidate_allowed") is not True:
+        raise RuntimeError(
+            f"{candidate_scope_id} owner policy blocks pretrade candidate"
+        )
+    if policy.get("action_time_rehearsal_allowed") is not True:
+        raise RuntimeError(
+            f"{candidate_scope_id} owner policy blocks action-time rehearsal"
+        )
+    if policy.get("live_submit_allowed") not in {"scoped", "conditional_hard_gated"}:
+        raise RuntimeError(f"{candidate_scope_id} owner policy blocks live submit")
+    _required_policy_risk_defaults(policy)
+
+
+def _bootstrap_inputs_from_control_state(
+    control_state: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    candidate_rows = [
+        row
+        for row in _dict_rows(control_state, "candidate_scope")
+        if row.get("status") == "active"
+    ]
+    if not candidate_rows:
+        raise RuntimeError("PG runtime bootstrap has no active candidate scope")
+
+    strategy_rows = {
+        str(row.get("strategy_group_id") or ""): row
+        for row in _dict_rows(control_state, "strategy_groups")
+    }
+    version_rows = {
+        str(row.get("strategy_group_id") or ""): row
+        for row in _dict_rows(control_state, "strategy_group_versions")
+        if row.get("status") == "current"
+    }
+    policy_rows = {
+        str(row.get("policy_current_id") or ""): row
+        for row in _dict_rows(control_state, "owner_policy_current")
+    }
+    runtime_bindings = _active_runtime_bindings_by_candidate(control_state)
+
+    symbols_by_group: dict[str, list[str]] = {}
+    lanes_by_group: dict[str, list[str]] = {}
+    sides_by_group: dict[str, list[str]] = {}
+    candidate_by_group: dict[str, list[dict[str, Any]]] = {}
+    risk_defaults_by_group_lane: dict[str, dict[str, dict[str, str]]] = {}
+    for row in candidate_rows:
+        candidate_scope_id = str(row.get("candidate_scope_id") or "unknown_candidate")
+        strategy_group_id = str(row.get("strategy_group_id") or "").strip()
+        symbol = _exchange_symbol(row.get("symbol"))
+        side = str(row.get("side") or "").strip().lower()
+        if (
+            not strategy_group_id
+            or not symbol
+            or not symbol.endswith("USDT")
+            or side not in {"long", "short"}
+        ):
+            raise RuntimeError(f"{candidate_scope_id} has malformed active candidate scope")
+        policy_current_id = str(row.get("policy_current_id") or "")
+        binding = runtime_bindings.get(candidate_scope_id)
+        policy = policy_rows.get(policy_current_id)
+        _require_closed_runtime_scope_binding(
+            row=row,
+            binding=binding,
+            policy=policy,
+        )
+        candidate_by_group.setdefault(strategy_group_id, []).append(row)
+        risk_defaults_by_group_lane.setdefault(strategy_group_id, {})[
+            f"{symbol}:{side}"
+        ] = _required_policy_risk_defaults(policy)
+        symbols_by_group.setdefault(strategy_group_id, [])
+        if symbol not in symbols_by_group[strategy_group_id]:
+            symbols_by_group[strategy_group_id].append(symbol)
+        lanes_by_group.setdefault(strategy_group_id, [])
+        lane_key = f"{symbol}:{side}"
+        if lane_key not in lanes_by_group[strategy_group_id]:
+            lanes_by_group[strategy_group_id].append(lane_key)
+        sides_by_group.setdefault(strategy_group_id, [])
+        if side not in sides_by_group[strategy_group_id]:
+            sides_by_group[strategy_group_id].append(side)
+
+    strategy_picker: list[dict[str, Any]] = []
+    readiness_rows: list[dict[str, Any]] = []
+    symbol_readiness_rows: list[dict[str, Any]] = []
+    candidate_pool_rows: list[dict[str, Any]] = []
+    for strategy_group_id, rows in sorted(candidate_by_group.items()):
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                int(row.get("priority_rank") or 999),
+                str(row.get("symbol") or ""),
+                str(row.get("side") or ""),
+            ),
+        )
+        first = rows[0]
+        strategy = strategy_rows.get(strategy_group_id) or {}
+        version = version_rows.get(strategy_group_id) or {}
+        policy = policy_rows.get(str(first.get("policy_current_id") or ""))
+        min_rank = min(int(row.get("priority_rank") or 999) for row in rows)
+        symbols = sorted(symbols_by_group.get(strategy_group_id) or [])
+        sides = sorted(sides_by_group.get(strategy_group_id) or [])
+        strategy_picker.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "name": strategy.get("owner_label") or strategy_group_id,
+                "intake_status": "armed_observation_intake_ready",
+                "supported_symbols": symbols,
+                "supported_sides": sides,
+                "signal_ready_rule": {"side": sides[0] if sides else "long"},
+                "risk_defaults": _required_policy_risk_defaults(policy),
+                "risk_defaults_by_lane": risk_defaults_by_group_lane.get(
+                    strategy_group_id,
+                    {},
+                ),
+                "picker": {
+                    "rank": min_rank,
+                    "default_mode": "armed_observation",
+                },
+                "edge_thesis": version.get("edge_thesis"),
+                "candidate_universe_source": PG_SOURCE_REF,
+            }
+        )
+        readiness_rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "readiness_status": "pg_runtime_scope_ready",
+                "observe_ready": True,
+                "armed_candidate_prepare_ready": False,
+                "exchange_rules": {
+                    "ready_symbols": symbols,
+                    "blocked_symbols": [],
+                },
+                "blockers": [],
+                "source": PG_SOURCE_REF,
+            }
+        )
+        for row in rows:
+            symbol = _exchange_symbol(row.get("symbol"))
+            side = str(row.get("side") or "").strip().lower()
+            symbol_readiness_rows.append(
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "candidate_scope_id": row.get("candidate_scope_id"),
+                    "symbol": symbol,
+                    "side": side,
+                    "status": "runtime_scope_ready",
+                    "source": PG_SOURCE_REF,
+                }
+            )
+        candidate_pool_rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "daily_rank": min_rank,
+                "side": str(first.get("side") or "long"),
+            }
+        )
+
+    candidate_pool = {
+        "schema": "brc.strategy_live_candidate_pool.v1",
+        "status": "strategy_live_candidate_pool_ready",
+        "source_mode": "db_backed",
+        "authority_boundary": "pg_runtime_control_state_only",
+        "candidate_universe": {
+            key: sorted(value) for key, value in sorted(symbols_by_group.items())
+        },
+        "candidate_lane_universe": {
+            key: sorted(value) for key, value in sorted(lanes_by_group.items())
+        },
+        "candidate_rows": candidate_pool_rows,
+        "symbol_readiness_rows": symbol_readiness_rows,
+    }
+    return (
+        {
+            "status": "ready_for_main_control_intake",
+            "source_mode": "db_backed",
+            "authority_boundary": "pg_runtime_control_state_only",
+            "strategy_picker": strategy_picker,
+        },
+        {
+            "status": "runtime_scope_readiness_ready",
+            "source_mode": "db_backed",
+            "readiness": readiness_rows,
+        },
+        candidate_pool,
+        PG_SOURCE_REF,
+    )
+
+
+def _local_scope_source_args(args: argparse.Namespace) -> list[str]:
+    candidates = {
+        "--handoff-dir": getattr(args, "handoff_dir", None),
+        "--intake-json": getattr(args, "intake_json", None),
+        "--live-facts-readiness-json": getattr(args, "live_facts_readiness_json", None),
+        "--candidate-universe-json": getattr(args, "candidate_universe_json", None),
+        "--account-facts-json": getattr(args, "account_facts_json", None),
+    }
+    return [name for name, value in candidates.items() if value]
+
+
+def _load_bootstrap_inputs(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str | None]:
+    database_url = str(getattr(args, "database_url", "") or "")
+    allow_local_file_diagnostic = bool(
+        getattr(args, "allow_local_file_diagnostic", False)
+    )
+    if getattr(args, "execute", False) and allow_local_file_diagnostic:
+        raise RuntimeError(
+            "--allow-local-file-diagnostic must not be combined with --execute"
+        )
+    if getattr(args, "execute", False) and getattr(
+        args,
+        "allow_non_postgres_for_test",
+        False,
+    ):
+        raise RuntimeError(
+            "--allow-non-postgres-for-test must not be combined with --execute"
+        )
+    if getattr(args, "require_database_url", False) and not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for runtime bootstrap")
+    if database_url:
+        local_scope_args = _local_scope_source_args(args)
+        if local_scope_args:
+            raise RuntimeError(
+                "DB-backed runtime bootstrap must not mix local scope files: "
+                + ", ".join(local_scope_args)
+            )
+        control_state = _read_control_state_from_pg(
+            database_url=database_url,
+            allow_non_postgres_for_test=bool(
+                getattr(args, "allow_non_postgres_for_test", False)
+            ),
+        )
+        return _bootstrap_inputs_from_control_state(control_state)
+
+    if getattr(args, "execute", False):
+        raise RuntimeError(
+            "--execute requires PG_DATABASE_URL; local file diagnostic bootstrap "
+            "must not create runtime records"
+        )
+    if not allow_local_file_diagnostic:
+        raise RuntimeError(
+            "runtime bootstrap without PG_DATABASE_URL is local diagnostic only; "
+            "pass --allow-local-file-diagnostic for plan-only file inputs"
+        )
+    intake = (
+        _read_json(args.intake_json)
+        if args.intake_json
+        else build_handoff_intake_artifact(
+            handoff_dir=Path(args.handoff_dir or DEFAULT_HANDOFF_DIR)
+        )
+    )
+    live_facts_readiness = _read_json(args.live_facts_readiness_json)
+    candidate_pool = _read_json(args.candidate_universe_json)
+    candidate_pool_readiness = _candidate_pool_readiness(candidate_pool)
+    if candidate_pool_readiness:
+        live_facts_readiness = candidate_pool_readiness
+    return intake, live_facts_readiness, candidate_pool, args.candidate_universe_json
 
 
 def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
@@ -361,6 +737,11 @@ def _groups_from_candidate_pool(
                 if isinstance(base.get("risk_defaults"), dict)
                 else {}
             )
+            risk_defaults_by_lane = (
+                base.get("risk_defaults_by_lane")
+                if isinstance(base.get("risk_defaults_by_lane"), dict)
+                else {}
+            )
             groups.append(
                 {
                     **base,
@@ -387,6 +768,7 @@ def _groups_from_candidate_pool(
                         "max_leverage": str(risk_defaults.get("max_leverage") or "1"),
                         **risk_defaults,
                     },
+                    "risk_defaults_by_lane": risk_defaults_by_lane,
                     "picker": picker,
                     "candidate_universe_source": "strategy_live_candidate_pool",
                 }
@@ -552,8 +934,23 @@ def _bootstrap_config(
     renewal_suffix: str | None = None,
 ) -> BootstrapConfig:
     strategy_group_id = _group_id(group)
+    risk_defaults_by_lane = (
+        group.get("risk_defaults_by_lane")
+        if isinstance(group.get("risk_defaults_by_lane"), dict)
+        else {}
+    )
+    lane_risk_defaults = risk_defaults_by_lane.get(
+        f"{_exchange_symbol(symbol)}:{side}",
+        {},
+    )
     risk_defaults = (
-        group.get("risk_defaults") if isinstance(group.get("risk_defaults"), dict) else {}
+        lane_risk_defaults
+        if isinstance(lane_risk_defaults, dict) and lane_risk_defaults
+        else (
+            group.get("risk_defaults")
+            if isinstance(group.get("risk_defaults"), dict)
+            else {}
+        )
     )
     max_notional = _decimal_from(
         risk_defaults.get("max_notional_per_action_usdt")
@@ -671,6 +1068,7 @@ def build_artifact(
         candidate_pool=candidate_pool or {},
     )
     candidate_pool_symbols = _candidate_pool_symbols(candidate_pool or {})
+    candidate_pool_lanes = _candidate_pool_lanes_by_group(candidate_pool or {})
     groups.sort(
         key=lambda item: (
             (item.get("picker") or {}).get("rank", 999),
@@ -909,6 +1307,11 @@ def build_artifact(
             "candidate_universe_symbol_count": sum(
                 len(symbols) for symbols in candidate_pool_symbols.values()
             ),
+            "candidate_universe_lane_count": sum(
+                len(symbols)
+                for lanes_by_side in candidate_pool_lanes.values()
+                for symbols in lanes_by_side.values()
+            ),
             "watcher_scope_note": (
                 "The default systemd watcher monitors all ACTIVE runtimes when "
                 "no --runtime-instance-id filter is present; server env/drop-in "
@@ -981,11 +1384,38 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default=os.environ.get("RUNTIME_LIVE_BOOTSTRAP_API_BASE", DEFAULT_API_BASE))
     parser.add_argument("--env-file")
-    parser.add_argument("--handoff-dir", default=str(DEFAULT_HANDOFF_DIR))
+    parser.add_argument(
+        "--database-url",
+        default=os.environ.get("PG_DATABASE_URL", ""),
+        help="PG runtime control-state DSN for production bootstrap source.",
+    )
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
+    parser.add_argument(
+        "--allow-local-file-diagnostic",
+        action="store_true",
+        help=(
+            "Allow plan-only local file bootstrap diagnostics. This must not be "
+            "combined with --execute."
+        ),
+    )
+    parser.add_argument(
+        "--handoff-dir",
+        help=(
+            "Local diagnostic-only StrategyGroup handoff directory. Production "
+            "bootstrap reads PG runtime control state."
+        ),
+    )
     parser.add_argument("--intake-json")
     parser.add_argument("--live-facts-readiness-json")
     parser.add_argument("--active-runtimes-json")
-    parser.add_argument("--candidate-universe-json")
+    parser.add_argument(
+        "--candidate-universe-json",
+        help=(
+            "Local diagnostic-only Candidate Pool export. Production bootstrap "
+            "reads PG candidate scope/runtime bindings."
+        ),
+    )
     parser.add_argument("--strategy-group-id", action="append", default=[])
     parser.add_argument("--include-observe-only", action="store_true")
     parser.add_argument("--max-symbols-per-group", type=int, default=DEFAULT_MAX_SYMBOLS_PER_GROUP)
@@ -1007,17 +1437,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    _load_env_file(args.env_file)
-    intake = (
-        _read_json(args.intake_json)
-        if args.intake_json
-        else build_handoff_intake_artifact(handoff_dir=Path(args.handoff_dir))
-    )
-    live_facts_readiness = _read_json(args.live_facts_readiness_json)
-    candidate_pool = _read_json(args.candidate_universe_json)
-    candidate_pool_readiness = _candidate_pool_readiness(candidate_pool)
-    if candidate_pool_readiness:
-        live_facts_readiness = candidate_pool_readiness
+    try:
+        _load_env_file(args.env_file)
+        intake, live_facts_readiness, candidate_pool, candidate_universe_source = (
+            _load_bootstrap_inputs(args)
+        )
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.execute and args.active_runtimes_json:
+        print(
+            "--active-runtimes-json is local diagnostic only; execute must inspect "
+            "the runtime API",
+            file=sys.stderr,
+        )
+        return 2
     if args.active_runtimes_json:
         active_payload = _read_json(args.active_runtimes_json)
         active_runtimes = _runtime_rows_from_payload(active_payload)
@@ -1046,7 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
             output_json=args.output_json,
             renew_exhausted_runtimes=args.renew_exhausted_runtimes,
             renewal_batch_id=args.renewal_batch_id,
-            candidate_universe_source=args.candidate_universe_json,
+            candidate_universe_source=candidate_universe_source,
         ),
         intake_artifact=intake,
         live_facts_readiness=live_facts_readiness,

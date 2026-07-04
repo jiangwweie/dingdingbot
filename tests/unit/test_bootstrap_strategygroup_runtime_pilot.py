@@ -1,12 +1,66 @@
 from __future__ import annotations
 
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine, text
+
+from scripts import bootstrap_strategygroup_runtime_pilot as bootstrap
 from scripts.bootstrap_strategygroup_runtime_pilot import (
+    PG_SOURCE_REF,
     RuntimePilotBootstrapConfig,
     _active_inventory_counts,
+    _bootstrap_config,
     _runtime_rows_from_payload,
     _runtime_symbol,
     build_artifact,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+
+
+def _load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _seed_runtime_control_state_db(tmp_path: Path) -> str:
+    migration = _load_module(MIGRATION_PATH, "migration_086_bootstrap_runtime")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_bootstrap_runtime")
+    database_url = f"sqlite:///{tmp_path / 'runtime-control-state.db'}"
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    engine.dispose()
+    return database_url
+
+
+def _mutate_runtime_control_state_db(database_url: str, statement: str) -> None:
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        conn.execute(text(statement))
+    engine.dispose()
 
 
 class _FakeClient:
@@ -447,6 +501,32 @@ def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization(
     assert artifact["safety_invariants"]["creates_order"] is False
 
 
+def test_bootstrap_config_uses_lane_specific_policy_risk_defaults():
+    config = _bootstrap_config(
+        config=RuntimePilotBootstrapConfig(),
+        group={
+            "strategy_group_id": "MPG-001",
+            "name": "MPG",
+            "supported_symbols": ["OPUSDT"],
+            "risk_defaults": {
+                "max_notional_per_action_usdt": "8",
+                "max_leverage": "1",
+            },
+            "risk_defaults_by_lane": {
+                "OPUSDT:long": {
+                    "max_notional_per_action_usdt": "13",
+                    "max_leverage": "3",
+                }
+            },
+        },
+        symbol="OPUSDT",
+        side="long",
+    )
+
+    assert str(config.max_notional) == "13"
+    assert config.max_leverage == 3
+
+
 def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
     candidate_pool = {
         "status": "strategy_live_candidate_pool_ready",
@@ -575,3 +655,197 @@ def test_execute_blocks_when_active_inventory_is_unavailable():
     assert artifact["status"] == "blocked_active_runtime_inventory_unavailable"
     assert artifact["executions"] == []
     assert "active_runtime_inventory_unavailable:URLError" in artifact["blockers"]
+
+
+def test_cli_requires_pg_or_explicit_local_diagnostic(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    output_path = tmp_path / "bootstrap.json"
+
+    result = bootstrap.main(["--output-json", str(output_path)])
+
+    assert result == 2
+    assert not output_path.exists()
+    assert "local diagnostic only" in capsys.readouterr().err
+
+
+def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    output_path = tmp_path / "bootstrap.json"
+
+    result = bootstrap.main(
+        [
+            "--execute",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 2
+    assert not output_path.exists()
+    assert "--execute requires PG_DATABASE_URL" in capsys.readouterr().err
+
+
+def test_cli_execute_rejects_local_file_diagnostic_flag(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    output_path = tmp_path / "bootstrap.json"
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--allow-local-file-diagnostic",
+            "--execute",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 2
+    assert not output_path.exists()
+    assert "must not be combined with --execute" in capsys.readouterr().err
+
+
+def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    output_path = tmp_path / "bootstrap.json"
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--execute",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 2
+    assert not output_path.exists()
+    assert "must not be combined with --execute" in capsys.readouterr().err
+
+
+def test_cli_rejects_pg_scope_mixed_with_candidate_universe_json(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    candidate_universe = tmp_path / "candidate-pool.json"
+    candidate_universe.write_text(
+        json.dumps(
+            {
+                "status": "strategy_live_candidate_pool_ready",
+                "candidate_universe": {"MPG-001": ["OPUSDT"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--candidate-universe-json",
+            str(candidate_universe),
+            "--output-json",
+            str(tmp_path / "bootstrap.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "must not mix local scope files" in capsys.readouterr().err
+
+
+def test_cli_pg_bootstrap_requires_active_runtime_scope_binding(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    _mutate_runtime_control_state_db(
+        database_url,
+        """
+        DELETE FROM brc_runtime_scope_bindings
+        WHERE candidate_scope_id = 'candidate_scope:MPG-001:OPUSDT:long:MPG-LONG'
+        """,
+    )
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(tmp_path / "bootstrap.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "has no active runtime scope binding" in capsys.readouterr().err
+
+
+def test_cli_pg_bootstrap_requires_policy_notional_leverage_scope(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    _mutate_runtime_control_state_db(
+        database_url,
+        """
+        UPDATE brc_owner_policy_current
+        SET max_notional = NULL
+        WHERE policy_current_id =
+          'policy_current:candidate_scope:MPG-001:OPUSDT:long:MPG-LONG'
+        """,
+    )
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(tmp_path / "bootstrap.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "missing max_notional or leverage scope" in capsys.readouterr().err
+
+
+def test_cli_pg_backed_bootstrap_reads_seeded_runtime_control_state(
+    tmp_path,
+):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    active_runtimes = tmp_path / "active-runtimes.json"
+    active_runtimes.write_text(json.dumps({"items": []}), encoding="utf-8")
+    output_path = tmp_path / "bootstrap.json"
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--allow-local-file-diagnostic",
+            "--active-runtimes-json",
+            str(active_runtimes),
+            "--max-symbols-per-group",
+            "4",
+            "--max-total-new-runtimes",
+            "30",
+            "--include-observe-only",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 0
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert artifact["runtime_scope"]["candidate_universe_source"] == PG_SOURCE_REF
+    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 18
+    assert artifact["runtime_scope"]["candidate_universe_lane_count"] == 22
+    target_scope = {
+        (row["strategy_group_id"], row["exchange_symbol"], row["side"])
+        for row in artifact["targets"]
+    }
+    assert ("CPM-RO-001", "ETHUSDT", "short") not in target_scope
+    assert ("MPG-001", "OPUSDT", "short") not in target_scope
+    assert ("BRF2-001", "BTCUSDT", "long") not in target_scope
+    assert ("SOR-001", "ETHUSDT", "long") in target_scope
+    assert ("SOR-001", "ETHUSDT", "short") in target_scope
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
