@@ -228,6 +228,9 @@ def _operation_layer_handoff_ready_body() -> dict:
         "finalgate_pass_id": "finalgate-pass-1",
         "operation_layer_handoff_id": "handoff-1",
         "operation_submit_command_id": "operation-submit-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
         "blockers": [],
         "warnings": [],
         "command_plan": {
@@ -269,6 +272,87 @@ def _ticket_bound_finalgate_and_handoff_request(calls: list[dict]):
     return _request_json
 
 
+def _ticket_bound_finalgate_handoff_and_submit_request(
+    calls: list[dict],
+    *,
+    submit_body: dict,
+):
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        url = str(kwargs.get("url") or "")
+        if kwargs["method"] == "GET":
+            body = _finalgate_ready_body()
+        elif "/runtime-protected-submits/tickets/" in url:
+            body = submit_body
+        else:
+            body = _operation_layer_handoff_ready_body()
+        return {"http_status": 200, "error": False, "body": body}
+
+    return _request_json
+
+
+def _protected_submit_disabled_smoke_body() -> dict:
+    return {
+        "status": "disabled_smoke_passed",
+        "protected_submit_attempt_id": "protected-submit-1",
+        "ticket_id": "ticket-ready-1",
+        "finalgate_pass_id": "finalgate-pass-1",
+        "operation_layer_handoff_id": "handoff-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "action_time_lane_input_id": "lane-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_mode": "disabled_smoke",
+        "submit_allowed": True,
+        "blockers": [],
+        "warnings": ["disabled_smoke_no_exchange_write"],
+        "submit_request": {},
+        "submit_result": {"status": "exchange_submit_execution_disabled"},
+        "identity_evidence": {},
+        "official_operation_layer_submit_called": True,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _protected_submit_submitted_body(**overrides) -> dict:
+    body = {
+        "status": "submitted",
+        "protected_submit_attempt_id": "protected-submit-1",
+        "ticket_id": "ticket-ready-1",
+        "finalgate_pass_id": "finalgate-pass-1",
+        "operation_layer_handoff_id": "handoff-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "action_time_lane_input_id": "lane-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_mode": "real_gateway_action",
+        "submit_allowed": True,
+        "blockers": [],
+        "warnings": [],
+        "submit_request": {},
+        "submit_result": {"status": "exchange_submit_orders_submitted"},
+        "identity_evidence": {},
+        "official_operation_layer_submit_called": True,
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+    body.update(overrides)
+    return body
+
+
 def _assert_ticket_bound_operation_layer_ready(artifact: dict) -> None:
     assert artifact["status"] == "operation_layer_ready"
     assert artifact["blocker_class"] == "none"
@@ -297,21 +381,29 @@ def _assert_ticket_bound_operation_layer_ready(artifact: dict) -> None:
     )
 
 
-def _assert_ticket_bound_protected_submit_adapter_missing(artifact: dict) -> None:
-    assert artifact["status"] == "operation_layer_submit_blocked"
-    assert artifact["blocker_class"] == "missing_fact"
+def _assert_ticket_bound_protected_submit_disabled_smoke_passed(
+    artifact: dict,
+) -> None:
+    assert artifact["status"] == "operation_layer_disabled_smoke_passed"
+    assert artifact["blocker_class"] == "none"
     assert artifact["dispatch_status"] == (
-        "blocked_by_missing_ticket_bound_protected_submit_adapter"
+        "ticket_bound_protected_submit_disabled_smoke_passed"
     )
-    assert artifact["blockers"] == ["ticket_bound_protected_submit_adapter_missing"]
+    assert artifact["blockers"] == []
     assert artifact["operation_layer_handoff_result"]["called"] is True
     assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
     assert artifact["operation_layer_command_plan"]["finalgate_pass_id"] == (
         "finalgate-pass-1"
     )
     assert "authorization_id" not in artifact["operation_layer_command_plan"]
-    assert artifact["operation_layer_submit_result"]["called"] is False
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["operation_layer_submit_result"]["called"] is True
+    assert artifact["operation_layer_submit_result"]["body"]["ticket_id"] == (
+        "ticket-ready-1"
+    )
+    assert artifact["operation_layer_submit_result"]["body"][
+        "operation_submit_command_id"
+    ] == "operation-submit-1"
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
     assert artifact["safety_invariants"]["places_order"] is False
     assert artifact["safety_invariants"]["exchange_write_called"] is False
 
@@ -634,7 +726,10 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        _ticket_bound_finalgate_and_handoff_request(calls),
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_disabled_smoke_body(),
+        ),
     )
 
     artifact = build_dispatch_artifact(
@@ -740,7 +835,10 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        _ticket_bound_finalgate_and_handoff_request(calls),
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_disabled_smoke_body(),
+        ),
     )
     prepared_runtime_ids = []
 
@@ -1146,7 +1244,10 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        _ticket_bound_finalgate_and_handoff_request(calls),
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_disabled_smoke_body(),
+        ),
     )
 
     artifact = build_dispatch_artifact(
@@ -1216,7 +1317,10 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        _ticket_bound_finalgate_and_handoff_request(calls),
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_disabled_smoke_body(),
+        ),
     )
 
     def _prepare_evidence(authorization_id, command_plan):
@@ -1237,15 +1341,19 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
+        operation_layer_submit_mode="disabled_smoke",
         operation_layer_evidence_report=_operation_layer_blocked_report(),
         operation_layer_evidence_preparer=_prepare_evidence,
     )
 
     assert prepared == []
-    _assert_ticket_bound_protected_submit_adapter_missing(artifact)
-    assert len(calls) == 2
+    _assert_ticket_bound_protected_submit_disabled_smoke_passed(artifact)
+    assert len(calls) == 3
     assert calls[0]["method"] == "GET"
     assert calls[1]["method"] == "POST"
+    assert calls[2]["method"] == "POST"
+    assert "/runtime-protected-submits/tickets/ticket-ready-1/" in calls[2]["url"]
+    assert "submit_mode=disabled_smoke" in calls[2]["url"]
 
 
 def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operation_layer(
@@ -1286,7 +1394,10 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        _ticket_bound_finalgate_and_handoff_request(calls),
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_submitted_body(symbol="SOLUSDT"),
+        ),
     )
 
     artifact = build_dispatch_artifact(
@@ -1304,11 +1415,17 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
 
     assert prepared == []
     assert live_enablement_calls == []
-    _assert_ticket_bound_protected_submit_adapter_missing(artifact)
+    assert artifact["status"] == "operation_layer_submit_failed"
+    assert artifact["dispatch_status"] == "ticket_bound_submit_result_identity_mismatch"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["blockers"] == [
+        "ticket_bound_submit_result_mismatch:symbol:"
+        "expected=ETHUSDT:actual=SOLUSDT"
+    ]
     assert "runtime_live_enablement_result" not in artifact
-    assert artifact["operation_layer_submit_result"]["called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["operation_layer_submit_result"]["called"] is True
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
     assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 

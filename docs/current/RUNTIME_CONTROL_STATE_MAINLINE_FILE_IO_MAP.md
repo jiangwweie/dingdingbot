@@ -177,6 +177,7 @@ historical research script.
 | Readiness and promotion | Candidate Pool JSON | `brc_pretrade_readiness_rows`, `brc_promotion_candidates` | Candidate Pool export |
 | Action-time lane | action-time boundary JSON, resume pack | `brc_action_time_lane_inputs` | action-time export |
 | Action-Time Ticket | loose prepare files / missing ticket identity | `brc_action_time_tickets`, `brc_action_time_ticket_events` | ticket materialization export |
+| Protected submit attempt | submit API response JSON / dispatcher artifact | `brc_ticket_bound_protected_submit_attempts` | submit attempt export |
 | Goal Status | report-dir goal-status JSON plus legacy artifacts | `brc_goal_status_current` | goal-status export |
 | Server monitor and notification | server monitor latest JSON, dedupe JSON | `brc_server_monitor_runs`, `brc_server_monitor_notifications` | monitor export |
 | Strategy governance/admission | handoff JSON, MI admission JSON, review snapshots | `brc_strategy_governance_decisions`, admission tables, registry/version tables | governance export |
@@ -210,6 +211,7 @@ Each current state needs one owner:
 | Single Lane Packet export | task packet exporter | Candidate Pool, Goal Status |
 | Goal Status current | Goal Status projector | product-state refresh, legacy 70 post-step, server monitor |
 | Runtime Safety State | Runtime Safety projector | Candidate Pool, Goal Status |
+| Protected Submit Attempt | ticket-bound protected submit adapter | dispatcher, reconciliation, settlement, review |
 | Server monitor current | server monitor runner | local heartbeat, local monitor sequence |
 
 ### Rule 3: Legacy Files Become Diagnostics

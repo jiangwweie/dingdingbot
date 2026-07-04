@@ -984,6 +984,10 @@ def _operation_layer_blocker_class(
         return "hard_safety_stop"
     if "authorization_id_mismatch" in combined:
         return "hard_safety_stop"
+    if "ticket_bound_submit_result_mismatch" in combined:
+        return "hard_safety_stop"
+    if "submit_result_order_id_not_in_ticket_request" in combined:
+        return "hard_safety_stop"
     if "runtime_instance_id_mismatch" in combined:
         return "hard_safety_stop"
     if "reservation_id_mismatch" in combined:
@@ -2633,6 +2637,7 @@ def _execute_finalgate_preflight(
             preflight_result=preflight_result,
             timeout_seconds=timeout_seconds,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
         )
 
     operation_layer_command_plan = _operation_layer_command_plan(
@@ -2702,6 +2707,7 @@ def _execute_ticket_bound_operation_layer_handoff(
     preflight_result: dict[str, Any],
     timeout_seconds: int,
     execute_operation_layer_submit: bool,
+    operation_layer_submit_mode: str,
 ) -> dict[str, Any]:
     preflight_body = _dict(preflight_result.get("body"))
     command_plan = _dict(artifact.get("command_plan"))
@@ -2832,18 +2838,10 @@ def _execute_ticket_bound_operation_layer_handoff(
         handoff_result=handoff_result,
     )
     if execute_operation_layer_submit:
-        return _dispatch_artifact_from_operation_layer_submit(
+        return _execute_ticket_bound_protected_submit(
             artifact=result,
-            status="operation_layer_submit_blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_missing_ticket_bound_protected_submit_adapter",
-            blockers=["ticket_bound_protected_submit_adapter_missing"],
-            submit_result={
-                "called": False,
-                "http_status": None,
-                "body": None,
-                "error": "ticket_bound_protected_submit_adapter_missing",
-            },
+            timeout_seconds=timeout_seconds,
+            operation_layer_submit_mode=operation_layer_submit_mode,
         )
     return result
 
@@ -3347,6 +3345,9 @@ def _dispatch_artifact_from_operation_layer_handoff(
         "finalgate_pass_id": body.get("finalgate_pass_id"),
         "operation_layer_handoff_id": body.get("operation_layer_handoff_id"),
         "operation_submit_command_id": body.get("operation_submit_command_id"),
+        "strategy_group_id": body.get("strategy_group_id"),
+        "symbol": body.get("symbol"),
+        "side": body.get("side"),
         "finalgate_preflight_result": preflight_result,
         "operation_layer_handoff_plan": handoff_plan,
         "operation_layer_handoff_result": handoff_result,
@@ -3361,6 +3362,9 @@ def _dispatch_artifact_from_operation_layer_handoff(
                 "finalgate_pass_id": body.get("finalgate_pass_id"),
                 "operation_layer_handoff_id": body.get("operation_layer_handoff_id"),
                 "operation_submit_command_id": body.get("operation_submit_command_id"),
+                "strategy_group_id": body.get("strategy_group_id"),
+                "symbol": body.get("symbol"),
+                "side": body.get("side"),
                 "ready_for_ticket_bound_protected_submit": True,
                 "places_order": False,
                 "exchange_write_called": False,
@@ -3388,6 +3392,298 @@ def _dispatch_artifact_from_operation_layer_handoff(
             "withdrawal_or_transfer_created": False,
         },
     }
+
+
+def _ticket_bound_protected_submit_url(
+    *,
+    artifact: dict[str, Any],
+    submit_mode: str,
+) -> tuple[str, str, list[str]]:
+    ticket_id = _first_text(artifact.get("ticket_id"))
+    operation_submit_command_id = _first_text(
+        artifact.get("operation_submit_command_id")
+    )
+    blockers: list[str] = []
+    if not ticket_id:
+        blockers.append("ticket_id_missing_for_ticket_bound_submit")
+    if not operation_submit_command_id:
+        blockers.append("operation_submit_command_id_missing_for_ticket_bound_submit")
+    api_base = str(
+        _dict(artifact.get("operation_layer_handoff_plan")).get("api_base")
+        or _dict(artifact.get("operation_layer_command_plan")).get("api_base")
+        or DEFAULT_API_BASE
+    ).rstrip("/")
+    path = (
+        "/api/trading-console/runtime-protected-submits/tickets/"
+        f"{urllib.parse.quote(ticket_id or '', safe='')}"
+        "/operation-submit-commands/"
+        f"{urllib.parse.quote(operation_submit_command_id or '', safe='')}"
+    )
+    query = urllib.parse.urlencode({"submit_mode": submit_mode})
+    return api_base + path + "?" + query, path, blockers
+
+
+def _execute_ticket_bound_protected_submit(
+    *,
+    artifact: dict[str, Any],
+    timeout_seconds: int,
+    operation_layer_submit_mode: str,
+) -> dict[str, Any]:
+    if operation_layer_submit_mode not in OPERATION_LAYER_SUBMIT_MODES:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
+            blockers=[
+                f"invalid_operation_layer_submit_mode:{operation_layer_submit_mode}"
+            ],
+            submit_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "invalid_operation_layer_submit_mode",
+            },
+        )
+    url, path, url_blockers = _ticket_bound_protected_submit_url(
+        artifact=artifact,
+        submit_mode=operation_layer_submit_mode,
+    )
+    if url_blockers:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_before_ticket_bound_protected_submit",
+            blockers=url_blockers,
+            submit_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "ticket_bound_submit_identity_missing",
+            },
+        )
+    cookie, cookie_error = _session_cookie()
+    if not cookie:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_unavailable",
+            blockers=[cookie_error or "operator_session_unavailable"],
+            submit_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": cookie_error or "operator_session_unavailable",
+            },
+        )
+    response = _request_json(
+        method="POST",
+        url=url,
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+    )
+    body = _ticket_bound_submit_body_for_dispatch(_dict(response.get("body")))
+    submit_result = {
+        "called": True,
+        "method": "POST",
+        "path": path,
+        "http_status": response.get("http_status"),
+        "body": body,
+        "error": bool(response.get("error")),
+        "error_type": response.get("error_type"),
+        "error_message": response.get("error_message"),
+        "owner_confirmed_for_first_real_submit_action": (
+            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+        ),
+        "standing_authorized_first_real_submit": (
+            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+        ),
+        "standing_authorization_scope": "ticket_bound_runtime_safety_state",
+        "owner_chat_confirmation_required_for_real_submit": False,
+        "legacy_owner_confirmation_env_required": False,
+        "standing_authorization_consumed_for_real_submit": (
+            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+        ),
+        "operation_layer_submit_mode": operation_layer_submit_mode,
+        "official_operation_layer_submit_called": True,
+        "official_operation_layer_endpoint": True,
+    }
+    http_status = response.get("http_status")
+    if http_status in {401, 403}:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_http_error",
+            blockers=[f"operator_session_http_status:{http_status}"],
+            submit_result=submit_result,
+        )
+    if response.get("error"):
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_ticket_bound_protected_submit_http_error",
+            blockers=[
+                f"ticket_bound_protected_submit_http_status:{http_status or 'unavailable'}"
+            ],
+            submit_result=submit_result,
+        )
+    forbidden_effects = _ticket_bound_submit_forbidden_effects(
+        body,
+        submit_mode=operation_layer_submit_mode,
+    )
+    if forbidden_effects:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_ticket_bound_submit_forbidden_effect",
+            blockers=forbidden_effects,
+            submit_result=submit_result,
+        )
+    if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
+        if body.get("status") != "disabled_smoke_passed":
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
+                status="operation_layer_submit_blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_status="blocked_by_disabled_smoke_submit_result",
+                blockers=[
+                    "disabled_smoke_expected_disabled_smoke_passed:"
+                    f"{body.get('status') or 'missing'}"
+                ],
+                submit_result=submit_result,
+            )
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_disabled_smoke_passed",
+            blocker_class="none",
+            dispatch_status="ticket_bound_protected_submit_disabled_smoke_passed",
+            blockers=[],
+            submit_result=submit_result,
+        )
+
+    if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="operation_layer_submit_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
+            blockers=[
+                f"invalid_operation_layer_submit_mode:{operation_layer_submit_mode}"
+            ],
+            submit_result=submit_result,
+        )
+    if body.get("status") == "submitted":
+        identity_blockers = _ticket_bound_submit_result_identity_blockers(
+            artifact=artifact,
+            body=body,
+        )
+        if identity_blockers:
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
+                status="operation_layer_submit_failed",
+                blocker_class=_operation_layer_blocker_class(identity_blockers, []),
+                dispatch_status="ticket_bound_submit_result_identity_mismatch",
+                blockers=identity_blockers,
+                submit_result=submit_result,
+            )
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=artifact,
+            status="submitted",
+            blocker_class="none",
+            dispatch_status="ticket_bound_protected_submit_completed",
+            blockers=[],
+            submit_result=submit_result,
+        )
+
+    blockers = _dedupe_text(body.get("blockers") or [])
+    return _dispatch_artifact_from_operation_layer_submit(
+        artifact=artifact,
+        status=(
+            "operation_layer_submit_failed"
+            if body.get("status") == "submit_failed"
+            else "operation_layer_submit_blocked"
+        ),
+        blocker_class=_operation_layer_blocker_class(blockers, []),
+        dispatch_status="blocked_by_ticket_bound_protected_submit_result",
+        blockers=blockers or [f"ticket_bound_submit_status:{body.get('status') or 'missing'}"],
+        submit_result=submit_result,
+    )
+
+
+def _ticket_bound_submit_body_for_dispatch(body: dict[str, Any]) -> dict[str, Any]:
+    status = str(body.get("status") or "")
+    exchange_write_called = body.get("exchange_write_called") is True
+    order_lifecycle_called = body.get("order_lifecycle_called") is True
+    return {
+        **body,
+        "exchange_called": exchange_write_called,
+        "exchange_order_submitted": status == "submitted" and exchange_write_called,
+        "order_lifecycle_submit_called": order_lifecycle_called,
+    }
+
+
+def _ticket_bound_submit_forbidden_effects(
+    body: dict[str, Any],
+    *,
+    submit_mode: str,
+) -> list[str]:
+    effects: list[str] = []
+    for key in (
+        "withdrawal_or_transfer_created",
+        "live_profile_changed",
+        "order_sizing_changed",
+    ):
+        if body.get(key) not in {False, None, "", 0}:
+            effects.append(f"ticket_bound_submit_forbidden_effect:{key}")
+    if submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
+        for key in (
+            "exchange_write_called",
+            "order_created",
+            "order_lifecycle_called",
+            "exchange_called",
+            "exchange_order_submitted",
+            "order_lifecycle_submit_called",
+        ):
+            if body.get(key) not in {False, None, "", 0}:
+                effects.append(f"disabled_smoke_forbidden_effect:{key}")
+    return effects
+
+
+def _ticket_bound_submit_result_identity_blockers(
+    *,
+    artifact: dict[str, Any],
+    body: dict[str, Any],
+) -> list[str]:
+    expected = {
+        "ticket_id": artifact.get("ticket_id"),
+        "operation_submit_command_id": artifact.get("operation_submit_command_id"),
+        "strategy_group_id": artifact.get("strategy_group_id"),
+        "symbol": artifact.get("symbol"),
+        "side": artifact.get("side"),
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = str(body.get(key) or "")
+        expected_text = str(expected_value or "")
+        if not actual:
+            blockers.append(f"ticket_bound_submit_result_missing:{key}")
+        elif expected_text and actual != expected_text:
+            blockers.append(
+                f"ticket_bound_submit_result_mismatch:{key}:"
+                f"expected={expected_text}:actual={actual}"
+            )
+    if not body.get("protected_submit_attempt_id"):
+        blockers.append("protected_submit_attempt_id_missing")
+    if not body.get("runtime_safety_snapshot_id"):
+        blockers.append("runtime_safety_snapshot_id_missing")
+    if body.get("submit_allowed") is not True:
+        blockers.append("ticket_bound_submit_allowed_false")
+    return _dedupe_text(blockers)
 
 
 def _maybe_execute_operation_layer_submit(

@@ -97,6 +97,7 @@ def test_migration_creates_runtime_control_state_foundation_tables(connection):
         "brc_action_time_ticket_events",
         "brc_operation_layer_handoffs",
         "brc_runtime_safety_state_snapshots",
+        "brc_ticket_bound_protected_submit_attempts",
         "brc_projection_runs",
         "brc_current_projection_ownership",
         "brc_legacy_diagnostics",
@@ -986,5 +987,99 @@ def test_runtime_safety_submit_allowed_fails_closed(connection):
             "active_position_conflict": False,
             "facts_fresh": True,
             "trusted_fact_refs_complete": True,
+        },
+    )
+
+
+def test_ticket_bound_protected_submit_attempts_fail_closed(connection):
+    statement = """
+        INSERT INTO brc_ticket_bound_protected_submit_attempts (
+            protected_submit_attempt_id, ticket_id, finalgate_pass_id,
+            operation_layer_handoff_id, operation_submit_command_id,
+            runtime_safety_snapshot_id, action_time_lane_input_id,
+            strategy_group_id, symbol, side, runtime_profile_id,
+            submit_mode, status, submit_allowed, official_operation_layer_submit_called,
+            exchange_write_called, order_created, order_lifecycle_called,
+            withdrawal_or_transfer_created, live_profile_changed, order_sizing_changed,
+            authority_boundary, created_at_ms, updated_at_ms
+        ) VALUES (
+            :id, 'ticket-1', 'finalgate-pass-1', 'handoff-1', :command_id,
+            'runtime-safety-1', 'lane-1', 'SOR-001', 'ETHUSDT', 'long',
+            'tiny-live-profile', :submit_mode, :status, :submit_allowed,
+            :official_called, :exchange_write_called, :order_created,
+            :order_lifecycle_called, :withdrawal_or_transfer_created,
+            :live_profile_changed, :order_sizing_changed, 'ticket_bound_submit',
+            1770000000000, 1770000000000
+        )
+    """
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "smoke-with-exchange",
+            "command_id": "command-smoke",
+            "submit_mode": "disabled_smoke",
+            "status": "disabled_smoke_passed",
+            "submit_allowed": True,
+            "official_called": True,
+            "exchange_write_called": True,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "submitted-without-effects",
+            "command_id": "command-submitted-missing",
+            "submit_mode": "real_gateway_action",
+            "status": "submitted",
+            "submit_allowed": True,
+            "official_called": True,
+            "exchange_write_called": False,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "submitted-with-profile-change",
+            "command_id": "command-submitted-profile",
+            "submit_mode": "real_gateway_action",
+            "status": "submitted",
+            "submit_allowed": True,
+            "official_called": True,
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": True,
+            "order_sizing_changed": False,
+        },
+    )
+    connection.execute(
+        text(statement),
+        {
+            "id": "submitted-valid",
+            "command_id": "command-submitted-valid",
+            "submit_mode": "real_gateway_action",
+            "status": "submitted",
+            "submit_allowed": True,
+            "official_called": True,
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
         },
     )

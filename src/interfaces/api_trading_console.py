@@ -256,6 +256,39 @@ class RuntimeOperationLayerHandoff(BaseModel):
     order_sizing_changed: bool = False
 
 
+class RuntimeTicketBoundProtectedSubmit(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    protected_submit_attempt_id: str | None = None
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    operation_layer_handoff_id: str | None = None
+    operation_submit_command_id: str | None = None
+    runtime_safety_snapshot_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    submit_mode: str | None = None
+    submit_allowed: bool = False
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    submit_request: dict[str, Any] = Field(default_factory=dict)
+    submit_result: dict[str, Any] = Field(default_factory=dict)
+    identity_evidence: dict[str, Any] = Field(default_factory=dict)
+    next_action: str
+    authority_boundary: str
+    official_operation_layer_submit_called: bool = False
+    exchange_write_called: bool = False
+    order_created: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+
+
 class _TradingConsoleLiveReadOnlyGateway:
     """Lazy, per-event-loop read-only exchange adapter for Trading Console GETs."""
 
@@ -2174,6 +2207,38 @@ async def runtime_operation_layer_handoff_for_ticket(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post(
+    "/runtime-protected-submits/tickets/{ticket_id}/operation-submit-commands/"
+    "{operation_submit_command_id}",
+    response_model=RuntimeTicketBoundProtectedSubmit,
+)
+async def runtime_ticket_bound_protected_submit_for_ticket(
+    ticket_id: str,
+    operation_submit_command_id: str,
+    submit_mode: str = Query(default="disabled_smoke"),
+) -> RuntimeTicketBoundProtectedSubmit:
+    ticket_id = str(ticket_id or "").strip()
+    operation_submit_command_id = str(operation_submit_command_id or "").strip()
+    submit_mode = str(submit_mode or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    if not operation_submit_command_id:
+        raise HTTPException(status_code=400, detail="operation_submit_command_id_required")
+    try:
+        report = await _run_ticket_bound_protected_submit(
+            ticket_id=ticket_id,
+            operation_submit_command_id=operation_submit_command_id,
+            submit_mode=submit_mode,
+        )
+        return RuntimeTicketBoundProtectedSubmit(
+            **_ticket_bound_protected_submit_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
     database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
     if not database_url:
@@ -2221,6 +2286,333 @@ def _run_ticket_bound_operation_layer_handoff(
             )
     finally:
         engine.dispose()
+
+
+async def _run_ticket_bound_protected_submit(
+    *,
+    ticket_id: str,
+    operation_submit_command_id: str,
+    submit_mode: str,
+) -> dict[str, Any]:
+    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound protected submit")
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise RuntimeError("ticket-bound protected submit requires PostgreSQL DSN")
+
+    from scripts.materialize_ticket_bound_protected_submit_attempt import (
+        SUBMIT_MODE_REAL_GATEWAY_ACTION,
+        prepare_ticket_bound_protected_submit_attempt,
+        record_ticket_bound_protected_submit_result,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            report = prepare_ticket_bound_protected_submit_attempt(
+                conn,
+                ticket_id=ticket_id,
+                operation_submit_command_id=operation_submit_command_id,
+                submit_mode=submit_mode,
+            )
+        if report.get("status") != "submit_prepared":
+            return report
+        if submit_mode != SUBMIT_MODE_REAL_GATEWAY_ACTION:
+            return report
+
+        submit_result = await _execute_ticket_bound_real_gateway_submit(report)
+        with engine.begin() as conn:
+            return record_ticket_bound_protected_submit_result(
+                conn,
+                protected_submit_attempt_id=str(
+                    report.get("protected_submit_attempt_id") or ""
+                ),
+                submit_result=submit_result,
+            )
+    finally:
+        engine.dispose()
+
+
+async def _execute_ticket_bound_real_gateway_submit(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    from src.application.order_lifecycle_service import OrderLifecycleService
+    from src.interfaces import api as api_module
+
+    gateway_binding = await _runtime_exchange_submit_gateway_binding(api_module)
+    gateway = gateway_binding.get("gateway")
+    if gateway is None:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="runtime_exchange_gateway_unavailable",
+            blockers=list(gateway_binding.get("blockers") or []),
+        )
+    order_repository = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_order_repo",
+        _build_pg_order_repo,
+    )
+    if order_repository is None:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="order_lifecycle_repository_unavailable",
+            blockers=["order_lifecycle_repository_unavailable"],
+        )
+    order_lifecycle_service = OrderLifecycleService(repository=order_repository)
+    return await _submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=order_lifecycle_service,
+    )
+
+
+async def _submit_ticket_bound_orders(
+    report: dict[str, Any],
+    *,
+    gateway: Any,
+    order_lifecycle_service: Any,
+) -> dict[str, Any]:
+    from src.domain.models import Direction, Order, OrderRole, OrderStatus
+
+    submit_request = dict(report.get("submit_request") or {})
+    orders = [
+        dict(item)
+        for item in submit_request.get("orders", [])
+        if isinstance(item, dict)
+    ]
+    if not orders:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_orders_missing",
+            blockers=["submit_request_orders_missing"],
+        )
+    now_ms = int(time.time() * 1000)
+    registered_orders: list[Any] = []
+    submitted_orders: list[dict[str, Any]] = []
+    exchange_call_count = 0
+    try:
+        direction = Direction(str(submit_request.get("direction") or ""))
+    except Exception as exc:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_direction_invalid",
+            blockers=[f"submit_request_direction_invalid:{type(exc).__name__}"],
+        )
+    for order_request in orders:
+        local_order_id = str(order_request.get("local_order_id") or "")
+        try:
+            order_type = _ticket_bound_order_type(
+                order_request.get("gateway_order_type")
+            )
+            order_role = OrderRole(str(order_request.get("order_role") or ""))
+            amount = Decimal(str(order_request.get("amount") or "0"))
+            order = Order(
+                id=local_order_id,
+                signal_id=str(report.get("ticket_id") or ""),
+                symbol=str(
+                    order_request.get("symbol")
+                    or submit_request.get("exchange_symbol")
+                    or ""
+                ),
+                direction=direction,
+                order_type=order_type,
+                order_role=order_role,
+                price=_optional_decimal(order_request.get("price")),
+                trigger_price=_optional_decimal(order_request.get("trigger_price")),
+                requested_qty=amount,
+                status=OrderStatus.CREATED,
+                created_at=now_ms,
+                updated_at=now_ms,
+                reduce_only=order_request.get("reduce_only") is True,
+                parent_order_id=order_request.get("parent_order_id"),
+                signal_evaluation_id=str(report.get("ticket_id") or ""),
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="submit_request_order_invalid",
+                blockers=[
+                    "submit_request_order_invalid:"
+                    f"{local_order_id or 'missing'}:{type(exc).__name__}"
+                ],
+                order_created=bool(registered_orders),
+                order_lifecycle_called=bool(registered_orders),
+                submitted_orders=submitted_orders,
+            )
+        try:
+            registered = await order_lifecycle_service.register_created_order(
+                order,
+                metadata={
+                    "scope": "ticket_bound_protected_submit",
+                    "ticket_id": report.get("ticket_id"),
+                    "operation_submit_command_id": (
+                        report.get("operation_submit_command_id")
+                    ),
+                    "runtime_safety_snapshot_id": (
+                        report.get("runtime_safety_snapshot_id")
+                    ),
+                    "exchange_order_submitted": False,
+                    "exchange_called": False,
+                },
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="local_order_registration_failed",
+                blockers=[
+                    "local_order_registration_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=bool(registered_orders),
+                order_lifecycle_called=bool(registered_orders),
+                submitted_orders=submitted_orders,
+            )
+        registered_orders.append(registered)
+
+        exchange_call_count += 1
+        try:
+            placement_result = await gateway.place_order(
+                symbol=order.symbol,
+                order_type=str(order_request.get("gateway_order_type") or ""),
+                side=str(order_request.get("gateway_side") or ""),
+                amount=amount,
+                price=_optional_decimal(order_request.get("price")),
+                trigger_price=_optional_decimal(order_request.get("trigger_price")),
+                reduce_only=order_request.get("reduce_only") is True,
+                client_order_id=str(
+                    order_request.get("client_order_id") or local_order_id
+                ),
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="exchange_submit_failed",
+                blockers=[
+                    "exchange_submit_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        if not getattr(placement_result, "is_success", False):
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status=(
+                    "protection_submit_failed"
+                    if order_role != OrderRole.ENTRY
+                    else "entry_submit_failed"
+                ),
+                blockers=[
+                    getattr(placement_result, "error_message", None)
+                    or getattr(placement_result, "error_code", None)
+                    or f"exchange_submit_failed:{local_order_id}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        exchange_order_id = getattr(placement_result, "exchange_order_id", None)
+        try:
+            await order_lifecycle_service.submit_order(
+                local_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+            await order_lifecycle_service.confirm_order(
+                local_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="order_lifecycle_update_failed",
+                blockers=[
+                    "order_lifecycle_update_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        submitted_orders.append(
+            {
+                "local_order_id": local_order_id,
+                "exchange_order_id": exchange_order_id,
+                "order_role": str(order_role.value),
+                "reduce_only": order_request.get("reduce_only") is True,
+            }
+        )
+
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": "exchange_submit_orders_submitted",
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "exchange_call_count": exchange_call_count,
+        "submitted_orders": submitted_orders,
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_submit_blocked_result(
+    report: dict[str, Any],
+    *,
+    status: str,
+    blockers: list[str],
+    order_created: bool = False,
+    order_lifecycle_called: bool = False,
+    exchange_write_called: bool = False,
+    submitted_orders: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": status,
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "submitted_orders": submitted_orders or [],
+        "exchange_write_called": exchange_write_called,
+        "order_created": order_created,
+        "order_lifecycle_called": order_lifecycle_called,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_order_type(value: Any) -> Any:
+    from src.domain.models import OrderType
+
+    normalized = str(value or "").strip().lower()
+    if normalized == "market":
+        return OrderType.MARKET
+    if normalized == "limit":
+        return OrderType.LIMIT
+    if normalized == "stop_market":
+        return OrderType.STOP_MARKET
+    if normalized == "stop_limit":
+        return OrderType.STOP_LIMIT
+    raise ValueError(f"unsupported_ticket_bound_order_type:{normalized or 'missing'}")
+
+
+def _optional_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value))
 
 
 def _ticket_bound_finalgate_api_body(report: dict[str, Any]) -> dict[str, Any]:
@@ -2303,6 +2695,52 @@ def _ticket_bound_operation_layer_handoff_api_body(report: dict[str, Any]) -> di
         "withdrawal_or_transfer_created": False,
         "live_profile_changed": False,
         "order_sizing_changed": False,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_protected_submit_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "brc.runtime_ticket_bound_protected_submit_api.v1",
+        "status": str(report.get("status") or "blocked"),
+        "protected_submit_attempt_id": report.get("protected_submit_attempt_id"),
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "operation_layer_handoff_id": report.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "runtime_safety_snapshot_id": report.get("runtime_safety_snapshot_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "submit_mode": report.get("submit_mode"),
+        "submit_allowed": report.get("submit_allowed") is True,
+        "blockers": [
+            str(item)
+            for item in (report.get("blockers") or [])
+            if str(item).strip()
+        ],
+        "warnings": [
+            str(item)
+            for item in (report.get("warnings") or [])
+            if str(item).strip()
+        ],
+        "submit_request": dict(report.get("submit_request") or {}),
+        "submit_result": dict(report.get("submit_result") or {}),
+        "identity_evidence": dict(report.get("identity_evidence") or {}),
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "official_operation_layer_submit_called": (
+            report.get("official_operation_layer_submit_called") is True
+        ),
+        "exchange_write_called": report.get("exchange_write_called") is True,
+        "order_created": report.get("order_created") is True,
+        "order_lifecycle_called": report.get("order_lifecycle_called") is True,
+        "withdrawal_or_transfer_created": (
+            report.get("withdrawal_or_transfer_created") is True
+        ),
+        "live_profile_changed": report.get("live_profile_changed") is True,
+        "order_sizing_changed": report.get("order_sizing_changed") is True,
         "source_report": report,
     }
 

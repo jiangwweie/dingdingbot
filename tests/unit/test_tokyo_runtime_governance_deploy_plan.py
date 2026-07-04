@@ -56,7 +56,7 @@ def test_deploy_plan_requires_artifact_and_manifest():
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-07-05-087_harden_live_signal_event_time_authority.py"
+            "2026-07-05-088_create_ticket_bound_protected_submit_attempts.py"
         ),
     )
 
@@ -111,7 +111,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
             "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
         ),
         expected_latest_migration=(
-            "2026-07-05-087_harden_live_signal_event_time_authority.py"
+            "2026-07-05-088_create_ticket_bound_protected_submit_attempts.py"
         ),
     )
 
@@ -157,17 +157,17 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "systemctl start brc-owner-console-backend.service" in all_commands
     assert "--expected-current-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
     assert "--deployed-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
-    assert "--expected-min-migrations 87" in all_commands
+    assert "--expected-min-migrations 88" in all_commands
     assert "--expected-migration-count 85" in all_commands
     assert (
         "--expected-latest-migration "
-        "2026-07-05-087_harden_live_signal_event_time_authority.py"
+        "2026-07-05-088_create_ticket_bound_protected_submit_attempts.py"
     ) in all_commands
     assert "HEALTH_URL=http://127.0.0.1:18080/api/health" in all_commands
     assert "for attempt in $(seq 1 30)" in all_commands
     assert 'curl -fsS "$HEALTH_URL"' in all_commands
-    assert "--base-revision 085 --head-revision 087" in all_commands
-    assert "--expected-revision-count 2" in all_commands
+    assert "--base-revision 085 --head-revision 088" in all_commands
+    assert "--expected-revision-count 3" in all_commands
     assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
     assert "verify_runtime_submit_rehearsal_pre_live_evidence.py --json" in all_commands
     assert "--skip-current-head-deployed-check" in all_commands
@@ -210,7 +210,7 @@ def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-07-05-087_harden_live_signal_event_time_authority.py"
+            "2026-07-05-088_create_ticket_bound_protected_submit_attempts.py"
         ),
     )
 

@@ -100,6 +100,7 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_execution_policies` | Order type, time-in-force, slippage, and execution intent policy | P0 |
 | `brc_state_transition_events` | Append-only state transition audit events | P1 |
 | `brc_runtime_safety_state_snapshots` | Runtime Safety State snapshots | P1 |
+| `brc_ticket_bound_protected_submit_attempts` | Ticket-bound protected submit attempts and result identity | P0 |
 | `brc_projection_runs` | Projection lineage and input watermark records | P0 |
 | `brc_current_projection_ownership` | Single-owner registry for current projections | P0 |
 | `brc_legacy_diagnostics` | Legacy artifact diagnostics that cannot set current blockers | P1 |
@@ -1366,6 +1367,63 @@ Checks and indexes:
 Writer: Runtime Safety State builder.
 
 Readers: Daily Table, Candidate Pool, FinalGate preflight, Owner Console.
+
+### `brc_ticket_bound_protected_submit_attempts`
+
+Purpose: record the official protected submit attempt for exactly one
+Action-Time Ticket. This is the first PG table allowed to represent an actual
+submit attempt, and it must stay bound to `ticket_id`, `finalgate_pass_id`,
+`operation_layer_handoff_id`, `operation_submit_command_id`, and
+`runtime_safety_snapshot_id`.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `protected_submit_attempt_id` | `String(192)` PK | Stable attempt ID |
+| `ticket_id` | `String(192)` | Action-Time Ticket ref |
+| `finalgate_pass_id` | `String(256)` | FinalGate pass ref |
+| `operation_layer_handoff_id` | `String(192)` | Operation Layer handoff ref |
+| `operation_submit_command_id` | `String(192)` | Unique submit command ref |
+| `runtime_safety_snapshot_id` | `String(192)` | Runtime Safety State ref |
+| `action_time_lane_input_id` | `String(192)` | Lane ref |
+| `strategy_group_id` | `String(128)` | StrategyGroup |
+| `symbol` | `String(128)` | Symbol |
+| `side` | `String(32)` | `long` or `short` |
+| `runtime_profile_id` | `String(128)` | Runtime profile |
+| `submit_mode` | `String(64)` | `disabled_smoke` or `real_gateway_action` |
+| `status` | `String(64)` | `blocked`, `submit_prepared`, `disabled_smoke_passed`, `submitted`, `submit_failed`, `hard_stopped` |
+| `submit_allowed` | `Boolean` | True only when the referenced Runtime Safety State allows submit |
+| `blockers` | `JSONB` | Submit blockers |
+| `warnings` | `JSONB` | Submit warnings |
+| `trusted_fact_refs` | `JSONB` | Copied trusted fact refs from Runtime Safety State |
+| `submit_request` | `JSONB` | Ticket-bound entry/protection order request |
+| `submit_result` | `JSONB` | Gateway/OrderLifecycle result or disabled-smoke result |
+| `identity_evidence` | `JSONB` | Result identity proof and mismatch blockers |
+| `official_operation_layer_submit_called` | `Boolean` | Official protected submit boundary was entered |
+| `exchange_write_called` | `Boolean` | Real exchange write was attempted/succeeded |
+| `order_created` | `Boolean` | Local order objects were created |
+| `order_lifecycle_called` | `Boolean` | OrderLifecycle submit/update path was called |
+| `withdrawal_or_transfer_created` | `Boolean` | Must remain false |
+| `live_profile_changed` | `Boolean` | Must remain false |
+| `order_sizing_changed` | `Boolean` | Must remain false |
+| `authority_boundary` | `Text` | Boundary statement |
+| `created_at_ms` | `BIGINT` | Insert time |
+| `updated_at_ms` | `BIGINT` | Last update time |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_ticket_submit_command` | One protected submit attempt per `operation_submit_command_id` |
+| `ck_brc_ticket_submit_disabled_no_effects` | `disabled_smoke` cannot set exchange/order lifecycle side effects |
+| `ck_brc_ticket_submit_submitted_effects` | `submitted` requires `real_gateway_action`, `submit_allowed=true`, official submit called, exchange write called, and OrderLifecycle called |
+| `ck_brc_ticket_submit_no_forbidden_effects` | Withdrawal/transfer, live profile mutation, and order sizing mutation must remain false |
+| `idx_brc_ticket_submit_ticket_status` | `(ticket_id, status, created_at_ms)` |
+| `idx_brc_ticket_submit_safety` | `(runtime_safety_snapshot_id, status)` |
+
+Writer: ticket-bound protected submit adapter only.
+
+Readers: dispatcher, post-submit reconciliation, budget settlement, Review
+Ledger, server monitor, Owner Console detail surfaces.
 
 ### `brc_goal_status_current`
 

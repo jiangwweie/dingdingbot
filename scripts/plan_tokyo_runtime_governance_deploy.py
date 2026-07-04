@@ -46,7 +46,7 @@ DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
 )
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-05-087_harden_live_signal_event_time_authority.py"
+    "2026-07-05-088_create_ticket_bound_protected_submit_attempts.py"
 )
 DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"

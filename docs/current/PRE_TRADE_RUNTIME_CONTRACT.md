@@ -315,6 +315,7 @@ Every real exchange write must trace to:
 ticket_id
 finalgate_pass_id
 operation_submit_command_id
+protected_submit_attempt_id
 ```
 
 Watcher, monitor, projector, Candidate Pool, Daily Table, Goal Status,
