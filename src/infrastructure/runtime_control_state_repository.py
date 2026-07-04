@@ -49,6 +49,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "ticket_bound_protected_submit_attempts": (
         "brc_ticket_bound_protected_submit_attempts"
     ),
+    "ticket_bound_post_submit_closures": "brc_ticket_bound_post_submit_closures",
     "goal_status_current": "brc_goal_status_current",
     "projection_runs": "brc_projection_runs",
     "current_projection_ownership": "brc_current_projection_ownership",

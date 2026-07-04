@@ -52,6 +52,7 @@ TABLES = (
     "brc_state_transition_events",
     "brc_runtime_safety_state_snapshots",
     "brc_ticket_bound_protected_submit_attempts",
+    "brc_ticket_bound_post_submit_closures",
     "brc_projection_runs",
     "brc_current_projection_ownership",
     "brc_legacy_diagnostics",
@@ -1284,6 +1285,110 @@ def upgrade() -> None:
             "idx_brc_ticket_submit_safety",
             "brc_ticket_bound_protected_submit_attempts",
             ["runtime_safety_snapshot_id", "status"],
+        )
+
+    if not _has_table("brc_ticket_bound_post_submit_closures"):
+        op.create_table(
+            "brc_ticket_bound_post_submit_closures",
+            sa.Column("post_submit_closure_id", sa.String(192), primary_key=True),
+            sa.Column("protected_submit_attempt_id", sa.String(192), nullable=False),
+            sa.Column("ticket_id", sa.String(192), nullable=False),
+            sa.Column("finalgate_pass_id", sa.String(256), nullable=False),
+            sa.Column("operation_layer_handoff_id", sa.String(192), nullable=False),
+            sa.Column("operation_submit_command_id", sa.String(192), nullable=False),
+            sa.Column("runtime_safety_snapshot_id", sa.String(192), nullable=False),
+            sa.Column("action_time_lane_input_id", sa.String(192), nullable=False),
+            sa.Column("strategy_group_id", sa.String(128), nullable=False),
+            sa.Column("symbol", sa.String(128), nullable=False),
+            sa.Column("side", sa.String(32), nullable=False),
+            sa.Column("status", sa.String(64), nullable=False),
+            sa.Column("protection_state", sa.String(64), nullable=False),
+            sa.Column("reconciliation_state", sa.String(64), nullable=False),
+            sa.Column("settlement_state", sa.String(64), nullable=False),
+            sa.Column("review_state", sa.String(64), nullable=False),
+            sa.Column("first_blocker", sa.String(160), nullable=True),
+            sa.Column("blockers", json_t, nullable=False, server_default="[]"),
+            sa.Column("warnings", json_t, nullable=False, server_default="[]"),
+            sa.Column("submitted_order_refs", json_t, nullable=False, server_default="[]"),
+            sa.Column("reconciliation_evidence", json_t, nullable=False, server_default="{}"),
+            sa.Column("settlement_evidence", json_t, nullable=False, server_default="{}"),
+            sa.Column("review_evidence", json_t, nullable=False, server_default="{}"),
+            sa.Column("next_action", sa.Text(), nullable=False),
+            sa.Column("finalgate_called", sa.Boolean(), nullable=False),
+            sa.Column("operation_layer_called", sa.Boolean(), nullable=False),
+            sa.Column("exchange_write_called", sa.Boolean(), nullable=False),
+            sa.Column("order_created", sa.Boolean(), nullable=False),
+            sa.Column("order_lifecycle_called", sa.Boolean(), nullable=False),
+            sa.Column("withdrawal_or_transfer_created", sa.Boolean(), nullable=False),
+            sa.Column("live_profile_changed", sa.Boolean(), nullable=False),
+            sa.Column("order_sizing_changed", sa.Boolean(), nullable=False),
+            sa.Column("runtime_budget_mutated", sa.Boolean(), nullable=False),
+            sa.Column("authority_boundary", sa.Text(), nullable=False),
+            sa.Column("created_at_ms", sa.BIGINT(), nullable=False),
+            sa.Column("updated_at_ms", sa.BIGINT(), nullable=False),
+            sa.CheckConstraint(
+                "side IN ('long', 'short')",
+                name="ck_brc_ticket_post_submit_side",
+            ),
+            sa.CheckConstraint(
+                "status IN ('blocked', 'reconciliation_pending', "
+                "'reconciliation_matched', 'settlement_ready', 'review_ready', "
+                "'closed')",
+                name="ck_brc_ticket_post_submit_status",
+            ),
+            sa.CheckConstraint(
+                "protection_state IN ('submitted', 'missing', 'failed', 'unknown')",
+                name="ck_brc_ticket_post_submit_protection",
+            ),
+            sa.CheckConstraint(
+                "reconciliation_state IN ('not_checked', 'matched', 'mismatch', "
+                "'blocked')",
+                name="ck_brc_ticket_post_submit_reconciliation",
+            ),
+            sa.CheckConstraint(
+                "settlement_state IN ('not_started', 'held_until_position_resolved', "
+                "'released', 'blocked')",
+                name="ck_brc_ticket_post_submit_settlement",
+            ),
+            sa.CheckConstraint(
+                "review_state IN ('not_recorded', 'recorded', 'blocked')",
+                name="ck_brc_ticket_post_submit_review",
+            ),
+            sa.CheckConstraint(
+                "finalgate_called = false "
+                "AND operation_layer_called = false "
+                "AND exchange_write_called = false "
+                "AND order_created = false "
+                "AND order_lifecycle_called = false "
+                "AND withdrawal_or_transfer_created = false "
+                "AND live_profile_changed = false "
+                "AND order_sizing_changed = false "
+                "AND runtime_budget_mutated = false",
+                name="ck_brc_ticket_post_submit_no_effects",
+            ),
+            sa.CheckConstraint(
+                "status <> 'closed' OR "
+                "(protection_state = 'submitted' "
+                "AND reconciliation_state = 'matched' "
+                "AND settlement_state = 'released' "
+                "AND review_state = 'recorded' "
+                "AND first_blocker IS NULL)",
+                name="ck_brc_ticket_post_submit_closed_truth",
+            ),
+            sa.UniqueConstraint(
+                "protected_submit_attempt_id",
+                name="uq_brc_ticket_post_submit_attempt",
+            ),
+        )
+        _create_index(
+            "idx_brc_ticket_post_submit_ticket_status",
+            "brc_ticket_bound_post_submit_closures",
+            ["ticket_id", "status", "created_at_ms"],
+        )
+        _create_index(
+            "idx_brc_ticket_post_submit_scope",
+            "brc_ticket_bound_post_submit_closures",
+            ["strategy_group_id", "symbol", "created_at_ms"],
         )
 
     if not _has_table("brc_projection_runs"):

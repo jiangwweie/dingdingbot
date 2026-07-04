@@ -289,6 +289,38 @@ class RuntimeTicketBoundProtectedSubmit(BaseModel):
     order_sizing_changed: bool = False
 
 
+class RuntimeTicketBoundPostSubmitClosure(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    post_submit_closure_id: str | None = None
+    protected_submit_attempt_id: str | None = None
+    ticket_id: str | None = None
+    operation_submit_command_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    protection_state: str | None = None
+    reconciliation_state: str | None = None
+    settlement_state: str | None = None
+    review_state: str | None = None
+    first_blocker: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    submitted_order_refs: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: str
+    authority_boundary: str
+    finalgate_called: bool = False
+    operation_layer_called: bool = False
+    exchange_write_called: bool = False
+    order_created: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+    runtime_budget_mutated: bool = False
+
+
 class _TradingConsoleLiveReadOnlyGateway:
     """Lazy, per-event-loop read-only exchange adapter for Trading Console GETs."""
 
@@ -2239,6 +2271,30 @@ async def runtime_ticket_bound_protected_submit_for_ticket(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post(
+    "/runtime-post-submit-closures/protected-submit-attempts/"
+    "{protected_submit_attempt_id}",
+    response_model=RuntimeTicketBoundPostSubmitClosure,
+)
+async def runtime_ticket_bound_post_submit_closure_for_attempt(
+    protected_submit_attempt_id: str,
+) -> RuntimeTicketBoundPostSubmitClosure:
+    protected_submit_attempt_id = str(protected_submit_attempt_id or "").strip()
+    if not protected_submit_attempt_id:
+        raise HTTPException(status_code=400, detail="protected_submit_attempt_id_required")
+    try:
+        report = _run_ticket_bound_post_submit_closure(
+            protected_submit_attempt_id=protected_submit_attempt_id,
+        )
+        return RuntimeTicketBoundPostSubmitClosure(
+            **_ticket_bound_post_submit_closure_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
     database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
     if not database_url:
@@ -2328,6 +2384,31 @@ async def _run_ticket_bound_protected_submit(
                     report.get("protected_submit_attempt_id") or ""
                 ),
                 submit_result=submit_result,
+            )
+    finally:
+        engine.dispose()
+
+
+def _run_ticket_bound_post_submit_closure(
+    *,
+    protected_submit_attempt_id: str,
+) -> dict[str, Any]:
+    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound post-submit closure")
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise RuntimeError("ticket-bound post-submit closure requires PostgreSQL DSN")
+
+    from scripts.materialize_ticket_bound_post_submit_closure import (
+        materialize_ticket_bound_post_submit_closure,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_ticket_bound_post_submit_closure(
+                conn,
+                protected_submit_attempt_id=protected_submit_attempt_id,
             )
     finally:
         engine.dispose()
@@ -2741,6 +2822,49 @@ def _ticket_bound_protected_submit_api_body(report: dict[str, Any]) -> dict[str,
         ),
         "live_profile_changed": report.get("live_profile_changed") is True,
         "order_sizing_changed": report.get("order_sizing_changed") is True,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_post_submit_closure_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "brc.runtime_ticket_bound_post_submit_closure_api.v1",
+        "status": str(report.get("status") or "blocked"),
+        "post_submit_closure_id": report.get("post_submit_closure_id"),
+        "protected_submit_attempt_id": report.get("protected_submit_attempt_id"),
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "protection_state": report.get("protection_state"),
+        "reconciliation_state": report.get("reconciliation_state"),
+        "settlement_state": report.get("settlement_state"),
+        "review_state": report.get("review_state"),
+        "first_blocker": report.get("first_blocker"),
+        "blockers": [
+            str(item)
+            for item in (report.get("blockers") or [])
+            if str(item).strip()
+        ],
+        "submitted_order_refs": [
+            dict(item)
+            for item in (report.get("submitted_order_refs") or [])
+            if isinstance(item, dict)
+        ],
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "finalgate_called": report.get("finalgate_called") is True,
+        "operation_layer_called": report.get("operation_layer_called") is True,
+        "exchange_write_called": report.get("exchange_write_called") is True,
+        "order_created": report.get("order_created") is True,
+        "order_lifecycle_called": report.get("order_lifecycle_called") is True,
+        "withdrawal_or_transfer_created": (
+            report.get("withdrawal_or_transfer_created") is True
+        ),
+        "live_profile_changed": report.get("live_profile_changed") is True,
+        "order_sizing_changed": report.get("order_sizing_changed") is True,
+        "runtime_budget_mutated": report.get("runtime_budget_mutated") is True,
         "source_report": report,
     }
 

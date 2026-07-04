@@ -178,6 +178,7 @@ historical research script.
 | Action-time lane | action-time boundary JSON, resume pack | `brc_action_time_lane_inputs` | action-time export |
 | Action-Time Ticket | loose prepare files / missing ticket identity | `brc_action_time_tickets`, `brc_action_time_ticket_events` | ticket materialization export |
 | Protected submit attempt | submit API response JSON / dispatcher artifact | `brc_ticket_bound_protected_submit_attempts` | submit attempt export |
+| Post-submit closure | dispatcher artifact / old authorization finalize output | `brc_ticket_bound_post_submit_closures` | post-submit closure export |
 | Goal Status | report-dir goal-status JSON plus legacy artifacts | `brc_goal_status_current` | goal-status export |
 | Server monitor and notification | server monitor latest JSON, dedupe JSON | `brc_server_monitor_runs`, `brc_server_monitor_notifications` | monitor export |
 | Strategy governance/admission | handoff JSON, MI admission JSON, review snapshots | `brc_strategy_governance_decisions`, admission tables, registry/version tables | governance export |

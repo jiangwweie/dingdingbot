@@ -98,6 +98,7 @@ def test_migration_creates_runtime_control_state_foundation_tables(connection):
         "brc_operation_layer_handoffs",
         "brc_runtime_safety_state_snapshots",
         "brc_ticket_bound_protected_submit_attempts",
+        "brc_ticket_bound_post_submit_closures",
         "brc_projection_runs",
         "brc_current_projection_ownership",
         "brc_legacy_diagnostics",
@@ -111,6 +112,101 @@ def test_migration_creates_runtime_control_state_foundation_tables(connection):
         "brc_strategy_governance_decisions",
         "brc_strategy_policy_change_requests",
     }.issubset(tables)
+
+
+def test_ticket_bound_post_submit_closure_cannot_record_execution_side_effects(
+    connection,
+):
+    valid_insert = """
+        INSERT INTO brc_ticket_bound_post_submit_closures (
+            post_submit_closure_id, protected_submit_attempt_id, ticket_id,
+            finalgate_pass_id, operation_layer_handoff_id,
+            operation_submit_command_id, runtime_safety_snapshot_id,
+            action_time_lane_input_id, strategy_group_id, symbol, side, status,
+            protection_state, reconciliation_state, settlement_state, review_state,
+            first_blocker, blockers, warnings, submitted_order_refs,
+            reconciliation_evidence, settlement_evidence, review_evidence,
+            next_action, finalgate_called, operation_layer_called,
+            exchange_write_called, order_created, order_lifecycle_called,
+            withdrawal_or_transfer_created, live_profile_changed,
+            order_sizing_changed, runtime_budget_mutated, authority_boundary,
+            created_at_ms, updated_at_ms
+        ) VALUES (
+            :id, :attempt_id, 'ticket-1', 'finalgate-pass-1', 'handoff-1',
+            'operation-submit-1', 'runtime-safety-1', 'lane-1', 'SOR-001',
+            'ETHUSDT', 'long', 'reconciliation_pending', 'submitted',
+            'not_checked', 'blocked', 'blocked',
+            'post_submit_reconciliation_fact_missing',
+            '["post_submit_reconciliation_fact_missing"]', '[]', '[]',
+            '{}', '{}', '{}', 'run_ticket_bound_post_submit_reconciliation',
+            :finalgate_called, false, false, false, false, false, false,
+            false, false, 'ticket_bound_post_submit_closure', 1770000000000,
+            1770000000000
+        )
+    """
+    connection.execute(
+        text(valid_insert),
+        {
+            "id": "closure-valid",
+            "attempt_id": "protected-submit-valid",
+            "finalgate_called": False,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        valid_insert,
+        {
+            "id": "closure-invalid-finalgate-called",
+            "attempt_id": "protected-submit-invalid",
+            "finalgate_called": True,
+        },
+    )
+
+
+def test_ticket_bound_post_submit_closure_closed_requires_settlement_release(
+    connection,
+):
+    closed_insert = """
+        INSERT INTO brc_ticket_bound_post_submit_closures (
+            post_submit_closure_id, protected_submit_attempt_id, ticket_id,
+            finalgate_pass_id, operation_layer_handoff_id,
+            operation_submit_command_id, runtime_safety_snapshot_id,
+            action_time_lane_input_id, strategy_group_id, symbol, side, status,
+            protection_state, reconciliation_state, settlement_state, review_state,
+            first_blocker, blockers, warnings, submitted_order_refs,
+            reconciliation_evidence, settlement_evidence, review_evidence,
+            next_action, finalgate_called, operation_layer_called,
+            exchange_write_called, order_created, order_lifecycle_called,
+            withdrawal_or_transfer_created, live_profile_changed,
+            order_sizing_changed, runtime_budget_mutated, authority_boundary,
+            created_at_ms, updated_at_ms
+        ) VALUES (
+            :id, :attempt_id, 'ticket-closed-1', 'finalgate-pass-1',
+            'handoff-1', 'operation-submit-closed-1', 'runtime-safety-1',
+            'lane-1', 'SOR-001', 'ETHUSDT', 'long', 'closed',
+            'submitted', 'matched', :settlement_state, 'recorded', NULL,
+            '[]', '[]', '[]', '{}', '{}', '{}', 'continue_watcher_observation',
+            false, false, false, false, false, false, false, false, false,
+            'ticket_bound_post_submit_closure', 1770000000000, 1770000000000
+        )
+    """
+    connection.execute(
+        text(closed_insert),
+        {
+            "id": "closure-closed-valid",
+            "attempt_id": "protected-submit-closed-valid",
+            "settlement_state": "released",
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        closed_insert,
+        {
+            "id": "closure-closed-invalid-settlement",
+            "attempt_id": "protected-submit-closed-invalid-settlement",
+            "settlement_state": "blocked",
+        },
+    )
 
 
 def test_087_upgrades_already_applied_086_live_signal_schema_fail_closed():

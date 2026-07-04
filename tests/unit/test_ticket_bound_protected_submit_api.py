@@ -104,6 +104,89 @@ def test_ticket_bound_protected_submit_api_signature_has_no_legacy_inputs():
 
 
 @pytest.mark.asyncio
+async def test_ticket_bound_post_submit_closure_api_returns_pg_closure_body(
+    monkeypatch,
+):
+    def _run(*, protected_submit_attempt_id: str):
+        return {
+            "status": "reconciliation_pending",
+            "post_submit_closure_id": "post-submit-closure-1",
+            "protected_submit_attempt_id": protected_submit_attempt_id,
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "protection_state": "submitted",
+            "reconciliation_state": "not_checked",
+            "settlement_state": "blocked",
+            "review_state": "blocked",
+            "first_blocker": "post_submit_reconciliation_fact_missing",
+            "blockers": ["post_submit_reconciliation_fact_missing"],
+            "submitted_order_refs": [{"local_order_id": "entry-1"}],
+            "next_action": "run_ticket_bound_post_submit_reconciliation",
+            "authority_boundary": "ticket_bound_post_submit_closure",
+            "finalgate_called": False,
+            "operation_layer_called": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "runtime_budget_mutated": False,
+        }
+
+    monkeypatch.setattr(api_trading_console, "_run_ticket_bound_post_submit_closure", _run)
+
+    response = (
+        await api_trading_console.runtime_ticket_bound_post_submit_closure_for_attempt(
+            "protected-submit-1"
+        )
+    )
+    payload = response.model_dump()
+
+    assert payload["status"] == "reconciliation_pending"
+    assert payload["post_submit_closure_id"] == "post-submit-closure-1"
+    assert payload["protected_submit_attempt_id"] == "protected-submit-1"
+    assert payload["ticket_id"] == "ticket-1"
+    assert payload["first_blocker"] == "post_submit_reconciliation_fact_missing"
+    assert payload["exchange_write_called"] is False
+    assert payload["order_created"] is False
+    assert payload["order_lifecycle_called"] is False
+    assert payload["runtime_budget_mutated"] is False
+
+
+@pytest.mark.asyncio
+async def test_ticket_bound_post_submit_closure_api_fails_closed_without_pg(
+    monkeypatch,
+):
+    def _raise(*, protected_submit_attempt_id: str):
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound post-submit closure")
+
+    monkeypatch.setattr(api_trading_console, "_run_ticket_bound_post_submit_closure", _raise)
+
+    with pytest.raises(HTTPException) as exc:
+        await api_trading_console.runtime_ticket_bound_post_submit_closure_for_attempt(
+            "protected-submit-1"
+        )
+
+    assert exc.value.status_code == 503
+    assert "PG_DATABASE_URL is required" in exc.value.detail
+
+
+def test_ticket_bound_post_submit_closure_api_signature_has_no_legacy_inputs():
+    signature = inspect.signature(
+        api_trading_console.runtime_ticket_bound_post_submit_closure_for_attempt
+    )
+
+    assert list(signature.parameters) == ["protected_submit_attempt_id"]
+    assert "authorization_id" not in signature.parameters
+    assert "prepared_authorization_id" not in signature.parameters
+    assert "signal_input_json" not in signature.parameters
+
+
+@pytest.mark.asyncio
 async def test_ticket_bound_real_submit_helper_uses_gateway_and_order_lifecycle():
     gateway = _FakeGateway()
     lifecycle = _FakeOrderLifecycle()

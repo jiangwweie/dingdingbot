@@ -51,6 +51,8 @@ L2 Candidate Universe
 -> Action-Time Ticket
 -> FinalGate ticket check
 -> Operation Layer ticket handoff
+-> protected submit attempt
+-> post-submit closure
 ```
 
 `L2-L7` means:
@@ -316,6 +318,7 @@ ticket_id
 finalgate_pass_id
 operation_submit_command_id
 protected_submit_attempt_id
+post_submit_closure_id
 ```
 
 Watcher, monitor, projector, Candidate Pool, Daily Table, Goal Status,

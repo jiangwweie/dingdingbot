@@ -2638,6 +2638,7 @@ def _execute_finalgate_preflight(
             timeout_seconds=timeout_seconds,
             execute_operation_layer_submit=execute_operation_layer_submit,
             operation_layer_submit_mode=operation_layer_submit_mode,
+            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
     operation_layer_command_plan = _operation_layer_command_plan(
@@ -2708,6 +2709,7 @@ def _execute_ticket_bound_operation_layer_handoff(
     timeout_seconds: int,
     execute_operation_layer_submit: bool,
     operation_layer_submit_mode: str,
+    execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     preflight_body = _dict(preflight_result.get("body"))
     command_plan = _dict(artifact.get("command_plan"))
@@ -2842,6 +2844,7 @@ def _execute_ticket_bound_operation_layer_handoff(
             artifact=result,
             timeout_seconds=timeout_seconds,
             operation_layer_submit_mode=operation_layer_submit_mode,
+            execute_post_submit_finalize=execute_post_submit_finalize,
         )
     return result
 
@@ -3428,6 +3431,7 @@ def _execute_ticket_bound_protected_submit(
     artifact: dict[str, Any],
     timeout_seconds: int,
     operation_layer_submit_mode: str,
+    execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     if operation_layer_submit_mode not in OPERATION_LAYER_SUBMIT_MODES:
         return _dispatch_artifact_from_operation_layer_submit(
@@ -3591,13 +3595,19 @@ def _execute_ticket_bound_protected_submit(
                 blockers=identity_blockers,
                 submit_result=submit_result,
             )
-        return _dispatch_artifact_from_operation_layer_submit(
+        submitted_artifact = _dispatch_artifact_from_operation_layer_submit(
             artifact=artifact,
             status="submitted",
             blocker_class="none",
             dispatch_status="ticket_bound_protected_submit_completed",
             blockers=[],
             submit_result=submit_result,
+        )
+        if not execute_post_submit_finalize:
+            return submitted_artifact
+        return _execute_ticket_bound_post_submit_closure(
+            artifact=submitted_artifact,
+            timeout_seconds=timeout_seconds,
         )
 
     blockers = _dedupe_text(body.get("blockers") or [])
@@ -3684,6 +3694,302 @@ def _ticket_bound_submit_result_identity_blockers(
     if body.get("submit_allowed") is not True:
         blockers.append("ticket_bound_submit_allowed_false")
     return _dedupe_text(blockers)
+
+
+def _ticket_bound_post_submit_closure_url(
+    *,
+    artifact: dict[str, Any],
+) -> tuple[str, str, list[str]]:
+    body = _dict(_dict(artifact.get("operation_layer_submit_result")).get("body"))
+    protected_submit_attempt_id = _first_text(body.get("protected_submit_attempt_id"))
+    blockers: list[str] = []
+    if not protected_submit_attempt_id:
+        blockers.append("protected_submit_attempt_id_missing_for_post_submit_closure")
+    api_base = str(
+        _dict(artifact.get("operation_layer_handoff_plan")).get("api_base")
+        or _dict(artifact.get("operation_layer_command_plan")).get("api_base")
+        or DEFAULT_API_BASE
+    ).rstrip("/")
+    path = (
+        "/api/trading-console/runtime-post-submit-closures/"
+        "protected-submit-attempts/"
+        f"{urllib.parse.quote(protected_submit_attempt_id or '', safe='')}"
+    )
+    return api_base + path, path, blockers
+
+
+def _execute_ticket_bound_post_submit_closure(
+    *,
+    artifact: dict[str, Any],
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    url, path, url_blockers = _ticket_bound_post_submit_closure_url(artifact=artifact)
+    if url_blockers:
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_before_ticket_bound_post_submit_closure",
+            blockers=url_blockers,
+            closure_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "ticket_bound_post_submit_closure_identity_missing",
+            },
+        )
+    cookie, cookie_error = _session_cookie()
+    if not cookie:
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_unavailable",
+            blockers=[cookie_error or "operator_session_unavailable"],
+            closure_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": cookie_error or "operator_session_unavailable",
+            },
+        )
+    response = _request_json(
+        method="POST",
+        url=url,
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+    )
+    body = _dict(response.get("body"))
+    closure_result = {
+        "called": True,
+        "method": "POST",
+        "path": path,
+        "http_status": response.get("http_status"),
+        "body": body,
+        "error": bool(response.get("error")),
+        "error_type": response.get("error_type"),
+        "error_message": response.get("error_message"),
+        "official_post_submit_finalize_endpoint": False,
+        "ticket_bound_post_submit_closure_endpoint": True,
+        "exchange_write_called": False,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "withdrawal_or_transfer_created": False,
+    }
+    http_status = response.get("http_status")
+    if http_status in {401, 403}:
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_http_error",
+            blockers=[f"operator_session_http_status:{http_status}"],
+            closure_result=closure_result,
+        )
+    if response.get("error"):
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_ticket_bound_post_submit_closure_http_error",
+            blockers=[
+                f"ticket_bound_post_submit_closure_http_status:{http_status or 'unavailable'}"
+            ],
+            closure_result=closure_result,
+        )
+    forbidden_effects = _ticket_bound_post_submit_closure_forbidden_effects(body)
+    if forbidden_effects:
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_ticket_bound_post_submit_closure_forbidden_effect",
+            blockers=forbidden_effects,
+            closure_result=closure_result,
+        )
+    identity_blockers = _ticket_bound_post_submit_closure_identity_blockers(
+        artifact=artifact,
+        body=body,
+    )
+    if identity_blockers:
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_closure_blocked",
+            blocker_class=_operation_layer_blocker_class(identity_blockers, []),
+            dispatch_status="ticket_bound_post_submit_closure_identity_mismatch",
+            blockers=identity_blockers,
+            closure_result=closure_result,
+        )
+
+    body_status = str(body.get("status") or "")
+    blockers = _dedupe_text(body.get("blockers") or [])
+    if body_status == "reconciliation_pending":
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="post_submit_reconciliation_pending",
+            blocker_class="missing_fact",
+            dispatch_status="ticket_bound_post_submit_closure_reconciliation_pending",
+            blockers=blockers or ["post_submit_reconciliation_fact_missing"],
+            closure_result=closure_result,
+        )
+    if body_status == "closed":
+        closed_blockers = _ticket_bound_post_submit_closure_closed_blockers(body)
+        if closed_blockers:
+            return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+                artifact=artifact,
+                status="post_submit_closure_blocked",
+                blocker_class=_operation_layer_blocker_class(closed_blockers, []),
+                dispatch_status="ticket_bound_post_submit_closure_closed_truth_mismatch",
+                blockers=closed_blockers,
+                closure_result=closure_result,
+            )
+        return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+            artifact=artifact,
+            status="settled",
+            blocker_class="none",
+            dispatch_status="ticket_bound_post_submit_closure_closed",
+            blockers=[],
+            closure_result=closure_result,
+        )
+    return _dispatch_artifact_from_ticket_bound_post_submit_closure(
+        artifact=artifact,
+        status="post_submit_closure_blocked",
+        blocker_class=_operation_layer_blocker_class(blockers, []),
+        dispatch_status="blocked_by_ticket_bound_post_submit_closure_result",
+        blockers=blockers or [f"post_submit_closure_status:{body_status or 'missing'}"],
+        closure_result=closure_result,
+    )
+
+
+def _ticket_bound_post_submit_closure_forbidden_effects(
+    body: dict[str, Any],
+) -> list[str]:
+    effects: list[str] = []
+    checks = {
+        "finalgate_called": False,
+        "operation_layer_called": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "runtime_budget_mutated": False,
+    }
+    for name, expected in checks.items():
+        if body.get(name) not in {expected, None, "", 0}:
+            effects.append(f"ticket_bound_post_submit_closure_effect:{name}")
+    return effects
+
+
+def _ticket_bound_post_submit_closure_identity_blockers(
+    *,
+    artifact: dict[str, Any],
+    body: dict[str, Any],
+) -> list[str]:
+    submit_body = _dict(_dict(artifact.get("operation_layer_submit_result")).get("body"))
+    expected = {
+        "protected_submit_attempt_id": submit_body.get("protected_submit_attempt_id"),
+        "ticket_id": artifact.get("ticket_id"),
+        "operation_submit_command_id": artifact.get("operation_submit_command_id"),
+        "strategy_group_id": artifact.get("strategy_group_id"),
+        "symbol": artifact.get("symbol"),
+        "side": artifact.get("side"),
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = str(body.get(key) or "")
+        expected_text = str(expected_value or "")
+        if not actual:
+            blockers.append(f"ticket_bound_post_submit_closure_missing:{key}")
+        elif expected_text and actual != expected_text:
+            blockers.append(
+                f"ticket_bound_post_submit_closure_mismatch:{key}:"
+                f"expected={expected_text}:actual={actual}"
+            )
+    return _dedupe_text(blockers)
+
+
+def _ticket_bound_post_submit_closure_closed_blockers(
+    body: dict[str, Any],
+) -> list[str]:
+    expected = {
+        "protection_state": "submitted",
+        "reconciliation_state": "matched",
+        "settlement_state": "released",
+        "review_state": "recorded",
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = str(body.get(key) or "")
+        if actual != expected_value:
+            blockers.append(
+                f"ticket_bound_post_submit_closure_closed_truth:{key}:"
+                f"expected={expected_value}:actual={actual or 'missing'}"
+            )
+    if body.get("first_blocker"):
+        blockers.append("ticket_bound_post_submit_closure_closed_with_first_blocker")
+    if body.get("blockers"):
+        blockers.append("ticket_bound_post_submit_closure_closed_with_blockers")
+    return _dedupe_text(blockers)
+
+
+def _dispatch_artifact_from_ticket_bound_post_submit_closure(
+    *,
+    artifact: dict[str, Any],
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    closure_result: dict[str, Any],
+) -> dict[str, Any]:
+    body = _dict(closure_result.get("body"))
+    closure_called = bool(closure_result.get("called"))
+    owner_state = {
+        "status": status,
+        "blocker_class": blocker_class,
+        "blocked_at": "post_submit_reconciliation",
+        "blocked_reason": ",".join(blockers),
+        "non_authority_checkpoint": body.get("next_action")
+        or "run_ticket_bound_post_submit_reconciliation",
+        "downgrade_mode": "halt_new_entries_until_post_submit_settled",
+        "checkpoint_source": "ticket_bound_post_submit_closure",
+    }
+    if status == "settled":
+        owner_state = {
+            "status": "settled",
+            "blocker_class": "none",
+            "blocked_at": None,
+            "blocked_reason": None,
+            "non_authority_checkpoint": CONTINUE_ACTION,
+            "checkpoint_source": "ticket_bound_post_submit_closure",
+        }
+    return {
+        **artifact,
+        "status": status,
+        "blocker_class": blocker_class,
+        "dispatch_status": dispatch_status,
+        "dispatch_action": CONTINUE_ACTION if status == "settled" else None,
+        "owner_state": _owner_state_projection(owner_state),
+        "ticket_bound_post_submit_closure_result": closure_result,
+        "blockers": blockers,
+        "safety_invariants": {
+            **_dict(artifact.get("safety_invariants")),
+            "dispatcher_only": False,
+            "ticket_bound_post_submit_closure_called": closure_called,
+            "ticket_bound_post_submit_closure_endpoint": closure_called,
+            "official_post_submit_finalize_called": False,
+            "post_submit_budget_settlement_called": False,
+            "runtime_budget_mutated": False,
+            "mutates_pg": bool(
+                closure_called
+                or _dict(artifact.get("safety_invariants")).get("mutates_pg")
+            ),
+            "withdrawal_or_transfer_created": bool(
+                body.get("withdrawal_or_transfer_created")
+            ),
+        },
+    }
 
 
 def _maybe_execute_operation_layer_submit(

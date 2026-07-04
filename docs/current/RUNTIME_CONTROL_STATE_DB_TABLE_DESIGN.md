@@ -101,6 +101,7 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_state_transition_events` | Append-only state transition audit events | P1 |
 | `brc_runtime_safety_state_snapshots` | Runtime Safety State snapshots | P1 |
 | `brc_ticket_bound_protected_submit_attempts` | Ticket-bound protected submit attempts and result identity | P0 |
+| `brc_ticket_bound_post_submit_closures` | Ticket-bound protection/reconciliation/settlement/review closure state | P0 |
 | `brc_projection_runs` | Projection lineage and input watermark records | P0 |
 | `brc_current_projection_ownership` | Single-owner registry for current projections | P0 |
 | `brc_legacy_diagnostics` | Legacy artifact diagnostics that cannot set current blockers | P1 |
@@ -1424,6 +1425,66 @@ Writer: ticket-bound protected submit adapter only.
 
 Readers: dispatcher, post-submit reconciliation, budget settlement, Review
 Ledger, server monitor, Owner Console detail surfaces.
+
+### `brc_ticket_bound_post_submit_closures`
+
+Purpose: record the official post-submit closure state for exactly one
+`protected_submit_attempt_id`. This table does not submit orders and does not
+settle budget by itself. It records whether the submitted ticket has entered
+protection, reconciliation, settlement, and review closure.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `post_submit_closure_id` | `String(192)` PK | Stable closure ID |
+| `protected_submit_attempt_id` | `String(192)` | Unique protected submit attempt ref |
+| `ticket_id` | `String(192)` | Action-Time Ticket ref |
+| `finalgate_pass_id` | `String(256)` | FinalGate pass ref |
+| `operation_layer_handoff_id` | `String(192)` | Operation Layer handoff ref |
+| `operation_submit_command_id` | `String(192)` | Submit command ref |
+| `runtime_safety_snapshot_id` | `String(192)` | Runtime Safety State ref |
+| `action_time_lane_input_id` | `String(192)` | Lane ref |
+| `strategy_group_id` | `String(128)` | StrategyGroup |
+| `symbol` | `String(128)` | Symbol |
+| `side` | `String(32)` | `long` or `short` |
+| `status` | `String(64)` | `blocked`, `reconciliation_pending`, `reconciliation_matched`, `settlement_ready`, `review_ready`, `closed` |
+| `protection_state` | `String(64)` | `submitted`, `missing`, `failed`, or `unknown` |
+| `reconciliation_state` | `String(64)` | `not_checked`, `matched`, `mismatch`, or `blocked` |
+| `settlement_state` | `String(64)` | `not_started`, `held_until_position_resolved`, `released`, or `blocked` |
+| `review_state` | `String(64)` | `not_recorded`, `recorded`, or `blocked` |
+| `first_blocker` | `String(160)` nullable | First post-submit blocker |
+| `blockers` | `JSONB` | Current post-submit blockers |
+| `submitted_order_refs` | `JSONB` | Submitted entry/protection order refs from the attempt result |
+| `reconciliation_evidence` | `JSONB` | Reconciliation refs, empty until real reconciliation runs |
+| `settlement_evidence` | `JSONB` | Settlement refs, empty until settlement runs |
+| `review_evidence` | `JSONB` | Review refs, empty until review records |
+| `next_action` | `Text` | Next official post-submit action |
+| `finalgate_called` | `Boolean` | Must remain false |
+| `operation_layer_called` | `Boolean` | Must remain false |
+| `exchange_write_called` | `Boolean` | Must remain false |
+| `order_created` | `Boolean` | Must remain false |
+| `order_lifecycle_called` | `Boolean` | Must remain false |
+| `withdrawal_or_transfer_created` | `Boolean` | Must remain false |
+| `live_profile_changed` | `Boolean` | Must remain false |
+| `order_sizing_changed` | `Boolean` | Must remain false |
+| `runtime_budget_mutated` | `Boolean` | Must remain false |
+| `authority_boundary` | `Text` | Boundary statement |
+| `created_at_ms` | `BIGINT` | Insert time |
+| `updated_at_ms` | `BIGINT` | Last update time |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_ticket_post_submit_attempt` | One closure row per protected submit attempt |
+| `ck_brc_ticket_post_submit_no_effects` | Closure cannot call FinalGate, Operation Layer, exchange write, OrderLifecycle, budget mutation, profile mutation, sizing mutation, withdrawal, or transfer |
+| `ck_brc_ticket_post_submit_closed_truth` | `closed` requires submitted protection, matched reconciliation, released settlement, recorded review, and no first blocker |
+| `idx_brc_ticket_post_submit_ticket_status` | `(ticket_id, status, created_at_ms)` |
+| `idx_brc_ticket_post_submit_scope` | `(strategy_group_id, symbol, created_at_ms)` |
+
+Writer: ticket-bound post-submit closure materializer only.
+
+Readers: post-submit reconciliation, budget settlement, Review Ledger, server
+monitor, Owner Console detail surfaces.
 
 ### `brc_goal_status_current`
 

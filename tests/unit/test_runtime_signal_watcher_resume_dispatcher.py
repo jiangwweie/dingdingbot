@@ -291,6 +291,28 @@ def _ticket_bound_finalgate_handoff_and_submit_request(
     return _request_json
 
 
+def _ticket_bound_full_submit_and_closure_request(
+    calls: list[dict],
+    *,
+    submit_body: dict,
+    closure_body: dict,
+):
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        url = str(kwargs.get("url") or "")
+        if kwargs["method"] == "GET":
+            body = _finalgate_ready_body()
+        elif "/runtime-post-submit-closures/protected-submit-attempts/" in url:
+            body = closure_body
+        elif "/runtime-protected-submits/tickets/" in url:
+            body = submit_body
+        else:
+            body = _operation_layer_handoff_ready_body()
+        return {"http_status": 200, "error": False, "body": body}
+
+    return _request_json
+
+
 def _protected_submit_disabled_smoke_body() -> dict:
     return {
         "status": "disabled_smoke_passed",
@@ -349,6 +371,53 @@ def _protected_submit_submitted_body(**overrides) -> dict:
         "live_profile_changed": False,
         "order_sizing_changed": False,
     }
+    body.update(overrides)
+    return body
+
+
+def _post_submit_closure_reconciliation_pending_body(**overrides) -> dict:
+    body = {
+        "status": "reconciliation_pending",
+        "post_submit_closure_id": "post-submit-closure-1",
+        "protected_submit_attempt_id": "protected-submit-1",
+        "ticket_id": "ticket-ready-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "protection_state": "submitted",
+        "reconciliation_state": "not_checked",
+        "settlement_state": "blocked",
+        "review_state": "blocked",
+        "first_blocker": "post_submit_reconciliation_fact_missing",
+        "blockers": ["post_submit_reconciliation_fact_missing"],
+        "submitted_order_refs": [{"local_order_id": "entry-1"}],
+        "next_action": "run_ticket_bound_post_submit_reconciliation",
+        "authority_boundary": "ticket_bound_post_submit_closure",
+        "finalgate_called": False,
+        "operation_layer_called": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "runtime_budget_mutated": False,
+    }
+    body.update(overrides)
+    return body
+
+
+def _post_submit_closure_closed_body(**overrides) -> dict:
+    body = _post_submit_closure_reconciliation_pending_body(
+        status="closed",
+        reconciliation_state="matched",
+        settlement_state="released",
+        review_state="recorded",
+        first_blocker=None,
+        blockers=[],
+        next_action="continue_watcher_observation",
+    )
     body.update(overrides)
     return body
 
@@ -1354,6 +1423,110 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
     assert calls[2]["method"] == "POST"
     assert "/runtime-protected-submits/tickets/ticket-ready-1/" in calls[2]["url"]
     assert "submit_mode=disabled_smoke" in calls[2]["url"]
+
+
+def test_dispatcher_records_ticket_bound_post_submit_closure_after_real_submit(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_full_submit_and_closure_request(
+            calls,
+            submit_body=_protected_submit_submitted_body(),
+            closure_body=_post_submit_closure_reconciliation_pending_body(),
+        ),
+    )
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        execute_post_submit_finalize=True,
+    )
+
+    assert artifact["status"] == "post_submit_reconciliation_pending"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == (
+        "ticket_bound_post_submit_closure_reconciliation_pending"
+    )
+    assert artifact["blockers"] == ["post_submit_reconciliation_fact_missing"]
+    assert artifact["dispatch_action"] is None
+    assert artifact["ticket_bound_post_submit_closure_result"]["called"] is True
+    assert artifact["ticket_bound_post_submit_closure_result"]["body"][
+        "post_submit_closure_id"
+    ] == "post-submit-closure-1"
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert artifact["safety_invariants"]["ticket_bound_post_submit_closure_called"] is True
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
+    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is False
+    assert artifact["safety_invariants"]["runtime_budget_mutated"] is False
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert len(calls) == 4
+    assert calls[0]["method"] == "GET"
+    assert calls[1]["method"] == "POST"
+    assert calls[2]["method"] == "POST"
+    assert calls[3]["method"] == "POST"
+    assert "/runtime-protected-submits/tickets/ticket-ready-1/" in calls[2]["url"]
+    assert (
+        "/runtime-post-submit-closures/protected-submit-attempts/protected-submit-1"
+        in calls[3]["url"]
+    )
+    assert "post-submit-finalize-payloads" not in calls[3]["url"]
+
+
+def test_dispatcher_blocks_ticket_bound_closed_closure_without_settlement_release(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_full_submit_and_closure_request(
+            calls,
+            submit_body=_protected_submit_submitted_body(),
+            closure_body=_post_submit_closure_closed_body(settlement_state="blocked"),
+        ),
+    )
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        execute_post_submit_finalize=True,
+    )
+
+    assert artifact["status"] == "post_submit_closure_blocked"
+    assert artifact["dispatch_status"] == (
+        "ticket_bound_post_submit_closure_closed_truth_mismatch"
+    )
+    assert artifact["dispatch_action"] is None
+    assert (
+        "ticket_bound_post_submit_closure_closed_truth:settlement_state:"
+        "expected=released:actual=blocked"
+    ) in artifact["blockers"]
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
+    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is False
 
 
 def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operation_layer(

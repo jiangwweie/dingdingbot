@@ -91,6 +91,7 @@ PG strategy/event/scope/policy seed
 -> FinalGate ticket input
 -> Operation Layer ticket handoff
 -> PG ticket-bound protected submit attempt
+-> PG ticket-bound post-submit closure
 ```
 
 Production runtime must not keep a long-term shape where PG and file sources are
@@ -583,6 +584,7 @@ Close the official pre-submit chain:
 - FinalGate input as `ticket_id` only;
 - Operation Layer input as `ticket_id + finalgate_pass_id` only;
 - protected submit input as `ticket_id + operation_submit_command_id` only;
+- post-submit closure input as `protected_submit_attempt_id` only;
 - protection and reconciliation lineage back to the ticket.
 
 ### Step 4: Old-Source Removal
