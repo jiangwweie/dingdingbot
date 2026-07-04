@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
 
 
 SCRIPT_PATH = (
@@ -12,6 +17,12 @@ SCRIPT_PATH = (
     / "scripts"
     / "build_strategygroup_tradeability_decision.py"
 )
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
 def _load_module():
@@ -25,6 +36,35 @@ def _load_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_file_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _create_seeded_runtime_control_db(path: Path) -> str:
+    migration = _load_file_module(MIGRATION_PATH, "migration_086_tradeability")
+    seed = _load_file_module(SEED_PATH, "seed_runtime_control_tradeability")
+    database_url = f"sqlite:///{path}"
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                migration.upgrade()
+            finally:
+                migration.op = old_op
+            seed.seed_runtime_control_state_foundation(conn)
+    finally:
+        engine.dispose()
+    return database_url
 
 
 def _capital_trial_envelope_projection() -> dict:
@@ -2126,20 +2166,106 @@ def test_tradeability_prefers_runtime_safety_candidate_authorization_state():
     assert brf2["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
 
 
-def test_cli_does_not_read_default_brf2_shadow_candidate_evidence_provenance(
-    tmp_path: Path,
-) -> None:
-    projection_json = tmp_path / "projection.json"
+def test_cli_requires_pg_or_explicit_local_file_diagnostic(tmp_path: Path) -> None:
     output_json = tmp_path / "tradeability.json"
     output_md = tmp_path / "tradeability.md"
-    projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+
+    env = {**os.environ, "PG_DATABASE_URL": ""}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/build_strategygroup_tradeability_decision.py",
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 2
+    assert "PG_DATABASE_URL is required" in result.stderr
+    assert not output_json.exists()
+
+
+def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
+    tmp_path: Path,
+) -> None:
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    output_json = tmp_path / "tradeability.json"
+    output_md = tmp_path / "tradeability.md"
 
     result = subprocess.run(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
+    assert packet["source_mode"] == "db_backed"
+    assert packet["projection_target"] == "production_current"
+    assert packet["source_validation"]["legacy_file_authority"] is False
+    assert set(rows) == {
+        "CPM-RO-001",
+        "MPG-001",
+        "MI-001",
+        "SOR-001",
+        "BRF2-001",
+    }
+    assert rows["CPM-RO-001"]["policy_scope"]["side_scope"] == ["long"]
+    assert rows["MPG-001"]["policy_scope"]["side_scope"] == ["long"]
+    assert rows["MI-001"]["policy_scope"]["side_scope"] == ["long"]
+    assert rows["SOR-001"]["policy_scope"]["side_scope"] == ["long", "short"]
+    assert rows["BRF2-001"]["policy_scope"]["side_scope"] == ["short"]
+    assert packet["summary"]["tradable_now_count"] == 0
+    for row in rows.values():
+        assert row["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
+        assert "actionable_now" not in row
+        assert "real_order_authority" not in row
+    assert packet["safety_invariants"]["calls_finalgate"] is False
+    assert packet["safety_invariants"]["calls_operation_layer"] is False
+    assert packet["safety_invariants"]["calls_exchange_write"] is False
+
+
+def test_cli_does_not_read_default_brf2_shadow_candidate_evidence_provenance(
+    tmp_path: Path,
+) -> None:
+    projection_json = tmp_path / "projection.json"
+    registry_json = tmp_path / "registry.json"
+    tier_json = tmp_path / "tier.json"
+    output_json = tmp_path / "tradeability.json"
+    output_md = tmp_path / "tradeability.md"
+    projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+    registry_json.write_text(json.dumps(_registry()), encoding="utf-8")
+    tier_json.write_text(json.dumps(_tier_policy()), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
+            "--registry-json",
+            str(registry_json),
+            "--tier-policy-json",
+            str(tier_json),
             "--output-json",
             str(output_json),
             "--output-owner-progress",
@@ -2170,10 +2296,14 @@ def test_cli_explicit_brf2_runtime_signal_capture_path_feeds_signal_state(
     tmp_path: Path,
 ) -> None:
     projection_json = tmp_path / "projection.json"
+    registry_json = tmp_path / "registry.json"
+    tier_json = tmp_path / "tier.json"
     brf2_capture_json = tmp_path / "brf2-capture.json"
     output_json = tmp_path / "tradeability.json"
     output_md = tmp_path / "tradeability.md"
     projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+    registry_json.write_text(json.dumps(_registry()), encoding="utf-8")
+    tier_json.write_text(json.dumps(_tier_policy()), encoding="utf-8")
     brf2_capture_json.write_text(
         json.dumps(_brf2_runtime_signal_capture()),
         encoding="utf-8",
@@ -2183,8 +2313,13 @@ def test_cli_explicit_brf2_runtime_signal_capture_path_feeds_signal_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
+            "--registry-json",
+            str(registry_json),
+            "--tier-policy-json",
+            str(tier_json),
             "--brf2-runtime-signal-capture-json",
             str(brf2_capture_json),
             "--output-json",
@@ -2241,6 +2376,7 @@ def test_cli_without_explicit_runtime_safety_state_does_not_read_default_runtime
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2293,6 +2429,7 @@ def test_cli_rejects_legacy_live_submit_readiness_alias(tmp_path: Path) -> None:
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--live-submit-readiness-json",
@@ -2336,6 +2473,7 @@ def test_cli_without_explicit_trial_asset_admission_does_not_read_default_propos
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2404,6 +2542,7 @@ def test_cli_explicit_trial_asset_admission_path_feeds_strategy_asset_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2472,6 +2611,7 @@ def test_cli_without_explicit_brf2_owner_policy_does_not_read_default_scope(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2541,6 +2681,7 @@ def test_cli_explicit_brf2_owner_policy_path_feeds_policy_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2610,6 +2751,7 @@ def test_cli_without_explicit_three_strategy_portfolio_does_not_read_default_tri
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2679,6 +2821,7 @@ def test_cli_explicit_three_strategy_portfolio_path_feeds_trial_envelope_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2750,6 +2893,7 @@ def test_cli_without_explicit_trial_grade_audit_does_not_read_default_audit(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2819,6 +2963,7 @@ def test_cli_explicit_trial_grade_audit_path_feeds_trial_grade_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2875,6 +3020,7 @@ def test_cli_without_explicit_signal_coverage_does_not_read_default_observation(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2921,6 +3067,7 @@ def test_cli_explicit_signal_coverage_path_feeds_observe_only_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -2965,6 +3112,7 @@ def test_cli_without_explicit_capital_trial_envelope_projection_does_not_read_de
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--registry-json",
             str(registry_json),
             "--tier-policy-json",
@@ -3005,6 +3153,7 @@ def test_cli_explicit_capital_trial_envelope_projection_path_feeds_candidate_row
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -3066,6 +3215,7 @@ def test_cli_explicit_runtime_safety_state_path_feeds_runtime_safety_state(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",
@@ -3111,10 +3261,14 @@ def test_cli_explicit_brf2_shadow_evidence_path_keeps_provenance_only(
     tmp_path: Path,
 ) -> None:
     projection_json = tmp_path / "projection.json"
+    registry_json = tmp_path / "registry.json"
+    tier_json = tmp_path / "tier.json"
     brf2_shadow_candidate_evidence_json = tmp_path / "brf2-shadow-evidence.json"
     output_json = tmp_path / "tradeability.json"
     output_md = tmp_path / "tradeability.md"
     projection_json.write_text(json.dumps(_capital_trial_envelope_projection()), encoding="utf-8")
+    registry_json.write_text(json.dumps(_registry()), encoding="utf-8")
+    tier_json.write_text(json.dumps(_tier_policy()), encoding="utf-8")
     brf2_shadow_candidate_evidence_json.write_text(
         json.dumps(_brf2_shadow_candidate_evidence()),
         encoding="utf-8",
@@ -3124,8 +3278,13 @@ def test_cli_explicit_brf2_shadow_evidence_path_keeps_provenance_only(
         [
             sys.executable,
             "scripts/build_strategygroup_tradeability_decision.py",
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
+            "--registry-json",
+            str(registry_json),
+            "--tier-policy-json",
+            str(tier_json),
             "--brf2-shadow-candidate-evidence-json",
             str(brf2_shadow_candidate_evidence_json),
             "--output-json",
@@ -3296,6 +3455,7 @@ def test_tradeability_decision_cli_writes_json_and_markdown(tmp_path: Path):
 
     exit_code = module.main(
         [
+            "--allow-local-file-diagnostic",
             "--capital-trial-envelope-projection-json",
             str(projection_json),
             "--registry-json",

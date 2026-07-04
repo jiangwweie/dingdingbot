@@ -82,18 +82,6 @@
     },
     {
       "path": "scripts/build_strategygroup_tradeability_decision.py",
-      "pattern_id": "docs_current_json_literal",
-      "occurrence_count": 2,
-      "matches": [
-        "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json",
-        "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
-      ],
-      "disposition": "pre_pg_cutover_debt",
-      "replacement": "brc_strategy_groups, brc_strategy_group_versions, brc_owner_policy_current",
-      "sunset_condition": "Tradeability Decision reads PG strategy and policy projections"
-    },
-    {
-      "path": "scripts/build_strategygroup_tradeability_decision.py",
       "pattern_id": "output_runtime_latest_literal",
       "occurrence_count": 1,
       "matches": [

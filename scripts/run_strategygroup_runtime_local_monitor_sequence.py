@@ -2351,6 +2351,7 @@ def build_local_monitor_sequence_report(
     strategygroup_tradeability_decision_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_strategygroup_tradeability_decision.py"),
+        "--allow-local-file-diagnostic",
         "--capital-trial-envelope-projection-json",
         str(strategygroup_capital_trial_envelope_projection_json),
         "--registry-json",

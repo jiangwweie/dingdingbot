@@ -19,7 +19,7 @@
     {
       "path": "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
       "paired_path": "output/runtime-monitor/latest-strategygroup-tradeability-decision.md",
-      "source_command": "python3 scripts/build_strategygroup_tradeability_decision.py",
+      "source_command": "python3 scripts/build_strategygroup_tradeability_decision.py --require-database-url",
       "validator": "python3 -m py_compile scripts/build_strategygroup_tradeability_decision.py",
       "consumed_by": "daily_live_enablement_table"
     },
