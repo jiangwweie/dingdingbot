@@ -55,6 +55,7 @@ def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path
     assert calls[-1][1] == "scripts/build_strategygroup_runtime_goal_status.py"
     command_names = [command[1] for command in calls]
     assert "scripts/materialize_candidate_pool_action_time_lane.py" not in command_names
+    assert "scripts/build_strategygroup_runtime_safety_state.py" not in command_names
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_action_time_operation_layer_handoff.py" in command_names
@@ -102,6 +103,11 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         assert "--daily-table-json" not in command
         assert "--candidate-pool-json" not in command
         assert "--runtime-active-monitor-json" not in command
+    assert all(
+        "output/runtime-monitor/latest-" not in item
+        for command in calls
+        for item in command
+    )
 
 
 def test_server_product_state_refresh_sequence_fails_on_required_step_but_continues(

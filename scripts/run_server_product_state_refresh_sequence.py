@@ -201,17 +201,61 @@ def _refresh_steps(
     env_file: Path,
 ) -> list[RefreshStep]:
     status = report_dir / "latest-status.json"
-    public = Path("output/runtime-monitor/latest-binance-usdm-public-facts.json")
+    public = runtime_monitor_dir / "latest-binance-usdm-public-facts.json"
+    public_md = runtime_monitor_dir / "latest-binance-usdm-public-facts.md"
     live = report_dir / "strategy-group-live-facts-input.json"
     account = runtime_monitor_dir / "latest-account-safe-facts.json"
     goal = report_dir / "strategygroup-runtime-goal-status.json"
-    candidate_pool = Path("output/runtime-monitor/latest-strategy-live-candidate-pool.json")
-    daily_table = Path("output/runtime-monitor/latest-daily-live-enablement-table.json")
-    single_lane = Path("output/runtime-monitor/latest-single-lane-task-packet.json")
+    candidate_pool = runtime_monitor_dir / "latest-strategy-live-candidate-pool.json"
+    candidate_pool_md = runtime_monitor_dir / "latest-strategy-live-candidate-pool.md"
+    daily_table = runtime_monitor_dir / "latest-daily-live-enablement-table.json"
+    daily_table_md = runtime_monitor_dir / "latest-daily-live-enablement-table.md"
+    single_lane = runtime_monitor_dir / "latest-single-lane-task-packet.json"
+    single_lane_md = runtime_monitor_dir / "latest-single-lane-task-packet.md"
+    action_time_boundary = (
+        runtime_monitor_dir / "latest-strategy-fresh-signal-action-time-boundary.json"
+    )
+    action_time_boundary_md = (
+        runtime_monitor_dir / "latest-strategy-fresh-signal-action-time-boundary.md"
+    )
+    sor_detector_dir = runtime_monitor_dir
+    sor_detector = runtime_monitor_dir / "latest-sor-session-detector-facts.json"
+    cpm_capture = runtime_monitor_dir / "latest-cpm-runtime-signal-capture.json"
+    cpm_facts = runtime_monitor_dir / "latest-cpm-runtime-signal-facts.json"
+    cpm_rehearsal = runtime_monitor_dir / "latest-cpm-dry-run-submit-rehearsal.json"
+    mpg_readiness = runtime_monitor_dir / "latest-mpg-action-time-facts-readiness.json"
+    mpg_evidence = runtime_monitor_dir / "latest-mpg-runtime-activation-evidence.json"
+    sor_evidence = runtime_monitor_dir / "latest-sor-runtime-activation-evidence.json"
+    mi_trial = runtime_monitor_dir / "latest-mi-trial-admission-decision.json"
+    mi_trial_md = runtime_monitor_dir / "latest-mi-trial-admission-decision.md"
+    brf2_facts = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.json"
+    brf2_facts_md = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.md"
     release_manifest = Path("/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json")
     handoff_dir = Path("/home/ubuntu/brc-deploy/app/current/docs/current/strategy-group-handoffs")
 
     pg_required = ("--require-database-url",)
+    action_time_boundary_inputs = (
+        "--cpm-capture-json",
+        str(cpm_capture),
+        "--cpm-facts-json",
+        str(cpm_facts),
+        "--cpm-rehearsal-json",
+        str(cpm_rehearsal),
+        "--mpg-readiness-json",
+        str(mpg_readiness),
+        "--mpg-evidence-json",
+        str(mpg_evidence),
+        "--sor-evidence-json",
+        str(sor_evidence),
+        "--sor-detector-json",
+        str(sor_detector),
+        "--account-safe-facts-json",
+        str(account),
+        "--output-json",
+        str(action_time_boundary),
+        "--output-owner-progress",
+        str(action_time_boundary_md),
+    )
 
     return [
         RefreshStep(
@@ -227,18 +271,62 @@ def _refresh_steps(
                 "SUIUSDT",
                 "OPUSDT",
                 "--fallback-json",
-                str(runtime_monitor_dir / "latest-binance-usdm-public-facts.json"),
+                str(public),
                 "--output-json",
                 str(public),
                 "--output-owner-progress",
-                "output/runtime-monitor/latest-binance-usdm-public-facts.md",
+                str(public_md),
             ),
         ),
-        RefreshStep("build_sor_detector", (python, "scripts/build_sor_session_scope_detector.py", "--public-facts-json", str(public))),
-        RefreshStep("build_action_time_boundary_public", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py")),
-        RefreshStep("build_mi_trial_admission", (python, "scripts/build_mi_trial_admission_decision.py", "--public-facts-json", str(public))),
-        RefreshStep("build_brf2_runtime_signal_facts", (python, "scripts/build_brf2_runtime_signal_facts.py", "--strategy-source", "live_market", "--public-facts-json", str(public))),
-        RefreshStep("build_runtime_safety_state", (python, "scripts/build_strategygroup_runtime_safety_state.py")),
+        RefreshStep(
+            "build_sor_detector",
+            (
+                python,
+                "scripts/build_sor_session_scope_detector.py",
+                "--public-facts-json",
+                str(public),
+                "--output-dir",
+                str(sor_detector_dir),
+            ),
+        ),
+        RefreshStep(
+            "build_action_time_boundary_public",
+            (
+                python,
+                "scripts/build_strategy_fresh_signal_action_time_boundary.py",
+                *action_time_boundary_inputs,
+            ),
+        ),
+        RefreshStep(
+            "build_mi_trial_admission",
+            (
+                python,
+                "scripts/build_mi_trial_admission_decision.py",
+                "--replay-json",
+                str(runtime_monitor_dir / "latest-four-candidate-recent-live-submit-replay.json"),
+                "--public-facts-json",
+                str(public),
+                "--output-json",
+                str(mi_trial),
+                "--output-owner-progress",
+                str(mi_trial_md),
+            ),
+        ),
+        RefreshStep(
+            "build_brf2_runtime_signal_facts",
+            (
+                python,
+                "scripts/build_brf2_runtime_signal_facts.py",
+                "--strategy-source",
+                "live_market",
+                "--public-facts-json",
+                str(public),
+                "--output-json",
+                str(brf2_facts),
+                "--output-owner-progress",
+                str(brf2_facts_md),
+            ),
+        ),
         RefreshStep("validate_runtime_coverage", (python, "scripts/validate_runtime_candidate_universe_coverage.py", str(status))),
         RefreshStep(
             "build_candidate_pool",
@@ -246,6 +334,10 @@ def _refresh_steps(
                 python,
                 "scripts/build_strategy_live_candidate_pool.py",
                 *pg_required,
+                "--output-json",
+                str(candidate_pool),
+                "--output-owner-progress",
+                str(candidate_pool_md),
             ),
         ),
         RefreshStep("validate_candidate_pool", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
@@ -255,6 +347,10 @@ def _refresh_steps(
                 python,
                 "scripts/build_daily_live_enablement_table.py",
                 *pg_required,
+                "--output-json",
+                str(daily_table),
+                "--output-owner-progress",
+                str(daily_table_md),
             ),
         ),
         RefreshStep("validate_daily_table", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
@@ -264,6 +360,10 @@ def _refresh_steps(
                 python,
                 "scripts/build_single_lane_task_packet.py",
                 *pg_required,
+                "--output-json",
+                str(single_lane),
+                "--output-owner-progress",
+                str(single_lane_md),
             ),
         ),
         RefreshStep("validate_single_lane_task_packet", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
@@ -303,13 +403,24 @@ def _refresh_steps(
             required=False,
         ),
         RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), "--output-json", str(account))),
-        RefreshStep("build_action_time_boundary_account", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py", "--account-safe-facts-json", str(account))),
+        RefreshStep(
+            "build_action_time_boundary_account",
+            (
+                python,
+                "scripts/build_strategy_fresh_signal_action_time_boundary.py",
+                *action_time_boundary_inputs,
+            ),
+        ),
         RefreshStep(
             "build_candidate_pool_after_account",
             (
                 python,
                 "scripts/build_strategy_live_candidate_pool.py",
                 *pg_required,
+                "--output-json",
+                str(candidate_pool),
+                "--output-owner-progress",
+                str(candidate_pool_md),
             ),
         ),
         RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
@@ -364,6 +475,10 @@ def _refresh_steps(
                 python,
                 "scripts/build_daily_live_enablement_table.py",
                 *pg_required,
+                "--output-json",
+                str(daily_table),
+                "--output-owner-progress",
+                str(daily_table_md),
             ),
         ),
         RefreshStep("validate_daily_table_after_account", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
@@ -373,6 +488,10 @@ def _refresh_steps(
                 python,
                 "scripts/build_single_lane_task_packet.py",
                 *pg_required,
+                "--output-json",
+                str(single_lane),
+                "--output-owner-progress",
+                str(single_lane_md),
             ),
         ),
         RefreshStep("validate_single_lane_task_packet_after_account", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
