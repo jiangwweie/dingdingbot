@@ -5,9 +5,9 @@ The sequence is non-authority from a trading perspective. It refreshes control
 read models, may materialize PG fresh signals into one action-time lane,
 may materialize a PG Action-Time Ticket when a PG real-submit lane is present,
 and may run the ticket-bound non-executing FinalGate preflight and Operation
-Layer handoff. It does not call Operation Layer submit, exchange write APIs,
-OrderLifecycle, withdrawals, transfers, credential mutation, live profile
-changes, or order sizing changes.
+Layer handoff, then materialize PG Runtime Safety State. It does not call
+Operation Layer submit, exchange write APIs, OrderLifecycle, withdrawals,
+transfers, credential mutation, live profile changes, or order sizing changes.
 """
 
 from __future__ import annotations
@@ -177,6 +177,7 @@ def run_server_product_state_refresh_sequence(
             "calls_finalgate": False,
             "calls_ticket_bound_finalgate_preflight": True,
             "calls_ticket_bound_operation_layer_handoff": True,
+            "calls_ticket_bound_runtime_safety_state": True,
             "calls_operation_layer_submit": False,
             "calls_exchange_write": False,
             "places_order": False,
@@ -462,6 +463,16 @@ def _refresh_steps(
                 *pg_required,
                 "--output-json",
                 str(report_dir / "operation-layer-handoff.json"),
+            ),
+        ),
+        RefreshStep(
+            "materialize_ticket_bound_runtime_safety_state",
+            (
+                python,
+                "scripts/materialize_ticket_bound_runtime_safety_state.py",
+                *pg_required,
+                "--output-json",
+                str(report_dir / "ticket-bound-runtime-safety-state.json"),
             ),
         ),
         RefreshStep(

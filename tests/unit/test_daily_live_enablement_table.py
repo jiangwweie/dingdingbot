@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from src.infrastructure.runtime_control_state_repository import (
@@ -291,6 +291,39 @@ def test_daily_table_builds_from_pg_control_state_seed(pg_control_connection):
         for row in table["rows"]
     )
     assert _errors(table) == []
+
+
+def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_safety_state_snapshots (
+              runtime_safety_snapshot_id, action_time_lane_input_id,
+              strategy_group_id, symbol, side, runtime_profile_id, safety_state,
+              submit_allowed, finalgate_ready, operation_layer_ready,
+              protection_ready, active_position_conflict, facts_fresh,
+              trusted_fact_refs_complete, blockers, trusted_fact_refs,
+              observed_at_ms, valid_until_ms, created_at_ms, authority_boundary
+            ) VALUES (
+              'runtime_safety:unit', 'lane:unit', 'SOR-001', 'ETHUSDT',
+              'long', 'runtime-profile:SOR-001:ETHUSDT:long:v1',
+              'live_submit_ready', true, true, true, true, false, true, true,
+              '[]', '{}', 1770001000000, 1770001600000, 1770001000000,
+              'unit no exchange write'
+            )
+            """
+        )
+    )
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+
+    runtime_safety = _builder()._pg_runtime_safety_projection(control_state)
+
+    assert runtime_safety["status"] == "live_submit_ready"
+    assert runtime_safety["runtime_safety_state"]["live_submit_ready"] is True
+    assert runtime_safety["runtime_safety_state"]["snapshot_id"] == "runtime_safety:unit"
 
 
 def test_daily_table_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):

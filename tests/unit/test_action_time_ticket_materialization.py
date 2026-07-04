@@ -369,7 +369,11 @@ def _insert_action_time_lane_graph(
         row=row,
         fact_surface="account_safe",
         source_ref="unit:account-safe",
-        fact_values={"account_safe": True, "open_orders_clear": True},
+        fact_values={
+            "account_safe": True,
+            "open_orders_clear": True,
+            "active_position_or_open_order_clear": True,
+        },
         observed_at_ms=NOW_MS - 4_000,
         valid_until_ms=expires_at_ms,
     )

@@ -60,6 +60,7 @@ def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_action_time_operation_layer_handoff.py" in command_names
+    assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
     assert "scripts/build_runtime_signal_watcher_readiness_pack.py" in command_names
     assert (tmp_path / "sequence.json").exists()
 
@@ -93,6 +94,7 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         "scripts/materialize_action_time_ticket.py",
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
+        "scripts/materialize_ticket_bound_runtime_safety_state.py",
     }
     control_builder_calls = [
         command
@@ -353,6 +355,50 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
         "materialize_action_time_operation_layer_handoff"
     )
     assert calls[-1][1] == "scripts/materialize_action_time_operation_layer_handoff.py"
+    skipped_names = [
+        step["name"]
+        for step in report["step_results"]
+        if step["status"] == "skipped_after_required_failure"
+    ]
+    assert "build_readiness_pack_after_materialization" in skipped_names
+    assert "build_goal_status" in skipped_names
+
+
+def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_failure(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if any(
+            item.endswith("materialize_ticket_bound_runtime_safety_state.py")
+            for item in command
+        ):
+            return module.CommandResult(
+                returncode=1,
+                stdout="",
+                stderr="ticket-bound runtime safety state failed",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["blocked_by_required_step"] == (
+        "materialize_ticket_bound_runtime_safety_state"
+    )
+    assert calls[-1][1] == "scripts/materialize_ticket_bound_runtime_safety_state.py"
     skipped_names = [
         step["name"]
         for step in report["step_results"]

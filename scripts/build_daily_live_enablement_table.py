@@ -435,7 +435,7 @@ def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, An
                     or row.get("first_blocker_class")
                     or "submit_allowed_false"
                 ),
-                "snapshot_id": str(row.get("safety_snapshot_id") or ""),
+                "snapshot_id": str(row.get("runtime_safety_snapshot_id") or ""),
             },
             "source_mode": "db_backed",
         }
