@@ -111,6 +111,7 @@ def test_materializes_pg_action_time_ticket(pg_control_connection):
     assert ticket["action_time_lane_input_id"] == lane_id
     assert ticket["signal_event_id"] == "signal:SOR-001:ETHUSDT:long:unit"
     assert ticket["event_time_ms"] == ticket["trigger_candle_close_time_ms"]
+    assert ticket["event_time_ms"] == NOW_MS - 60_000
 
     event_count = pg_control_connection.execute(
         text("SELECT COUNT(*) FROM brc_action_time_ticket_events")
@@ -261,6 +262,31 @@ def test_materializer_blocks_required_fact_not_satisfied(pg_control_connection):
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_non_live_submit_promotion_scope(pg_control_connection):
+    _insert_action_time_lane_graph(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_promotion_candidates
+            SET promotion_scope = 'action_time_rehearsal'
+            WHERE promotion_candidate_id = 'promotion:SOR-001:ETHUSDT:long:unit'
+            """
+        )
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert (
+        "promotion_scope_not_live_submit_candidate:action_time_rehearsal"
+        in payload["blockers"]
+    )
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def _insert_action_time_lane_graph(
     conn,
     *,
@@ -362,14 +388,17 @@ def _insert_action_time_lane_graph(
             """
             INSERT INTO brc_live_signal_events (
               signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
-              symbol, side, detector_key, signal_type, status, freshness_state,
+              symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
               confidence, fact_snapshot_id, reason_codes, signal_payload,
-              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+              event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
+              expires_at_ms, invalidated_at_ms, created_at_ms
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
               :symbol, :side, 'detector:SOR-001:long', 'SOR-LONG',
-              'facts_validated', 'fresh', 0.9, :fact_snapshot_id, :reason_codes,
-              :signal_payload, :observed_at_ms, :expires_at_ms, NULL, :created_at_ms
+              'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
+              :reason_codes, :signal_payload, :event_time_ms,
+              :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
+              NULL, :created_at_ms
             )
             """
         ),
@@ -382,10 +411,17 @@ def _insert_action_time_lane_graph(
             "side": row["side"],
             "fact_snapshot_id": public_fact_id,
             "reason_codes": _json(["unit_fresh_signal"]),
-            "signal_payload": _json({"trigger_candle_close_time_ms": NOW_MS - 60_000}),
-            "observed_at_ms": NOW_MS - 60_000,
+            "signal_payload": _json(
+                {
+                    "time_authority": "trigger_candle_close_time_ms",
+                    "trigger_candle_close_time_ms": NOW_MS - 60_000,
+                }
+            ),
+            "event_time_ms": NOW_MS - 60_000,
+            "trigger_candle_close_time_ms": NOW_MS - 60_000,
+            "observed_at_ms": NOW_MS - 55_000,
             "expires_at_ms": expires_at_ms,
-            "created_at_ms": NOW_MS - 60_000,
+            "created_at_ms": NOW_MS - 54_000,
         },
     )
     conn.execute(
@@ -428,7 +464,7 @@ def _insert_action_time_lane_graph(
               expires_at_ms, closed_at_ms, authority_boundary
             ) VALUES (
               :promotion_candidate_id, :signal_event_id, :readiness_row_id,
-              :strategy_group_id, :symbol, :side, 'live_submit', 'arbitration_won',
+              :strategy_group_id, :symbol, :side, 'live_submit_candidate', 'arbitration_won',
               'live_submit_allowed', 'acceptable', :facts_snapshot_id, :blockers,
               1, :created_at_ms, :expires_at_ms, NULL, :authority_boundary
             )

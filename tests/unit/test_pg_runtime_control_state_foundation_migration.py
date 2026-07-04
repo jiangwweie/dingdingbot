@@ -16,12 +16,16 @@ MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+MIGRATION_087_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "migrations/versions/2026-07-05-087_harden_live_signal_event_time_authority.py"
+)
 
 
-def _load_migration():
+def _load_migration(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(
-        "migration_086_runtime_control_state_foundation",
-        MIGRATION_PATH,
+        name,
+        path,
     )
     assert spec is not None and spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
@@ -31,22 +35,34 @@ def _load_migration():
 
 @pytest.fixture()
 def connection():
-    migration = _load_migration()
+    migration_086 = _load_migration(
+        MIGRATION_PATH,
+        "migration_086_runtime_control_state_foundation",
+    )
+    migration_087 = _load_migration(
+        MIGRATION_087_PATH,
+        "migration_087_live_signal_event_time_authority",
+    )
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     with engine.begin() as conn:
-        old_op = migration.op
-        migration.op = Operations(MigrationContext.configure(conn))
-        try:
-            migration.upgrade()
-        finally:
-            migration.op = old_op
+        _run_migration(conn, migration_086)
+        _run_migration(conn, migration_087)
     with engine.connect() as conn:
         yield conn
     engine.dispose()
+
+
+def _run_migration(conn, migration) -> None:
+    old_op = migration.op
+    migration.op = Operations(MigrationContext.configure(conn))
+    try:
+        migration.upgrade()
+    finally:
+        migration.op = old_op
 
 
 def _expect_integrity_error(conn, statement: str, params: dict[str, object]) -> None:
@@ -94,6 +110,169 @@ def test_migration_creates_runtime_control_state_foundation_tables(connection):
         "brc_strategy_governance_decisions",
         "brc_strategy_policy_change_requests",
     }.issubset(tables)
+
+
+def test_087_upgrades_already_applied_086_live_signal_schema_fail_closed():
+    migration_087 = _load_migration(
+        MIGRATION_087_PATH,
+        "migration_087_old_086_live_signal_upgrade",
+    )
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE brc_live_signal_events (
+                    signal_event_id VARCHAR(192) PRIMARY KEY,
+                    candidate_scope_id VARCHAR(160),
+                    event_spec_id VARCHAR(160) NOT NULL,
+                    strategy_group_id VARCHAR(128) NOT NULL,
+                    symbol VARCHAR(128) NOT NULL,
+                    side VARCHAR(32) NOT NULL,
+                    detector_key VARCHAR(128) NOT NULL,
+                    signal_type VARCHAR(64) NOT NULL,
+                    status VARCHAR(64) NOT NULL,
+                    freshness_state VARCHAR(64) NOT NULL,
+                    confidence NUMERIC(18, 8),
+                    fact_snapshot_id VARCHAR(192),
+                    reason_codes JSON NOT NULL DEFAULT '[]',
+                    signal_payload JSON NOT NULL DEFAULT '{}',
+                    observed_at_ms BIGINT NOT NULL,
+                    expires_at_ms BIGINT,
+                    invalidated_at_ms BIGINT,
+                    created_at_ms BIGINT NOT NULL,
+                    CONSTRAINT ck_brc_live_signal_side CHECK (side IN ('long', 'short')),
+                    CONSTRAINT ck_brc_live_signal_status CHECK (
+                        status IN ('detected', 'facts_validated', 'stale', 'rejected', 'superseded')
+                    ),
+                    CONSTRAINT ck_brc_live_signal_freshness CHECK (
+                        freshness_state IN ('fresh', 'stale', 'expired', 'unknown')
+                    ),
+                    CONSTRAINT ck_brc_live_signal_fresh_valid CHECK (
+                        freshness_state <> 'fresh'
+                        OR (status = 'facts_validated' AND expires_at_ms IS NOT NULL)
+                    ),
+                    CONSTRAINT uq_brc_live_signal_identity UNIQUE (
+                        strategy_group_id, symbol, side, detector_key, signal_type, observed_at_ms
+                    )
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_live_signal_events (
+                    signal_event_id, candidate_scope_id, event_spec_id,
+                    strategy_group_id, symbol, side, detector_key, signal_type,
+                    status, freshness_state, confidence, fact_snapshot_id,
+                    reason_codes, signal_payload, observed_at_ms, expires_at_ms,
+                    invalidated_at_ms, created_at_ms
+                ) VALUES (
+                    'legacy-fresh', 'scope-1', 'SOR-LONG-v1', 'SOR-001',
+                    'ETHUSDT', 'long', 'sor-detector', 'SOR-LONG',
+                    'facts_validated', 'fresh', NULL, 'facts-1', '[]', '{}',
+                    1770000000000, 1770000060000, NULL, 1770000001000
+                )
+                """
+            )
+        )
+        _run_migration(conn, migration_087)
+
+        columns = {column["name"]: column for column in inspect(conn).get_columns("brc_live_signal_events")}
+        assert columns["source_kind"]["nullable"] is False
+        assert columns["event_time_ms"]["nullable"] is False
+        assert columns["trigger_candle_close_time_ms"]["nullable"] is False
+
+        legacy_row = conn.execute(
+            text(
+                """
+                SELECT source_kind, status, freshness_state, event_time_ms,
+                       trigger_candle_close_time_ms, observed_at_ms, created_at_ms
+                FROM brc_live_signal_events
+                WHERE signal_event_id = 'legacy-fresh'
+                """
+            )
+        ).mappings().one()
+        assert legacy_row["source_kind"] == "historical"
+        assert legacy_row["status"] == "stale"
+        assert legacy_row["freshness_state"] == "stale"
+        assert legacy_row["event_time_ms"] == legacy_row["trigger_candle_close_time_ms"]
+        assert legacy_row["event_time_ms"] == legacy_row["observed_at_ms"]
+        assert legacy_row["event_time_ms"] != legacy_row["created_at_ms"]
+
+        upgraded_insert = """
+            INSERT INTO brc_live_signal_events (
+                signal_event_id, candidate_scope_id, event_spec_id,
+                strategy_group_id, symbol, side, detector_key, signal_type,
+                source_kind, status, freshness_state, confidence, fact_snapshot_id,
+                reason_codes, signal_payload, event_time_ms,
+                trigger_candle_close_time_ms, observed_at_ms, expires_at_ms,
+                invalidated_at_ms, created_at_ms
+            ) VALUES (
+                :id, 'scope-1', 'SOR-LONG-v1', 'SOR-001', :symbol, 'long',
+                'sor-detector', 'SOR-LONG', :source_kind, 'facts_validated',
+                'fresh', NULL, 'facts-1', '[]', '{}', :event_time_ms,
+                :trigger_candle_close_time_ms, :observed_at_ms, 1770000300000,
+                NULL, :created_at_ms
+            )
+        """
+        conn.execute(
+            text(upgraded_insert),
+            {
+                "id": "upgraded-live-valid",
+                "symbol": "SOLUSDT",
+                "source_kind": "live_market",
+                "event_time_ms": 1770000120000,
+                "trigger_candle_close_time_ms": 1770000120000,
+                "observed_at_ms": 1770000120001,
+                "created_at_ms": 1770000120002,
+            },
+        )
+        _expect_integrity_error(
+            conn,
+            upgraded_insert,
+            {
+                "id": "upgraded-replay-fresh",
+                "symbol": "AVAXUSDT",
+                "source_kind": "replay",
+                "event_time_ms": 1770000180000,
+                "trigger_candle_close_time_ms": 1770000180000,
+                "observed_at_ms": 1770000180001,
+                "created_at_ms": 1770000180002,
+            },
+        )
+        _expect_integrity_error(
+            conn,
+            upgraded_insert,
+            {
+                "id": "upgraded-event-mismatch",
+                "symbol": "BTCUSDT",
+                "source_kind": "live_market",
+                "event_time_ms": 1770000240000,
+                "trigger_candle_close_time_ms": 1770000241000,
+                "observed_at_ms": 1770000241001,
+                "created_at_ms": 1770000241002,
+            },
+        )
+        _expect_integrity_error(
+            conn,
+            upgraded_insert,
+            {
+                "id": "upgraded-generated-at-event-time",
+                "symbol": "OPUSDT",
+                "source_kind": "live_market",
+                "event_time_ms": 1770000300000,
+                "trigger_candle_close_time_ms": 1770000300000,
+                "observed_at_ms": 1770000300001,
+                "created_at_ms": 1770000300000,
+            },
+        )
+    engine.dispose()
 
 
 def test_strategy_group_versions_have_one_current_version(connection):
@@ -236,12 +415,15 @@ def test_live_signal_freshness_requires_validated_signal(connection):
         INSERT INTO brc_live_signal_events (
             signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
             symbol, side, detector_key, signal_type, status, freshness_state,
-            confidence, fact_snapshot_id, observed_at_ms, expires_at_ms,
+            source_kind, confidence, fact_snapshot_id, event_time_ms,
+            trigger_candle_close_time_ms, observed_at_ms, expires_at_ms,
             invalidated_at_ms, created_at_ms
         ) VALUES (
             :id, 'scope-1', 'SOR-LONG-v1', 'SOR-001', 'ETHUSDT', 'long',
             'sor-detector', 'SOR-LONG', :status, :freshness_state,
-            NULL, 'facts-1', 1770000000000, :expires_at_ms, NULL, 1770000000001
+            :source_kind, NULL, 'facts-1', :event_time_ms,
+            :trigger_candle_close_time_ms, 1770000000002, :expires_at_ms,
+            NULL, :created_at_ms
         )
     """
     connection.execute(
@@ -250,7 +432,11 @@ def test_live_signal_freshness_requires_validated_signal(connection):
             "id": "signal-valid",
             "status": "facts_validated",
             "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "event_time_ms": 1770000000000,
+            "trigger_candle_close_time_ms": 1770000000000,
             "expires_at_ms": 1770000060000,
+            "created_at_ms": 1770000000001,
         },
     )
 
@@ -261,7 +447,11 @@ def test_live_signal_freshness_requires_validated_signal(connection):
             "id": "signal-invalid-detected-fresh",
             "status": "detected",
             "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "event_time_ms": 1770000060000,
+            "trigger_candle_close_time_ms": 1770000060000,
             "expires_at_ms": 1770000060000,
+            "created_at_ms": 1770000060001,
         },
     )
     _expect_integrity_error(
@@ -271,7 +461,53 @@ def test_live_signal_freshness_requires_validated_signal(connection):
             "id": "signal-invalid-fresh-no-expiry",
             "status": "facts_validated",
             "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "event_time_ms": 1770000120000,
+            "trigger_candle_close_time_ms": 1770000120000,
             "expires_at_ms": None,
+            "created_at_ms": 1770000120001,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "signal-invalid-fresh-replay-source",
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "replay",
+            "event_time_ms": 1770000180000,
+            "trigger_candle_close_time_ms": 1770000180000,
+            "expires_at_ms": 1770000240000,
+            "created_at_ms": 1770000180001,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "signal-invalid-event-time-mismatch",
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "event_time_ms": 1770000300000,
+            "trigger_candle_close_time_ms": 1770000360000,
+            "expires_at_ms": 1770000420000,
+            "created_at_ms": 1770000300001,
+        },
+    )
+    _expect_integrity_error(
+        connection,
+        statement,
+        {
+            "id": "signal-invalid-generated-at-event-time",
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "event_time_ms": 1770000480000,
+            "trigger_candle_close_time_ms": 1770000480000,
+            "expires_at_ms": 1770000540000,
+            "created_at_ms": 1770000480000,
         },
     )
 

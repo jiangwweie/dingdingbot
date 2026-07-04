@@ -428,13 +428,13 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
     assert report["checks"]["remote_mutation_authorization"]
-    assert report["inputs"]["target_migration_count"] == 86
+    assert report["inputs"]["target_migration_count"] == 87
     assert report["inputs"]["local_latest_migration"] == (
-        "2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+        "2026-07-05-087_harden_live_signal_event_time_authority.py"
     )
     assert report["inputs"]["remote_migration_revision"] == "081"
-    assert report["inputs"]["target_migration_revision"] == "086"
-    assert report["inputs"]["migration_gap_revision_count"] == 10
+    assert report["inputs"]["target_migration_revision"] == "087"
+    assert report["inputs"]["migration_gap_revision_count"] == 11
     phases = {phase["phase"]: phase for phase in report["plan_phases"]}
     assert phases["2_owner_authorized_git_fetch_and_export"]["remote_mutation"] is True
     assert all(
@@ -465,9 +465,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert '"status": "postdeploy_accepted"' in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
-    assert "--expected-min-migrations 86" in all_commands
-    assert "--base-revision 081 --head-revision 086 --expected-revision-count 10" in all_commands
-    assert "--expected-migration-count 86" in all_commands
+    assert "--expected-min-migrations 87" in all_commands
+    assert "--base-revision 081 --head-revision 087 --expected-revision-count 11" in all_commands
+    assert "--expected-migration-count 87" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
 

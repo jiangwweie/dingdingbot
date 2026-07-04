@@ -380,8 +380,8 @@ def _build_ticket_bundle(
         "exchange_instrument_id": exchange_instrument_id,
         "side": lane["side"],
         "event_id": event_spec["event_id"],
-        "event_time_ms": signal["observed_at_ms"],
-        "trigger_candle_close_time_ms": signal["observed_at_ms"],
+        "event_time_ms": signal["event_time_ms"],
+        "trigger_candle_close_time_ms": signal["trigger_candle_close_time_ms"],
         "runtime_profile_id": lane["runtime_profile_id"],
         "public_fact_snapshot_id": public_fact["fact_snapshot_id"],
         "action_time_fact_snapshot_id": action_time_fact["fact_snapshot_id"],
@@ -454,12 +454,43 @@ def _validate_lineage(blockers: list[str], **items: Any) -> None:
         blockers.append("execution_policy_mismatch:event_spec_id")
     if items["promotion"].get("status") != "arbitration_won":
         blockers.append(f"promotion_candidate_not_arbitration_won:{items['promotion'].get('status') or 'missing'}")
+    if items["promotion"].get("promotion_scope") != "live_submit_candidate":
+        blockers.append(
+            "promotion_scope_not_live_submit_candidate:"
+            f"{items['promotion'].get('promotion_scope') or 'missing'}"
+        )
+    if str(lane.get("promotion_candidate_id") or "") != str(
+        items["promotion"].get("promotion_candidate_id") or ""
+    ):
+        blockers.append("lane_mismatch:promotion_candidate_id")
+    if str(lane.get("signal_event_id") or "") != str(
+        items["signal"].get("signal_event_id") or ""
+    ):
+        blockers.append("lane_mismatch:signal_event_id")
+    if str(items["promotion"].get("signal_event_id") or "") != str(
+        items["signal"].get("signal_event_id") or ""
+    ):
+        blockers.append("promotion_candidate_mismatch:signal_event_id")
     if items["signal"].get("status") != "facts_validated":
         blockers.append(f"signal_event_not_facts_validated:{items['signal'].get('status') or 'missing'}")
     if items["signal"].get("freshness_state") != "fresh":
         blockers.append(f"signal_event_not_fresh:{items['signal'].get('freshness_state') or 'missing'}")
+    if items["signal"].get("source_kind") != "live_market":
+        blockers.append(f"signal_event_not_live_market:{items['signal'].get('source_kind') or 'missing'}")
     if int(items["signal"].get("expires_at_ms") or 0) <= now_ms:
         blockers.append("signal_event_expired")
+    event_time_ms = int(items["signal"].get("event_time_ms") or 0)
+    trigger_candle_close_time_ms = int(
+        items["signal"].get("trigger_candle_close_time_ms") or 0
+    )
+    if event_time_ms <= 0:
+        blockers.append("signal_event_time_missing")
+    if trigger_candle_close_time_ms <= 0:
+        blockers.append("signal_trigger_candle_close_time_missing")
+    if event_time_ms != trigger_candle_close_time_ms:
+        blockers.append("signal_event_time_mismatch:trigger_candle_close_time_ms")
+    if int(items["signal"].get("created_at_ms") or 0) == event_time_ms:
+        blockers.append("signal_generated_at_used_as_event_time")
     if items["runtime_scope"].get("status") != "active":
         blockers.append("runtime_scope_binding_not_active")
     for flag in (

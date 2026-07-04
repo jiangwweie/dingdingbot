@@ -89,7 +89,7 @@ def _ready_plan(tmp_path: Path) -> dict:
             "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
         ),
         expected_latest_migration=(
-            "2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+            "2026-07-05-087_harden_live_signal_event_time_authority.py"
         ),
     )
 

@@ -196,12 +196,12 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
         expected_latest_migration=(
-            "2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+            "2026-07-05-087_harden_live_signal_event_time_authority.py"
         ),
-        target_migration_count=86,
+        target_migration_count=87,
         remote_migration_revision="081",
-        target_migration_revision="086",
-        migration_gap_revision_count=5,
+        target_migration_revision="087",
+        migration_gap_revision_count=6,
         manifest_payload={"scope": "test"},
     )
 

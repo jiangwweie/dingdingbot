@@ -1071,13 +1071,16 @@ read-model state, not a row.
 | `side` | `String(32)` | Side |
 | `detector_key` | `String(128)` | Detector ID |
 | `signal_type` | `String(64)` | Strategy-specific signal |
+| `source_kind` | `String(64)` | `live_market`, `replay`, `historical`, `synthetic`, or `unit_test` |
 | `status` | `String(64)` | `detected`, `facts_validated`, `stale`, `rejected`, `superseded` |
 | `freshness_state` | `String(64)` | `fresh`, `stale`, `expired`, `unknown` |
 | `confidence` | `Numeric` nullable | Confidence if available |
 | `fact_snapshot_id` | `String(192)` nullable | Facts supporting signal |
 | `reason_codes` | `JSONB` | Reason codes |
 | `signal_payload` | `JSONB` | Details |
-| `observed_at_ms` | `BIGINT` | Signal time |
+| `event_time_ms` | `BIGINT` | Strategy event time |
+| `trigger_candle_close_time_ms` | `BIGINT` | Closed candle time authority |
+| `observed_at_ms` | `BIGINT` | Detector observation/write-adjacent time, not freshness authority |
 | `expires_at_ms` | `BIGINT` | Freshness expiry |
 | `invalidated_at_ms` | `BIGINT` nullable | Invalidation time |
 | `created_at_ms` | `BIGINT` | Insert time |
@@ -1088,8 +1091,12 @@ Checks and indexes:
 | --- | --- |
 | `idx_brc_live_signal_events_scope_time` | `(strategy_group_id, symbol, side, observed_at_ms)` |
 | `idx_brc_live_signal_events_status_expiry` | `(status, freshness_state, expires_at_ms)` |
-| `uq_brc_live_signal_events_identity` | Unique `(strategy_group_id, symbol, side, detector_key, signal_type, observed_at_ms)` |
-| `ck_brc_live_signal_events_fresh_validated` | `freshness_state='fresh'` requires `status='facts_validated'` and non-expired `expires_at_ms` |
+| `uq_brc_live_signal_identity` | Unique `(strategy_group_id, symbol, side, detector_key, signal_type, event_time_ms)` |
+| `ck_brc_live_signal_source_kind` | `source_kind` is `live_market`, `replay`, `historical`, `synthetic`, or `unit_test` |
+| `ck_brc_live_signal_fresh_valid` | `freshness_state='fresh'` requires `status='facts_validated'` and non-expired `expires_at_ms` |
+| `ck_brc_live_signal_event_time` | `event_time_ms = trigger_candle_close_time_ms` |
+| `ck_brc_live_signal_no_generated_at_event_time` | `created_at_ms` must not equal `event_time_ms` and must be greater than or equal to it |
+| `ck_brc_live_signal_fresh_source` | Fresh validated signal requires `source_kind='live_market'` |
 
 Writer: live detectors/watcher.
 
