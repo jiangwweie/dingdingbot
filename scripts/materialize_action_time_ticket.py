@@ -51,6 +51,47 @@ ACTIVE_TICKET_STATUSES = {"created", "preflight_pending", "finalgate_ready"}
 AUTHORITY_BOUNDARY = (
     "action_time_ticket_identity_only; no_finalgate_no_operation_layer_no_exchange_write"
 )
+TICKET_IDENTITY_HASH_FIELDS = (
+    "ticket_id",
+    "action_time_lane_input_id",
+    "promotion_candidate_id",
+    "signal_event_id",
+    "event_spec_id",
+    "event_spec_version_id",
+    "candidate_scope_id",
+    "runtime_scope_binding_id",
+    "strategy_group_id",
+    "strategy_group_version_id",
+    "symbol",
+    "exchange_instrument_id",
+    "side",
+    "event_id",
+    "event_time_ms",
+    "trigger_candle_close_time_ms",
+    "runtime_profile_id",
+    "public_fact_snapshot_id",
+    "action_time_fact_snapshot_id",
+    "account_safe_fact_snapshot_id",
+    "account_mode_snapshot_id",
+    "budget_reservation_id",
+    "protection_ref_id",
+    "execution_policy_id",
+    "execution_policy_version",
+    "owner_policy_version",
+    "sizing_policy_version",
+    "protection_policy_version",
+    "target_notional",
+    "leverage",
+    "expires_at_ms",
+    "authority_boundary",
+    "created_under_versions_hash",
+)
+DECIMAL_HASH_FIELDS = {"target_notional", "leverage"}
+INTEGER_HASH_FIELDS = {
+    "event_time_ms",
+    "trigger_candle_close_time_ms",
+    "expires_at_ms",
+}
 FORBIDDEN_EFFECTS = {
     "finalgate_called": False,
     "operation_layer_called": False,
@@ -402,7 +443,7 @@ def _build_ticket_bundle(
         "created_under_versions_hash": created_under_versions_hash,
         "created_at_ms": now_ms,
     }
-    ticket["ticket_hash"] = _hash_payload(ticket)
+    ticket["ticket_hash"] = compute_action_time_ticket_hash(ticket)
     ticket_event = {
         "ticket_event_id": _stable_id("ticket_event", ticket_id, "created"),
         "ticket_id": ticket_id,
@@ -907,6 +948,36 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return Decimal("-1")
+
+
+def compute_action_time_ticket_hash(ticket: dict[str, Any]) -> str:
+    return _hash_payload(
+        {
+            field: _canonical_ticket_hash_value(field, ticket.get(field))
+            for field in TICKET_IDENTITY_HASH_FIELDS
+        }
+    )
+
+
+def _canonical_ticket_hash_value(field: str, value: Any) -> Any:
+    if field in DECIMAL_HASH_FIELDS:
+        return _canonical_decimal_string(value)
+    if field in INTEGER_HASH_FIELDS:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def _canonical_decimal_string(value: Any) -> str:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if decimal_value == 0:
+        return "0"
+    return format(decimal_value.normalize(), "f")
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

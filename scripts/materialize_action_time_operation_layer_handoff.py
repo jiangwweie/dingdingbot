@@ -31,6 +31,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from scripts.materialize_action_time_ticket import (  # noqa: E402
+    compute_action_time_ticket_hash,
+)
 
 
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
@@ -223,6 +226,10 @@ def _handoff_blockers(
     now_ms: int,
 ) -> list[str]:
     blockers: list[str] = []
+    if not ticket.get("ticket_hash"):
+        blockers.append("ticket_hash_missing")
+    elif compute_action_time_ticket_hash(ticket) != ticket.get("ticket_hash"):
+        blockers.append("ticket_hash_mismatch")
     if ticket.get("status") != "finalgate_ready":
         blockers.append(f"ticket_status_not_finalgate_ready:{ticket.get('status') or 'missing'}")
     if int(ticket.get("expires_at_ms") or 0) <= now_ms:

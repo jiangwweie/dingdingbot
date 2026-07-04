@@ -222,6 +222,67 @@ def test_finalgate_preflight_rejects_account_conflict(pg_control_connection):
     ).scalar_one() == "finalgate_rejected"
 
 
+def test_finalgate_preflight_rejects_ticket_identity_hash_mismatch(
+    pg_control_connection,
+):
+    ticket_id = _create_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET target_notional = 999
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    )
+
+    payload = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 1000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "ticket_hash_mismatch" in payload["blockers"]
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets WHERE ticket_id = :ticket_id"),
+        {"ticket_id": ticket_id},
+    ).scalar_one() == "finalgate_rejected"
+
+
+def test_finalgate_preflight_already_ready_still_checks_ticket_hash(
+    pg_control_connection,
+):
+    ticket_id = _create_ticket(pg_control_connection)
+    first = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 1000,
+    )
+    assert first["status"] == "finalgate_ready"
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET target_notional = 999
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    )
+
+    second = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 2000,
+    )
+
+    assert second["status"] == "blocked"
+    assert "ticket_hash_mismatch" in second["blockers"]
+    assert second["finalgate_pass_id"] == first["finalgate_pass_id"]
+
+
 def _create_ticket(conn) -> str:
     _insert_action_time_lane_graph(conn)
     payload = ticket_materializer.materialize_action_time_ticket(conn, now_ms=NOW_MS)

@@ -35,6 +35,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from scripts.materialize_action_time_ticket import (  # noqa: E402
+    compute_action_time_ticket_hash,
+)
 
 
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
@@ -93,6 +96,14 @@ def materialize_action_time_finalgate_preflight(
             finalgate_pass_id=None,
         )
     if ticket.get("status") == "finalgate_ready":
+        hash_blockers = _ticket_hash_blockers(ticket)
+        if hash_blockers:
+            return _blocked(
+                hash_blockers,
+                now_ms=now_ms,
+                ticket=ticket,
+                finalgate_pass_id=_latest_finalgate_pass_id(control_state, ticket_id),
+            )
         return _result(
             "finalgate_already_ready",
             now_ms=now_ms,
@@ -287,6 +298,7 @@ def _finalgate_blockers(
     blockers: list[str] = []
     if int(ticket.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("ticket_expired")
+    blockers.extend(_ticket_hash_blockers(ticket))
 
     lane = _row_by_id(
         control_state,
@@ -368,6 +380,14 @@ def _finalgate_blockers(
         blockers,
         "execution_policy_missing",
     )
+    event_spec = _row_by_id(
+        control_state,
+        "strategy_side_event_specs",
+        "event_spec_id",
+        ticket.get("event_spec_id"),
+        blockers,
+        "event_spec_missing",
+    )
 
     for name, row in (
         ("lane", lane),
@@ -380,6 +400,7 @@ def _finalgate_blockers(
         ("budget", budget),
         ("protection", protection),
         ("execution_policy", execution_policy),
+        ("event_spec", event_spec),
     ):
         _assert_ticket_scope(blockers, ticket=ticket, row=row, label=name)
 
@@ -391,8 +412,24 @@ def _finalgate_blockers(
         blockers.append(f"signal_event_status_not_validated:{signal.get('status')}")
     if signal and signal.get("freshness_state") != "fresh":
         blockers.append(f"signal_event_not_fresh:{signal.get('freshness_state')}")
+    if signal and signal.get("source_kind") != "live_market":
+        blockers.append(f"signal_event_not_live_market:{signal.get('source_kind') or 'missing'}")
     if signal and int(signal.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("signal_event_expired")
+    if signal and str(signal.get("event_spec_id") or "") != str(ticket.get("event_spec_id") or ""):
+        blockers.append("signal_event_spec_mismatch")
+    if signal and int(signal.get("event_time_ms") or 0) != int(ticket.get("event_time_ms") or 0):
+        blockers.append("signal_event_time_mismatch:ticket")
+    if signal and int(signal.get("trigger_candle_close_time_ms") or 0) != int(
+        ticket.get("trigger_candle_close_time_ms") or 0
+    ):
+        blockers.append("signal_trigger_candle_close_time_mismatch:ticket")
+    if signal and int(signal.get("event_time_ms") or 0) != int(
+        signal.get("trigger_candle_close_time_ms") or 0
+    ):
+        blockers.append("signal_event_time_mismatch:trigger_candle_close_time_ms")
+    if signal and int(signal.get("created_at_ms") or 0) == int(signal.get("event_time_ms") or 0):
+        blockers.append("signal_generated_at_used_as_event_time")
     if runtime_scope:
         for flag in (
             "selected_strategygroup_scope",
@@ -424,7 +461,23 @@ def _finalgate_blockers(
         blockers.append("protection_ref_expired")
     if execution_policy and execution_policy.get("status") != "current":
         blockers.append("execution_policy_not_current")
+    if event_spec and event_spec.get("status") != "current":
+        blockers.append("event_spec_not_current")
+    if event_spec and event_spec.get("time_authority") != "trigger_candle_close_time_ms":
+        blockers.append("unsupported_event_time_authority")
+    if event_spec and str(
+        f"{event_spec.get('event_spec_id')}:{event_spec.get('event_spec_version')}"
+    ) != str(ticket.get("event_spec_version_id") or ""):
+        blockers.append("event_spec_version_mismatch")
     return _dedupe(blockers)
+
+
+def _ticket_hash_blockers(ticket: dict[str, Any]) -> list[str]:
+    if not ticket.get("ticket_hash"):
+        return ["ticket_hash_missing"]
+    if compute_action_time_ticket_hash(ticket) != ticket.get("ticket_hash"):
+        return ["ticket_hash_mismatch"]
+    return []
 
 
 def _transition_ticket(

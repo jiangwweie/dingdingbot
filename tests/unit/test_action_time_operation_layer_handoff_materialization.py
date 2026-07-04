@@ -191,6 +191,35 @@ def test_operation_layer_handoff_rejects_ticket_before_finalgate(
     assert "finalgate_pass_id_missing" in payload["blockers"]
 
 
+def test_operation_layer_handoff_rejects_ticket_identity_hash_mismatch(
+    pg_control_connection,
+):
+    ticket_id, finalgate_pass_id = _create_finalgate_ready_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET leverage = 9
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    )
+
+    payload = handoff.materialize_action_time_operation_layer_handoff(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        finalgate_pass_id=finalgate_pass_id,
+        now_ms=NOW_MS + 2000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "ticket_hash_mismatch" in payload["blockers"]
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_operation_layer_handoffs")
+    ).scalar_one() == 0
+
+
 def _create_finalgate_ready_ticket(conn) -> tuple[str, str]:
     _insert_action_time_lane_graph(conn)
     ticket_payload = ticket_materializer.materialize_action_time_ticket(
