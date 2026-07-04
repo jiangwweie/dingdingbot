@@ -97,6 +97,7 @@ def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side
         "optional_chain_closure_status_refresh": False,
         "optional_live_closure_evidence_refresh": False,
         "optional_goal_status_refresh": False,
+        "goal_status_external_pg_projector_required": False,
         "optional_source_readiness_unavailable_evidence": False,
         "exchange_write_called": False,
         "order_created": False,
@@ -452,7 +453,7 @@ def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp
     assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_refresh_product_state_artifacts_mirrors_external_dry_run_artifact_for_goal_status(
+def test_refresh_product_state_artifacts_retires_default_goal_status_writer(
     tmp_path,
     monkeypatch,
 ):
@@ -462,9 +463,7 @@ def test_refresh_product_state_artifacts_mirrors_external_dry_run_artifact_for_g
 
     output_dir = tmp_path / "reports"
     external_dry_run_json = tmp_path / "external" / "runtime-dry-run-audit-chain.json"
-    external_goal_status_json = (
-        tmp_path / "external" / "strategygroup-runtime-goal-status.json"
-    )
+    external_goal_status_json = tmp_path / "external" / "strategygroup-runtime-goal-status.json"
 
     def missing_cookie():
         raise RuntimeError("operator auth missing")
@@ -502,20 +501,28 @@ def test_refresh_product_state_artifacts_mirrors_external_dry_run_artifact_for_g
     mirrored_goal_status_json = output_dir / "strategygroup-runtime-goal-status.json"
     assert external_dry_run_json.exists()
     assert mirrored_dry_run_json.exists()
-    assert external_goal_status_json.exists()
-    assert mirrored_goal_status_json.exists()
+    assert not external_goal_status_json.exists()
+    assert not mirrored_goal_status_json.exists()
     assert artifact["dry_run_audit_refresh"]["output_json"] == str(external_dry_run_json)
     assert artifact["dry_run_audit_refresh"]["goal_status_input_json"] == str(
         mirrored_dry_run_json
     )
-    assert artifact["goal_status_refresh"]["output_json"] == str(external_goal_status_json)
-    assert artifact["goal_status_refresh"]["goal_status_input_json"] == str(
-        mirrored_goal_status_json
-    )
+    assert artifact["goal_status_refresh"] == {
+        "enabled": False,
+        "status": "retired_external_pg_projector_required",
+        "reason": (
+            "Goal Status current projection is owned by "
+            "build_strategygroup_runtime_goal_status.py --require-database-url"
+        ),
+    }
     assert "fallback_input_json" not in artifact["goal_status_refresh"]
     assert artifact["dry_run_audit_refresh"]["status"] == "passed"
-    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
-    assert artifact["source_readiness_unavailable_evidence"]["goal_status_included"] is True
+    assert artifact["source_readiness_unavailable_evidence"]["goal_status_included"] is False
+    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is False
+    assert (
+        artifact["safety_invariants"]["goal_status_external_pg_projector_required"]
+        is True
+    )
     assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert artifact["safety_invariants"]["places_order"] is False
 
@@ -804,7 +811,9 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
     }
     assert artifact["dry_run_audit_refresh"]["status"] == "passed"
     assert artifact["dry_run_audit_refresh"]["scenario_count"] == 14
-    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["goal_status_refresh"]["status"] == (
+        "retired_external_pg_projector_required"
+    )
     assert artifact["source_readiness_unavailable_evidence"]["reason"] == (
         "operator_cookie_unavailable"
     )
@@ -846,4 +855,6 @@ def test_cli_keeps_default_blocked_exit_for_degraded_refresh(
     assert artifact["status"] == "refresh_blocked"
     assert "cli_exit_policy" not in artifact
     assert artifact["dry_run_audit_refresh"]["status"] == "passed"
-    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["goal_status_refresh"]["status"] == (
+        "retired_external_pg_projector_required"
+    )

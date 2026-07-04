@@ -1080,11 +1080,11 @@ the local console server/auth environment is not running.
 | --- | --- |
 | Optional dry-run refresh | `--refresh-dry-run-audit-chain` writes `runtime-dry-run-audit-chain.json` |
 | Optional closure-status refresh | `--refresh-chain-closure-status` writes `runtime-execution-chain-closure-status.json` from the current dry-run audit artifact |
-| Optional goal-status refresh | `--refresh-goal-status` writes `strategygroup-runtime-goal-status.json` |
+| Retired goal-status refresh | `--refresh-goal-status` no longer writes `strategygroup-runtime-goal-status.json`; final Goal Status is owned by `build_strategygroup_runtime_goal_status.py --require-database-url` |
 | Tokyo watcher hook | `80-product-state-refresh.conf` now writes `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-execution-chain-closure-status.json` after the dry-run audit post-step |
 | Local auth missing | Records `operator_cookie_unavailable` and skips API readmodel refresh instead of aborting the local audit refresh |
-| Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, goal-status refreshed, source-readiness unavailable evidence was written, and no forbidden safety effect is present |
-| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=14`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
+| Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, source-readiness unavailable evidence was written, and no forbidden safety effect is present; Goal Status remains owned by the external PG projector |
+| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=14`, `goal_status_refresh.status=retired_external_pg_projector_required` |
 | Safety | The wrapper remains readmodel/local-artifact only; the degraded-success flag is not installed in Tokyo systemd and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Source-Readiness Unavailable Evidence Checkpoint

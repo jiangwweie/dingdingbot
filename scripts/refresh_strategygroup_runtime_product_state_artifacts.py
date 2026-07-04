@@ -781,56 +781,66 @@ def refresh_product_state_artifacts(
         "status": "skipped",
     }
     if refresh_goal_status:
-        from scripts.build_strategygroup_runtime_goal_status import (
-            DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
-            build_goal_status_artifact,
-        )
-
-        builder = goal_status_builder or build_goal_status_artifact
-        resolved_goal_status_output_json = (
-            goal_status_output_json or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-        )
-        try:
-            goal_status_artifact = builder(
-                report_dir=output_dir,
-                release_manifest=release_manifest,
-                expected_head=expected_head,
+        if goal_status_builder is None:
+            goal_status_refresh = {
+                "enabled": False,
+                "status": "retired_external_pg_projector_required",
+                "reason": (
+                    "Goal Status current projection is owned by "
+                    "build_strategygroup_runtime_goal_status.py --require-database-url"
+                ),
+            }
+        else:
+            from scripts.build_strategygroup_runtime_goal_status import (  # noqa: PLC0415
+                DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
             )
-            _write_json(resolved_goal_status_output_json, goal_status_artifact)
-            goal_status_input_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-            if (
-                resolved_goal_status_output_json.resolve()
-                != goal_status_input_json.resolve()
-            ):
-                _write_json(goal_status_input_json, goal_status_artifact)
-            goal_status_refresh = {
-                "enabled": True,
-                "status": goal_status_artifact.get("status"),
-                "output_json": str(resolved_goal_status_output_json),
-                "goal_status_input_json": str(goal_status_input_json),
-                "non_authority_checkpoint": owner_non_authority_checkpoint(
-                    goal_status_artifact,
-                    goal_status_artifact.get("owner_state") or {},
-                    default="refresh_runtime_goal_status",
-                ),
-                "runtime_dry_run_audit_passed": (
-                    (goal_status_artifact.get("checks") or {}).get(
-                        "runtime_dry_run_audit_passed"
-                    )
-                    is True
-                ),
-                "ready_for_real_order_action": (
-                    _goal_status_ready_for_real_order_action(goal_status_artifact)
-                ),
-            }
-        except Exception as exc:
-            blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
-            warnings.append(str(exc))
-            goal_status_refresh = {
-                "enabled": True,
-                "status": "failed",
-                "output_json": str(resolved_goal_status_output_json),
-            }
+
+            builder = goal_status_builder
+            resolved_goal_status_output_json = (
+                goal_status_output_json
+                or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+            )
+            try:
+                goal_status_artifact = builder(
+                    report_dir=output_dir,
+                    release_manifest=release_manifest,
+                    expected_head=expected_head,
+                )
+                _write_json(resolved_goal_status_output_json, goal_status_artifact)
+                goal_status_input_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+                if (
+                    resolved_goal_status_output_json.resolve()
+                    != goal_status_input_json.resolve()
+                ):
+                    _write_json(goal_status_input_json, goal_status_artifact)
+                goal_status_refresh = {
+                    "enabled": True,
+                    "status": goal_status_artifact.get("status"),
+                    "output_json": str(resolved_goal_status_output_json),
+                    "goal_status_input_json": str(goal_status_input_json),
+                    "non_authority_checkpoint": owner_non_authority_checkpoint(
+                        goal_status_artifact,
+                        goal_status_artifact.get("owner_state") or {},
+                        default="refresh_runtime_goal_status",
+                    ),
+                    "runtime_dry_run_audit_passed": (
+                        (goal_status_artifact.get("checks") or {}).get(
+                            "runtime_dry_run_audit_passed"
+                        )
+                        is True
+                    ),
+                    "ready_for_real_order_action": (
+                        _goal_status_ready_for_real_order_action(goal_status_artifact)
+                    ),
+                }
+            except Exception as exc:
+                blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
+                warnings.append(str(exc))
+                goal_status_refresh = {
+                    "enabled": True,
+                    "status": "failed",
+                    "output_json": str(resolved_goal_status_output_json),
+                }
 
     if refresh_api_readmodels and cookie is None:
         try:
@@ -961,7 +971,10 @@ def refresh_product_state_artifacts(
             "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
             "optional_chain_closure_status_refresh": refresh_chain_closure_status,
             "optional_live_closure_evidence_refresh": refresh_live_closure_evidence,
-            "optional_goal_status_refresh": refresh_goal_status,
+            "optional_goal_status_refresh": goal_status_refresh.get("enabled") is True,
+            "goal_status_external_pg_projector_required": (
+                refresh_goal_status and goal_status_refresh.get("enabled") is not True
+            ),
             "optional_source_readiness_unavailable_evidence": source_readiness_unavailable_evidence.get(
                 "enabled"
             )
