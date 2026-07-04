@@ -20,6 +20,16 @@ The target is:
 2. Git no longer keeps long-lived MD/JSON state files, reports, or strategy packs.
 ```
 
+Owner-confirmed target:
+
+```text
+replace, not parallel
+```
+
+After PG cutover, repo MD/JSON/output may be contracts, curated seed inputs,
+fixtures, exports, diagnostics, archives, or provenance. They must not be
+runtime or trading decision authority and must not be production fallback.
+
 This plan extends the DB-backed control-state design in:
 
 ```text
@@ -204,6 +214,33 @@ Every repo MD/JSON should be classified into one of these dispositions.
 | Review-only/historical reports | `move_to_archive` | archive metadata only if needed |
 | Local monitor artifacts | `delete_noise` or local-only | No production source role |
 
+### P0 Old-Source Disposition Inventory
+
+The first PG cutover implementation must include a concrete inventory table for
+the current production-affecting file sources. A family-level plan is not enough
+for implementation acceptance.
+
+Minimum required rows:
+
+| Old source | Required disposition | Runtime replacement | Deletion or archive condition |
+| --- | --- | --- | --- |
+| `owner-pretrade-runtime-authorization-v0.json` | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_runtime_scope_bindings` | DB seed validated and runtime readers reject JSON authority |
+| `main-control-runtime-tier-policy.json` | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current` | Tier/profile policy version exists in DB and tests prove no runtime JSON read |
+| `strategygroup-registry-baseline.json` | `move_to_db_seed` then archive | `brc_strategy_groups`, `brc_strategy_group_versions`, RequiredFacts tables | Registry rows seeded, event specs versioned, old JSON no longer read by runtime |
+| StrategyGroup `handoff.json` files | `move_to_db_seed` then archive | StrategyGroup versions, event specs, RequiredFacts, risk envelope, evidence refs | Seed/import audit preserves semantics and runtime ignores handoff files |
+| `output/runtime-monitor/latest-strategy-live-candidate-pool.json` | `export_only` | readiness, promotion, action-time lane, ticket tables plus read-model snapshot | Watcher, Goal Status, Daily Table, and monitor no longer consume it as source |
+| `output/runtime-monitor/latest-daily-live-enablement-table.json` | `export_only` | DB-backed read-model snapshot | Packet/export tools read repository state, not previous JSON |
+| `output/runtime-monitor/latest-single-lane-task-packet.json` | `export_only` | task/export projection over DB blockers | No runtime process reads packet as authority |
+| `output/runtime-monitor/latest-*-facts.json` | `move_to_db_runtime_state` | `brc_runtime_fact_snapshots` | Fact collectors write DB snapshots and generated files become optional exports |
+| server `strategygroup-runtime-goal-status.json` | `export_only` | `brc_goal_status_current` | One DB owner projector writes current status and JSON is generated view |
+| server monitor dedupe JSON | `move_to_db_runtime_state` | `brc_server_monitor_notifications` | Notifier dedupe reads/writes PG state |
+| `DEFAULT_SIDE_SCOPE` and broad side constants | `delete_noise` / replace with DB scope | `brc_strategy_group_candidate_scope`, `brc_candidate_scope_event_bindings` | Production candidate/scope builders fail if constant fallback is used |
+
+Any old source with reusable semantics must be converted into code schema, DB
+seed, DB runtime state, fixture, or archive. Sources that conflict with the new
+PG semantics must be deleted or archived; they must not be downgraded into a
+hidden fallback path.
+
 ### `config`
 
 | File family | Target disposition | Notes |
@@ -218,7 +255,8 @@ Every repo MD/JSON should be classified into one of these dispositions.
 | Keep files but ban commits | Runtime still reads files; git stops tracking most of them | Quick repo shrink | Runtime/decision drift remains | Reject |
 | Move every MD/JSON into DB as document blobs | DB stores full file payloads | Easy import | DB becomes second file system; weak semantics | Reject |
 | Big-bang remove all repo files | Delete files and patch all readers at once | Fast if perfect | High production and test breakage risk | Reject |
-| Source-boundary first, DB-backed second | Runtime reads `RuntimeControlStateRepository`; DB gradually replaces file-backed sources; files become exports/archives | Removes decision drift while allowing phased migration | Requires staged validators and temporary compatibility | Recommended |
+| Source-boundary first, DB-backed second | Runtime reads `RuntimeControlStateRepository`; DB gradually replaces file-backed sources; files become exports/archives | Can reduce direct file reads | Keeps compatibility pressure and may preserve a second source of truth | Reject as production target; local non-authority comparison only |
+| PG replace-and-cutover | Build PG schema, seed, readers/writers, ticket path, monitor path, old-source removal, and negative tests as one cutover design | Matches Owner target and removes file authority | Larger implementation batch | Recommended |
 
 ## Recommended Migration Strategy
 
@@ -229,8 +267,8 @@ inventory and classify
 -> stop new direct file dependencies
 -> introduce RuntimeControlStateRepository
 -> introduce current projection ownership and lineage
--> DB-source P0 policy/scope/coverage
--> export read models from DB
+-> PG schema / seed / negative constraints
+-> PG-source policy/scope/coverage/facts/promotion/ticket/read models
 -> untrack output/state/report files
 -> archive strategy packs and large replay files
 -> delete runtime file fallback
@@ -264,11 +302,15 @@ Deliverables:
   - `docs/current/**/*.json`;
   - `output/runtime-monitor/latest-*.json`;
   - local monitor cache paths;
+- current implemented validator:
+  - `scripts/validate_runtime_file_authority_boundary.py`;
+  - `config/runtime_file_authority_boundary.json`;
 - allow exceptions only for:
   - test fixtures;
   - explicit import/seed tools;
   - export writers;
-  - current transitional repository implementation.
+  - local migration comparison implementation that cannot become production
+    current authority.
 
 Acceptance:
 
@@ -277,13 +319,14 @@ Acceptance:
 | New direct reads blocked | CI/test validator catches new raw path reads |
 | Exceptions explicit | Each exception has a file, reason, and sunset condition |
 | Runtime scripts scoped | Candidate Pool, Daily Table, Tradeability, server monitor become priority migration targets |
+| Baseline debt frozen | `python3 scripts/validate_runtime_file_authority_boundary.py --json` passes and blocks new source literals or extra occurrences in monitored mainline files |
 
 ### Phase 2: RuntimeControlStateRepository
 
 Deliverables:
 
 - add repository interface;
-- add file-backed compatibility implementation;
+- add PG-backed implementation and local-only inventory/comparison helpers where needed;
 - route Candidate Pool, Daily Table, Tradeability, and server monitor through it;
 - keep JSON outputs as exports only.
 
@@ -292,8 +335,8 @@ Acceptance:
 | Check | Done when |
 | --- | --- |
 | Single read boundary | Main runtime builders no longer own raw docs/output path decisions |
-| Compatibility preserved | Existing focused tests still pass under file-backed source |
-| DB switch ready | Repository source can be selected by config/env without changing builder logic |
+| Migration comparison isolated | File-backed comparison exists only in tests/import tools and cannot be selected by Tokyo production runtime |
+| DB production ready | Repository source is `db` in production; missing DB state fails closed rather than falling back to files |
 
 ### Phase 2B: Current Projection Ownership
 
@@ -408,7 +451,9 @@ Acceptance:
 
 ### Phase 7: Remove Transitional File Backing
 
-After DB-backed sources are stable, remove runtime fallback to repo files.
+Runtime fallback to repo files must be removed as part of PG cutover. Do not
+accept a production state where PG is available but runtime still falls back to
+repo files.
 
 Acceptance:
 
@@ -442,6 +487,8 @@ Acceptance:
 | Candidate scope tests | Five StrategyGroups and multi-symbol scopes are DB-backed |
 | Coverage/facts tests | stale/missing facts fail closed at Runtime Safety State |
 | Export tests | JSON/MD exports can be regenerated from DB snapshots |
+| Ticket/gate handoff tests | FinalGate rejects missing `ticket_id`; Operation Layer rejects missing `ticket_id + finalgate_pass_id` |
+| Negative semantics tests | Unsupported side/symbol/event, generated_at freshness, replay-as-live, JSON authority inputs, and duplicate signal/ticket/submit paths are rejected |
 
 ## Git Governance Rules
 
@@ -507,6 +554,8 @@ File-backed mode is allowed only for:
 - one-shot seed/import commands;
 - fixture-based unit tests.
 
+It is not a Tokyo production fallback.
+
 ## Rollback Strategy
 
 Rollback must restore software behavior without restoring repo file authority.
@@ -518,13 +567,14 @@ Rollback must restore software behavior without restoring repo file authority.
 | Export generation bug | Disable export command; runtime continues from DB |
 | Monitor notification bug | Disable notification send or retry from DB monitor state; do not use local heartbeat fallback |
 | Strategy registry import bug | Park affected StrategyGroup or revert DB rows; do not re-enable handoff JSON as runtime authority |
+| PG current state unavailable | Stop ticket / FinalGate / submit progression and forward-fix PG state; do not restore old file authority |
 
 ## Risks And Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
 | DB becomes a generic JSON dump | Use normalized tables for policy/scope/facts; allow JSONB only for nested evidence |
-| Migration breaks current builders | Repository-first migration with file-backed parity |
+| Migration breaks current builders | Use local parity tests and forward-fix; do not preserve production file authority |
 | Strategy semantics lose provenance | Store evidence refs and archive IDs in DB |
 | Git cleanup deletes needed fixtures | Inventory disposition before untracking |
 | Runtime silently falls back to files | Production source env must be `db`; fallback disabled in production |
@@ -573,6 +623,22 @@ Goal: move watcher coverage, public facts, account facts, and runtime safety inp
 Capability unlocked: fresh-signal promotion can rely on server-backed facts instead of latest JSON files
 ```
 
+### P0-F: Ticket And Gate Handoff DB Source
+
+```text
+Task ID: P0-ACTION-TIME-TICKET-GATE-HANDOFF-DB-SOURCE
+Goal: create Action-Time Ticket identity and make FinalGate consume ticket_id while Operation Layer consumes ticket_id + finalgate_pass_id
+Capability unlocked: loose JSON/candidate/order parameters can no longer bypass PG lineage
+```
+
+### P0-G: Old Authority Removal
+
+```text
+Task ID: P0-OLD-FILE-AUTHORITY-REMOVAL
+Goal: delete, clean, convert, or archive old MD/JSON/output/code fallback paths that can still decide runtime scope, signals, tickets, gates, or submit identity
+Capability unlocked: PG cutover has one production authority path
+```
+
 ### P1-A: Strategy Pack Migration
 
 ```text
@@ -604,7 +670,7 @@ The governance target is complete only when:
 | Requirement | Done when |
 | --- | --- |
 | Runtime no repo MD/JSON dependency | Production Candidate Pool, Daily Table, Tradeability, Runtime Safety State, server monitor, FinalGate preconditions, and Operation Layer preconditions read DB/code/API sources only |
-| Trading decisions DB-backed | Policy, registry, candidate scope, runtime coverage, facts, readiness, promotion, and action-time lane state are DB-backed |
+| Trading decisions DB-backed | Policy, registry, candidate scope, runtime coverage, facts, live signal events, readiness, promotion, action-time lane state, Action-Time Tickets, FinalGate handoff, and Operation Layer handoff are DB-backed |
 | Output export-only | `output/**` is regenerated from DB/read models and not tracked in routine commits |
 | Strategy packs retired | `strategy-group-handoffs` is no longer a runtime source; packs are DB rows plus archive provenance |
 | Docs thin | Current docs contain durable architecture and bootstrap only |

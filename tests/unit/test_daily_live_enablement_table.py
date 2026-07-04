@@ -7,10 +7,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILDER_PATH = REPO_ROOT / "scripts" / "build_daily_live_enablement_table.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_daily_live_enablement_table.py"
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
 def _load_module(path: Path, name: str):
@@ -29,6 +44,28 @@ def _builder():
 
 def _validator():
     return _load_module(VALIDATOR_PATH, "validate_daily_live_enablement_table")
+
+
+@pytest.fixture()
+def pg_control_connection():
+    migration = _load_module(MIGRATION_PATH, "migration_086_daily_table")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_daily_table")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    with engine.connect() as conn:
+        yield conn
+    engine.dispose()
 
 
 def _tradeability() -> dict:
@@ -224,6 +261,165 @@ def _errors(table: dict) -> list[str]:
     return _validator().validate_daily_live_enablement_table(table)
 
 
+def test_daily_table_builds_from_pg_control_state_seed(pg_control_connection):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+
+    table = _builder().build_daily_live_enablement_table_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    assert table["schema"] == "brc.daily_live_enablement_table.v1"
+    assert table["status"] == "daily_live_enablement_table_ready"
+    assert table["source_mode"] == "db_backed"
+    assert table["projection_target"] == "production_current"
+    assert table["source_validation"]["legacy_file_authority"] is False
+    assert table["summary"]["row_count"] == 5
+    assert table["control_state_watermark"]["table_counts"]["candidate_scope"] == 22
+    assert [row["strategy_group_id"] for row in table["rows"]] == [
+        "CPM-RO-001",
+        "MPG-001",
+        "MI-001",
+        "SOR-001",
+        "BRF2-001",
+    ]
+    assert all(row["candidate_pool_reference"] for row in table["rows"])
+    assert all(
+        row["candidate_pool_reference"]["server_runtime_coverage"]["state"]
+        == "runtime_profile_scope_missing"
+        for row in table["rows"]
+    )
+    assert _errors(table) == []
+
+
+def test_daily_table_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
+    output_json = tmp_path / "daily.json"
+    output_md = tmp_path / "daily.md"
+
+    build = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            "--database-url",
+            f"sqlite:///{tmp_path / 'runtime.db'}",
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert build.returncode == 2
+    assert "requires PostgreSQL DSN" in build.stderr
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_daily_table_pg_cli_requires_database_url_when_requested(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    output_json = tmp_path / "daily.json"
+    output_md = tmp_path / "daily.md"
+
+    build = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            "--require-database-url",
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert build.returncode == 2
+    assert "PG_DATABASE_URL is required" in build.stderr
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_daily_table_cli_requires_pg_or_explicit_local_diagnostic(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    output_json = tmp_path / "daily.json"
+    output_md = tmp_path / "daily.md"
+
+    build = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert build.returncode == 2
+    assert "allow-local-file-diagnostic" in build.stderr
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_daily_table_pg_cli_round_trip(tmp_path: Path):
+    migration = _load_module(MIGRATION_PATH, "migration_086_daily_table_cli")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_daily_table_cli")
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                migration.upgrade()
+            finally:
+                migration.op = old_op
+            seed.seed_runtime_control_state_foundation(conn)
+    finally:
+        engine.dispose()
+    output_json = tmp_path / "daily.json"
+    output_md = tmp_path / "daily.md"
+
+    build = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert build.returncode == 0, build.stdout + build.stderr
+    table = json.loads(output_json.read_text(encoding="utf-8"))
+    assert table["source_mode"] == "db_backed"
+    assert table["summary"]["row_count"] == 5
+    assert output_md.exists()
+    assert _errors(table) == []
+
+
 def test_daily_table_generator_emits_five_wip_rows_and_rank_one():
     table = _valid_table()
 
@@ -270,7 +466,7 @@ def test_daily_table_can_rank_from_server_backed_candidate_pool_rows():
     rank_1 = next(row for row in table["rows"] if row["closest_to_live_rank"] == 1)
     assert rank_1["strategy_group_id"] == "MI-001"
     assert rank_1["first_blocker_evidence"].startswith(
-        "output/runtime-monitor/latest-strategy-live-candidate-pool.json:"
+        "candidate_pool_input:"
     )
     assert _errors(table) == []
 
@@ -406,7 +602,7 @@ def test_daily_table_generator_prefers_per_symbol_parity_evidence():
     assert rows["MPG-001"]["next_engineering_action"] == (
         "produce_scoped_live_observation_or_scope_proposal"
     )
-    assert "latest-replay-live-parity-audit.json" in rows["MPG-001"][
+    assert "replay_live_parity_input:" in rows["MPG-001"][
         "first_blocker_evidence"
     ]
 
@@ -540,7 +736,7 @@ def test_daily_table_matches_action_time_row_by_selected_symbol():
     assert cpm_row["symbol"] == "AVAXUSDT"
     assert (
         cpm_row["first_blocker_evidence"]
-        == "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+        == "replay_live_parity_input:"
         "CPM-RO-001/AVAXUSDT first_blocker=action_time_boundary_not_reproduced "
         "watcher_tick_present=True"
     )
@@ -645,7 +841,8 @@ def test_daily_table_builder_marks_missing_sources_invalid():
     assert any("source_validation.valid" in error for error in _errors(table))
 
 
-def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path):
+def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     tradeability = tmp_path / "tradeability.json"
     parity = tmp_path / "parity.json"
     action_time = tmp_path / "action-time.json"
@@ -663,6 +860,7 @@ def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path):
         [
             sys.executable,
             str(BUILDER_PATH),
+            "--allow-local-file-diagnostic",
             "--tradeability-json",
             str(tradeability),
             "--replay-live-parity-json",
@@ -695,7 +893,8 @@ def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path):
     assert validate.returncode == 0, validate.stdout + validate.stderr
 
 
-def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path):
+def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     output_json = tmp_path / "daily.json"
     output_md = tmp_path / "daily.md"
 
@@ -703,6 +902,7 @@ def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path):
         [
             sys.executable,
             str(BUILDER_PATH),
+            "--allow-local-file-diagnostic",
             "--tradeability-json",
             str(tmp_path / "missing-tradeability.json"),
             "--replay-live-parity-json",

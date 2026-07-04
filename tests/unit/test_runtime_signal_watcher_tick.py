@@ -18,6 +18,9 @@ def _args(tmp_path: Path, **overrides):
         "runtime_instance_id": [],
         "strategy_family_id": [],
         "candidate_universe_json": None,
+        "database_url": "",
+        "require_database_url": False,
+        "allow_non_postgres_for_test": False,
         "max_iterations": 1,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 0.0,
@@ -345,6 +348,60 @@ def test_watcher_tick_passes_candidate_universe_to_supervisor(tmp_path, monkeypa
     assert captured["candidate_universe_json"] == (
         "/srv/current/latest-strategy-live-candidate-pool.json"
     )
+
+
+def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
+    tmp_path,
+    monkeypatch,
+):
+    captured = {}
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_operator_evidence_from_path",
+        lambda **kwargs: {
+            "scope": "runtime_observation_operator_evidence",
+            "status": "observation_running_no_signal",
+            "active_runtime_observation": {},
+            "signal_counts": {},
+            "runtime_prepare_context": {},
+            "operator_review_plan": {
+                "next_step": "continue_active_runtime_observation",
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "operator_evidence_only": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "forbidden_effects": [],
+            },
+        },
+    )
+
+    def supervisor_builder(args):
+        captured["database_url"] = args.database_url
+        captured["require_database_url"] = args.require_database_url
+        captured["candidate_universe_json"] = args.candidate_universe_json
+        return _fake_supervisor("waiting_for_signal")(args)
+
+    runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(
+            tmp_path,
+            database_url="postgresql://unit/runtime",
+            require_database_url=True,
+        ),
+        supervisor_builder=supervisor_builder,
+    )
+
+    assert captured == {
+        "database_url": "postgresql://unit/runtime",
+        "require_database_url": True,
+        "candidate_universe_json": None,
+    }
 
 
 def test_watcher_tick_stale_status_recovers_on_fresh_observation_artifacts(

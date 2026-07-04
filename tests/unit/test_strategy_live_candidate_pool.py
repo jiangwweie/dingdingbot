@@ -6,10 +6,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILDER_PATH = REPO_ROOT / "scripts" / "build_strategy_live_candidate_pool.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_strategy_live_candidate_pool.py"
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
 def _load_module(path: Path, name: str):
@@ -28,6 +43,28 @@ def _builder():
 
 def _validator():
     return _load_module(VALIDATOR_PATH, "validate_strategy_live_candidate_pool")
+
+
+@pytest.fixture()
+def pg_control_connection():
+    migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    with engine.connect() as conn:
+        yield conn
+    engine.dispose()
 
 
 def _daily_table() -> dict:
@@ -146,6 +183,78 @@ def _single_lane() -> dict:
     }
 
 
+def _owner_pretrade_authorization() -> dict:
+    required_gates = [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation",
+    ]
+    strategy_groups = {
+        "CPM-RO-001": {
+            "candidate_symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "side_scope": ["long"],
+            "live_submit_allowed": "scoped",
+            "real_submit_required_gates": required_gates,
+        },
+        "MPG-001": {
+            "candidate_symbols": ["OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
+            "side_scope": ["long"],
+            "live_submit_allowed": "scoped",
+            "real_submit_required_gates": required_gates,
+        },
+        "MI-001": {
+            "candidate_symbols": ["AVAXUSDT", "ETHUSDT", "SOLUSDT"],
+            "side_scope": ["long"],
+            "live_submit_allowed": "scoped",
+            "real_submit_required_gates": required_gates,
+        },
+        "SOR-001": {
+            "candidate_symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"],
+            "side_scope": ["long", "short"],
+            "live_submit_allowed": "scoped",
+            "real_submit_required_gates": required_gates,
+        },
+        "BRF2-001": {
+            "candidate_symbols": ["BTCUSDT", "AVAXUSDT", "ETHUSDT"],
+            "side_scope": ["short"],
+            "live_submit_allowed": "conditional_hard_gated",
+            "real_submit_required_gates": [
+                *required_gates,
+                "short_side_disable_clear",
+                "squeeze_clear",
+                "liquidity_clear",
+            ],
+        },
+    }
+    for row in strategy_groups.values():
+        row["pretrade_candidate_allowed"] = True
+        row["action_time_rehearsal_allowed"] = True
+    return {
+        "schema": "brc.owner_pretrade_runtime_authorization.v0",
+        "status": "owner_pretrade_runtime_authorization_recorded",
+        "pretrade_candidate_allowed": True,
+        "action_time_rehearsal_allowed": True,
+        "v0_single_action_time_lane": True,
+        "v0_single_real_submit_intent": True,
+        "strategy_groups": strategy_groups,
+        "authority_boundary": (
+            "owner_pretrade_authorization_only; finalgate_required; "
+            "operation_layer_required; no_exchange_write_bypass; "
+            "no_live_profile_or_sizing_change"
+        ),
+    }
+
+
+def _build_candidate_pool(**kwargs):
+    kwargs.setdefault("owner_pretrade_authorization", _owner_pretrade_authorization())
+    return _builder().build_strategy_live_candidate_pool(**kwargs)
+
+
 def _mi_trial_admission() -> dict:
     return {
         "schema": "brc.mi_trial_admission_decision.v1",
@@ -250,8 +359,239 @@ def _action_time_private_facts_ready() -> dict:
     }
 
 
+def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    assert artifact["schema"] == "brc.strategy_live_candidate_pool.v1"
+    assert artifact["status"] == "strategy_live_candidate_pool_ready"
+    assert artifact["source_mode"] == "db_backed"
+    assert artifact["projection_target"] == "production_current"
+    assert artifact["source_validation"]["legacy_file_authority"] is False
+    assert artifact["summary"]["candidate_count"] == 5
+    assert artifact["summary"]["symbol_readiness_count"] == 22
+    assert artifact["summary"]["action_time_lane_input_count"] == 0
+    assert artifact["action_time_lane_inputs"] == []
+    assert artifact["control_state_watermark"]["table_counts"]["candidate_scope"] == 22
+    assert artifact["pretrade_runtime"]["candidate_symbols_per_strategy_group"] == {
+        "CPM-RO-001": 4,
+        "MPG-001": 4,
+        "MI-001": 3,
+        "SOR-001": 4,
+        "BRF2-001": 3,
+    }
+    assert artifact["pretrade_runtime"]["candidate_lanes_per_strategy_group"] == {
+        "CPM-RO-001": 4,
+        "MPG-001": 4,
+        "MI-001": 3,
+        "SOR-001": 8,
+        "BRF2-001": 3,
+    }
+    lanes = {
+        (row["strategy_group_id"], row["symbol"], row["side"])
+        for row in artifact["symbol_readiness_rows"]
+    }
+    assert ("CPM-RO-001", "ETHUSDT", "short") not in lanes
+    assert ("MPG-001", "OPUSDT", "short") not in lanes
+    assert ("MI-001", "AVAXUSDT", "short") not in lanes
+    assert ("BRF2-001", "BTCUSDT", "long") not in lanes
+    assert ("SOR-001", "ETHUSDT", "long") in lanes
+    assert ("SOR-001", "ETHUSDT", "short") in lanes
+    assert artifact["pretrade_runtime"]["owner_authorization"][
+        "scoped_live_submit_strategy_groups"
+    ] == ["CPM-RO-001", "MI-001", "MPG-001", "SOR-001"]
+    assert artifact["pretrade_runtime"]["owner_authorization"][
+        "conditional_hard_gated_strategy_groups"
+    ] == ["BRF2-001"]
+    assert all(
+        row["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
+        for row in artifact["symbol_readiness_rows"]
+    )
+    assert all(
+        row["promotion_state"] == "idle"
+        for row in artifact["symbol_readiness_rows"]
+    )
+    assert all(
+        value is False for value in artifact["safety_invariants"].values()
+    )
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
+    builder = _builder()
+    output_json = tmp_path / "candidate_pool.json"
+    output_md = tmp_path / "candidate_pool.md"
+
+    assert (
+        builder.main(
+            [
+                "--database-url",
+                f"sqlite:///{tmp_path / 'runtime.db'}",
+                "--output-json",
+                str(output_json),
+                "--output-owner-progress",
+                str(output_md),
+            ]
+        )
+        == 2
+    )
+
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_candidate_pool_pg_cli_requires_database_url_when_requested(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    builder = _builder()
+    output_json = tmp_path / "candidate_pool.json"
+    output_md = tmp_path / "candidate_pool.md"
+
+    assert (
+        builder.main(
+            [
+                "--require-database-url",
+                "--output-json",
+                str(output_json),
+                "--output-owner-progress",
+                str(output_md),
+            ]
+        )
+        == 2
+    )
+
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_candidate_pool_cli_requires_pg_by_default_without_local_diagnostic_flag(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    builder = _builder()
+    output_json = tmp_path / "candidate_pool.json"
+    output_md = tmp_path / "candidate_pool.md"
+
+    assert (
+        builder.main(
+            [
+                "--output-json",
+                str(output_json),
+                "--output-owner-progress",
+                str(output_md),
+            ]
+        )
+        == 2
+    )
+
+    assert not output_json.exists()
+    assert not output_md.exists()
+
+
+def test_candidate_pool_pg_scope_does_not_refill_from_code_defaults(pg_control_connection):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    control_state["candidate_scope"] = [
+        row
+        for row in control_state["candidate_scope"]
+        if not (
+            row["strategy_group_id"] == "CPM-RO-001"
+            and row["symbol"] == "ETHUSDT"
+            and row["side"] == "long"
+        )
+    ]
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    lanes = {
+        (row["strategy_group_id"], row["symbol"], row["side"])
+        for row in artifact["symbol_readiness_rows"]
+    }
+    assert ("CPM-RO-001", "ETHUSDT", "long") not in lanes
+    assert artifact["summary"]["symbol_readiness_count"] == 21
+    assert artifact["pretrade_runtime"]["owner_authorization"][
+        "strategy_group_scopes"
+    ]["CPM-RO-001"]["candidate_symbols"] == ["AVAXUSDT", "SOLUSDT", "SUIUSDT"]
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_pg_state_fails_closed_without_runtime_scope(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    control_state["runtime_scope_bindings"] = [
+        row
+        for row in control_state["runtime_scope_bindings"]
+        if not (
+            row["strategy_group_id"] == "MPG-001"
+            and row["symbol"] == "OPUSDT"
+            and row["side"] == "long"
+        )
+    ]
+
+    with pytest.raises(ValueError, match="has no active PG runtime scope"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
+
+
+def test_candidate_pool_pg_cli_round_trip(tmp_path: Path):
+    migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                migration.upgrade()
+            finally:
+                migration.op = old_op
+            seed.seed_runtime_control_state_foundation(conn)
+    finally:
+        engine.dispose()
+
+    output_json = tmp_path / "candidate_pool.json"
+    output_md = tmp_path / "candidate_pool.md"
+
+    assert (
+        _builder().main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                "--output-json",
+                str(output_json),
+                "--output-owner-progress",
+                str(output_md),
+            ]
+        )
+        == 0
+    )
+
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["source_mode"] == "db_backed"
+    assert artifact["summary"]["symbol_readiness_count"] == 22
+    assert output_md.exists()
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_builds_five_wip_candidate_rows():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -263,7 +603,7 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
     assert artifact["schema"] == "brc.strategy_live_candidate_pool.v1"
     assert artifact["status"] == "strategy_live_candidate_pool_ready"
     assert artifact["summary"]["candidate_count"] == 5
-    assert artifact["summary"]["symbol_readiness_count"] == 36
+    assert artifact["summary"]["symbol_readiness_count"] == 22
     assert artifact["summary"]["deploy_ready"] is False
     assert "rank_1_lane" not in artifact["summary"]
     assert "rank_1_task_id" not in artifact["summary"]
@@ -308,7 +648,7 @@ def test_candidate_pool_builds_five_wip_candidate_rows():
 
 
 def test_candidate_pool_review_keeps_open_p0_items_visible():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -375,7 +715,7 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
     }
     single_lane["first_blocker"] = "action_time_boundary_not_reproduced"
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=daily_table,
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -404,6 +744,7 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "OPUSDT",
+                    "side": "long",
                     "state": "runtime_profile_scope_missing",
                     "blocker_class": "runtime_profile_scope_missing",
                     "active_runtime_instance_ids": [],
@@ -415,6 +756,7 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
                 {
                     "strategy_group_id": "MPG-001",
                     "symbol": "SOLUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-mpg-sol"],
@@ -425,7 +767,7 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -442,7 +784,7 @@ def test_candidate_pool_consumes_server_runtime_candidate_universe_coverage():
     op = rows[("MPG-001", "OPUSDT", "long")]
     sol = rows[("MPG-001", "SOLUSDT", "long")]
     assert op["first_blocker"] == "detector_not_attached"
-    assert op["evidence_ref"] == "default_candidate_universe:MPG-001/OPUSDT"
+    assert op["evidence_ref"] == "owner_pretrade_authorization_scope:MPG-001/OPUSDT"
     assert op["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
     assert sol["observation_scope"] == "active_observation"
     assert sol["watcher_state"] == "fresh"
@@ -472,6 +814,7 @@ def test_candidate_pool_does_not_treat_server_scope_as_watcher_tick():
                 {
                     "strategy_group_id": "SOR-001",
                     "symbol": "ETHUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-sor-eth"],
@@ -482,7 +825,7 @@ def test_candidate_pool_does_not_treat_server_scope_as_watcher_tick():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -543,7 +886,7 @@ def test_candidate_pool_prefers_computed_failed_facts_over_missing_watcher_tick(
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -585,6 +928,7 @@ def test_candidate_pool_consumes_sor_detector_facts_for_authorized_symbols():
                 {
                     "strategy_group_id": "SOR-001",
                     "symbol": "ETHUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-sor-eth"],
@@ -595,7 +939,7 @@ def test_candidate_pool_consumes_sor_detector_facts_for_authorized_symbols():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -619,7 +963,7 @@ def test_candidate_pool_consumes_sor_detector_facts_for_authorized_symbols():
 
 
 def test_candidate_pool_consumes_mi_trial_admission_symbol_evidence():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -648,7 +992,7 @@ def test_candidate_pool_consumes_mi_trial_admission_symbol_evidence():
 
 
 def test_candidate_pool_reclassifies_brf2_runtime_facts_gap_as_watcher_input():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -673,7 +1017,7 @@ def test_candidate_pool_reclassifies_brf2_runtime_facts_gap_as_watcher_input():
 
 
 def test_candidate_pool_marks_brf2_uncovered_symbols_as_watcher_input_gap():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -706,7 +1050,7 @@ def test_candidate_pool_marks_brf2_uncovered_symbols_as_watcher_input_gap():
 
 
 def test_candidate_pool_consumes_brf2_per_symbol_public_proxy_facts():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -736,7 +1080,7 @@ def test_candidate_pool_fails_closed_when_brf2_ready_fact_symbol_is_unknown():
     brf2_facts = _brf2_ready_runtime_signal_facts()
     brf2_facts["signal_context"] = {"symbol": ""}
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -780,6 +1124,7 @@ def test_candidate_pool_blocks_fresh_signal_when_action_time_boundary_not_reprod
                 {
                     "strategy_group_id": "SOR-001",
                     "symbol": "ETHUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-sor-eth"],
@@ -790,7 +1135,7 @@ def test_candidate_pool_blocks_fresh_signal_when_action_time_boundary_not_reprod
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -834,6 +1179,7 @@ def test_candidate_pool_maps_missing_private_action_time_facts_to_contract_block
         {
             "strategy_group_id": "SOR-001",
             "symbol": "ETHUSDT",
+            "side": "long",
             "action_time_path_ready": True,
             "first_blocker": "private_action_time_facts_required",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
@@ -850,6 +1196,7 @@ def test_candidate_pool_maps_missing_private_action_time_facts_to_contract_block
                 {
                     "strategy_group_id": "SOR-001",
                     "symbol": "ETHUSDT",
+                    "side": "long",
                     "state": "active_watcher_scope",
                     "blocker_class": "none",
                     "active_runtime_instance_ids": ["runtime-sor-eth"],
@@ -860,7 +1207,7 @@ def test_candidate_pool_maps_missing_private_action_time_facts_to_contract_block
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -899,6 +1246,8 @@ def test_candidate_pool_blocks_authorized_fresh_signal_without_server_runtime_sc
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -921,7 +1270,7 @@ def test_candidate_pool_blocks_authorized_fresh_signal_without_server_runtime_sc
 
     single_lane = _single_lane()
     single_lane["first_blocker"] = "scope_not_attached"
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=daily_table,
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -959,6 +1308,8 @@ def test_candidate_pool_uses_owner_authorization_for_live_submit_scope():
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -978,7 +1329,7 @@ def test_candidate_pool_uses_owner_authorization_for_live_submit_scope():
         }
     ]
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1042,6 +1393,8 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
             "detector_attached": True,
             "watcher_tick_present": True,
             "computed": True,
+            "fresh_signal_present": True,
+            "event_time_utc": "2026-07-03T12:00:00+00:00",
             "failed_facts": [],
             "mismatch_count": 13,
             "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
@@ -1053,6 +1406,8 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
             "detector_attached": True,
             "watcher_tick_present": True,
             "computed": True,
+            "fresh_signal_present": True,
+            "event_time_utc": "2026-07-03T12:01:00+00:00",
             "failed_facts": [],
             "mismatch_count": 10,
             "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
@@ -1114,7 +1469,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1143,6 +1498,15 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
     assert artifact["action_time_lane_inputs"][0]["public_facts_state"]["state"] == (
         "satisfied"
     )
+    assert artifact["action_time_lane_inputs"][0]["fresh_signal_timestamp_utc"] == (
+        "2026-07-03T12:00:00+00:00"
+    )
+    assert artifact["action_time_lane_inputs"][0][
+        "fresh_signal_timestamp_source"
+    ] == "parity_row:event_time_utc"
+    assert artifact["action_time_lane_inputs"][0][
+        "strategy_signal_fact_side_supported"
+    ] is True
     selected_rows = [
         row
         for row in artifact["symbol_readiness_rows"]
@@ -1187,6 +1551,173 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
     )
 
 
+def test_candidate_pool_does_not_expand_unsupported_side_from_runtime_coverage():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "CPM-RO-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["SOLUSDT"]}
+    action_time = _action_time()
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "SOLUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "private_action_time_facts_required",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": _action_time_private_facts_ready(),
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "SOLUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "fresh_signal_present": True,
+            "event_time_utc": "2026-07-03T12:00:00+00:00",
+            "failed_facts": [],
+            "mismatch_count": 13,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "expected_row_count": 1,
+            "active_matched_row_count": 1,
+            "missing_row_count": 0,
+            "rows": [
+                {
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "SOLUSDT",
+                    "side": "short",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-cpm-sol-short"],
+                    "selected_runtime_instance_ids": ["runtime-cpm-sol-short"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-cpm-sol-short",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
+                    "next_action": "continue_pretrade_observation",
+                },
+            ],
+        }
+    }
+
+    artifact = _build_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    assert not [
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "CPM-RO-001"
+        and item["symbol"] == "SOLUSDT"
+        and item["side"] == "short"
+    ]
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_rejects_artifact_generated_at_as_fresh_signal_identity():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "MPG-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["OPUSDT"]}
+    action_time = _action_time()
+    action_time["generated_at_utc"] = "2026-07-03T12:00:00+00:00"
+    action_time["strategy_rows"].append(
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "action_time_path_ready": True,
+            "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "next_action": "refresh_private_action_time_facts_before_finalgate",
+            "required_facts_readiness": _action_time_private_facts_ready(),
+        }
+    )
+    parity = _parity()
+    parity["per_symbol_mismatch_table"] = [
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "blocker_class": "market_wait_validated",
+            "detector_attached": True,
+            "watcher_tick_present": True,
+            "computed": True,
+            "fresh_signal_present": False,
+            "failed_facts": [],
+            "mismatch_count": 10,
+            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        },
+    ]
+    runtime_active_monitor = {
+        "candidate_universe_coverage": {
+            "status": "complete",
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "state": "active_watcher_scope",
+                    "blocker_class": "none",
+                    "active_runtime_instance_ids": ["runtime-mpg-op"],
+                    "selected_runtime_instance_ids": ["runtime-mpg-op"],
+                    "runtime_profile": {
+                        "runtime_profile_id": "profile-mpg-op-long",
+                        "target_notional_usdt": "10",
+                        "max_notional": "10",
+                        "leverage": "1",
+                    },
+                    "next_action": "continue_pretrade_observation",
+                },
+            ],
+        }
+    }
+
+    artifact = _build_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=parity,
+        action_time_boundary=action_time,
+        single_lane_task_packet=_single_lane(),
+        runtime_active_monitor=runtime_active_monitor,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001"
+        and item["symbol"] == "OPUSDT"
+        and item["side"] == "long"
+    )
+    assert row["signal_state"] == "absent"
+    assert row["fresh_signal_timestamp_utc"] == ""
+    assert row["fresh_signal_timestamp_source"] == ""
+    assert row["promotion_state"] == "idle"
+    assert artifact["action_time_lane_inputs"] == []
+    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
 def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
     action_time = _action_time()
     action_time["strategy_rows"].append(
@@ -1195,6 +1726,8 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
             "symbol": "BTCUSDT",
             "action_time_path_ready": True,
             "first_blocker": "private_action_time_facts_required",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1237,7 +1770,7 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -1277,6 +1810,8 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
             "symbol": "BTCUSDT",
             "action_time_path_ready": True,
             "first_blocker": "private_action_time_facts_required",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1318,7 +1853,7 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
             ],
         }
     }
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -1352,6 +1887,8 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1393,7 +1930,7 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
             ],
         }
     }
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -1420,7 +1957,7 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
         for error in errors
     )
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -1456,6 +1993,8 @@ def test_candidate_pool_blocks_action_time_when_active_position_resolution_neede
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "resolve_active_position_or_open_order_before_submit",
             "required_facts_readiness": {
                 "public_facts_ready": True,
@@ -1501,7 +2040,7 @@ def test_candidate_pool_blocks_action_time_when_active_position_resolution_neede
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=parity,
@@ -1540,6 +2079,8 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1577,7 +2118,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1613,6 +2154,8 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent()
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1632,7 +2175,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent()
         },
     ]
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1671,6 +2214,8 @@ def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1706,7 +2251,7 @@ def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1791,7 +2336,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_side_mismatches()
         }
     }
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1834,6 +2379,8 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
             "symbol": "OPUSDT",
             "action_time_path_ready": True,
             "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
+            "fresh_signal_present": True,
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
             "next_action": "refresh_private_action_time_facts_before_finalgate",
             "required_facts_readiness": _action_time_private_facts_ready(),
         }
@@ -1875,7 +2422,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
             ],
         }
     }
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1899,7 +2446,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
     assert any("action_time_lane requires active server runtime coverage" in error for error in errors)
     assert any("action_time_lane_inputs[0] requires active server runtime coverage" in error for error in errors)
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1930,7 +2477,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
         for error in errors
     )
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1960,7 +2507,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
         for error in errors
     )
 
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=tradeability,
         replay_live_parity=parity,
@@ -1991,7 +2538,7 @@ def test_candidate_pool_no_stale_facts_waives_blocked_public_facts_with_reason()
     for row in daily_table["rows"]:
         row["first_blocker"] = "computed_not_satisfied"
         row["next_engineering_action"] = "continue_observation_with_failed_fact_matrix"
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=daily_table,
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -2007,7 +2554,7 @@ def test_candidate_pool_no_stale_facts_waives_blocked_public_facts_with_reason()
 
 
 def test_candidate_pool_validator_rejects_missing_required_candidate_field():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -2023,7 +2570,7 @@ def test_candidate_pool_validator_rejects_missing_required_candidate_field():
 
 
 def test_candidate_pool_validator_rejects_authority_leakage():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -2057,7 +2604,7 @@ def test_action_time_readiness_requires_public_facts_for_finalgate_preflight():
 
 
 def test_candidate_pool_validator_rejects_preflight_ready_without_public_facts():
-    artifact = _builder().build_strategy_live_candidate_pool(
+    artifact = _build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=_tradeability(),
         replay_live_parity=_parity(),
@@ -2077,7 +2624,8 @@ def test_candidate_pool_validator_rejects_preflight_ready_without_public_facts()
     assert any("public_facts_ready" in error for error in errors)
 
 
-def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
+def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     daily = tmp_path / "daily.json"
     tradeability = tmp_path / "tradeability.json"
     parity = tmp_path / "parity.json"
@@ -2085,6 +2633,7 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
     mi_trial = tmp_path / "mi_trial.json"
     brf2_facts = tmp_path / "brf2_facts.json"
     single_lane = tmp_path / "single_lane.json"
+    owner_authorization = tmp_path / "owner_authorization.json"
     output_json = tmp_path / "candidate_pool.json"
     output_md = tmp_path / "candidate_pool.md"
     daily.write_text(json.dumps(_daily_table()), encoding="utf-8")
@@ -2094,11 +2643,16 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
     mi_trial.write_text(json.dumps({}), encoding="utf-8")
     brf2_facts.write_text(json.dumps({}), encoding="utf-8")
     single_lane.write_text(json.dumps(_single_lane()), encoding="utf-8")
+    owner_authorization.write_text(
+        json.dumps(_owner_pretrade_authorization()),
+        encoding="utf-8",
+    )
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
+            "--allow-local-file-diagnostic",
             "--daily-table-json",
             str(daily),
             "--tradeability-json",
@@ -2113,6 +2667,8 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path):
             str(brf2_facts),
             "--single-lane-task-packet-json",
             str(single_lane),
+            "--owner-pretrade-authorization-json",
+            str(owner_authorization),
             "--output-json",
             str(output_json),
             "--output-owner-progress",

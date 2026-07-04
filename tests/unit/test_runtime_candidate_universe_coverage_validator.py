@@ -25,29 +25,10 @@ def _load_module():
 
 
 def _complete_artifact() -> dict:
-    rows = []
-    for strategy_group_id, symbols in _load_module().DEFAULT_CANDIDATE_UNIVERSE.items():
-        for symbol in symbols:
-            for side in _load_module().DEFAULT_SIDE_SCOPE[strategy_group_id]:
-                rows.append(
-                    {
-                        "strategy_group_id": strategy_group_id,
-                        "symbol": symbol,
-                        "side": side,
-                        "state": "active_watcher_scope",
-                        "blocker_class": "none",
-                        "active_runtime_instance_ids": [
-                            f"runtime-{strategy_group_id}-{symbol}-{side}"
-                        ],
-                        "selected_runtime_instance_ids": [
-                            f"runtime-{strategy_group_id}-{symbol}-{side}"
-                        ],
-                        "authority_boundary": (
-                            "candidate_universe_coverage_is_read_only; "
-                            "no_finalgate_no_operation_layer_no_exchange_write"
-                        ),
-                    }
-                )
+    rows = [
+        _coverage_row("CPM-RO-001", "ETHUSDT", "long"),
+        _coverage_row("SOR-001", "ETHUSDT", "short"),
+    ]
     return {
         "status": "waiting_for_signal",
         "candidate_universe_coverage": {
@@ -57,6 +38,24 @@ def _complete_artifact() -> dict:
             "missing_row_count": 0,
             "rows": rows,
         },
+    }
+
+
+def _coverage_row(strategy_group_id: str, symbol: str, side: str) -> dict:
+    return {
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "state": "active_watcher_scope",
+        "blocker_class": "none",
+        "active_runtime_instance_ids": [f"runtime-{strategy_group_id}-{symbol}-{side}"],
+        "selected_runtime_instance_ids": [
+            f"runtime-{strategy_group_id}-{symbol}-{side}"
+        ],
+        "authority_boundary": (
+            "candidate_universe_coverage_is_read_only; "
+            "no_finalgate_no_operation_layer_no_exchange_write"
+        ),
     }
 
 
@@ -80,15 +79,19 @@ def test_runtime_candidate_universe_coverage_rejects_incomplete_scope():
     module = _load_module()
     artifact = _complete_artifact()
     coverage = artifact["candidate_universe_coverage"]
+    expected_count = coverage["expected_row_count"]
     coverage["status"] = "incomplete"
-    coverage["active_matched_row_count"] = 35
+    coverage["active_matched_row_count"] = expected_count - 1
     coverage["missing_row_count"] = 1
     coverage["rows"][0]["selected_runtime_instance_ids"] = []
 
     errors = module.validate_runtime_candidate_universe_coverage(artifact)
 
     assert "candidate_universe_coverage.status must be complete" in errors
-    assert "candidate_universe_coverage.active_matched_row_count must be 36" in errors
+    assert (
+        f"candidate_universe_coverage.active_matched_row_count must be {expected_count}"
+        in errors
+    )
     assert "candidate_universe_coverage.missing_row_count must be 0" in errors
     assert any("selected_runtime_instance_ids must be non-empty" in error for error in errors)
 

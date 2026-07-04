@@ -124,6 +124,10 @@
       "edge_thesis": "Capture trend-intact pullback followed by reclaim, distinct from MPG momentum continuation.",
       "evidence_refs": [
         {
+          "kind": "handoff",
+          "path": "docs/current/strategy-group-handoffs/CPM-RO-001/handoff.json"
+        },
+        {
           "kind": "identity_decision",
           "path": "output/runtime-monitor/latest-cpm-identity-routing-decision.json"
         },

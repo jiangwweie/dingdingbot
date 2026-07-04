@@ -35,10 +35,14 @@ Local owns development diagnostics only.
 FinalGate and Operation Layer remain action-time execution gates only.
 ```
 
-The server monitor may read runtime status, watcher status, public facts,
-account-safe facts, systemd state, deploy health, and generated runtime
-artifacts. It may classify the current state as quiet or notify and may send a
-Feishu message. It must not create order authority or call execution gates.
+After PG cutover, the server monitor reads Tokyo PG current state plus readonly
+system/process/deploy health. It may classify the current state as quiet or
+notify and may send a Feishu message. It must not create order authority or
+call execution gates.
+
+Generated runtime artifacts may be read only as diagnostics or export-health
+checks. They must not decide production quiet/notify, fresh-signal state,
+ticket state, or Owner intervention state when PG lineage exists.
 
 ## Current Problem
 
@@ -48,7 +52,7 @@ transition. It has these limitations:
 | Concern | Local heartbeat model | Production target |
 | --- | --- | --- |
 | Monitor location | Local Codex session | Tokyo server timer |
-| Runtime truth source | Local cache / output artifacts | Tokyo runtime state and server artifacts |
+| Runtime truth source | Local cache / output artifacts | Tokyo PG current state and readonly server facts |
 | Cache freshness | Can become stale or schema-stale | Server reads current runtime facts directly |
 | Owner notification | Local process decides from cached state | Server classifies quiet / notify and pushes Feishu |
 | Trading safety | Must not depend on local monitor | Still protected by FinalGate and Operation Layer |
@@ -71,7 +75,7 @@ The server-side monitor may:
 - read watcher status;
 - read public facts and account-safe facts;
 - read process, systemd, deploy, and artifact health;
-- write server-side monitor artifacts;
+- write PG server monitor run records and optional exports;
 - send Feishu notifications;
 - record notification dedupe state;
 - retry failed notifications without changing trading authority.
@@ -101,10 +105,17 @@ heartbeat chatter.
 | --- | --- |
 | Healthy waiting for market | Do not notify |
 | Fresh signal appears | Notify |
+| Promotion candidate appears | Notify with dedupe when policy requires it |
+| Action-Time Ticket is created | Notify |
 | Candidate approaches action-time boundary | Notify |
+| FinalGate passes or rejects | Notify |
+| Real submit accepted | Notify |
+| Protection fails or detaches | Must notify |
+| Reconciliation mismatch appears | Must notify |
 | Non-market blocker appears | Notify with blocker class |
 | Watcher, systemd, deploy, or readiness chain fails | Notify |
 | Server-side public facts or account-safe facts fail | Notify as runtime data gap |
+| Pure JSON export stale | Export issue only; not production trading failure |
 | Feishu send fails | Record failure and retry; do not change trading state |
 
 Owner-facing messages should use product language such as:
@@ -139,7 +150,8 @@ Minimum dedupe identity:
 | `last_notified_at` | Last notification time for the same condition |
 
 The dedupe state is notification state. It is not trading authority, strategy
-policy, or runtime safety state.
+policy, or runtime safety state. After PG cutover, dedupe state should live in
+PG monitor/notification tables, not a local file that becomes production truth.
 
 ## Migration Plan
 
@@ -151,9 +163,9 @@ Create a Tokyo-side monitor entrypoint such as:
 scripts/run_tokyo_runtime_server_monitor.py
 ```
 
-It should read server runtime state, classify quiet / notify, write a
-server-side monitor artifact, and call the Feishu notifier only when the
-notification policy requires it.
+It should read PG current state, classify quiet / notify, write a server-side
+monitor run record, optionally export an artifact, and call the Feishu notifier
+only when the notification policy requires it.
 
 ### Phase 2: Add Systemd Timer
 
@@ -170,9 +182,10 @@ use a shorter burst mode, but healthy waiting should remain quiet.
 
 ### Phase 3: Add Feishu Dedupe
 
-Implement the dedupe identity in a server-side local state file or runtime
-store. A failed Feishu send should be retried and recorded without changing
-runtime safety or order authority.
+Implement the dedupe identity in PG monitor notification tables or an equivalent
+server-side runtime store that is not a repo/local-cache truth source. A failed
+Feishu send should be retried and recorded without changing runtime safety or
+order authority.
 
 ### Phase 4: Remove Local Heartbeat From Production
 
@@ -194,7 +207,7 @@ The server-side monitor migration is accepted only when:
 | Server monitor ownership | Tokyo timer runs the readonly monitor without local Codex dependency |
 | Quiet path | Healthy waiting produces no Feishu notification |
 | Notify path | Fresh signal, action-time approach, non-market blocker, or runtime failure sends one deduped notification |
-| Runtime source | Monitor reads Tokyo runtime/server facts, not local cache as the primary truth source |
+| Runtime source | Monitor reads Tokyo PG current state and readonly server facts, not local cache, generated JSON, or repo files as production truth |
 | Safety boundary | Tests prove no FinalGate, Operation Layer, exchange write, order create, withdrawal, transfer, credential mutation, live-profile mutation, or sizing mutation |
 | Local removal from production | Local monitor remains available for development diagnostics only and is not production notification owner or fallback |
 

@@ -190,6 +190,60 @@ missed a fixed target or used a higher leverage scenario in research.
 to attempt the official real-order path when Tradeability Decision and Runtime
 Safety State both allow the action-time path.
 
+## Current Active Runtime Event Registry
+
+The current active pre-trade runtime uses these Owner-confirmed StrategyGroup
+semantics. This section is the durable registry contract for the PG initial
+seed and must not be replaced by old handoff JSON, old code constants, or
+generated output artifacts.
+
+| StrategyGroup | Candidate symbols | Supported side | Event spec | Event time authority | Protection reference |
+| --- | --- | --- | --- | --- | --- |
+| `CPM-RO-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long only | `CPM-LONG` | closed 1h reclaim trigger candle close | `pullback_low_reference` |
+| `MPG-001` | `OPUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long only | `MPG-LONG` | closed 1h momentum-persistence trigger candle close | `momentum_floor_reference` |
+| `MI-001` | `AVAXUSDT`, `ETHUSDT`, `SOLUSDT` | long only / long-first | `MI-LONG` | closed 1h candle anchoring 12h impulse | impulse invalidation / fast reversal threshold |
+| `SOR-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `BTCUSDT` | long and short through explicit side events | `SOR-LONG`, `SOR-SHORT` | closed 15m session breakout/breakdown candle close | opening-range invalidation |
+| `BRF2-001` | `BTCUSDT`, `AVAXUSDT`, `ETHUSDT` | short only | `BRF2-SHORT` | closed 1h rally-failure trigger candle close | `rally_high_reference` |
+
+Unsupported opposite sides are not dormant permissions. They are rejected
+runtime scope. A future unsupported side requires a new StrategyGroup or a
+versioned strategy variant with its own event spec, RequiredFacts, scope,
+policy, protection, and negative tests.
+
+### Event Meanings
+
+| Event spec | Plain-language event |
+| --- | --- |
+| `CPM-LONG` | 4h uptrend remains intact, 1h pullback is normal, and 1h reclaim confirms continuation |
+| `MPG-LONG` | 4h context is upward, 1h momentum persists, and a closed 1h candle confirms continuation or breakout |
+| `MI-LONG` | A strong 12h close-to-close impulse appears in an allowed high-beta asset and passes exhaustion/reversal checks |
+| `SOR-LONG` | Session opening range is formed, price breaks above the range high, follow-through confirms, and invalidation holds |
+| `SOR-SHORT` | Session opening range is formed, price breaks below the range low, bearish follow-through confirms, and reclaim does not occur |
+| `BRF2-SHORT` | A weak or non-strong-uptrend market rallies, rally failure/rejection confirms, and squeeze risk remains acceptable |
+
+### Current Event RequiredFacts Boundary
+
+The current PG seed must not include transitional `v0` exceptions inside
+RequiredFacts. If a RequiredFact is not part of a strategy event, that absence
+must be represented by a new versioned event spec or RequiredFacts version, not
+by free-text exceptions.
+
+Current special case:
+
+| Event spec | RequiredFact decision |
+| --- | --- |
+| `MI-LONG` | `relative_strength_confirmed=true` is required for the current event spec |
+
+### Version Boundary
+
+StrategyGroup versions, event specs, RequiredFacts, policy, execution policy,
+and protection policy are versioned.
+
+Signals, promotion candidates, Action-Time Tickets, orders, protection,
+reconciliation, and reviews must bind the versions that were current when they
+were created. New versions affect future events. They must not rewrite the
+meaning of historical signals, tickets, orders, or reviews.
+
 ## Current Pilot Registry Sketch
 
 This table is a human-readable sketch. Generated or machine-readable registry

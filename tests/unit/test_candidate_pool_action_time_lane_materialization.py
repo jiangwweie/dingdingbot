@@ -22,6 +22,10 @@ def _args(tmp_path: Path, **overrides) -> argparse.Namespace:
         "four_hour_limit": 25,
         "timeout_seconds": 10.0,
         "allow_prepare_records": True,
+        "database_url": "",
+        "require_database_url": False,
+        "allow_non_postgres_for_test": False,
+        "allow_local_file_diagnostic": True,
         "owner_operator_id": "owner",
         "owner_confirmation_reference": "owner-authorized-unit",
     }
@@ -40,6 +44,7 @@ def _candidate_pool() -> dict:
                 "symbol": "ETHUSDT",
                 "side": "long",
                 "fresh_signal_timestamp_utc": "2026-07-03T12:00:00+00:00",
+                "fresh_signal_timestamp_source": "parity_row:event_time_utc",
                 "lane_fingerprint": "lane-sor-eth-long-1",
                 "runtime_profile": {
                     "runtime_profile_id": "profile-sor-eth",
@@ -52,6 +57,7 @@ def _candidate_pool() -> dict:
                 "scope_state": "live_submit_allowed",
                 "promotion_state": "action_time_lane",
                 "first_blocker": "action_time_preflight_ready",
+                "strategy_signal_fact_side_supported": True,
                 "selected_runtime_instance_ids": ["runtime-SOR-001-ETHUSDT"],
             }
         ],
@@ -125,9 +131,8 @@ def test_materializes_action_time_lane_into_watcher_prepare_evidence(tmp_path: P
     status = json.loads((report_dir / "status-artifact.json").read_text())
     latest = json.loads((report_dir / "latest-status.json").read_text())
     assert status == latest
-    assert status["signal_input_json"].endswith(
-        "runtime-SOR-001-ETHUSDT-signal-input.json"
-    )
+    assert "SOR-001-ETHUSDT-long-" in status["signal_input_json"]
+    assert "lane-sor-eth-long-1" in status["signal_input_json"]
     assert status["prepared_authorization_id"] == "auth-sor-eth-1"
     assert status["shadow_candidate_id"] == "candidate-sor-eth-1"
     assert status["candidate_pool_action_time_lane_materialization"][
@@ -135,6 +140,12 @@ def test_materializes_action_time_lane_into_watcher_prepare_evidence(tmp_path: P
     ] == "lane-sor-eth-long-1"
     assert status["runtime_signal_summaries"][0]["status"] == (
         "ready_for_final_gate_preflight"
+    )
+    assert status["runtime_signal_summaries"][0]["fresh_signal_timestamp_utc"] == (
+        "2026-07-03T12:00:00+00:00"
+    )
+    assert status["runtime_signal_summaries"][0]["fresh_signal_timestamp_source"] == (
+        "parity_row:event_time_utc"
     )
     assert status["safety_invariants"]["observed_submit_authorization_created"] is True
     assert status["safety_invariants"]["exchange_write_called"] is False
@@ -218,6 +229,43 @@ def test_materializer_noops_without_action_time_lane(tmp_path: Path):
     assert payload["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_materializer_requires_pg_when_requested(tmp_path: Path, capsys, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    result = materializer.main(
+        [
+            "--require-database-url",
+            "--report-dir",
+            str(tmp_path / "report"),
+            "--output-json",
+            str(tmp_path / "report" / "materialization.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "PG_DATABASE_URL is required" in capsys.readouterr().err
+    assert not (tmp_path / "report" / "materialization.json").exists()
+
+
+def test_materializer_requires_pg_or_explicit_local_diagnostic(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    result = materializer.main(
+        [
+            "--report-dir",
+            str(tmp_path / "report"),
+            "--output-json",
+            str(tmp_path / "report" / "materialization.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "allow-local-file-diagnostic" in capsys.readouterr().err
+    assert not (tmp_path / "report" / "materialization.json").exists()
+
+
 def test_materializer_noops_conditional_rehearsal_lane(tmp_path: Path):
     candidate_pool = _candidate_pool()
     candidate_pool["action_time_lane_inputs"][0][
@@ -241,3 +289,74 @@ def test_materializer_noops_conditional_rehearsal_lane(tmp_path: Path):
     assert payload["blockers"] == [
         "action_time_lane_scope_not_live_submit:conditional_action_time_rehearsal_allowed"
     ]
+
+
+def test_materializer_keeps_distinct_signal_summaries_for_same_runtime(tmp_path: Path):
+    candidate_pool = _candidate_pool()
+    candidate_pool_json = tmp_path / "candidate-pool.json"
+    report_dir = tmp_path / "report"
+    output_json = report_dir / "action-time-lane-materialization.json"
+    _write(candidate_pool_json, candidate_pool)
+    _write(
+        report_dir / "status-artifact.json",
+        {
+            "status": "ok",
+            "selected_runtime_instance_ids": ["runtime-SOR-001-ETHUSDT"],
+            "runtime_signal_summaries": [
+                {
+                    "runtime_instance_id": "runtime-SOR-001-ETHUSDT",
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                    "fresh_signal_timestamp_utc": "2026-07-03T11:00:00+00:00",
+                    "lane_fingerprint": "lane-sor-eth-long-old",
+                    "signal_input_json": "/old/signal-input.json",
+                }
+            ],
+            "safety_invariants": {"exchange_write_called": False},
+        },
+    )
+
+    def fake_prepare(args: argparse.Namespace) -> dict:
+        signal_path = Path(args.signal_output_json)
+        _write(
+            signal_path,
+            {
+                "strategy_family_id": "SOR-001",
+                "strategy_family_version_id": "SOR-001-v0",
+                "runtime_instance_id": "runtime-SOR-001-ETHUSDT",
+                "symbol": "ETHUSDT",
+                "side": "long",
+            },
+        )
+        return {
+            "status": "ready_for_final_gate_preflight",
+            "signal_input_json": str(signal_path),
+            "blockers": [],
+            "ids": {
+                "authorization_id": "auth-sor-eth-2",
+                "order_candidate_id": "candidate-sor-eth-2",
+            },
+            "safety_invariants": {"submit_authorization_created": True},
+        }
+
+    payload = materializer.materialize_action_time_lane(
+        candidate_pool_json=candidate_pool_json,
+        report_dir=report_dir,
+        output_json=output_json,
+        args=_args(tmp_path),
+        prepare_builder=fake_prepare,
+    )
+
+    assert payload["status"] == "ready_for_action_time_final_gate"
+    status = json.loads((report_dir / "status-artifact.json").read_text())
+    assert len(status["runtime_signal_summaries"]) == 2
+    assert {
+        row["lane_fingerprint"] for row in status["runtime_signal_summaries"]
+    } == {"lane-sor-eth-long-old", "lane-sor-eth-long-1"}
+    assert len(
+        {
+            row.get("signal_input_json")
+            for row in status["runtime_signal_summaries"]
+        }
+    ) == 2

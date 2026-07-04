@@ -405,6 +405,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "no_dangerous_effects": True,
     }
     assert set(selected_guard["selected_strategygroup_dispatches"]) == {
+        "CPM-RO-001",
         "MPG-001",
         "TEQ-001",
         "FBS-001",
@@ -432,14 +433,27 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "prepare_runner_called_once": True,
         "prepare_uses_runtime_and_signal_input": True,
         "prepare_result_ready_for_finalgate": True,
-        "dispatcher_reaches_finalgate_ready": True,
-        "finalgate_called_once": True,
+        "dispatcher_reaches_ticket_bound_operation_layer_handoff_ready": True,
+        "finalgate_preflight_called_once": True,
+        "operation_layer_handoff_called_once": True,
         "operation_layer_submit_not_called": True,
         "no_dangerous_effects": True,
     }
-    assert rehearsal_prepare["resume_dispatch"]["status"] == "finalgate_ready"
+    assert rehearsal_prepare["resume_dispatch"]["status"] == "operation_layer_ready"
+    assert rehearsal_prepare["resume_dispatch"]["dispatch_status"] == (
+        "ticket_bound_operation_layer_handoff_ready"
+    )
     assert rehearsal_prepare["resume_dispatch"]["dispatch_action"] == (
-        "prepare_official_operation_layer_submit"
+        "prepare_ticket_bound_protected_submit"
+    )
+    assert rehearsal_prepare["resume_dispatch"]["ticket_id"] == (
+        "dry-run-action-time-ticket-1"
+    )
+    assert rehearsal_prepare["resume_dispatch"]["finalgate_pass_id"] == (
+        "dry-run-finalgate-pass-1"
+    )
+    assert rehearsal_prepare["resume_dispatch"]["operation_submit_command_id"] == (
+        "dry-run-operation-submit-1"
     )
     assert rehearsal_prepare["resume_dispatch"]["safety_invariants"][
         "official_non_executing_prepare_called"
@@ -733,6 +747,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     }
     assert set(shared["found_strategy_groups"]) == {
         "BTPC-001",
+        "CPM-RO-001",
         "MPG-001",
         "TEQ-001",
         "FBS-001",

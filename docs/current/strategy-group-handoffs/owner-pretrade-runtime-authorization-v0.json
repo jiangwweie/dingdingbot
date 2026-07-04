@@ -11,7 +11,7 @@
   "strategy_groups": {
     "CPM-RO-001": {
       "candidate_symbols": ["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
-      "side_scope": ["long", "short"],
+      "side_scope": ["long"],
       "pretrade_candidate_allowed": true,
       "action_time_rehearsal_allowed": true,
       "live_submit_allowed": "scoped",
@@ -28,7 +28,7 @@
     },
     "MPG-001": {
       "candidate_symbols": ["OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"],
-      "side_scope": ["long", "short"],
+      "side_scope": ["long"],
       "pretrade_candidate_allowed": true,
       "action_time_rehearsal_allowed": true,
       "live_submit_allowed": "scoped",
@@ -45,7 +45,7 @@
     },
     "MI-001": {
       "candidate_symbols": ["AVAXUSDT", "ETHUSDT", "SOLUSDT"],
-      "side_scope": ["long", "short"],
+      "side_scope": ["long"],
       "pretrade_candidate_allowed": true,
       "action_time_rehearsal_allowed": true,
       "live_submit_allowed": "scoped",
@@ -79,7 +79,7 @@
     },
     "BRF2-001": {
       "candidate_symbols": ["BTCUSDT", "AVAXUSDT", "ETHUSDT"],
-      "side_scope": ["long", "short"],
+      "side_scope": ["short"],
       "pretrade_candidate_allowed": true,
       "action_time_rehearsal_allowed": true,
       "live_submit_allowed": "conditional_hard_gated",

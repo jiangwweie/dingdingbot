@@ -18,6 +18,7 @@ last_verified: 2026-06-20
 | StrategyGroup | 当前层级 | 可试运行 | 当前判断 | 推荐策略检查点 | Owner 政策需求 |
 | --- | --- | --- | --- | --- | --- |
 | `MPG-001` | `L4` | `true` | `keep_observing` | `keep` | `false` |
+| `CPM-RO-001` | `L3` | `true` | `keep_current_tier_no_promotion_evidence` | `keep` | `false` |
 | `TEQ-001` | `L2` | `false` | `keep_current_tier_no_promotion_evidence` | `keep` | `false` |
 | `FBS-001` | `L3` | `false` | `keep_observing` | `keep` | `false` |
 | `SOR-001` | `L3` | `false` | `keep_observing` | `keep` | `false` |
@@ -50,6 +51,18 @@ last_verified: 2026-06-20
 - Owner 政策需求: `false`
 - 下一证据: no_action_visibility_and_routing_summary:MPG-001_no_action_visibility_and_routing_audit
 - 暂不晋级原因: current Strategy Asset State supports continued observation, not tier promotion
+
+### `CPM-RO-001` CPM 回踩收复
+
+- 当前层级: `L3`
+- 当前判断: `keep_current_tier_no_promotion_evidence`
+- 晋级范围: `not_applicable`
+- 晋级目标: `not_applicable`
+- 推荐策略检查点: `keep`
+- 判断来源: `None`
+- Owner 政策需求: `false`
+- 下一证据: fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence
+- 暂不晋级原因: strategy uncertainty is not an execution blocker, but there is no current decision evidence for promotion or live scope change; Standalone CPM-LONG pullback-reclaim trial StrategyGroup; may observe and run non-executing rehearsal, but real submit still requires fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.
 
 ### `TEQ-001` 类股权永续动量
 

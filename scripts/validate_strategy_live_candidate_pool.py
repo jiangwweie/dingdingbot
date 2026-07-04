@@ -22,12 +22,11 @@ from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
     ACTION_TIME_INPUT_BLOCKERS,
     ACTION_TIME_SCOPE_STATES,
     AUTHORITY_BOUNDARY,
-    DEFAULT_CANDIDATE_UNIVERSE,
-    DEFAULT_SIDE_SCOPE,
     OWNER_AUTHORIZATION_SCHEMA,
     PLACEHOLDER_SYMBOLS,
     SCHEMA,
     SCOPED_LIVE_SUBMIT_STRATEGIES,
+    STRATEGY_SIGNAL_FACT_SIDE_SCOPE,
 )
 
 
@@ -102,7 +101,15 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
         errors.append("symbol_readiness_rows are required")
     for index, row in enumerate(symbol_rows):
         errors.extend(_validate_symbol_readiness_row(index, row))
-    errors.extend(_validate_authorized_candidate_universe(symbol_rows))
+    expected_symbols = _expected_candidate_symbols_by_strategy(artifact)
+    expected_sides = _expected_side_scope_by_strategy(artifact)
+    errors.extend(
+        _validate_authorized_candidate_universe(
+            symbol_rows,
+            expected_symbols=expected_symbols,
+            expected_sides=expected_sides,
+        )
+    )
     errors.extend(_validate_pretrade_runtime(artifact, symbol_rows))
     summary = _as_dict(artifact.get("summary"))
     if summary.get("candidate_count") != len(WIP_LANES):
@@ -259,6 +266,35 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         errors.append(f"{prefix}.action_time_lane has unresolved blocker")
     if (
         row.get("promotion_state") == "action_time_lane"
+        and row.get("strategy_signal_fact_side_supported") is not True
+    ):
+        errors.append(
+            f"{prefix}.action_time_lane requires strategy signal fact side support"
+        )
+    if row.get("promotion_state") == "action_time_lane" and not str(
+        row.get("fresh_signal_timestamp_utc") or ""
+    ):
+        errors.append(f"{prefix}.action_time_lane requires fresh signal timestamp")
+    if row.get("promotion_state") == "action_time_lane" and not str(
+        row.get("fresh_signal_timestamp_source") or ""
+    ):
+        errors.append(f"{prefix}.action_time_lane requires fresh signal timestamp source")
+    if (
+        row.get("fresh_signal_timestamp_source")
+        == "action_time_boundary:_artifact_generated_at_utc"
+    ):
+        errors.append(
+            f"{prefix}.fresh_signal_timestamp_source must not be artifact generated_at"
+        )
+    strategy_group_id = str(row.get("strategy_group_id") or "")
+    side = str(row.get("side") or "")
+    side_scope = set(STRATEGY_SIGNAL_FACT_SIDE_SCOPE.get(strategy_group_id, ()))
+    if row.get("strategy_signal_fact_side_supported") is True and side not in side_scope:
+        errors.append(
+            f"{prefix}.strategy_signal_fact_side_supported contradicts side scope"
+        )
+    if (
+        row.get("promotion_state") == "action_time_lane"
         and not _server_runtime_scope_ready(
             _as_dict(row.get("server_runtime_coverage")),
             strategy_group_id=str(row.get("strategy_group_id") or ""),
@@ -290,6 +326,8 @@ def _validate_pretrade_runtime(
     artifact: dict[str, Any], symbol_rows: list[dict[str, Any]]
 ) -> list[str]:
     errors: list[str] = []
+    expected_symbols = _expected_candidate_symbols_by_strategy(artifact)
+    expected_sides = _expected_side_scope_by_strategy(artifact)
     runtime = _as_dict(artifact.get("pretrade_runtime"))
     if not runtime:
         errors.append("pretrade_runtime is required")
@@ -299,7 +337,7 @@ def _validate_pretrade_runtime(
         counts = {}
     for strategy_group_id in WIP_LANES:
         count = int(counts.get(strategy_group_id) or 0)
-        expected = len(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ()))
+        expected = len(expected_symbols.get(strategy_group_id, set()))
         if count != expected:
             errors.append(
                 "pretrade_runtime candidate symbol count must match authorized "
@@ -311,8 +349,8 @@ def _validate_pretrade_runtime(
         lane_counts = {}
     for strategy_group_id in WIP_LANES:
         count = int(lane_counts.get(strategy_group_id) or 0)
-        expected = len(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())) * len(
-            DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
+        expected = len(expected_symbols.get(strategy_group_id, set())) * len(
+            expected_sides.get(strategy_group_id, set())
         )
         if count != expected:
             errors.append(
@@ -340,7 +378,7 @@ def _validate_pretrade_runtime(
             errors.append(
                 f"action_time_lane_inputs[{index}].symbol must be a real authorized symbol"
             )
-        if symbol not in set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())):
+        if symbol not in expected_symbols.get(strategy_group_id, set()):
             errors.append(
                 f"action_time_lane_inputs[{index}].symbol is outside authorized universe"
             )
@@ -407,6 +445,17 @@ def _validate_action_time_input_matches_readiness_row(
         errors.append(f"{prefix} must report fresh signal_state")
     if not str(action_time_input.get("fresh_signal_timestamp_utc") or ""):
         errors.append(f"{prefix}.fresh_signal_timestamp_utc is required")
+    if not str(action_time_input.get("fresh_signal_timestamp_source") or ""):
+        errors.append(f"{prefix}.fresh_signal_timestamp_source is required")
+    if (
+        action_time_input.get("fresh_signal_timestamp_source")
+        == "action_time_boundary:_artifact_generated_at_utc"
+    ):
+        errors.append(
+            f"{prefix}.fresh_signal_timestamp_source must not be artifact generated_at"
+        )
+    if action_time_input.get("strategy_signal_fact_side_supported") is not True:
+        errors.append(f"{prefix} requires strategy signal fact side support")
     if not str(action_time_input.get("lane_fingerprint") or ""):
         errors.append(f"{prefix}.lane_fingerprint is required")
     if readiness_row.get("promotion_state") != "action_time_lane":
@@ -419,7 +468,9 @@ def _validate_action_time_input_matches_readiness_row(
         "scope_state",
         "side",
         "fresh_signal_timestamp_utc",
+        "fresh_signal_timestamp_source",
         "lane_fingerprint",
+        "strategy_signal_fact_side_supported",
     ):
         if action_time_input.get(key) != readiness_row.get(key):
             errors.append(f"{prefix}.{key} must match symbol_readiness_rows")
@@ -444,8 +495,55 @@ def _validate_action_time_input_matches_readiness_row(
     return errors
 
 
+def _expected_candidate_symbols_by_strategy(
+    artifact: dict[str, Any],
+) -> dict[str, set[str]]:
+    scopes = _owner_authorization_strategy_group_scopes(artifact)
+    if scopes:
+        return {
+            strategy_group_id: {
+                str(item)
+                for item in _as_dict(scopes.get(strategy_group_id)).get(
+                    "candidate_symbols"
+                )
+                or []
+                if str(item or "")
+            }
+            for strategy_group_id in WIP_LANES
+        }
+    return {strategy_group_id: set() for strategy_group_id in WIP_LANES}
+
+
+def _expected_side_scope_by_strategy(
+    artifact: dict[str, Any],
+) -> dict[str, set[str]]:
+    scopes = _owner_authorization_strategy_group_scopes(artifact)
+    if scopes:
+        return {
+            strategy_group_id: {
+                str(item)
+                for item in _as_dict(scopes.get(strategy_group_id)).get("side_scope")
+                or []
+                if str(item or "")
+            }
+            for strategy_group_id in WIP_LANES
+        }
+    return {strategy_group_id: set() for strategy_group_id in WIP_LANES}
+
+
+def _owner_authorization_strategy_group_scopes(
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    summary = _as_dict(_as_dict(artifact.get("pretrade_runtime")).get("owner_authorization"))
+    scopes = summary.get("strategy_group_scopes")
+    return scopes if isinstance(scopes, dict) else {}
+
+
 def _validate_authorized_candidate_universe(
-    symbol_rows: list[dict[str, Any]]
+    symbol_rows: list[dict[str, Any]],
+    *,
+    expected_symbols: dict[str, set[str]],
+    expected_sides: dict[str, set[str]],
 ) -> list[str]:
     errors: list[str] = []
     actual: dict[str, set[str]] = {}
@@ -461,18 +559,18 @@ def _validate_authorized_candidate_universe(
                 f"symbol_readiness_rows contains placeholder symbol {symbol}"
             )
     for strategy_group_id in WIP_LANES:
-        expected_symbols = set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ()))
+        expected_strategy_symbols = expected_symbols.get(strategy_group_id, set())
         actual_symbols = actual.get(strategy_group_id, set())
-        if actual_symbols != expected_symbols:
+        if actual_symbols != expected_strategy_symbols:
             errors.append(
                 "symbol_readiness_rows must match authorized universe for "
-                f"{strategy_group_id}: expected={sorted(expected_symbols)} "
+                f"{strategy_group_id}: expected={sorted(expected_strategy_symbols)} "
                 f"actual={sorted(actual_symbols)}"
             )
         expected_lanes = {
             (symbol, side)
-            for symbol in DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())
-            for side in DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
+            for symbol in expected_strategy_symbols
+            for side in expected_sides.get(strategy_group_id, set())
         }
         if actual_lanes.get(strategy_group_id, set()) != expected_lanes:
             errors.append(
@@ -585,7 +683,12 @@ def _validate_row_owner_authorization(
             and row.get("scope_state") != "live_submit_allowed"
         ):
             errors.append(f"{prefix}.scope_state must be live_submit_allowed")
-    if symbol not in set(DEFAULT_CANDIDATE_UNIVERSE.get(strategy_group_id, ())):
+    candidate_symbols = {
+        str(item)
+        for item in authorization.get("candidate_symbols") or []
+        if str(item or "")
+    }
+    if symbol not in candidate_symbols:
         errors.append(f"{prefix}.owner_authorization.symbol is outside authorized universe")
     boundary = str(authorization.get("authority_boundary") or "")
     if "no_exchange_write_bypass" not in boundary:

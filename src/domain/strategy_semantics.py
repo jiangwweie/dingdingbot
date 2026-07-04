@@ -402,7 +402,7 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 canonical_family_id="MI-001",
                 implementation_id="mi-market-impulse-pilot-v0",
                 source_ref="src/application/strategy_group_live_readonly_observation.py",
-                supported_sides=["long", "short"],
+                supported_sides=["long"],
                 trigger="relative_strength_momentum_impulse",
                 stop_reference="impulse_failure_or_atr_reference",
                 reference_role="relative_strength_impulse_long",
@@ -414,7 +414,7 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 canonical_family_id="BRF2-001",
                 implementation_id="brf2-bearish-reversal-followthrough-pilot-v0",
                 source_ref="src/domain/brf_price_action_evaluator.py",
-                supported_sides=["long", "short"],
+                supported_sides=["short"],
                 trigger="squeeze_disable_cleared_bearish_followthrough",
                 stop_reference="squeeze_reclaim_or_atr_reference",
                 reference_role="conditional_short_reversal_followthrough",
@@ -445,7 +445,7 @@ def _cpm_binding(
         implementation_kind=StrategyImplementationKind.PRICE_ACTION,
         candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
         source_ref="src/domain/cpm_historical_evaluator.py",
-        supported_sides=["long", "short"],
+        supported_sides=["long"],
         required_facts=_price_action_required_facts(),
         optional_facts=[
             _fact(
@@ -499,7 +499,7 @@ def _mpg_binding() -> StrategyImplementationBinding:
         implementation_kind=StrategyImplementationKind.PRICE_ACTION,
         candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
         source_ref="src/domain/mpg_momentum_persistence_evaluator.py",
-        supported_sides=["long", "short"],
+        supported_sides=["long"],
         required_facts=_price_action_required_facts(),
         optional_facts=[
             _fact(

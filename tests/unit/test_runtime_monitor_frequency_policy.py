@@ -28,6 +28,10 @@ def test_runtime_monitor_baseline_uses_low_frequency_for_healthy_waiting_market(
     assert server_side_monitor_check.startswith(
         "python3 scripts/run_tokyo_runtime_server_monitor.py "
     )
+    assert "--require-database-url" in server_side_monitor_check
+    assert "--dedupe-state-json" not in server_side_monitor_check
+    assert "--candidate-pool-json" not in server_side_monitor_check
+    assert "--daily-table-json" not in server_side_monitor_check
     assert baseline["server_side_runtime_monitor_service"] == (
         "brc-runtime-monitor.service"
     )

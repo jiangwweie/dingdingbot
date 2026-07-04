@@ -1,12 +1,62 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
+
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
 from src.infrastructure.runtime_control_state_repository import (
     FileBackedRuntimeControlStateRepository,
+    PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+VALIDATOR_PATH = REPO_ROOT / "scripts/validate_runtime_control_state_repository.py"
+
+
+def _load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture()
+def pg_control_connection():
+    migration = _load_module(MIGRATION_PATH, "migration_086_repository")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    with engine.connect() as conn:
+        yield conn
+    engine.dispose()
 
 
 def test_file_backed_runtime_control_state_repository_reads_candidate_pool_inputs(
@@ -48,6 +98,22 @@ def test_file_backed_runtime_control_state_repository_reads_candidate_pool_input
     assert inputs["owner_pretrade_authorization"] == {
         "source": "owner_pretrade_authorization"
     }
+
+
+def test_file_backed_runtime_control_state_repository_rejects_production_authority():
+    try:
+        FileBackedRuntimeControlStateRepository(source_mode="production_current")
+    except RuntimeControlStateRepositoryError as exc:
+        assert "cannot provide 'production_current'" in str(exc)
+    else:
+        raise AssertionError("file-backed repository accepted production authority")
+
+    try:
+        FileBackedRuntimeControlStateRepository(source_mode="db_backed")
+    except RuntimeControlStateRepositoryError as exc:
+        assert "cannot provide 'db_backed'" in str(exc)
+    else:
+        raise AssertionError("file-backed repository accepted DB authority")
 
 
 def test_file_backed_runtime_control_state_repository_fails_closed_when_required(
@@ -93,3 +159,187 @@ def test_file_backed_runtime_control_state_repository_reads_goal_sources(
     assert artifacts["candidate_pool"] == {
         "schema": "brc.strategy_live_candidate_pool.v1"
     }
+
+
+def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    state = repository.read_control_state()
+
+    assert state["schema"] == "brc.runtime_control_state_repository.v1"
+    assert state["source_mode"] == "db_backed"
+    assert state["projection_target"] == "production_current"
+    assert state["table_counts"]["strategy_groups"] == 5
+    assert state["table_counts"]["strategy_side_event_specs"] == 6
+    assert state["table_counts"]["candidate_scope"] == 22
+    assert state["table_counts"]["runtime_scope_bindings"] == 22
+    assert state["table_counts"]["current_projection_ownership"] == 6
+
+    scope = {
+        (row["strategy_group_id"], row["symbol"], row["side"])
+        for row in state["candidate_scope"]
+    }
+    assert ("CPM-RO-001", "ETHUSDT", "short") not in scope
+    assert ("MI-001", "AVAXUSDT", "short") not in scope
+    assert ("BRF2-001", "BTCUSDT", "long") not in scope
+    assert ("SOR-001", "ETHUSDT", "long") in scope
+    assert ("SOR-001", "ETHUSDT", "short") in scope
+
+    brf2_binding = next(
+        row
+        for row in state["runtime_scope_bindings"]
+        if row["strategy_group_id"] == "BRF2-001"
+        and row["symbol"] == "BTCUSDT"
+        and row["side"] == "short"
+    )
+    assert brf2_binding["conditional_hard_gates"] == [
+        "short_side_disable_clear",
+        "squeeze_clear",
+        "liquidity_clear",
+    ]
+
+
+def test_pg_backed_runtime_control_state_repository_rejects_non_db_modes(
+    pg_control_connection,
+):
+    with pytest.raises(RuntimeControlStateRepositoryError, match="source_mode='db_backed'"):
+        PgBackedRuntimeControlStateRepository(
+            pg_control_connection,
+            source_mode="local_file_inventory",
+        )
+
+    with pytest.raises(RuntimeControlStateRepositoryError, match="production_current"):
+        PgBackedRuntimeControlStateRepository(
+            pg_control_connection,
+            projection_target="diagnostic",
+        )
+
+
+def test_pg_backed_runtime_control_state_repository_fails_closed_without_tables():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            with pytest.raises(
+                RuntimeControlStateRepositoryError,
+                match="tables missing",
+            ):
+                repository.read_control_state()
+    finally:
+        engine.dispose()
+
+
+def test_pg_backed_runtime_control_state_repository_requires_projection_ownership(
+    pg_control_connection,
+):
+    pg_control_connection.execute(text("DELETE FROM brc_current_projection_ownership"))
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="current projection ownership is empty",
+    ):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_requires_event_binding(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            DELETE FROM brc_candidate_scope_event_bindings
+            WHERE candidate_scope_id = 'candidate_scope:CPM-RO-001:ETHUSDT:long:CPM-LONG'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(RuntimeControlStateRepositoryError, match="has no active event binding"):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_requires_runtime_policy_binding(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_runtime_scope_bindings
+            SET policy_current_id = 'policy_current:missing'
+            WHERE runtime_scope_binding_id =
+              'runtime_scope:candidate_scope:MPG-001:OPUSDT:long:MPG-LONG:owner-runtime-console-v1'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(RuntimeControlStateRepositoryError, match="has no current owner policy"):
+        repository.read_control_state()
+
+
+def test_runtime_control_state_repository_validator_rejects_non_postgres_without_test_flag(
+    capsys,
+):
+    validator = _load_module(VALIDATOR_PATH, "validate_runtime_control_state_repository")
+
+    assert validator.main(["--database-url", "sqlite:///tmp/runtime-control-state.db"]) == 2
+
+    captured = capsys.readouterr()
+    assert "requires PostgreSQL DSN" in captured.err
+
+
+def test_runtime_control_state_repository_validator_reports_seeded_state(
+    tmp_path: Path,
+    capsys,
+):
+    database_url = f"sqlite:///{tmp_path / 'runtime-control-state.db'}"
+    _seed_database_url(database_url)
+    validator = _load_module(VALIDATOR_PATH, "validate_runtime_control_state_repository")
+
+    assert (
+        validator.main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "runtime_control_state_repository_valid"
+    assert payload["strategy_group_count"] == 5
+    assert payload["event_spec_count"] == 6
+    assert payload["candidate_scope_count"] == 22
+    assert payload["runtime_scope_binding_count"] == 22
+    assert payload["current_projection_ownership_count"] == 6
+    assert all(value is False for value in payload["forbidden_effects"].values())
+
+
+def _seed_database_url(database_url: str) -> None:
+    migration = _load_module(MIGRATION_PATH, "migration_086_repository_validator")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository_validator")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                migration.upgrade()
+            finally:
+                migration.op = old_op
+            seed.seed_runtime_control_state_foundation(conn)
+    finally:
+        engine.dispose()

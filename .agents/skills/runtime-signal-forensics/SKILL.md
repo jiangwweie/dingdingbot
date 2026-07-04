@@ -37,6 +37,8 @@ docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/TRADEABILITY_DECISION_CONTRACT.md
+docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
+docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
 .agents/skills/chain-position/SKILL.md
 ```
 
@@ -45,17 +47,24 @@ absolute date using the current runtime timezone before reporting.
 
 ## Evidence Priority
 
-Prefer Tokyo server-side runtime evidence over local caches for production
-questions.
+Prefer PG current state and audit lineage over generated artifacts for
+production questions after PG cutover. Generated JSON/MD remains useful as
+export or diagnostic evidence, not production truth.
 
 Use this authority order:
 
-1. Tokyo `reports/runtime-signal-watcher/*` files and watcher journal.
-2. Tokyo `app/current/output/runtime-monitor/*` generated views.
-3. Tokyo server-side monitor reports and monitor journal.
+1. Tokyo PG current state and audit lineage for signal, promotion, lane,
+   ticket, policy, fact, FinalGate, Operation Layer, protection,
+   reconciliation, and monitor state.
+2. Tokyo DB-backed read-model exports and server monitor reports.
+3. Tokyo watcher, monitor, and deploy journals for runtime/process evidence.
 4. Tokyo release manifest and deploy-health reports.
-5. Local `output/runtime-monitor/*` only as fallback or comparison.
+5. Local `output/runtime-monitor/*` only as non-production comparison.
 6. Docs/contracts only to explain allowed meanings, not to invent facts.
+
+When PG lineage exists, do not treat `latest-*.json`, Single Lane Packet, local
+cache, old watcher artifacts, or generated report timestamps as production
+truth. Use them only to explain exports, diagnostics, or historical artifacts.
 
 Never claim "market had no opportunity all day" unless the queried time window
 has continuous watcher/monitor coverage or an explicit daily artifact proving
@@ -71,7 +80,8 @@ classification. Always inspect the server monitor artifact and its
 Use read-only commands only. Do not deploy, restart services, mutate files,
 call FinalGate, call Operation Layer, or call exchange-write endpoints.
 
-For Tokyo, collect:
+Before PG cutover, or when PG access is explicitly unavailable and the task is a
+diagnostic rather than production truth claim, collect these Tokyo exports:
 
 ```text
 /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-summary.json
@@ -229,6 +239,45 @@ The system detected SOR-001 / SOLUSDT / long and the server monitor correctly
 classified it as `notify_required`, but Feishu was not configured:
 `notification.configured=false`, `skipped_reason=feishu_webhook_url_missing`.
 ```
+
+### PG-Backed No-Trade Explanation
+
+After PG cutover, explain every no-trade answer from this chain:
+
+```text
+live_signal_event
+-> promotion_candidate
+-> action_time_lane_input
+-> action_time_ticket
+-> finalgate_evidence
+-> operation_submit_command
+-> protection_state
+-> reconciliation_state
+-> review_outcome
+```
+
+Stop only when the first missing or rejected object resolves to one first
+blocker. The answer must distinguish:
+
+```text
+market_not_satisfied
+fresh_signal_absent
+runtime_coverage_missing
+fact_snapshot_missing
+policy_scope_missing
+runtime_profile_missing
+sizing_scope_missing
+protection_missing
+arbitration_lost
+ticket_missing
+ticket_invalidated
+finalgate_rejected
+operation_blocked
+reconciliation_blocked
+```
+
+If the system lacks PG lineage for the queried window after cutover, classify it
+as an evidence/runtime gap rather than claiming market had no opportunity.
 
 ### Systemd OneShot Rules
 

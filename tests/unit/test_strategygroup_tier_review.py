@@ -11,7 +11,6 @@ from scripts.build_strategygroup_tier_review import (
     EXPECTED_TIERS,
     SAFETY_INVARIANTS,
     build_tier_review_artifact,
-    load_inputs,
     validate_inputs,
     validate_artifact,
 )
@@ -23,13 +22,54 @@ REGISTRY_PATH = Path(
 TIER_POLICY_PATH = Path(
     "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
 )
-STRATEGY_ASSET_STATE_PATH = Path(
-    "output/runtime-monitor/latest-strategy-asset-state.json"
+CURRENT_TIER_REVIEW_PATH = Path(
+    "docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json"
 )
 
 
-def _inputs(strategy_asset_state_source_path: Path = STRATEGY_ASSET_STATE_PATH):
-    return load_inputs(REGISTRY_PATH, TIER_POLICY_PATH, strategy_asset_state_source_path)
+def _strategy_asset_state_source() -> dict:
+    current = json.loads(CURRENT_TIER_REVIEW_PATH.read_text(encoding="utf-8"))
+    asset_rows = []
+    for row in current["rows"]:
+        if row.get("tier_review_source") != "strategy_asset_state":
+            continue
+        decision = row["current_decision"]
+        if decision == "promote_review_only":
+            decision = "promote"
+        asset_rows.append(
+            {
+                "strategy_group_id": row["strategy_group_id"],
+                "current_tier": row["current_tier"],
+                "current_decision": decision,
+                "promotion_scope": row["promotion_scope"],
+                "promotion_target": row["promotion_target"],
+                "required_next_evidence": row["required_next_evidence"],
+                "next_checkpoint": row["next_checkpoint"],
+                "reason": row.get("strategy_asset_state_reason") or "",
+            }
+        )
+    return {
+        "status": "strategy_asset_state_ready",
+        "strategy_asset_state": {
+            "status": "strategy_asset_state_ready",
+            "asset_rows": asset_rows,
+        },
+    }
+
+
+def _write_strategy_asset_state_source(tmp_path: Path) -> Path:
+    path = tmp_path / "strategy-asset-state-source.json"
+    path.write_text(
+        json.dumps(_strategy_asset_state_source(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _inputs():
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    tier_policy = json.loads(TIER_POLICY_PATH.read_text(encoding="utf-8"))
+    return registry, tier_policy, _strategy_asset_state_source()
 
 
 def test_tier_review_schema_and_one_row_per_strategygroup() -> None:
@@ -39,9 +79,9 @@ def test_tier_review_schema_and_one_row_per_strategygroup() -> None:
 
     assert artifact["schema"] == "brc.strategygroup_tier_review.v1"
     assert [row["strategy_group_id"] for row in artifact["rows"]] == EXPECTED_GROUPS
-    assert len(artifact["rows"]) == 10
+    assert len(artifact["rows"]) == 11
     assert "decision_counts" not in artifact
-    assert artifact["recommended_action_counts"]["keep"] == 6
+    assert artifact["recommended_action_counts"]["keep"] == 7
     assert artifact["recommended_action_counts"]["revise"] == 2
     assert validate_inputs(registry, tier_policy) == []
     assert validate_artifact(artifact) == []
@@ -80,7 +120,7 @@ def test_negative_row_legacy_authority_mirror_is_rejected() -> None:
         in errors
     )
     assert (
-        "TEQ-001.tier_review_row_legacy_authority_mirror_present:real_order_authority"
+        "CPM-RO-001.tier_review_row_legacy_authority_mirror_present:real_order_authority"
         in errors
     )
 
@@ -174,13 +214,16 @@ def test_tier_review_fails_closed_without_strategy_asset_state() -> None:
     assert rows["BTPC-001"]["current_decision"] == "keep_current_tier_no_promotion_evidence"
 
 
-def test_owner_markdown_includes_groups_without_primary_internal_gate_labels() -> None:
+def test_owner_markdown_includes_groups_without_primary_internal_gate_labels(
+    tmp_path: Path,
+) -> None:
+    strategy_asset_state_path = _write_strategy_asset_state_source(tmp_path)
     result = subprocess.run(
         [
             sys.executable,
             "scripts/build_strategygroup_tier_review.py",
             "--strategy-asset-state-json",
-            str(STRATEGY_ASSET_STATE_PATH),
+            str(strategy_asset_state_path),
         ],
         check=False,
         text=True,
@@ -197,13 +240,14 @@ def test_owner_markdown_includes_groups_without_primary_internal_gate_labels() -
         assert internal_label not in markdown.split("## Owner 读法", 1)[0]
 
 
-def test_check_mode_passes_against_generated_files() -> None:
+def test_check_mode_passes_against_generated_files(tmp_path: Path) -> None:
+    strategy_asset_state_path = _write_strategy_asset_state_source(tmp_path)
     result = subprocess.run(
         [
             sys.executable,
             "scripts/build_strategygroup_tier_review.py",
             "--strategy-asset-state-json",
-            str(STRATEGY_ASSET_STATE_PATH),
+            str(strategy_asset_state_path),
             "--check",
         ],
         check=False,
@@ -214,7 +258,7 @@ def test_check_mode_passes_against_generated_files() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads(result.stdout)
     assert report["status"] == "passed"
-    assert report["row_count"] == 10
+    assert report["row_count"] == 11
     assert report["errors"] == []
     assert all(value is False for value in SAFETY_INVARIANTS.values())
 

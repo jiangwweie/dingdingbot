@@ -90,8 +90,7 @@ UNSAFE_TRUE_FLAGS = {
     "order_created",
 }
 READY_REQUIRED_FIELDS = (
-    "signal_input_json",
-    "prepared_authorization_id",
+    "ticket_id",
 )
 OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
     "trusted_submit_fact_snapshot_id",
@@ -368,13 +367,12 @@ def _selected_scope_group_blockers(
 def _preflight_command_plan(
     *,
     api_base: str,
-    authorization_id: str,
-    signal_input_json: str | None,
-    shadow_candidate_id: str | None,
+    ticket_id: str,
 ) -> dict[str, Any]:
+    encoded_ticket_id = urllib.parse.quote(str(ticket_id), safe="")
     endpoint = (
         "/api/trading-console/"
-        f"runtime-execution-controlled-submit-preflights/authorizations/{authorization_id}"
+        f"runtime-action-time-finalgate-preflights/tickets/{encoded_ticket_id}"
     )
     return {
         "kind": "official_action_time_finalgate_preflight",
@@ -385,9 +383,7 @@ def _preflight_command_plan(
             "curl -fsS "
             f"{api_base.rstrip('/')}{endpoint}"
         ),
-        "prepared_authorization_id": authorization_id,
-        "signal_input_json": signal_input_json,
-        "shadow_candidate_id": shadow_candidate_id,
+        "ticket_id": ticket_id,
         "requires_operator_session": True,
         "places_order": False,
         "calls_order_lifecycle": False,
@@ -542,6 +538,23 @@ def _first_text(*values: Any) -> str | None:
     return None
 
 
+def _action_time_ticket_id(
+    *,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+    command_plan: dict[str, Any] | None = None,
+) -> str | None:
+    command_plan = command_plan or {}
+    return _first_text(
+        action_time_resume.get("ticket_id"),
+        action_time_resume.get("action_time_ticket_id"),
+        resume_pack.get("ticket_id"),
+        resume_pack.get("action_time_ticket_id"),
+        command_plan.get("ticket_id"),
+        _dict(resume_pack.get("command_plan")).get("ticket_id"),
+    )
+
+
 def _fresh_authorization_handoff_artifact_path(
     *,
     resume_pack: dict[str, Any],
@@ -633,6 +646,115 @@ def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
             "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
         ),
     }
+
+
+def _ticket_bound_operation_layer_handoff_plan(
+    *,
+    api_base: str,
+    ticket_id: str,
+    finalgate_pass_id: str,
+) -> dict[str, Any]:
+    encoded_ticket_id = urllib.parse.quote(str(ticket_id), safe="")
+    encoded_finalgate_pass_id = urllib.parse.quote(str(finalgate_pass_id), safe="")
+    endpoint = (
+        "/api/trading-console/runtime-operation-layer-handoffs/"
+        f"tickets/{encoded_ticket_id}/finalgate-passes/{encoded_finalgate_pass_id}"
+    )
+    return {
+        "kind": "ticket_bound_operation_layer_handoff",
+        "method": "POST",
+        "api_base": api_base.rstrip("/"),
+        "path": endpoint,
+        "curl": "curl -fsS -X POST " f"{api_base.rstrip('/')}{endpoint}",
+        "ticket_id": ticket_id,
+        "finalgate_pass_id": finalgate_pass_id,
+        "requires_operator_session": True,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "non_authority_checkpoint": "prepare_ticket_bound_protected_submit",
+    }
+
+
+def _operation_layer_handoff_forbidden_effects(body: Any) -> list[str]:
+    payload = _dict(body)
+    command_plan = _dict(payload.get("command_plan"))
+    effects: list[str] = []
+    checks = {
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+    for name, expected in checks.items():
+        if payload.get(name) is not expected:
+            effects.append(f"operation_layer_handoff_effect:{name}")
+    command_checks = {
+        "places_order": False,
+        "exchange_write_called": False,
+        "order_lifecycle_called": False,
+    }
+    for name, expected in command_checks.items():
+        if name in command_plan and command_plan.get(name) is not expected:
+            effects.append(f"operation_layer_handoff_command_effect:{name}")
+    for legacy_key in (
+        "authorization_id",
+        "prepared_authorization_id",
+        "shadow_candidate_id",
+        "signal_input_json",
+    ):
+        if command_plan.get(legacy_key):
+            effects.append(f"operation_layer_handoff_legacy_input:{legacy_key}")
+    return effects
+
+
+def _operation_layer_handoff_passed(body: Any) -> bool:
+    payload = _dict(body)
+    command_plan = _dict(payload.get("command_plan"))
+    return (
+        payload.get("status") == "operation_layer_handoff_ready"
+        and payload.get("operation_layer_verdict") == "ready"
+        and bool(payload.get("operation_submit_command_id"))
+        and command_plan.get("kind") == "ticket_bound_operation_layer_handoff"
+        and bool(command_plan.get("ticket_id"))
+        and bool(command_plan.get("finalgate_pass_id"))
+        and bool(command_plan.get("operation_submit_command_id"))
+        and command_plan.get("requires_ticket_bound_protected_submit") is True
+        and command_plan.get("places_order") is False
+        and command_plan.get("exchange_write_called") is False
+        and command_plan.get("order_lifecycle_called") is False
+        and not payload.get("blockers")
+    )
+
+
+def _operation_layer_handoff_blockers(body: Any) -> list[str]:
+    payload = _dict(body)
+    blockers = [str(item) for item in _list(payload.get("blockers")) if str(item).strip()]
+    if payload.get("status") != "operation_layer_handoff_ready":
+        blockers.append(f"operation_layer_handoff_status:{payload.get('status')}")
+    if payload.get("operation_layer_verdict") not in {"ready", None}:
+        blockers.append(f"operation_layer_verdict:{payload.get('operation_layer_verdict')}")
+    if not payload.get("operation_submit_command_id"):
+        blockers.append("operation_submit_command_id_missing")
+    command_plan = _dict(payload.get("command_plan"))
+    if payload.get("status") == "operation_layer_handoff_ready":
+        if command_plan.get("kind") != "ticket_bound_operation_layer_handoff":
+            blockers.append("operation_layer_handoff_command_kind_invalid")
+        for key in ("ticket_id", "finalgate_pass_id", "operation_submit_command_id"):
+            if not command_plan.get(key):
+                blockers.append(f"operation_layer_handoff_command_missing:{key}")
+        if command_plan.get("requires_ticket_bound_protected_submit") is not True:
+            blockers.append("ticket_bound_protected_submit_requirement_missing")
+        for key in ("places_order", "exchange_write_called", "order_lifecycle_called"):
+            if command_plan.get(key) is not False:
+                blockers.append(f"operation_layer_handoff_command_effect:{key}")
+    return _dedupe_text(blockers)
 
 
 def _operation_layer_submit_url(
@@ -944,6 +1066,37 @@ def _owner_state_for_operation_layer_ready() -> dict[str, Any]:
             "rerun_action_time_finalgate_then_use_official_operation_layer"
         ),
         "downgrade_mode": "none",
+    }
+
+
+def _owner_state_for_operation_layer_handoff(
+    *,
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    if status == "operation_layer_ready":
+        return {
+            "status": "operation_layer_ready",
+            "blocker_class": "none",
+            "blocked_at": "none",
+            "blocked_reason": "none",
+            "next_recover_condition": "ticket_bound_protected_submit_adapter_ready",
+            "non_authority_checkpoint": "prepare_ticket_bound_protected_submit",
+            "downgrade_mode": "none",
+            "operation_layer_handoff_status": body.get("status"),
+        }
+    return {
+        "status": "blocked",
+        "blocker_class": blocker_class,
+        "blocked_at": "OperationLayerHandoff",
+        "blocked_reason": blockers[0] if blockers else dispatch_status,
+        "next_recover_condition": "ticket_bound_operation_layer_handoff_ready",
+        "non_authority_checkpoint": "retry_ticket_bound_operation_layer_handoff",
+        "downgrade_mode": "continue_watcher_observation_no_submit",
+        "operation_layer_handoff_status": body.get("status"),
     }
 
 
@@ -1295,12 +1448,23 @@ def _execute_non_executing_prepare(
             prepare_result=prepare_result,
         )
 
-    authorization_id = _non_executing_prepare_authorization_id(prepare_result)
+    ticket_id = _action_time_ticket_id(
+        resume_pack=artifact,
+        action_time_resume=_dict(artifact.get("action_time_resume")),
+        command_plan=_dict(artifact.get("command_plan")),
+    )
+    if not ticket_id:
+        return _dispatch_artifact_from_non_executing_prepare(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_action_time_ticket_id",
+            blockers=["missing_fact:ticket_id"],
+            prepare_result=prepare_result,
+        )
     next_command_plan = _preflight_command_plan(
         api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
-        authorization_id=str(authorization_id),
-        signal_input_json=signal_input_json,
-        shadow_candidate_id=_non_executing_prepare_candidate_id(prepare_result),
+        ticket_id=ticket_id,
     )
     ready_artifact = _dispatch_artifact_from_non_executing_prepare(
         artifact=artifact,
@@ -1802,17 +1966,9 @@ def build_dispatch_artifact(
                 selected_strategy_group_id=selected_strategy_group_id,
             )
 
-        authorization_id = _first_text(
-            action_time_resume.get("prepared_authorization_id")
-            or resume_pack.get("prepared_authorization_id")
-        )
-        signal_input_json = _first_text(
-            action_time_resume.get("signal_input_json")
-            or resume_pack.get("signal_input_json")
-        )
-        shadow_candidate_id = _first_text(
-            action_time_resume.get("shadow_candidate_id")
-            or resume_pack.get("shadow_candidate_id")
+        ticket_id = _action_time_ticket_id(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
         )
         artifact = _dispatch_artifact(
             label=label,
@@ -1827,9 +1983,7 @@ def build_dispatch_artifact(
             blockers=[],
             command_plan=_preflight_command_plan(
                 api_base=api_base,
-                authorization_id=authorization_id,
-                signal_input_json=signal_input_json,
-                shadow_candidate_id=shadow_candidate_id,
+                ticket_id=str(ticket_id),
             ),
             selected_strategy_group_id=selected_strategy_group_id,
         )
@@ -2473,6 +2627,14 @@ def _execute_finalgate_preflight(
             operation_layer_command_plan=None,
         )
 
+    if _ticket_bound_finalgate_command_plan(command_plan):
+        return _execute_ticket_bound_operation_layer_handoff(
+            artifact=artifact,
+            preflight_result=preflight_result,
+            timeout_seconds=timeout_seconds,
+            execute_operation_layer_submit=execute_operation_layer_submit,
+        )
+
     operation_layer_command_plan = _operation_layer_command_plan(
         authorization_id=artifact["command_plan"]["prepared_authorization_id"],
     )
@@ -2527,6 +2689,163 @@ def _execute_finalgate_preflight(
         execute_post_submit_finalize=execute_post_submit_finalize,
         timeout_seconds=timeout_seconds,
     )
+
+
+def _ticket_bound_finalgate_command_plan(command_plan: dict[str, Any]) -> bool:
+    path = str(command_plan.get("path") or command_plan.get("official_endpoint_path") or "")
+    return "/runtime-action-time-finalgate-preflights/tickets/" in path
+
+
+def _execute_ticket_bound_operation_layer_handoff(
+    *,
+    artifact: dict[str, Any],
+    preflight_result: dict[str, Any],
+    timeout_seconds: int,
+    execute_operation_layer_submit: bool,
+) -> dict[str, Any]:
+    preflight_body = _dict(preflight_result.get("body"))
+    command_plan = _dict(artifact.get("command_plan"))
+    ticket_id = _first_text(
+        preflight_body.get("ticket_id"),
+        command_plan.get("ticket_id"),
+    )
+    finalgate_pass_id = _first_text(preflight_body.get("finalgate_pass_id"))
+    if not ticket_id or not finalgate_pass_id:
+        blockers = []
+        if not ticket_id:
+            blockers.append("ticket_id_missing_after_finalgate")
+        if not finalgate_pass_id:
+            blockers.append("finalgate_pass_id_missing_after_finalgate")
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_ticket_bound_operation_layer_handoff",
+            blockers=blockers,
+            preflight_result=preflight_result,
+            handoff_plan=None,
+            handoff_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "missing_ticket_or_finalgate_pass",
+            },
+        )
+
+    handoff_plan = _ticket_bound_operation_layer_handoff_plan(
+        api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
+        ticket_id=ticket_id,
+        finalgate_pass_id=finalgate_pass_id,
+    )
+    cookie, cookie_error = _session_cookie()
+    if not cookie:
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_unavailable",
+            blockers=[cookie_error or "operator_session_unavailable"],
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": cookie_error or "operator_session_unavailable",
+            },
+        )
+    response = _request_json(
+        method="POST",
+        url=str(handoff_plan["api_base"]).rstrip("/") + str(handoff_plan["path"]),
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+    )
+    handoff_result = {
+        "called": True,
+        "method": "POST",
+        "path": handoff_plan["path"],
+        "http_status": response.get("http_status"),
+        "body": response.get("body"),
+        "error": bool(response.get("error")),
+        "error_type": response.get("error_type"),
+        "error_message": response.get("error_message"),
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+    }
+    http_status = response.get("http_status")
+    if http_status in {401, 403}:
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_http_error",
+            blockers=[f"operator_session_http_status:{http_status}"],
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
+    if response.get("error"):
+        blocker_class = "missing_fact" if http_status == 404 else "deployment_issue"
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class=blocker_class,
+            dispatch_status="blocked_by_ticket_bound_operation_layer_handoff_http_error",
+            blockers=[f"operation_layer_handoff_http_status:{http_status or 'unavailable'}"],
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
+    forbidden_effects = _operation_layer_handoff_forbidden_effects(response.get("body"))
+    if forbidden_effects:
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_operation_layer_handoff_forbidden_effect",
+            blockers=forbidden_effects,
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
+    if not _operation_layer_handoff_passed(response.get("body")):
+        blockers = _operation_layer_handoff_blockers(response.get("body"))
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class=_operation_layer_blocker_class(blockers, []),
+            dispatch_status="blocked_by_ticket_bound_operation_layer_handoff",
+            blockers=blockers or ["operation_layer_handoff_not_ready"],
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
+    result = _dispatch_artifact_from_operation_layer_handoff(
+        artifact=artifact,
+        status="operation_layer_ready",
+        blocker_class="none",
+        dispatch_status="ticket_bound_operation_layer_handoff_ready",
+        blockers=[],
+        preflight_result=preflight_result,
+        handoff_plan=handoff_plan,
+        handoff_result=handoff_result,
+    )
+    if execute_operation_layer_submit:
+        return _dispatch_artifact_from_operation_layer_submit(
+            artifact=result,
+            status="operation_layer_submit_blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_ticket_bound_protected_submit_adapter",
+            blockers=["ticket_bound_protected_submit_adapter_missing"],
+            submit_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "ticket_bound_protected_submit_adapter_missing",
+            },
+        )
+    return result
 
 
 def _execute_fresh_authorization_binding(
@@ -2678,6 +2997,15 @@ def _execute_fresh_authorization_binding(
             blockers=["missing_fact:fresh_submit_authorization_id"],
             binding_result=binding_result,
         )
+    if next_command_plan.get("missing_ticket_id") is True:
+        return _dispatch_artifact_from_fresh_authorization_binding(
+            artifact=artifact,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_action_time_ticket_id",
+            blockers=["missing_fact:ticket_id"],
+            binding_result=binding_result,
+        )
     return _execute_finalgate_preflight(
         artifact=bound_artifact,
         timeout_seconds=timeout_seconds,
@@ -2736,20 +3064,16 @@ def _bound_fresh_authorization_preflight_plan(
         return None
     command_plan = _dict(artifact.get("command_plan"))
     action_time_resume = _dict(artifact.get("action_time_resume"))
-    authorization_snapshot = _dict(binding_body.get("authorization_snapshot"))
+    ticket_id = _action_time_ticket_id(
+        resume_pack=artifact,
+        action_time_resume=action_time_resume,
+        command_plan=command_plan,
+    )
+    if not ticket_id:
+        return {"missing_ticket_id": True}
     return _preflight_command_plan(
         api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
-        authorization_id=fresh_authorization_id,
-        signal_input_json=_first_text(
-            action_time_resume.get("signal_input_json"),
-            artifact.get("signal_input_json"),
-        ),
-        shadow_candidate_id=_first_text(
-            action_time_resume.get("shadow_candidate_id"),
-            artifact.get("shadow_candidate_id"),
-            binding_body.get("order_candidate_id"),
-            authorization_snapshot.get("order_candidate_id"),
-        ),
+        ticket_id=ticket_id,
     )
 
 
@@ -2983,6 +3307,84 @@ def _dispatch_artifact_with_operation_layer_readiness(
             "exchange_write_called": False,
             "attempt_counter_mutated": evidence_attempt_counter_mutated,
             "runtime_budget_mutated": evidence_runtime_budget_mutated,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _dispatch_artifact_from_operation_layer_handoff(
+    *,
+    artifact: dict[str, Any],
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    preflight_result: dict[str, Any],
+    handoff_plan: dict[str, Any] | None,
+    handoff_result: dict[str, Any],
+) -> dict[str, Any]:
+    body = _dict(handoff_result.get("body"))
+    command_plan = _dict(body.get("command_plan"))
+    owner_state = _owner_state_for_operation_layer_handoff(
+        status=status,
+        blocker_class=blocker_class,
+        dispatch_status=dispatch_status,
+        blockers=blockers,
+        body=body,
+    )
+    return {
+        **artifact,
+        "status": status,
+        "blocker_class": blocker_class,
+        "dispatch_status": dispatch_status,
+        "dispatch_action": (
+            "prepare_ticket_bound_protected_submit"
+            if status == "operation_layer_ready"
+            else None
+        ),
+        "owner_state": _owner_state_projection(owner_state),
+        "ticket_id": body.get("ticket_id"),
+        "finalgate_pass_id": body.get("finalgate_pass_id"),
+        "operation_layer_handoff_id": body.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": body.get("operation_submit_command_id"),
+        "finalgate_preflight_result": preflight_result,
+        "operation_layer_handoff_plan": handoff_plan,
+        "operation_layer_handoff_result": handoff_result,
+        "operation_layer_command_plan": (
+            command_plan if status == "operation_layer_ready" and command_plan else None
+        ),
+        "operation_layer_readiness": (
+            {
+                "status": "ready",
+                "blocker_class": "none",
+                "ticket_id": body.get("ticket_id"),
+                "finalgate_pass_id": body.get("finalgate_pass_id"),
+                "operation_layer_handoff_id": body.get("operation_layer_handoff_id"),
+                "operation_submit_command_id": body.get("operation_submit_command_id"),
+                "ready_for_ticket_bound_protected_submit": True,
+                "places_order": False,
+                "exchange_write_called": False,
+                "order_lifecycle_called": False,
+                "owner_state": owner_state,
+            }
+            if status == "operation_layer_ready"
+            else None
+        ),
+        "blockers": blockers,
+        "safety_invariants": {
+            **_dict(artifact.get("safety_invariants")),
+            "dispatcher_only": False,
+            "official_finalgate_preflight_called": bool(preflight_result.get("called")),
+            "ticket_bound_operation_layer_handoff_called": bool(
+                handoff_result.get("called")
+            ),
+            "official_operation_layer_submit_called": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": status == "operation_layer_ready"
+            or bool(_dict(artifact.get("safety_invariants")).get("mutates_pg")),
+            "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
         },
     }
@@ -3945,6 +4347,20 @@ def _owner_state_for_preflight(
             "non_authority_checkpoint": "refresh_action_time_facts_or_downgrade_to_observation",
             "downgrade_mode": "observe_only_no_submit",
         }
+    if dispatch_status == "blocked_by_missing_ticket_bound_operation_layer_handoff":
+        return {
+            "status": "blocked",
+            "blocker_class": blocker_class,
+            "blocked_at": "OperationLayerHandoff",
+            "blocked_reason": "operation_layer_ticket_handoff_missing",
+            "next_recover_condition": (
+                "ticket_id_and_finalgate_pass_id_bound_to_operation_layer"
+            ),
+            "non_authority_checkpoint": (
+                "implement_ticket_bound_operation_layer_handoff"
+            ),
+            "downgrade_mode": "continue_watcher_observation_no_submit",
+        }
     return {
         "status": "blocked",
         "blocker_class": blocker_class,
@@ -4119,6 +4535,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     _write_json(Path(args.output_json).expanduser(), artifact)
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    if artifact.get("dispatch_status") == (
+        "blocked_by_missing_ticket_bound_operation_layer_handoff"
+    ):
+        return 1
     return 0 if artifact["status"] in {
         WAITING_STATUS,
         READY_STATUS,

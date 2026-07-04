@@ -25,6 +25,7 @@ def _resume_pack(status: str = "waiting_for_market") -> dict:
         action.update(
             {
                 "next_step": "run_official_action_time_final_gate_preflight",
+                "ticket_id": "ticket-ready-1",
                 "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
                 "shadow_candidate_id": "shadow-candidate-1",
                 "prepared_authorization_id": "auth-ready-1",
@@ -39,6 +40,7 @@ def _resume_pack(status: str = "waiting_for_market") -> dict:
         "status": status,
         "can_continue_steps_5_8": status == "ready_for_action_time_final_gate",
         "selected_runtime_instance_ids": ["runtime-mpg-1"],
+        "ticket_id": action.get("ticket_id"),
         "signal_input_json": action["signal_input_json"],
         "shadow_candidate_id": action["shadow_candidate_id"],
         "prepared_authorization_id": action["prepared_authorization_id"],
@@ -104,6 +106,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
     return {
         "scope": "runtime_fresh_attempt_readiness_projection",
         "status": "ready_for_fresh_submit_authorization",
+        "ticket_id": "ticket-ready-1",
         "runtime_instance_id": "runtime-mpg-1",
         "selected_runtime_instance_ids": ["runtime-mpg-1"],
         "artifact_paths": {
@@ -111,6 +114,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
         },
         "action_time_resume": {
             "status": "ready_for_fresh_submit_authorization",
+            "ticket_id": "ticket-ready-1",
             "next_step": "bind_or_resolve_fresh_submit_authorization",
             "allowed_auto_actions": [
                 "bind_or_resolve_fresh_submit_authorization"
@@ -198,6 +202,118 @@ def _operation_layer_blocked_report() -> dict:
         }
     ]
     return report
+
+
+def _finalgate_ready_body() -> dict:
+    return {
+        "status": "ready_for_controlled_submit_adapter",
+        "final_gate_verdict": "pass",
+        "ticket_id": "ticket-ready-1",
+        "finalgate_pass_id": "finalgate-pass-1",
+        "blockers": [],
+        "warnings": [],
+        "submit_executed": False,
+        "order_created": False,
+        "exchange_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+    }
+
+
+def _operation_layer_handoff_ready_body() -> dict:
+    return {
+        "status": "operation_layer_handoff_ready",
+        "operation_layer_verdict": "ready",
+        "ticket_id": "ticket-ready-1",
+        "finalgate_pass_id": "finalgate-pass-1",
+        "operation_layer_handoff_id": "handoff-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "blockers": [],
+        "warnings": [],
+        "command_plan": {
+            "kind": "ticket_bound_operation_layer_handoff",
+            "ticket_id": "ticket-ready-1",
+            "finalgate_pass_id": "finalgate-pass-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "requires_ticket_bound_protected_submit": True,
+            "places_order": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
+        },
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_finalgate_and_handoff_request(calls: list[dict]):
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": (
+                _operation_layer_handoff_ready_body()
+                if kwargs["method"] == "POST"
+                else _finalgate_ready_body()
+            ),
+        }
+
+    return _request_json
+
+
+def _assert_ticket_bound_operation_layer_ready(artifact: dict) -> None:
+    assert artifact["status"] == "operation_layer_ready"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "ticket_bound_operation_layer_handoff_ready"
+    assert artifact["dispatch_action"] == "prepare_ticket_bound_protected_submit"
+    assert artifact["blockers"] == []
+    assert artifact["finalgate_preflight_result"]["called"] is True
+    assert artifact["operation_layer_handoff_result"]["called"] is True
+    assert artifact["ticket_id"] == "ticket-ready-1"
+    assert artifact["finalgate_pass_id"] == "finalgate-pass-1"
+    assert artifact["operation_layer_handoff_id"] == "handoff-1"
+    assert artifact["operation_submit_command_id"] == "operation-submit-1"
+    assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
+    assert artifact["operation_layer_command_plan"]["finalgate_pass_id"] == (
+        "finalgate-pass-1"
+    )
+    assert "authorization_id" not in artifact["operation_layer_command_plan"]
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert artifact["safety_invariants"]["ticket_bound_operation_layer_handoff_called"]
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["owner_state"]["status"] == "operation_layer_ready"
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "prepare_ticket_bound_protected_submit"
+    )
+
+
+def _assert_ticket_bound_protected_submit_adapter_missing(artifact: dict) -> None:
+    assert artifact["status"] == "operation_layer_submit_blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == (
+        "blocked_by_missing_ticket_bound_protected_submit_adapter"
+    )
+    assert artifact["blockers"] == ["ticket_bound_protected_submit_adapter_missing"]
+    assert artifact["operation_layer_handoff_result"]["called"] is True
+    assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
+    assert artifact["operation_layer_command_plan"]["finalgate_pass_id"] == (
+        "finalgate-pass-1"
+    )
+    assert "authorization_id" not in artifact["operation_layer_command_plan"]
+    assert artifact["operation_layer_submit_result"]["called"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
 def _operation_layer_shadow_boundary_report() -> dict:
@@ -432,10 +548,13 @@ def _non_executing_prepare_resume(
         runtime_instance_id=runtime_instance_id,
     )
     signal_input_json = f"/reports/{runtime_instance_id}/signal-input.json"
+    ticket_id = f"ticket-{runtime_instance_id}"
+    resume["ticket_id"] = ticket_id
     resume["signal_input_json"] = signal_input_json
     resume["action_time_resume"].update(
         {
             "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
+            "ticket_id": ticket_id,
             "signal_input_json": signal_input_json,
             "allowed_auto_actions": [
                 "prepare_fresh_candidate_authorization_evidence"
@@ -508,29 +627,15 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
         lambda: ("brc_operator_session=fake-session", None),
     )
 
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "ready_for_controlled_submit_adapter",
-                "final_gate_verdict": "PASS",
-                "blockers": [],
-                "warnings": [],
-                "submit_executed": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-            },
-        }
-
     def _prepare_runner(command_plan):
         prepare_calls.append(command_plan)
         return _non_executing_prepare_ready_artifact()
 
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_and_handoff_request(calls),
+    )
 
     artifact = build_dispatch_artifact(
         resume_pack=_non_executing_prepare_resume(),
@@ -541,9 +646,7 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
         selected_strategy_group_id="MPG-001",
     )
 
-    assert artifact["status"] == "finalgate_ready"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    _assert_ticket_bound_operation_layer_ready(artifact)
     assert artifact["non_executing_prepare_result"]["status"] == (
         "ready_for_final_gate_preflight"
     )
@@ -551,17 +654,14 @@ def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
     assert prepare_calls[0]["signal_input_json"] == (
         "/reports/runtime-mpg-1/signal-input.json"
     )
-    assert artifact["command_plan"]["prepared_authorization_id"] == "auth-prepared-1"
-    assert artifact["command_plan"]["shadow_candidate_id"] == "candidate-1"
-    assert artifact["finalgate_preflight_result"]["called"] is True
+    assert "prepared_authorization_id" not in artifact["command_plan"]
+    assert "shadow_candidate_id" not in artifact["command_plan"]
+    assert "signal_input_json" not in artifact["command_plan"]
     assert artifact["finalgate_preflight_result"]["places_order"] is False
     assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is True
     assert artifact["safety_invariants"]["allowed_prepare_evidence_created"] is True
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
-    assert [item["method"] for item in calls] == ["GET"]
+    assert [item["method"] for item in calls] == ["GET", "POST"]
 
 
 def test_dispatcher_execute_non_executing_prepare_blocks_forbidden_effect(
@@ -636,24 +736,11 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
         "_session_cookie",
         lambda: ("brc_operator_session=fake-session", None),
     )
+    calls: list[dict] = []
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        lambda **_kwargs: {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "ready_for_controlled_submit_adapter",
-                "final_gate_verdict": "PASS",
-                "blockers": [],
-                "warnings": [],
-                "submit_executed": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-            },
-        },
+        _ticket_bound_finalgate_and_handoff_request(calls),
     )
     prepared_runtime_ids = []
 
@@ -679,13 +766,10 @@ def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scop
             selected_strategy_group_id=strategy_group_id,
         )
 
-        assert artifact["status"] == "finalgate_ready"
+        _assert_ticket_bound_operation_layer_ready(artifact)
         assert artifact["selected_strategy_group_id"] == strategy_group_id
-        assert artifact["command_plan"]["prepared_authorization_id"] == (
-            f"auth-{runtime_instance_id}"
-        )
-        assert artifact["safety_invariants"]["places_order"] is False
-        assert artifact["safety_invariants"]["exchange_write_called"] is False
+        assert "prepared_authorization_id" not in artifact["command_plan"]
+        assert artifact["command_plan"]["ticket_id"] == f"ticket-{runtime_instance_id}"
 
     assert prepared_runtime_ids == ["runtime-teq-1", "runtime-sor-1"]
 
@@ -707,14 +791,37 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     assert artifact["blockers"] == []
     command = artifact["command_plan"]
     assert command["method"] == "GET"
-    assert command["prepared_authorization_id"] == "auth-ready-1"
+    assert command["ticket_id"] == "ticket-ready-1"
+    assert "prepared_authorization_id" not in command
+    assert "signal_input_json" not in command
+    assert "shadow_candidate_id" not in command
     assert (
         command["path"]
-        == "/api/trading-console/runtime-execution-controlled-submit-preflights/"
-        "authorizations/auth-ready-1"
+        == "/api/trading-console/runtime-action-time-finalgate-preflights/"
+        "tickets/ticket-ready-1"
     )
     assert command["places_order"] is False
     assert command["exchange_write_called"] is False
+
+
+def test_dispatcher_blocks_finalgate_auth_only_without_ticket_id():
+    resume = _with_runtime_summary(_resume_pack("ready_for_action_time_final_gate"))
+    resume.pop("ticket_id", None)
+    resume["action_time_resume"].pop("ticket_id", None)
+
+    artifact = build_dispatch_artifact(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "missing_fact"
+    assert artifact["dispatch_status"] == "blocked_by_missing_preflight_evidence"
+    assert "missing_fact:ticket_id" in artifact["blockers"]
+    assert artifact["command_plan"] is None
+    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
 
 
 def test_dispatcher_blocks_actionable_resume_outside_selected_strategygroup_scope():
@@ -891,21 +998,17 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
 
     def _request_json(**kwargs):
         calls.append(kwargs)
+        if "runtime-operation-layer-handoffs" in kwargs["url"]:
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": _operation_layer_handoff_ready_body(),
+            }
         if kwargs["method"] == "GET":
             return {
                 "http_status": 200,
                 "error": False,
-                "body": {
-                    "status": "ready_for_controlled_submit_adapter",
-                    "final_gate_verdict": "PASS",
-                    "blockers": [],
-                    "warnings": [],
-                    "submit_executed": False,
-                    "order_created": False,
-                    "exchange_called": False,
-                    "owner_bounded_execution_called": False,
-                    "order_lifecycle_called": False,
-                },
+                "body": _finalgate_ready_body(),
             }
         return {
             "http_status": 200,
@@ -941,26 +1044,21 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
         execute_preflight=True,
     )
 
-    assert artifact["status"] == "finalgate_ready"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
+    _assert_ticket_bound_operation_layer_ready(artifact)
     assert artifact["fresh_submit_authorization_id"] == "fresh-auth-1"
     assert artifact["fresh_authorization_binding_result"]["called"] is True
     assert "automatic_recovery_action" not in artifact["owner_state"]
     assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
+        "prepare_ticket_bound_protected_submit"
     )
     assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
     assert artifact["safety_invariants"]["official_fresh_authorization_binding_called"]
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
     assert artifact["safety_invariants"]["creates_submit_authorization"] is True
     assert artifact["safety_invariants"]["pg_prepare_evidence_mutated"] is True
     assert artifact["safety_invariants"]["mutates_pg"] is True
     assert artifact["safety_invariants"]["calls_official_submit_endpoint"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-    assert artifact["operation_layer_command_plan"]["authorization_id"] == "fresh-auth-1"
-    assert len(calls) == 2
+    assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
+    assert len(calls) == 3
     bind_call = calls[0]
     assert bind_call["method"] == "POST"
     assert "runtime-execution-first-real-submit-actions" not in bind_call["url"]
@@ -971,7 +1069,12 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
     preflight_call = calls[1]
     assert preflight_call["method"] == "GET"
     assert preflight_call["url"].endswith(
-        "/runtime-execution-controlled-submit-preflights/authorizations/fresh-auth-1"
+        "/runtime-action-time-finalgate-preflights/tickets/ticket-ready-1"
+    )
+    handoff_call = calls[2]
+    assert handoff_call["method"] == "POST"
+    assert "/runtime-operation-layer-handoffs/tickets/ticket-ready-1/" in (
+        handoff_call["url"]
     )
 
 
@@ -1039,24 +1142,11 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         "_session_cookie",
         lambda: ("brc_operator_session=fake-session", None),
     )
+    calls: list[dict] = []
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        lambda **_kwargs: {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "ready_for_controlled_submit_adapter",
-                "final_gate_verdict": "pass",
-                "blockers": [],
-                "warnings": [],
-                "submit_executed": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-            },
-        },
+        _ticket_bound_finalgate_and_handoff_request(calls),
     )
 
     artifact = build_dispatch_artifact(
@@ -1068,50 +1158,15 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         execute_preflight=True,
     )
 
-    assert artifact["status"] == "finalgate_ready"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_status"] == "official_finalgate_preflight_passed"
-    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert artifact["owner_state"]["status"] == "finalgate_ready"
+    _assert_ticket_bound_operation_layer_ready(artifact)
+    assert artifact["owner_state"]["status"] == "operation_layer_ready"
     assert "automatic_recovery_action" not in artifact["owner_state"]
     assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
+        "prepare_ticket_bound_protected_submit"
     )
     assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
     assert artifact["finalgate_preflight_result"]["called"] is True
-    assert artifact["operation_layer_command_plan"]["places_order"] is False
-    assert "next_action" not in artifact["operation_layer_command_plan"]
-    assert artifact["operation_layer_command_plan"][
-        "official_operation_layer_action"
-    ] == "prepare_official_operation_layer_submit"
-    assert artifact["operation_layer_command_plan"]["official_endpoint_method"] == "POST"
-    assert artifact["operation_layer_command_plan"]["official_endpoint_path"] == (
-        "/api/trading-console/"
-        "runtime-execution-first-real-submit-actions/authorizations/auth-ready-1"
-    )
-    assert (
-        artifact["operation_layer_command_plan"][
-            "owner_confirmed_for_first_real_submit_action"
-        ]
-        is True
-    )
-    assert (
-        artifact["operation_layer_command_plan"]["standing_authorized_first_real_submit"]
-        is True
-    )
-    assert (
-        artifact["operation_layer_command_plan"][
-            "owner_chat_confirmation_required_for_real_submit"
-        ]
-        is False
-    )
-    assert (
-        artifact["operation_layer_command_plan"]["legacy_owner_confirmation_env_required"]
-        is False
-    )
-    assert "exchange_submit_action_authorization_id" in (
-        artifact["operation_layer_command_plan"]["requires_evidence_ids"]
-    )
+    assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
     assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
     assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert artifact["safety_invariants"]["places_order"] is False
@@ -1158,43 +1213,11 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         lambda: ("brc_operator_session=fake-session", None),
     )
 
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if kwargs["method"] == "GET":
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "ready_for_controlled_submit_adapter",
-                    "final_gate_verdict": "PASS",
-                    "blockers": [],
-                    "warnings": [],
-                    "submit_executed": False,
-                    "order_created": False,
-                    "exchange_called": False,
-                    "owner_bounded_execution_called": False,
-                    "order_lifecycle_called": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "reservation_id": "runtime-attempt-reservation-auth-ready-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_and_handoff_request(calls),
+    )
 
     def _prepare_evidence(authorization_id, command_plan):
         prepared.append((authorization_id, command_plan))
@@ -1205,8 +1228,6 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
             "exchange_order_submitted": False,
         }
         return report
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
 
     artifact = build_dispatch_artifact(
         resume_pack=_with_runtime_summary(
@@ -1220,37 +1241,11 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         operation_layer_evidence_preparer=_prepare_evidence,
     )
 
-    assert prepared == [
-        (
-            "auth-ready-1",
-            {
-                **dispatcher._operation_layer_command_plan(
-                    authorization_id="auth-ready-1"
-                )
-            },
-        )
-    ]
-    assert artifact["status"] == "submitted"
-    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert artifact["operation_layer_submit_result"]["called"] is True
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert artifact["safety_invariants"][
-        "operation_layer_evidence_attempt_counter_mutated"
-    ] is True
-    assert artifact["safety_invariants"][
-        "operation_layer_evidence_runtime_budget_mutated"
-    ] is True
+    assert prepared == []
+    _assert_ticket_bound_protected_submit_adapter_missing(artifact)
     assert len(calls) == 2
     assert calls[0]["method"] == "GET"
     assert calls[1]["method"] == "POST"
-    submit_query = parse_qs(urlparse(calls[1]["url"]).query)
-    assert submit_query["attempt_outcome_policy_id"] == [
-        "attempt_outcome_policy_id-value"
-    ]
-    assert submit_query["exchange_submit_action_authorization_id"] == [
-        "exchange_submit_action_authorization_id-value"
-    ]
 
 
 def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operation_layer(
@@ -1265,44 +1260,6 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
         "_session_cookie",
         lambda: ("brc_operator_session=fake-session", None),
     )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if kwargs["method"] == "GET":
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "ready_for_controlled_submit_adapter",
-                    "final_gate_verdict": "PASS",
-                    "blockers": [],
-                    "warnings": [],
-                    "submit_executed": False,
-                    "order_created": False,
-                    "exchange_called": False,
-                    "owner_bounded_execution_called": False,
-                    "order_lifecycle_called": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "reservation_id": "runtime-attempt-reservation-auth-ready-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
 
     def _prepare_evidence(authorization_id, command_plan):
         prepared.append((authorization_id, command_plan))
@@ -1326,7 +1283,11 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
             "withdrawal_or_transfer_created": False,
         }
 
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_and_handoff_request(calls),
+    )
 
     artifact = build_dispatch_artifact(
         resume_pack=_with_runtime_summary(
@@ -1341,20 +1302,13 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
         runtime_live_enabler=_live_enable_runtime,
     )
 
-    assert len(prepared) == 2
-    assert len(live_enablement_calls) == 1
-    assert live_enablement_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
-    assert live_enablement_calls[0]["authorization_id"] == "auth-ready-1"
-    assert artifact["status"] == "submitted"
-    assert artifact["runtime_live_enablement_result"]["mutation_applied"] is True
-    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert artifact["operation_layer_submit_result"]["called"] is True
-    assert artifact["safety_invariants"]["runtime_live_enablement_called"] is True
-    assert artifact["safety_invariants"]["runtime_live_enablement_mutation_applied"] is True
-    assert artifact["safety_invariants"]["runtime_state_mutated"] is True
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert artifact["safety_invariants"]["places_order"] is True
-    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert prepared == []
+    assert live_enablement_calls == []
+    _assert_ticket_bound_protected_submit_adapter_missing(artifact)
+    assert "runtime_live_enablement_result" not in artifact
+    assert artifact["operation_layer_submit_result"]["called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
@@ -2288,7 +2242,7 @@ def test_dispatcher_execute_preflight_blocks_forbidden_preflight_effect(monkeypa
     assert artifact["operation_layer_command_plan"] is None
 
 
-def test_dispatcher_blocks_ready_without_fresh_evidence():
+def test_dispatcher_allows_ticket_bound_ready_without_signal_json():
     resume = _resume_pack("ready_for_action_time_final_gate")
     resume["action_time_resume"]["signal_input_json"] = None
     resume["signal_input_json"] = None
@@ -2298,11 +2252,12 @@ def test_dispatcher_blocks_ready_without_fresh_evidence():
         source_path=Path("/tmp/post-signal-resume-pack.json"),
     )
 
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "missing_fact"
-    assert artifact["dispatch_status"] == "blocked_by_missing_preflight_evidence"
-    assert "missing_fact:signal_input_json" in artifact["blockers"]
-    assert artifact["command_plan"] is None
+    assert artifact["status"] == "ready_for_action_time_final_gate"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["dispatch_status"] == "official_finalgate_preflight_dispatch_ready"
+    assert artifact["blockers"] == []
+    assert artifact["command_plan"]["ticket_id"] == "ticket-ready-1"
+    assert "signal_input_json" not in artifact["command_plan"]
 
 
 def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypatch):
@@ -2317,25 +2272,11 @@ def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypat
         lambda: ("brc_operator_session=fake-session", None),
     )
 
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "ready_for_controlled_submit_adapter",
-                "final_gate_verdict": "pass",
-                "blockers": [],
-                "warnings": [],
-                "submit_executed": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_and_handoff_request(calls),
+    )
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
@@ -2343,13 +2284,58 @@ def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypat
         execute_preflight=True,
     )
 
-    assert artifact["status"] == "finalgate_ready"
-    assert artifact["command_plan"]["shadow_candidate_id"] is None
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is True
+    _assert_ticket_bound_operation_layer_ready(artifact)
+    assert "shadow_candidate_id" not in artifact["command_plan"]
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith(
-        "/runtime-execution-controlled-submit-preflights/authorizations/auth-ready-1"
+        "/runtime-action-time-finalgate-preflights/tickets/ticket-ready-1"
     )
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["url"].endswith(
+        "/runtime-operation-layer-handoffs/tickets/ticket-ready-1/"
+        "finalgate-passes/finalgate-pass-1"
+    )
+
+
+def test_dispatcher_blocks_ticket_bound_handoff_forbidden_effects(monkeypatch):
+    calls = []
+    handoff_body = _operation_layer_handoff_ready_body()
+    handoff_body["live_profile_changed"] = True
+    handoff_body["command_plan"]["authorization_id"] = "legacy-auth-1"
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": handoff_body if kwargs["method"] == "POST" else _finalgate_ready_body(),
+        }
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
+        "blocked_by_operation_layer_handoff_forbidden_effect"
+    )
+    assert "operation_layer_handoff_effect:live_profile_changed" in artifact["blockers"]
+    assert (
+        "operation_layer_handoff_legacy_input:authorization_id"
+        in artifact["blockers"]
+    )
+    assert artifact["operation_layer_command_plan"] is None
+    assert [call["method"] for call in calls] == ["GET", "POST"]
 
 
 def test_dispatcher_blocks_unsafe_resume_flags():
@@ -2394,24 +2380,11 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
         "_session_cookie",
         lambda: ("brc_operator_session=fake-session", None),
     )
+    calls = []
     monkeypatch.setattr(
         dispatcher,
         "_request_json",
-        lambda **_kwargs: {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "ready_for_controlled_submit_adapter",
-                "final_gate_verdict": "pass",
-                "blockers": [],
-                "warnings": [],
-                "submit_executed": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-            },
-        },
+        _ticket_bound_finalgate_and_handoff_request(calls),
     )
     resume_path = tmp_path / "post-signal-resume-pack.json"
     output_path = tmp_path / "resume-dispatch-artifact.json"
@@ -2432,4 +2405,5 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
 
     assert exit_code == 0
     artifact = json.loads(output_path.read_text(encoding="utf-8"))
-    assert artifact["status"] == "finalgate_ready"
+    _assert_ticket_bound_operation_layer_ready(artifact)
+    assert [call["method"] for call in calls] == ["GET", "POST"]

@@ -55,8 +55,9 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env" in text
-    assert "--candidate-universe-json" in text
-    assert "latest-strategy-live-candidate-pool.json" in text
+    assert "--require-database-url" in text
+    assert "--candidate-universe-json" not in text
+    assert "latest-strategy-live-candidate-pool.json" not in text
     for strategy_family_id in (
         "CPM-RO-001",
         "MPG-001",
@@ -109,7 +110,8 @@ def test_signal_watcher_goal_status_dropin_does_not_write_final_status():
     assert "Retired as a final goal-status writer" in text
     assert "ExecStartPost=" not in text
     assert "build_strategygroup_runtime_goal_status.py" not in text
-    assert "--candidate-pool-json" in text
+    assert "DB-backed production current path" in text
+    assert "--candidate-pool-json" not in text
 
 
 def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel():
@@ -133,14 +135,20 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "transfers" in text
 
 
-def test_runtime_monitor_service_refreshes_server_public_facts_and_deploy_health():
+def test_runtime_monitor_service_uses_pg_control_state_not_json_sources():
     text = RUNTIME_MONITOR_SERVICE_PATH.read_text(encoding="utf-8")
 
-    assert "fetch_binance_usdm_public_facts.py" in text
-    assert "--symbols BTCUSDT ETHUSDT SOLUSDT AVAXUSDT SUIUSDT OPUSDT" in text
-    assert "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
-    assert "--public-facts-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json" in text
-    assert "--deploy-health-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json" in text
+    assert "run_tokyo_runtime_server_monitor.py" in text
+    assert "--require-database-url" in text
+    assert "EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env" in text
+    assert "fetch_binance_usdm_public_facts.py" not in text
+    assert "--daily-table-json" not in text
+    assert "--candidate-pool-json" not in text
+    assert "--public-facts-json" not in text
+    assert "--account-safe-facts-json" not in text
+    assert "--watcher-status-json" not in text
+    assert "--deploy-health-json" not in text
+    assert "--dedupe-state-json" not in text
     assert "ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor" in text
     assert "FinalGate" not in text
     assert "Operation Layer" not in text
@@ -188,12 +196,12 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
             "2026-06-11-081_create_llm_advisory_plane.py"
         ),
         expected_latest_migration=(
-            "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
+            "2026-07-04-086_create_pg_runtime_control_state_foundation.py"
         ),
-        target_migration_count=84,
+        target_migration_count=86,
         remote_migration_revision="081",
-        target_migration_revision="085",
-        migration_gap_revision_count=3,
+        target_migration_revision="086",
+        migration_gap_revision_count=5,
         manifest_payload={"scope": "test"},
     )
 

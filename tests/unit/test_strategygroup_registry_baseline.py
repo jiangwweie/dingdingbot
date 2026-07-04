@@ -29,7 +29,7 @@ def test_registry_baseline_schema_and_expected_rows() -> None:
 
     assert artifact["schema"] == "brc.strategygroup_registry_baseline.v1"
     assert [row["strategy_group_id"] for row in artifact["rows"]] == EXPECTED_GROUPS
-    assert len(artifact["rows"]) == 10
+    assert len(artifact["rows"]) == 11
     assert validate_artifact(artifact) == []
 
 
@@ -67,7 +67,7 @@ def test_negative_static_row_legacy_authority_mirror_is_rejected() -> None:
         in errors
     )
     assert (
-        "TEQ-001.static_row_legacy_authority_mirror_present:real_order_authority"
+        "CPM-RO-001.static_row_legacy_authority_mirror_present:real_order_authority"
         in errors
     )
 
@@ -133,5 +133,5 @@ def test_check_mode_passes_against_generated_files() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads(result.stdout)
     assert report["status"] == "passed"
-    assert report["row_count"] == 10
+    assert report["row_count"] == 11
     assert report["errors"] == []

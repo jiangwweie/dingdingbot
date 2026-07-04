@@ -60,10 +60,42 @@ The repository is the only allowed read boundary for these dynamic domains:
 - server monitor quiet/notify state;
 - generated control read-model snapshots.
 
-During migration, a file-backed repository may read the current JSON files for
-compatibility. Runtime scripts should still call the repository, not raw file
-paths. After DB-backed implementation is accepted, file-backed reads become
-seed/export compatibility only.
+After PG cutover, runtime scripts must read PG current state through typed
+repository methods. Repo MD/JSON/output files may be used only as curated seed
+inputs, exports, archives, fixtures, or diagnostics. They must not remain a
+production runtime fallback.
+
+Short-lived comparison during local migration validation is allowed only when it
+cannot affect runtime, trading, Owner notification, FinalGate, or Operation
+Layer decisions.
+
+## Owner-Confirmed Cutover Directive
+
+The Owner-confirmed target is:
+
+```text
+replace, not parallel
+```
+
+This means the PG migration must close the L2-L7 runtime authority path as one
+coherent design:
+
+```text
+PG strategy/event/scope/policy seed
+-> PG watcher coverage
+-> PG fact snapshots
+-> PG live signal events
+-> PG promotion candidates
+-> PG action-time lane inputs
+-> PG Action-Time Tickets
+-> FinalGate ticket input
+-> Operation Layer ticket handoff
+```
+
+Production runtime must not keep a long-term shape where PG and file sources are
+both active authorities. If PG current state is unavailable, real-submit
+progression must fail closed rather than falling back to old JSON, Markdown,
+output artifacts, local cache, or code constants.
 
 ## Known Current Facts
 
@@ -180,12 +212,13 @@ the main current blocker.
 | --- | --- | --- | --- | --- |
 | File-only cleanup | Keep JSON/MD as machine sources, tighten validators and gitignore rules | Smallest implementation change | Does not remove semantic drift across policy, runtime, output, and code constants | Reject as long-term architecture |
 | Big-bang DB migration | Move all dynamic JSON, output snapshots, strategy registry, policy, facts, and monitor state directly into DB | Clean target state quickly if it works | High blast radius; easy to break live-enablement builders and deployment at once | Reject for first implementation |
-| Repository-first phased migration | Add `RuntimeControlStateRepository`, start file-backed, then migrate policy/candidate scope/runtime coverage to DB | Compresses read boundary early; allows DB migration without breaking every builder at once | Requires temporary compatibility layer and tests against direct file reads | Recommended |
+| Repository-first phased migration | Add `RuntimeControlStateRepository`, start file-backed, then migrate policy/candidate scope/runtime coverage to DB | Useful as a historical way to compress file reads | Keeps a compatibility layer that can become a second source of truth | Reject as the Owner-confirmed target; may be used only for local non-production comparison if it cannot influence runtime decisions |
 | Generic JSONB document store | Store current JSON payloads in one or two generic tables | Fast to import existing artifacts | Preserves ambiguous schemas and makes DB another artifact bucket | Reject except for read-model snapshot history |
+| Replace-and-cutover PG migration | Build schema, seed, validators, runtime readers, ticket path, monitor path, and old-source removal together | Matches Owner target; removes dual authority; forces negative tests | Larger implementation batch and requires stronger acceptance testing | Recommended |
 
-The recommended path is repository-first phased migration. It removes the
-highest-risk source-selection problem before it changes the physical storage
-for every domain.
+The recommended path is replace-and-cutover PG migration. Repository methods
+remain useful as typed boundaries, but they must resolve to PG current state in
+production after cutover.
 
 ## Design Principles
 
@@ -373,16 +406,17 @@ write_control_read_model_snapshot(model_type, payload, source_watermark)
 write_goal_status_current(payload, projection_run_id)
 ```
 
-### Implementation Stages
+### Source Modes
 
-| Stage | Implementation | Purpose |
-| --- | --- | --- |
-| `file_backed` | Reads existing JSON files and constants behind one interface | Stop direct file-source drift before schema migration |
-| `hybrid` | Reads policy/registry/candidate scope from DB, runtime facts from files | First production-safe migration cut |
-| `db_backed` | Reads dynamic state from DB and writes exports only as read models | Final target |
+| Mode | Allowed use | Production runtime authority |
+| --- | --- | ---: |
+| `file_backed` | Local inventory, seed extraction, or historical compatibility tests only | No |
+| `hybrid` | Local migration comparison only; must not affect runtime, monitor, FinalGate, or Operation Layer | No |
+| `db_backed` | Production source after cutover | Yes |
 
-The important early win is not the DB itself. The important early win is that
-builders stop owning their own file-source decisions.
+The important target is not merely that builders call one repository class. The
+important target is that production repository methods resolve to PG current
+state and fail closed when required PG state is unavailable.
 
 ## Target Flow
 
@@ -485,9 +519,9 @@ compatibility. They must not become hand-edited authority.
 | Deploy/session reports | Stay deploy evidence, not runtime source |
 | Systemd/deploy config | Stay files; not DB runtime control state |
 
-## Migration Plan
+## Cutover Plan
 
-### Phase 0: Source Audit And Guardrails
+### Step 0: Source Audit And Guardrails
 
 Produce a file-source audit for the current live-enablement chain:
 
@@ -504,90 +538,88 @@ migration priority
 Add tests or validators that fail if new runtime builders read critical JSON
 paths directly instead of using the repository.
 
-### Phase 1: Repository Port With File-Backed Implementation
+### Step 1: PG Schema, Seed, And Negative Constraints
 
-Add `RuntimeControlStateRepository` as an application/infrastructure boundary.
-
-Initial scope:
+Create the PG schema, curated initial seed, and negative constraints for:
 
 - active StrategyGroups;
+- event specs and RequiredFacts;
+- Owner policy and candidate scope;
+- runtime profile, sizing, execution, protection, and budget scope;
+- watcher coverage, fact snapshots, live signal events, promotion candidates,
+  action-time lanes, and Action-Time Tickets.
+
+The initial seed must contain only confirmed clean semantics. Old live signals,
+old action-time lanes, old packets, replay opportunities, and generated
+timestamps must not be imported as current state.
+
+### Step 2: Runtime Readers And Writers Switch To PG
+
+Switch these runtime surfaces to PG current state:
+
+- watcher scope;
 - candidate universe;
-- Owner pre-trade authorization;
-- runtime tier policy;
-- runtime active monitor coverage;
-- tradeability decision;
-- candidate pool write snapshot;
-- daily table write snapshot.
+- Owner policy;
+- runtime coverage;
+- fact snapshots;
+- live signal events;
+- Candidate Pool;
+- Daily Table;
+- Goal Status;
+- server monitor;
+- forensics / chain-position explanations.
 
-No DB migration is required in this phase. The goal is to compress file reads
-behind one interface.
+### Step 3: Ticket, FinalGate, Operation Layer Handoff
 
-### Phase 2: Owner Policy And Candidate Universe To DB
+Close the official pre-submit chain:
 
-Migrate these first because they cause the most semantic drift:
+- Action-Time Ticket identity;
+- ticket-bound fact, policy, sizing, execution, protection, budget, instrument,
+  and account-mode lineage;
+- FinalGate input as `ticket_id` only;
+- Operation Layer input as `ticket_id + finalgate_pass_id` only;
+- protection and reconciliation lineage back to the ticket.
 
-- `owner-pretrade-runtime-authorization-v0.json`;
-- `main-control-runtime-tier-policy.json`;
-- hard-coded `DEFAULT_CANDIDATE_UNIVERSE`;
-- live-submit scope and conditional hard-gated scope.
+### Step 4: Old-Source Removal
 
-Keep JSON exports for visibility, but make DB the source.
+Remove or make non-authoritative:
 
-### Phase 3: StrategyGroup Registry To DB
+- direct runtime reads of Owner policy JSON;
+- direct runtime reads of generated output files;
+- hard-coded candidate universe and side fallbacks;
+- loose FinalGate parameter path;
+- loose Operation Layer submit path;
+- local cache as production monitor source.
 
-Use existing strategy family tables where they fit, then add StrategyGroup
-overlay tables for runtime-facing identifiers such as `MPG-001` and
-`CPM-RO-001`.
+### Step 5: Tokyo Cutover Bootstrap
 
-Seed/import current registry baseline and handoff summaries.
+After deploy, bootstrap current runtime facts from real sources:
 
-### Phase 4: Runtime Coverage And Fact Snapshots To DB
+- Tokyo watcher coverage;
+- live detector events;
+- exchange account facts;
+- active position and open orders;
+- balance;
+- systemd/service health;
+- server monitor run.
 
-Move server-backed runtime coverage, watcher liveness, public facts, and
-account-safe facts into runtime fact tables.
+Old `latest-*` JSON, packets, or artifacts must not seed current live state.
 
-At this point, `server_runtime_coverage = {}` should no longer be a file-missing
-ambiguity. It should be a DB-backed current state:
+### Step 6: Export And Diagnostics
 
-```text
-covered
-not_covered
-stale
-missing
-```
+JSON/MD outputs may be regenerated from PG-backed read models for diagnostics,
+audit viewing, or agent compatibility.
 
-with row-level reason and timestamp.
-
-### Phase 5: Candidate Pool And Daily Table DB-Backed Read Models
-
-Update builders so Candidate Pool and Daily Table are generated from the
-repository. Store read-model snapshots in DB, then export the controlled JSON
-paths listed in `config/output_control_snapshots.json`.
-
-### Phase 6: Server Monitor DB-Backed Production Path
-
-The Tokyo server-side monitor should read DB-backed runtime/control state and
-write monitor runs plus deduped notification records.
-
-Local output files remain optional development exports, not production monitor
-inputs or fallback.
-
-### Phase 7: Remove Direct Runtime File Reads
-
-After DB-backed reads are accepted, remove or fail closed on direct reads of:
-
-- Owner policy JSON as runtime source;
-- candidate universe constants as runtime source;
-- generated output files as authority inputs;
-- local monitor cache as production source.
+Those exports remain non-authority.
 
 ## Priority Order
 
 | Priority | Migration item | Reason |
 | --- | --- | --- |
-| P0 | Repository boundary | Removes source-selection drift before schema work |
+| P0 | PG schema, seed, and negative constraints | Creates the replacement current-state authority |
 | P0 | Owner policy and candidate universe | Directly controls multi-symbol pre-trade scope |
 | P0 | Runtime scope binding and coverage | Required for server-backed promotion to action-time |
+| P0 | Action-Time Ticket and gate handoff | Prevents loose identity before FinalGate and Operation Layer |
 | P1 | StrategyGroup registry overlay | Removes semantic drift between handoff, registry, and runtime |
 | P1 | RequiredFacts contract tables | Makes per-symbol readiness and action-time facts deterministic |
 | P1 | Candidate readiness and promotion tables | Makes fresh-signal promotion replayable and inspectable |
@@ -601,31 +633,40 @@ DB migration design is accepted only when all of these are true:
 
 | Requirement | Done when |
 | --- | --- |
-| Source boundary | Runtime builders consume `RuntimeControlStateRepository`, not raw dynamic JSON paths |
-| Policy source | Owner authorization and candidate universe are DB-backed or repository-backed with one current projection |
-| Runtime source | Watcher coverage and fact freshness are DB-backed or repository-backed with timestamps |
+| Source boundary | Production runtime builders consume PG current state through typed repository methods, not raw dynamic JSON paths |
+| Policy source | Owner authorization and candidate universe are DB-backed with one current projection |
+| Runtime source | Watcher coverage and fact freshness are DB-backed with timestamps |
 | Read model status | Daily Table and Candidate Pool are exports from repository state |
 | Output governance | `output/**` remains export-only and validated by output-scope rules |
 | Multi-symbol readiness | Five active StrategyGroups can carry candidate symbol rows without code constants redefining scope |
 | Promotion safety | Fresh satisfied symbols can become promotion candidates without exchange-write authority |
 | Action-time narrowing | At most one action-time lane input is active for real submit |
+| Ticket identity | FinalGate consumes `ticket_id`; Operation Layer consumes `ticket_id + finalgate_pass_id` |
 | Safety boundary | No FinalGate bypass, Operation Layer bypass, exchange write bypass, live profile mutation, or sizing mutation |
-| Rollback | DB-backed repository can be disabled back to file-backed compatibility during migration without changing trading authority |
+| Rollback | PG failure stops or disables trading progression; production does not fall back to old file authority |
 
 ## Rollback Strategy
 
-Migration should keep a feature flag or configuration switch:
+After PG cutover, rollback must not restore old file authority in production.
+
+Allowed rollback behavior:
 
 ```text
-RUNTIME_CONTROL_STATE_SOURCE=file
-RUNTIME_CONTROL_STATE_SOURCE=hybrid
-RUNTIME_CONTROL_STATE_SOURCE=db
+disable trading progression
+pause affected StrategyGroups
+stop FinalGate / Operation Layer progression
+repair or forward-fix PG state
+regenerate exports from PG after repair
 ```
 
-Rollback from `db` to `hybrid` or `file` may restore read compatibility, but it
-must not loosen safety. On rollback, real-submit readiness should fail closed
-unless current scope, facts, and runtime safety are still proven by the
-selected source.
+Forbidden rollback behavior:
+
+```text
+PG unavailable -> read old JSON as current policy
+PG unavailable -> use old output action-time lane
+PG unavailable -> use loose FinalGate / Operation Layer parameters
+local cache -> production monitor truth
+```
 
 ## Explicit Non-Goals
 
@@ -669,8 +710,8 @@ strategy_group_id: active WIP StrategyGroups
 symbol: active candidate universe
 stage: db_backed_control_state_design
 first_blocker: dynamic runtime and policy state are still split across JSON files, output snapshots, and code constants
-next_action: implement RuntimeControlStateRepository and migrate Owner policy plus candidate universe first
-stop_condition: Candidate Pool, Daily Table, and server monitor read one repository boundary and export JSON only as generated read models
+next_action: implement PG schema/seed/runtime-reader/ticket cutover and remove old file authority
+stop_condition: production runtime reads PG current state, FinalGate/Operation Layer use ticket lineage, and JSON/MD/output are export-only
 owner_action_required: no
 authority_boundary: DB migration remains non-executing and must not call FinalGate, Operation Layer, or exchange write
 ```

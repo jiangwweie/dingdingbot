@@ -46,7 +46,7 @@ from src.domain.standing_authorization import (
 
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
+    "2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
 
 

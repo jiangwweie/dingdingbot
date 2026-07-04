@@ -10,17 +10,10 @@ import sys
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
-    AUTHORITY_BOUNDARY,
-    DEFAULT_CANDIDATE_UNIVERSE,
-    DEFAULT_SIDE_SCOPE,
+AUTHORITY_BOUNDARY = (
+    "runtime_candidate_universe_coverage_validator_is_read_only; "
+    "no_finalgate_no_operation_layer_no_exchange_write"
 )
-
-
 READY_STATUS = "runtime_candidate_universe_coverage_valid"
 BLOCKED_STATUS = "runtime_candidate_universe_coverage_invalid"
 
@@ -51,7 +44,9 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": READY_STATUS,
-                "expected_row_count": _expected_row_count(),
+                "expected_row_count": _coverage_expected_row_count(
+                    _coverage(artifact)
+                ),
                 "authority_boundary": AUTHORITY_BOUNDARY,
             },
             ensure_ascii=False,
@@ -66,10 +61,16 @@ def validate_runtime_candidate_universe_coverage(
 ) -> list[str]:
     coverage = _coverage(artifact)
     errors: list[str] = []
-    expected_pairs = _expected_pairs()
-    expected_count = len(expected_pairs)
     if not coverage:
         return ["candidate_universe_coverage is required"]
+    rows = _dict_rows(coverage.get("rows"))
+    expected_count = _coverage_expected_row_count(coverage)
+    if expected_count <= 0:
+        errors.append("candidate_universe_coverage.expected_row_count must be positive")
+    if len(rows) != expected_count:
+        errors.append(
+            "candidate_universe_coverage.rows length must equal expected_row_count"
+        )
     if coverage.get("status") != "complete":
         errors.append("candidate_universe_coverage.status must be complete")
     for key in ("expected_row_count", "active_matched_row_count"):
@@ -78,7 +79,6 @@ def validate_runtime_candidate_universe_coverage(
     if coverage.get("missing_row_count") != 0:
         errors.append("candidate_universe_coverage.missing_row_count must be 0")
 
-    rows = _dict_rows(coverage.get("rows"))
     by_pair = {
         (
             str(row.get("strategy_group_id") or ""),
@@ -88,17 +88,21 @@ def validate_runtime_candidate_universe_coverage(
         for row in rows
     }
     row_pairs = set(by_pair)
-    for pair in sorted(expected_pairs - row_pairs):
+    if len(row_pairs) != len(rows):
         errors.append(
-            "candidate_universe_coverage missing row "
-            f"{pair[0]}/{pair[1]}/{pair[2]}"
+            "candidate_universe_coverage rows must be unique by strategy/symbol/side"
         )
-    for pair in sorted(row_pairs - expected_pairs):
-        errors.append(
-            "candidate_universe_coverage unexpected row "
-            f"{pair[0]}/{pair[1]}/{pair[2]}"
-        )
-    for pair in sorted(expected_pairs & row_pairs):
+    for pair in sorted(row_pairs):
+        if not all(pair):
+            errors.append(
+                "candidate_universe_coverage rows require strategy_group_id/symbol/side"
+            )
+            continue
+        if pair[2] not in {"long", "short"}:
+            errors.append(
+                "candidate_universe_coverage row side must be long or short "
+                f"for {pair[0]}/{pair[1]}/{pair[2]}"
+            )
         row = by_pair[pair]
         prefix = f"candidate_universe_coverage {pair[0]}/{pair[1]}/{pair[2]}"
         if row.get("state") != "active_watcher_scope":
@@ -126,17 +130,13 @@ def _coverage(artifact: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _expected_pairs() -> set[tuple[str, str, str]]:
-    return {
-        (strategy_group_id, symbol, side)
-        for strategy_group_id, symbols in DEFAULT_CANDIDATE_UNIVERSE.items()
-        for symbol in symbols
-        for side in DEFAULT_SIDE_SCOPE.get(strategy_group_id, ())
-    }
-
-
-def _expected_row_count() -> int:
-    return len(_expected_pairs())
+def _coverage_expected_row_count(coverage: dict[str, Any]) -> int:
+    value = coverage.get("expected_row_count")
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    return 0
 
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:

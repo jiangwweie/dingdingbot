@@ -5,9 +5,19 @@ import json
 import sys
 from pathlib import Path
 
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_tokyo_runtime_server_monitor.py"
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
 def _load_module():
@@ -15,6 +25,16 @@ def _load_module():
         "run_tokyo_runtime_server_monitor",
         SCRIPT_PATH,
     )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_file_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -107,15 +127,253 @@ def _args(module, paths: dict[str, Path]):
             str(paths["public_facts"]),
             "--account-safe-facts-json",
             str(paths["account_safe_facts"]),
+            "--allow-local-file-diagnostic",
             "--watcher-status-json",
             str(paths["watcher_status"]),
             "--deploy-health-json",
             str(paths["deploy_health"]),
+            "--database-url",
+            "",
             "--skip-systemd",
             "--feishu-webhook-url",
             "https://example.invalid/webhook",
         ]
     )
+
+
+def _pg_args(module, tmp_path: Path):
+    return module._parse_args(
+        [
+            "--output-json",
+            str(tmp_path / "monitor.json"),
+            "--dedupe-state-json",
+            str(tmp_path / "legacy-dedupe-should-not-be-used.json"),
+            "--daily-table-json",
+            str(tmp_path / "missing-daily-table.json"),
+            "--candidate-pool-json",
+            str(tmp_path / "missing-candidate-pool.json"),
+            "--public-facts-json",
+            str(tmp_path / "missing-public-facts.json"),
+            "--account-safe-facts-json",
+            str(tmp_path / "missing-account-facts.json"),
+            "--watcher-status-json",
+            str(tmp_path / "missing-watcher-status.json"),
+            "--deploy-health-json",
+            str(tmp_path / "missing-deploy-health.json"),
+            "--skip-systemd",
+            "--feishu-webhook-url",
+            "https://example.invalid/webhook",
+            "--database-url",
+            "sqlite://",
+            "--allow-non-postgres-for-test",
+        ]
+    )
+
+
+def _seed_pg_engine():
+    migration = _load_file_module(MIGRATION_PATH, "migration_086_server_monitor")
+    seed = _load_file_module(SEED_PATH, "seed_runtime_control_state_server_monitor")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    return engine
+
+
+def _insert_pg_coverage_and_unsatisfied_facts(conn) -> None:
+    rows = conn.execute(
+        text(
+            """
+            SELECT runtime_scope_binding_id, strategy_group_id, symbol, side, runtime_profile_id
+            FROM brc_runtime_scope_bindings
+            WHERE status = 'active'
+            ORDER BY runtime_scope_binding_id
+            """
+        )
+    ).mappings()
+    for index, row in enumerate(rows, start=1):
+        lane_key = f"{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
+        observed_at_ms = 1770000000000 + index
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_watcher_runtime_coverage (
+                  runtime_coverage_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  detector_key,
+                  runtime_profile_id,
+                  coverage_state,
+                  liveness_state,
+                  last_tick_at_ms,
+                  valid_until_ms,
+                  is_current,
+                  created_at_ms
+                ) VALUES (
+                  :runtime_coverage_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :detector_key,
+                  :runtime_profile_id,
+                  'covered',
+                  'healthy',
+                  :observed_at_ms,
+                  :valid_until_ms,
+                  true,
+                  :observed_at_ms
+                )
+                """
+            ),
+            {
+                "runtime_coverage_id": f"coverage:{lane_key}",
+                "strategy_group_id": row["strategy_group_id"],
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "detector_key": f"detector:{row['strategy_group_id']}:{row['side']}",
+                "runtime_profile_id": row["runtime_profile_id"],
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": observed_at_ms + 3_600_000,
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  runtime_profile_id,
+                  fact_surface,
+                  source_kind,
+                  source_ref,
+                  computed,
+                  satisfied,
+                  freshness_state,
+                  failed_facts,
+                  fact_values,
+                  blocker_class,
+                  observed_at_ms,
+                  valid_until_ms,
+                  created_at_ms
+                ) VALUES (
+                  :fact_snapshot_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :runtime_profile_id,
+                  'pretrade_public',
+                  'watcher',
+                  :source_ref,
+                  true,
+                  false,
+                  'fresh',
+                  :failed_facts,
+                  :fact_values,
+                  'computed_not_satisfied',
+                  :observed_at_ms,
+                  :valid_until_ms,
+                  :observed_at_ms
+                )
+                """
+            ),
+            {
+                "fact_snapshot_id": f"fact:{lane_key}:public",
+                "strategy_group_id": row["strategy_group_id"],
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "runtime_profile_id": row["runtime_profile_id"],
+                "source_ref": f"pg_test:{lane_key}",
+                "failed_facts": json.dumps(["market_condition_not_satisfied"]),
+                "fact_values": json.dumps({"market_condition_not_satisfied": False}),
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": observed_at_ms + 3_600_000,
+            },
+        )
+
+
+def _insert_pg_action_time_lane_without_ticket(conn) -> str:
+    row = conn.execute(
+        text(
+            """
+            SELECT runtime_scope_binding_id, strategy_group_id, symbol, side, runtime_profile_id
+            FROM brc_runtime_scope_bindings
+            WHERE status = 'active'
+              AND strategy_group_id = 'SOR-001'
+              AND symbol = 'ETHUSDT'
+              AND side = 'long'
+            LIMIT 1
+            """
+        )
+    ).mappings().one()
+    lane_id = "lane:SOR-001:ETHUSDT:long:ticket-pending"
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id,
+              promotion_candidate_id,
+              strategy_group_id,
+              symbol,
+              side,
+              runtime_profile_id,
+              lane_scope,
+              status,
+              signal_event_id,
+              public_fact_snapshot_id,
+              action_time_fact_snapshot_id,
+              runtime_scope_binding_id,
+              candidate_authorization_ref,
+              runtime_safety_snapshot_id,
+              first_blocker_class,
+              created_at_ms,
+              expires_at_ms,
+              closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              :lane_id,
+              'promotion:SOR-001:ETHUSDT:long',
+              :strategy_group_id,
+              :symbol,
+              :side,
+              :runtime_profile_id,
+              'real_submit_candidate',
+              'ticket_pending',
+              'signal:SOR-001:ETHUSDT:long',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'fact:SOR-001:ETHUSDT:long:action-time',
+              :runtime_scope_binding_id,
+              'candidate_auth:SOR-001:ETHUSDT:long',
+              NULL,
+              'action_time_preflight_ready',
+              1770001000000,
+              1770001900000,
+              NULL,
+              'non_executing_action_time_lane; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        ),
+        {
+            "lane_id": lane_id,
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "runtime_profile_id": row["runtime_profile_id"],
+            "runtime_scope_binding_id": row["runtime_scope_binding_id"],
+        },
+    )
+    return lane_id
 
 
 def test_healthy_waiting_is_quiet_without_feishu_notification(tmp_path: Path) -> None:
@@ -144,6 +402,132 @@ def test_healthy_waiting_is_quiet_without_feishu_notification(tmp_path: Path) ->
     assert artifact["safety_invariants"]["credentials_or_secrets_mutated"] is False
     assert artifact["safety_invariants"]["live_profile_changed"] is False
     assert artifact["safety_invariants"]["order_sizing_changed"] is False
+
+
+def test_pg_healthy_waiting_is_quiet_and_ignores_json_inputs(tmp_path: Path) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            _insert_pg_coverage_and_unsatisfied_facts(conn)
+            calls: list[dict] = []
+
+            artifact = module.build_server_monitor_artifact(
+                _pg_args(module, tmp_path),
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert artifact["source_mode"] == "db_backed"
+            assert artifact["status"] == "healthy_waiting_quiet"
+            assert artifact["decision"]["decision"] == "quiet"
+            assert artifact["notification"]["attempted"] is False
+            assert artifact["notification"]["skipped_reason"] == "healthy_waiting_quiet"
+            assert artifact["source_paths"] == {}
+            assert artifact["source_errors"] == {}
+            assert artifact["dedupe_state"]["source"] == "pg:brc_server_monitor_notifications"
+            assert calls == []
+            assert not (tmp_path / "legacy-dedupe-should-not-be-used.json").exists()
+            assert artifact["safety_invariants"]["calls_exchange_write"] is False
+            assert artifact["safety_invariants"]["places_order"] is False
+            run_count = conn.execute(
+                text("SELECT COUNT(*) FROM brc_server_monitor_runs")
+            ).scalar_one()
+            assert run_count == 1
+    finally:
+        engine.dispose()
+
+
+def test_pg_action_time_lane_notifies_once_with_pg_dedupe(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            _insert_pg_coverage_and_unsatisfied_facts(conn)
+            _insert_pg_action_time_lane_without_ticket(conn)
+            calls: list[dict] = []
+
+            def notifier(*args):
+                calls.append({"args": args})
+                return {"sent": True, "status_code": 200}
+
+            first = module.build_server_monitor_artifact(
+                _pg_args(module, tmp_path),
+                pg_conn=conn,
+                notifier=notifier,
+            )
+            second = module.build_server_monitor_artifact(
+                _pg_args(module, tmp_path),
+                pg_conn=conn,
+                notifier=notifier,
+            )
+
+            assert first["decision"]["decision"] == "notify"
+            assert first["decision"]["strategy_group_id"] == "SOR-001"
+            assert first["decision"]["symbol"] == "ETHUSDT"
+            assert first["decision"]["blocker_class"] == "action_time_ticket_missing"
+            assert first["decision"]["checkpoint"] == "materialize_action_time_ticket"
+            assert first["notification"]["attempted"] is True
+            assert first["notification"]["sent"] is True
+            assert second["notification"]["duplicate_suppressed"] is True
+            assert second["notification"]["attempted"] is False
+            assert len(calls) == 1
+            notification_count = conn.execute(
+                text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
+            ).scalar_one()
+            run_count = conn.execute(
+                text("SELECT COUNT(*) FROM brc_server_monitor_runs")
+            ).scalar_one()
+            assert notification_count == 1
+            assert run_count == 2
+            assert second["safety_invariants"]["notification_state_is_trading_authority"] is False
+    finally:
+        engine.dispose()
+
+
+def test_pg_required_database_url_does_not_fall_back_to_json_inputs(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    args = module._parse_args(
+        [
+            "--output-json",
+            str(tmp_path / "monitor.json"),
+            "--require-database-url",
+            "--skip-systemd",
+        ]
+    )
+    args.database_url = ""
+
+    try:
+        module.build_server_monitor_artifact(args)
+    except ValueError as exc:
+        assert "PG_DATABASE_URL is required" in str(exc)
+    else:
+        raise AssertionError("server monitor fell back to legacy JSON without PG")
+
+
+def test_default_server_monitor_requires_pg_or_explicit_local_diagnostic(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    args = module._parse_args(
+        [
+            "--output-json",
+            str(tmp_path / "monitor.json"),
+            "--skip-systemd",
+        ]
+    )
+    args.database_url = ""
+
+    try:
+        module.build_server_monitor_artifact(args)
+    except ValueError as exc:
+        assert "allow-local-file-diagnostic" in str(exc)
+    else:
+        raise AssertionError("server monitor fell back to legacy JSON without PG")
 
 
 def test_fresh_signal_or_action_time_boundary_notifies_once_with_dedupe(

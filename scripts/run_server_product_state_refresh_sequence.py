@@ -2,10 +2,12 @@
 """Run the server-side product-state refresh sequence after watcher ticks.
 
 The sequence is non-authority from a trading perspective. It refreshes control
-read models and may materialize one Candidate Pool action-time lane into
-non-executing prepare evidence. It does not call FinalGate, Operation Layer,
-exchange write APIs, OrderLifecycle, withdrawals, transfers, credential
-mutation, live profile changes, or order sizing changes.
+read models, may materialize one Candidate Pool action-time lane into
+non-executing prepare evidence, may materialize a PG Action-Time Ticket when a
+PG real-submit lane is present, and may run the ticket-bound non-executing
+FinalGate preflight and Operation Layer handoff. It does not call Operation
+Layer submit, exchange write APIs, OrderLifecycle, withdrawals, transfers,
+credential mutation, live profile changes, or order sizing changes.
 """
 
 from __future__ import annotations
@@ -173,7 +175,9 @@ def run_server_product_state_refresh_sequence(
         "step_results": step_results,
         "safety_invariants": {
             "calls_finalgate": False,
-            "calls_operation_layer": False,
+            "calls_ticket_bound_finalgate_preflight": True,
+            "calls_ticket_bound_operation_layer_handoff": True,
+            "calls_operation_layer_submit": False,
             "calls_exchange_write": False,
             "places_order": False,
             "order_created": False,
@@ -207,6 +211,8 @@ def _refresh_steps(
     release_manifest = Path("/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json")
     handoff_dir = Path("/home/ubuntu/brc-deploy/app/current/docs/current/strategy-group-handoffs")
 
+    pg_required = ("--require-database-url",)
+
     return [
         RefreshStep(
             "fetch_public_facts",
@@ -234,11 +240,32 @@ def _refresh_steps(
         RefreshStep("build_brf2_runtime_signal_facts", (python, "scripts/build_brf2_runtime_signal_facts.py", "--strategy-source", "live_market", "--public-facts-json", str(public))),
         RefreshStep("build_runtime_safety_state", (python, "scripts/build_strategygroup_runtime_safety_state.py")),
         RefreshStep("validate_runtime_coverage", (python, "scripts/validate_runtime_candidate_universe_coverage.py", str(status))),
-        RefreshStep("build_candidate_pool", (python, "scripts/build_strategy_live_candidate_pool.py", "--runtime-active-monitor-json", str(status))),
+        RefreshStep(
+            "build_candidate_pool",
+            (
+                python,
+                "scripts/build_strategy_live_candidate_pool.py",
+                *pg_required,
+            ),
+        ),
         RefreshStep("validate_candidate_pool", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
-        RefreshStep("build_daily_table", (python, "scripts/build_daily_live_enablement_table.py", "--candidate-pool-json", str(candidate_pool))),
+        RefreshStep(
+            "build_daily_table",
+            (
+                python,
+                "scripts/build_daily_live_enablement_table.py",
+                *pg_required,
+            ),
+        ),
         RefreshStep("validate_daily_table", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
-        RefreshStep("build_single_lane_task_packet", (python, "scripts/build_single_lane_task_packet.py")),
+        RefreshStep(
+            "build_single_lane_task_packet",
+            (
+                python,
+                "scripts/build_single_lane_task_packet.py",
+                *pg_required,
+            ),
+        ),
         RefreshStep("validate_single_lane_task_packet", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
         RefreshStep(
             "refresh_product_state_artifacts",
@@ -277,28 +304,43 @@ def _refresh_steps(
         ),
         RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), "--output-json", str(account))),
         RefreshStep("build_action_time_boundary_account", (python, "scripts/build_strategy_fresh_signal_action_time_boundary.py", "--account-safe-facts-json", str(account))),
-        RefreshStep("build_candidate_pool_after_account", (python, "scripts/build_strategy_live_candidate_pool.py", "--runtime-active-monitor-json", str(status))),
-        RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
         RefreshStep(
-            "materialize_action_time_lane",
+            "build_candidate_pool_after_account",
             (
                 python,
-                "scripts/materialize_candidate_pool_action_time_lane.py",
-                "--candidate-pool-json",
-                str(candidate_pool),
-                "--report-dir",
-                str(report_dir),
+                "scripts/build_strategy_live_candidate_pool.py",
+                *pg_required,
+            ),
+        ),
+        RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
+        RefreshStep(
+            "materialize_action_time_ticket",
+            (
+                python,
+                "scripts/materialize_action_time_ticket.py",
+                *pg_required,
                 "--output-json",
-                str(report_dir / "action-time-lane-materialization.json"),
-                "--materialization-dir",
-                str(report_dir / "action-time-lane-materialization"),
-                "--api-base",
-                api_base,
-                "--env-file",
-                str(env_file),
-                "--source",
-                "live_market",
-                "--allow-prepare-records",
+                str(report_dir / "action-time-ticket-materialization.json"),
+            ),
+        ),
+        RefreshStep(
+            "materialize_action_time_finalgate_preflight",
+            (
+                python,
+                "scripts/materialize_action_time_finalgate_preflight.py",
+                *pg_required,
+                "--output-json",
+                str(report_dir / "action-time-finalgate-preflight.json"),
+            ),
+        ),
+        RefreshStep(
+            "materialize_action_time_operation_layer_handoff",
+            (
+                python,
+                "scripts/materialize_action_time_operation_layer_handoff.py",
+                *pg_required,
+                "--output-json",
+                str(report_dir / "operation-layer-handoff.json"),
             ),
         ),
         RefreshStep(
@@ -316,9 +358,23 @@ def _refresh_steps(
                 "tokyo-runtime-signal-watcher",
             ),
         ),
-        RefreshStep("build_daily_table_after_account", (python, "scripts/build_daily_live_enablement_table.py", "--candidate-pool-json", str(candidate_pool))),
+        RefreshStep(
+            "build_daily_table_after_account",
+            (
+                python,
+                "scripts/build_daily_live_enablement_table.py",
+                *pg_required,
+            ),
+        ),
         RefreshStep("validate_daily_table_after_account", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
-        RefreshStep("build_single_lane_task_packet_after_account", (python, "scripts/build_single_lane_task_packet.py")),
+        RefreshStep(
+            "build_single_lane_task_packet_after_account",
+            (
+                python,
+                "scripts/build_single_lane_task_packet.py",
+                *pg_required,
+            ),
+        ),
         RefreshStep("validate_single_lane_task_packet_after_account", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
         RefreshStep(
             "build_goal_status",
@@ -329,8 +385,7 @@ def _refresh_steps(
                 str(report_dir),
                 "--release-manifest",
                 str(release_manifest),
-                "--candidate-pool-json",
-                str(candidate_pool),
+                *pg_required,
                 "--output-json",
                 str(goal),
             ),

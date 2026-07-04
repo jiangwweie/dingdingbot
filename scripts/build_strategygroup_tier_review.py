@@ -45,6 +45,7 @@ DEFAULT_OUTPUT_MD = (
 
 EXPECTED_TIERS = {
     "MPG-001": "L4",
+    "CPM-RO-001": "L3",
     "TEQ-001": "L2",
     "FBS-001": "L3",
     "SOR-001": "L3",

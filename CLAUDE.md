@@ -48,6 +48,30 @@ hand-edited source of truth. If a task changes StrategyGroup semantics, tie the
 change back to the StrategyGroup registry contract, handoff pack, runtime tier
 policy, Decision Ledger, or an explicit Codex-issued task card.
 
+After PG cutover, Claude must treat PG current state and append-only audit
+lineage as the production runtime truth for L2-L7 work. Generated JSON/MD,
+output artifacts, local cache, Single Lane Packet, old handoff JSON, and code
+fallback constants may be used only as exports, fixtures, archives,
+diagnostics, or seed provenance when the task explicitly allows it.
+
+Claude must not implement or preserve:
+
+```text
+production JSON/MD/output fallback
+long-term PG + file dual authority
+DEFAULT_SIDE_SCOPE-style side expansion
+unsupported long/short mirroring
+generated_at as event_time_ms
+replay event as fresh live signal
+FinalGate loose parameter input
+Operation Layer loose submit input
+watcher scope from Candidate Pool export
+server monitor production state from local cache
+```
+
+PG implementation tasks must include negative tests proving invalid paths are
+rejected, not only happy-path tests proving valid paths work.
+
 ## Current Product Direction
 
 The current target is a multi-StrategyGroup, multi-symbol pre-trade runtime:

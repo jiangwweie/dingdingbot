@@ -1,9 +1,9 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-07-02T09:10:00Z",
+  "updated_at_utc": "2026-07-04T00:00:00Z",
   "purpose": "Single source for production server-side StrategyGroup runtime monitor ownership.",
   "expected_runtime_head": "LOCAL_GIT_HEAD",
-  "server_side_runtime_monitor_check": "python3 scripts/run_tokyo_runtime_server_monitor.py --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json --dedupe-state-json /home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json",
+  "server_side_runtime_monitor_check": "python3 scripts/run_tokyo_runtime_server_monitor.py --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json --require-database-url",
   "server_side_runtime_monitor_service": "brc-runtime-monitor.service",
   "server_side_runtime_monitor_timer": "brc-runtime-monitor.timer",
   "signal_detection_source": "tokyo_server_side_runtime_monitor_feishu",

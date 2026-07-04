@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -88,6 +89,12 @@ def _loop_command(
         command.extend(["--strategy-family-id", strategy_family_id])
     if getattr(args, "candidate_universe_json", None):
         command.extend(["--candidate-universe-json", args.candidate_universe_json])
+    if getattr(args, "database_url", None):
+        command.extend(["--database-url", args.database_url])
+    if getattr(args, "require_database_url", False):
+        command.append("--require-database-url")
+    if getattr(args, "allow_non_postgres_for_test", False):
+        command.append("--allow-non-postgres-for-test")
     if args.allow_prepare_records:
         command.append("--allow-prepare-records")
     if args.include_artifacts:
@@ -438,6 +445,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--candidate-universe-json")
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)

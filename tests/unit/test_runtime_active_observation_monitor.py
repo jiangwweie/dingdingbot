@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
+
 from scripts import runtime_active_observation_monitor
 
 
@@ -33,6 +35,9 @@ def _args(**overrides):
         "runtime_instance_id": [],
         "strategy_family_id": [],
         "candidate_universe_json": None,
+        "database_url": "",
+        "require_database_url": False,
+        "allow_non_postgres_for_test": False,
         "strategy_handoff_dir": None,
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
@@ -288,7 +293,11 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
                 "candidate_universe": {
                     "MPG-001": ["OPUSDT", "SOLUSDT"],
                     "SOR-001": ["ETHUSDT"],
-                }
+                },
+                "side_scope": {
+                    "MPG-001": ["long"],
+                    "SOR-001": ["long"],
+                },
             }
         ),
         encoding="utf-8",
@@ -370,7 +379,7 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
         in packet["warnings"]
     )
     assert packet["candidate_universe_coverage"]["active_matched_row_count"] == 2
-    assert packet["candidate_universe_coverage"]["missing_row_count"] == 4
+    assert packet["candidate_universe_coverage"]["missing_row_count"] == 1
 
 
 def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
@@ -382,7 +391,12 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
                     "MPG-001": ["OPUSDT", "SOLUSDT"],
                     "BRF2-001": ["BTCUSDT"],
                     "SOR-001": ["ETHUSDT"],
-                }
+                },
+                "side_scope": {
+                    "MPG-001": ["long"],
+                    "BRF2-001": ["short"],
+                    "SOR-001": ["long"],
+                },
             }
         ),
         encoding="utf-8",
@@ -435,7 +449,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
         for row in coverage["rows"]
     }
     assert coverage["status"] == "incomplete"
-    assert coverage["expected_row_count"] == 8
+    assert coverage["expected_row_count"] == 4
     assert coverage["active_matched_row_count"] == 2
     assert rows[("MPG-001", "SOLUSDT", "long")]["state"] == "active_watcher_scope"
     assert rows[("SOR-001", "ETHUSDT", "long")]["state"] == "active_watcher_scope"
@@ -452,10 +466,81 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_active_monitor_candidate_universe_from_pg_control_state_seed():
+    control_state = {
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "candidate_scope": [
+            {
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "status": "active",
+            }
+            for strategy_group_id, symbols, sides in (
+                (
+                    "CPM-RO-001",
+                    ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
+                    ("long",),
+                ),
+                (
+                    "MPG-001",
+                    ("OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
+                    ("long",),
+                ),
+                (
+                    "MI-001",
+                    ("AVAXUSDT", "ETHUSDT", "SOLUSDT"),
+                    ("long",),
+                ),
+                (
+                    "SOR-001",
+                    ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"),
+                    ("long", "short"),
+                ),
+                (
+                    "BRF2-001",
+                    ("BTCUSDT", "AVAXUSDT", "ETHUSDT"),
+                    ("short",),
+                ),
+            )
+            for symbol in symbols
+            for side in sides
+        ],
+    }
+    universe, source = (
+        runtime_active_observation_monitor._candidate_universe_from_control_state(
+            control_state
+        )
+    )
+
+    assert source["source"] == "pg_runtime_control_state:candidate_scope"
+    assert source["source_mode"] == "db_backed"
+    assert universe["CPM-RO-001"] == ["AVAXUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT"]
+    assert universe["SOR-001"] == ["AVAXUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert source["side_scope"]["CPM-RO-001"] == ["long"]
+    assert source["side_scope"]["MPG-001"] == ["long"]
+    assert source["side_scope"]["MI-001"] == ["long"]
+    assert source["side_scope"]["SOR-001"] == ["long", "short"]
+    assert source["side_scope"]["BRF2-001"] == ["short"]
+
+
+def test_active_monitor_requires_pg_candidate_universe_when_requested():
+    with pytest.raises(RuntimeError, match="PG_DATABASE_URL is required"):
+        runtime_active_observation_monitor._candidate_universe_for_args(
+            _args(require_database_url=True)
+        )
+
+
 def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_path):
     candidate_pool = tmp_path / "candidate-pool.json"
     candidate_pool.write_text(
-        json.dumps({"candidate_universe": {"SOR-001": ["ETHUSDT"]}}),
+        json.dumps(
+            {
+                "candidate_universe": {"SOR-001": ["ETHUSDT"]},
+                "side_scope": {"SOR-001": ["long", "short"]},
+            }
+        ),
         encoding="utf-8",
     )
     client = _FakeClient(
@@ -515,7 +600,12 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
 def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_path):
     candidate_pool = tmp_path / "candidate-pool.json"
     candidate_pool.write_text(
-        json.dumps({"candidate_universe": {"SOR-001": ["SOLUSDT"]}}),
+        json.dumps(
+            {
+                "candidate_universe": {"SOR-001": ["SOLUSDT"]},
+                "side_scope": {"SOR-001": ["long"]},
+            }
+        ),
         encoding="utf-8",
     )
     handoff_dir = tmp_path / "handoffs"

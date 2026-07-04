@@ -37,7 +37,7 @@ current JSON files
 
 ## Evidence Scope
 
-This map is based on the current worktree as of 2026-07-03, using direct source
+This map is based on the current worktree as of 2026-07-04, using direct source
 inspection of:
 
 | Area | Files inspected |
@@ -48,7 +48,7 @@ inspection of:
 | runtime fact builders | `scripts/fetch_binance_usdm_public_facts.py`, `scripts/build_runtime_account_safe_facts.py`, `scripts/build_strategygroup_runtime_safety_state.py` |
 | detector/fresh-signal builders | `scripts/build_sor_session_scope_detector.py`, `scripts/build_strategy_fresh_signal_action_time_boundary.py`, `scripts/build_mi_trial_admission_decision.py`, `scripts/build_brf2_runtime_signal_facts.py` |
 | monitor/product refresh | `scripts/run_tokyo_runtime_server_monitor.py`, `scripts/refresh_strategygroup_runtime_product_state_artifacts.py` |
-| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py` |
+| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py`, `scripts/materialize_candidate_pool_action_time_lane.py`, `scripts/materialize_action_time_ticket.py` |
 
 This document focuses on the **Tokyo watcher post-step / pre-trade runtime /
 server monitor mainline**. It does not inventory every local diagnostic or
@@ -58,21 +58,21 @@ historical research script.
 
 | Order | Service step | Reads MD/JSON | Writes MD/JSON | Current role | PG target |
 | --- | --- | --- | --- | --- | --- |
-| 00-A | `runtime_signal_watcher_tick.py` | `latest-strategy-live-candidate-pool.json` as `--candidate-universe-json`, env files | `latest-status.json`, `watcher-tick.json`, `status-artifact.json`, `supervisor-artifact.json`, `operator-evidence.json`, `wakeup-evidence.json`, `notification-state.json` | Main watcher tick and runtime observation source | Reads DB candidate scope; writes watcher coverage, signal/fact events, diagnostics |
+| 00-A | `runtime_signal_watcher_tick.py --require-database-url` | PG runtime control state candidate scope via `runtime_active_observation_monitor.py`, env files | `latest-status.json`, `watcher-tick.json`, `status-artifact.json`, `supervisor-artifact.json`, `operator-evidence.json`, `wakeup-evidence.json`, `notification-state.json` | Main watcher tick and runtime observation source | Reads DB candidate scope; writes watcher coverage, signal/fact events, diagnostics |
 | 00-B | `build_runtime_signal_watcher_readiness_pack.py` | watcher report JSON such as `watcher-tick.json`, `wakeup-evidence.json`, `status-artifact.json`, `notification-state.json` | `deployment-readiness-artifact.json`, `post-signal-resume-pack.json` | Readiness/resume pack builder after watcher tick | Readiness export and action-time lane refs |
 | 40 | `runtime_signal_watcher_resume_dispatcher.py` | `post-signal-resume-pack.json` | `resume-dispatch-artifact.json`, optional `operation-layer-arm-evidence.json` | Action-time resume/dispatch bridge after fresh signal | `brc_action_time_lane_inputs`, execution-chain evidence refs, not current goal status |
 | 60 | `runtime_dry_run_audit_chain.py` | handoff JSON under `docs/current/strategy-group-handoffs`, `main-control-runtime-tier-policy.json` | `runtime-dry-run-audit-chain.json`, `dry-run-audit-chain/*.json` | Non-executing audit/rehearsal evidence | `brc_legacy_diagnostics` or rehearsal evidence refs; not production authority |
 | 70 | `brc-runtime-signal-watcher.service.d/70-goal-status.conf` | none in current worktree | none in current worktree | Retired final Goal Status writer | Must remain no-writer after `brc_goal_status_current` exists |
-| 80-A | first product-state shell | watcher `latest-status.json`, public-facts fallback JSON, prior generated output defaults | public facts, SOR detector, MI admission, BRF2 facts, runtime safety, Candidate Pool, Daily Table, Single Lane Packet | Rebuilds pre-trade control snapshots | DB fact/event writes plus current projection exports |
+| 80-A | first product-state sequence | watcher `latest-status.json` for runtime coverage validation, public-facts fallback JSON for detector/fact builders, PG runtime control state for Candidate Pool / Daily Table / Single Lane Packet | public facts, SOR detector, MI admission, BRF2 facts, runtime safety, Candidate Pool export, Daily Table export, Single Lane Packet export | Rebuilds pre-trade control exports from PG-backed current projections | DB fact/event writes plus current projection exports |
 | 80-B | `refresh_strategygroup_runtime_product_state_artifacts.py` | handoff dir, env file, dry-run/goal/live-facts/deploy report JSON | live-facts input, source-readiness, pilot status, chain closure, live-closure evidence, product refresh packet | Product-state and closure evidence refresh | fact/event rows, legacy diagnostics, closure evidence refs |
-| 80-C | final product-state shell | watcher `latest-status.json`, live-facts input, account-safe facts, Candidate Pool | account-safe facts, action-time boundary, Candidate Pool, Daily Table, Single Lane Packet, Goal Status | Final same-tick control refresh | owner projectors write current projections; JSON is export only |
+| 80-C | final product-state sequence | live-facts input and account-safe facts for account/action-time fact builders; PG runtime control state for Candidate Pool / materializers / Daily Table / Single Lane Packet / Goal Status | account-safe facts, action-time boundary, Candidate Pool export, action-time lane materialization export, Action-Time Ticket materialization export, Daily Table export, Single Lane Packet export, Goal Status export | Final same-tick control refresh; validators may read generated exports, but control builders and ticket issuer use PG current state | owner projectors write current projections and Action-Time Ticket rows; JSON is export only |
 
 ## Server Monitor Systemd Map
 
 | Step | Service command | Reads MD/JSON | Writes MD/JSON | Current role | PG target |
 | --- | --- | --- | --- | --- | --- |
-| monitor pre | `fetch_binance_usdm_public_facts.py` in `brc-runtime-monitor.service` | exchange API / fallback behavior | `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json/md` | Refresh public facts for monitor | `brc_runtime_fact_snapshots` plus export |
-| monitor main | `run_tokyo_runtime_server_monitor.py` | Daily Table JSON, Candidate Pool JSON, public facts JSON, account-safe facts JSON, watcher status JSON, deploy-health JSON, dedupe JSON | `latest-server-side-runtime-monitor.json`, `server-monitor-dedupe-state.json` | Production quiet/notify classification | `brc_server_monitor_runs`, `brc_server_monitor_notifications` |
+| monitor pre | none in current `brc-runtime-monitor.service` | none | none | Monitor no longer refreshes public-facts JSON as a prerequisite | Fact refresh belongs to watcher/fact projectors, not monitor |
+| monitor main | `run_tokyo_runtime_server_monitor.py --require-database-url` | PG runtime control state and systemd status | `latest-server-side-runtime-monitor.json` export | Production quiet/notify classification | `brc_server_monitor_runs`, `brc_server_monitor_notifications` |
 
 ## Current Mainline File Families
 
@@ -81,10 +81,10 @@ historical research script.
 | File | Current writers | Current readers | Current role | PG target | Key issue |
 | --- | --- | --- | --- | --- | --- |
 | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json` | watcher service | Candidate Pool, coverage validator, server monitor, systemd shell | Runtime active monitor / watcher scope | `brc_watcher_runtime_coverage` | File shape and freshness decide whether server-backed coverage exists |
-| `output/runtime-monitor/latest-binance-usdm-public-facts.json` and `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json` | `fetch_binance_usdm_public_facts.py` | SOR detector, MI admission, BRF2 facts, server monitor | Public market fact snapshot | `brc_runtime_fact_snapshots` | Same fact family is written under both app output and server report dirs |
+| `output/runtime-monitor/latest-binance-usdm-public-facts.json` and `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json` | `fetch_binance_usdm_public_facts.py` | SOR detector, MI admission, BRF2 facts, legacy diagnostics | Public market fact snapshot export | `brc_runtime_fact_snapshots` | Must not be read by production server monitor |
 | `output/runtime-monitor/latest-binance-usdm-public-facts.md` and server report MD counterpart | `fetch_binance_usdm_public_facts.py` | Owner/agent readability | Human export | Export only | Must not be read for runtime |
 | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-input.json` | product-state refresh | account-safe facts builder, product-state refresh | live/private fact input | `brc_runtime_fact_snapshots` | Currently both report input and downstream fact source |
-| `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json` | `build_runtime_account_safe_facts.py` | action-time boundary, server monitor | Account/open-order/balance safety facts | `brc_runtime_fact_snapshots` | Needs action-time freshness and profile/scope lineage |
+| `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json` | `build_runtime_account_safe_facts.py` | action-time boundary, legacy diagnostics | Account/open-order/balance safety facts export | `brc_runtime_fact_snapshots` / `brc_runtime_safety_state_snapshots` | Must not be read by production server monitor |
 
 ### Detector And Strategy Fact Files
 
@@ -102,8 +102,8 @@ historical research script.
 | --- | --- | --- | --- | --- | --- |
 | `output/runtime-monitor/latest-strategygroup-tradeability-decision.json/md` | `build_strategygroup_tradeability_decision.py` | Daily Table, Candidate Pool, Single Lane Packet evidence refs | Can-trade / first-blocker read model | DB-backed read model over registry, policy, facts, safety, readiness | Reads many file inputs and can become a broad secondary source |
 | `output/runtime-monitor/latest-replay-live-parity-audit.json/md` | `build_replay_live_parity_audit.py` | Tradeability, Daily Table, Candidate Pool, Single Lane Packet evidence refs | Replay/live parity read model | `brc_legacy_diagnostics`, detector parity rows, read-model export | Replay diagnostics can be mistaken for current live readiness |
-| `output/runtime-monitor/latest-strategy-live-candidate-pool.json/md` | `build_strategy_live_candidate_pool.py` | Daily Table, Goal Status, server monitor, validators | Per-symbol readiness and promotion view | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, export | Core read model is also used as source by later scripts |
-| `output/runtime-monitor/latest-daily-live-enablement-table.json/md` | `build_daily_live_enablement_table.py` | Single Lane Packet, server monitor, Candidate Pool default input | Main control table | `brc_control_read_model_snapshots` export over current projections | Feedback loop with Candidate Pool and Packet through latest files |
+| `output/runtime-monitor/latest-strategy-live-candidate-pool.json/md` | `build_strategy_live_candidate_pool.py` | validators, local diagnostics, human review exports | Per-symbol readiness and promotion view | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, export | Production monitor, watcher scope, Goal Status, and product refresh sequence must use PG current state rather than this export |
+| `output/runtime-monitor/latest-daily-live-enablement-table.json/md` | `build_daily_live_enablement_table.py` | validators, Single Lane Packet legacy/local mode, human review exports | Main control table | `brc_control_read_model_snapshots` export over current projections | Production sequence must use DB-backed builder path; latest file is export/diagnostic only |
 | `output/runtime-monitor/latest-single-lane-task-packet.json/md` | `build_single_lane_task_packet.py` | Candidate Pool default input, agents | One-lane task packet | task export only | Should never reclassify market waits into engineering closure |
 | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` | `build_strategygroup_runtime_goal_status.py` | product-state refresh, server monitor/Owner surfaces | Current goal summary | `brc_goal_status_current` plus export | Historically had multiple writers and optional Candidate Pool |
 | `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json` | `run_tokyo_runtime_server_monitor.py` | Owner/ops diagnostics | Server monitor run summary | `brc_server_monitor_runs` plus export | Monitor should read DB current projections, not output files |
@@ -140,6 +140,7 @@ historical research script.
 | `resume-dispatch-artifact.json` | resume dispatcher | Goal Status | resume dispatcher outcome | action-time/execution-chain evidence refs | Missing/mismatched names previously produced missing-artifact states |
 | `operation-layer-arm-evidence.json` | resume dispatcher when enabled | ops/execution diagnostics | Operation Layer arm evidence | official execution evidence table | Must not bypass FinalGate or Operation Layer |
 | `runtime-dry-run-audit-chain.json` | dry-run audit chain | Goal Status, product-state refresh | non-executing rehearsal audit | rehearsal evidence refs, `brc_legacy_diagnostics` | Useful for diagnostics, not production submit authority |
+| `action-time-ticket-materialization.json` | `materialize_action_time_ticket.py` | ops/diagnostics, test validators | PG Action-Time Ticket issuer export | `brc_action_time_tickets`, `brc_action_time_ticket_events` | Export only; FinalGate must consume `ticket_id` from PG, not this JSON |
 
 ## Critical Conflict Points
 
@@ -174,6 +175,7 @@ historical research script.
 | Replay/live parity | replay parity JSON | diagnostic/read-model rows with source replay/live detector refs | parity export |
 | Readiness and promotion | Candidate Pool JSON | `brc_pretrade_readiness_rows`, `brc_promotion_candidates` | Candidate Pool export |
 | Action-time lane | action-time boundary JSON, resume pack | `brc_action_time_lane_inputs` | action-time export |
+| Action-Time Ticket | loose prepare files / missing ticket identity | `brc_action_time_tickets`, `brc_action_time_ticket_events` | ticket materialization export |
 | Goal Status | report-dir goal-status JSON plus legacy artifacts | `brc_goal_status_current` | goal-status export |
 | Server monitor and notification | server monitor latest JSON, dedupe JSON | `brc_server_monitor_runs`, `brc_server_monitor_notifications` | monitor export |
 | Strategy governance/admission | handoff JSON, MI admission JSON, review snapshots | `brc_strategy_governance_decisions`, admission tables, registry/version tables | governance export |
@@ -243,7 +245,7 @@ Every generated JSON export should carry:
 | P0-C | close projection ownership | goal-status and latest output feedback loops | `brc_projection_runs`, `brc_current_projection_ownership`, `brc_goal_status_current` |
 | P0-D | migrate policy/scope | Owner auth JSON, tier policy JSON, candidate constants | owner policy, candidate scope, runtime bindings |
 | P0-E | migrate coverage/facts | watcher status JSON, public/account fact JSON | watcher coverage and fact snapshots |
-| P1-A | migrate readiness/promotion/action-time | Candidate Pool, action-time boundary, resume pack | readiness, promotion, action-time lane tables |
+| P1-A | migrate readiness/promotion/action-time/ticket | Candidate Pool, action-time boundary, resume pack, loose prepare identity | readiness, promotion, action-time lane, Action-Time Ticket tables |
 | P1-B | migrate strategy governance | handoff packs, MI admission, review snapshots | strategy governance, admission, registry/version tables |
 | P1-C | convert monitor and output to exports | server monitor JSON, dedupe JSON, output snapshots | monitor runs/notifications and export snapshots |
 

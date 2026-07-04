@@ -9,6 +9,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -192,6 +193,67 @@ router = APIRouter(
     tags=["Trading Console"],
     dependencies=[Depends(require_operator_session)],
 )
+
+
+class RuntimeActionTimeFinalGatePreflight(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    controlled_submit_plan_status: str
+    final_gate_verdict: str
+    ticket_preflight_status: str
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str
+    authority_boundary: str
+    submit_executed: bool = False
+    order_created: bool = False
+    exchange_called: bool = False
+    owner_bounded_execution_called: bool = False
+    order_lifecycle_called: bool = False
+    operation_layer_called: bool = False
+    exchange_write_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+
+
+class RuntimeOperationLayerHandoff(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    operation_layer_verdict: str
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    operation_layer_handoff_id: str | None = None
+    operation_submit_command_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    command_plan: dict[str, Any] = Field(default_factory=dict)
+    next_action: str
+    authority_boundary: str
+    submit_executed: bool = False
+    operation_layer_submit_called: bool = False
+    order_created: bool = False
+    exchange_called: bool = False
+    exchange_write_called: bool = False
+    owner_bounded_execution_called: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
 
 
 class _TradingConsoleLiveReadOnlyGateway:
@@ -2061,6 +2123,188 @@ async def runtime_execution_controlled_submit_preflight_for_authorization(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-action-time-finalgate-preflights/tickets/{ticket_id}",
+    response_model=RuntimeActionTimeFinalGatePreflight,
+)
+async def runtime_action_time_finalgate_preflight_for_ticket(
+    ticket_id: str,
+) -> RuntimeActionTimeFinalGatePreflight:
+    ticket_id = str(ticket_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    try:
+        report = _run_ticket_bound_action_time_finalgate_preflight(ticket_id)
+        return RuntimeActionTimeFinalGatePreflight(
+            **_ticket_bound_finalgate_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-operation-layer-handoffs/tickets/{ticket_id}/finalgate-passes/{finalgate_pass_id}",
+    response_model=RuntimeOperationLayerHandoff,
+)
+async def runtime_operation_layer_handoff_for_ticket(
+    ticket_id: str,
+    finalgate_pass_id: str,
+) -> RuntimeOperationLayerHandoff:
+    ticket_id = str(ticket_id or "").strip()
+    finalgate_pass_id = str(finalgate_pass_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    if not finalgate_pass_id:
+        raise HTTPException(status_code=400, detail="finalgate_pass_id_required")
+    try:
+        report = _run_ticket_bound_operation_layer_handoff(
+            ticket_id=ticket_id,
+            finalgate_pass_id=finalgate_pass_id,
+        )
+        return RuntimeOperationLayerHandoff(
+            **_ticket_bound_operation_layer_handoff_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
+    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound FinalGate")
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise RuntimeError("ticket-bound FinalGate requires PostgreSQL DSN")
+
+    from scripts.materialize_action_time_finalgate_preflight import (
+        materialize_action_time_finalgate_preflight,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_action_time_finalgate_preflight(
+                conn,
+                ticket_id=ticket_id,
+            )
+    finally:
+        engine.dispose()
+
+
+def _run_ticket_bound_operation_layer_handoff(
+    *,
+    ticket_id: str,
+    finalgate_pass_id: str,
+) -> dict[str, Any]:
+    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound Operation Layer handoff")
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise RuntimeError("ticket-bound Operation Layer handoff requires PostgreSQL DSN")
+
+    from scripts.materialize_action_time_operation_layer_handoff import (
+        materialize_action_time_operation_layer_handoff,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_action_time_operation_layer_handoff(
+                conn,
+                ticket_id=ticket_id,
+                finalgate_pass_id=finalgate_pass_id,
+            )
+    finally:
+        engine.dispose()
+
+
+def _ticket_bound_finalgate_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    preflight_status = str(report.get("status") or "")
+    passed = preflight_status in {"finalgate_ready", "finalgate_already_ready"}
+    blockers = [
+        str(item)
+        for item in (report.get("blockers") or [])
+        if str(item).strip()
+    ]
+    return {
+        "schema": "brc.runtime_action_time_finalgate_preflight_api.v1",
+        "status": (
+            "ready_for_controlled_submit_adapter" if passed else "blocked"
+        ),
+        "controlled_submit_plan_status": (
+            "ready_for_controlled_submit_adapter" if passed else "blocked"
+        ),
+        "final_gate_verdict": "pass" if passed else "block",
+        "ticket_preflight_status": preflight_status,
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "warnings": [],
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "submit_executed": False,
+        "order_created": False,
+        "exchange_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "operation_layer_called": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_operation_layer_handoff_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    handoff_status = str(report.get("status") or "")
+    ready = handoff_status in {
+        "operation_layer_handoff_ready",
+        "operation_layer_handoff_already_exists",
+    }
+    blockers = [
+        str(item)
+        for item in (report.get("blockers") or [])
+        if str(item).strip()
+    ]
+    return {
+        "schema": "brc.runtime_operation_layer_handoff_api.v1",
+        "status": "operation_layer_handoff_ready" if ready else "blocked",
+        "operation_layer_verdict": "ready" if ready else "block",
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "operation_layer_handoff_id": report.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "warnings": [],
+        "command_plan": dict(report.get("command_plan") or {}),
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "source_report": report,
+    }
 
 
 @router.get(

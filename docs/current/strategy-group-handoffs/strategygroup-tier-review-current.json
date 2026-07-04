@@ -1,6 +1,6 @@
 {
   "recommended_action_counts": {
-    "keep": 6,
+    "keep": 7,
     "park": 1,
     "promote_review_only": 1,
     "revise": 2
@@ -44,6 +44,31 @@
       "strategy_group_id": "MPG-001",
       "strategy_uncertainty_is_execution_blocker": false,
       "tier_review_source": "strategy_asset_state"
+    },
+    {
+      "authority_boundary": "tier_review_support_only; runtime_safety_gate_required; no_real_order_scope_change; no_exchange_write; no_live_profile_or_sizing_change",
+      "current_decision": "keep_current_tier_no_promotion_evidence",
+      "current_tier": "L3",
+      "do_not_promote_reason": "strategy uncertainty is not an execution blocker, but there is no current decision evidence for promotion or live scope change; Standalone CPM-LONG pullback-reclaim trial StrategyGroup; may observe and run non-executing rehearsal, but real submit still requires fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.",
+      "next_checkpoint": "fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence",
+      "owner_label": "CPM 回踩收复",
+      "owner_policy_required": false,
+      "owner_scoped_risk_acceptance_path": "may support trial eligibility or tier review, but cannot grant runtime authority or bypass runtime safety gates",
+      "promotion_scope": "not_applicable",
+      "promotion_target": "not_applicable",
+      "recommended_strategy_checkpoint": "keep",
+      "registry_trial_eligible": true,
+      "required_next_evidence": "fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence",
+      "safety_invariants": {
+        "calls_exchange_write": false,
+        "calls_finalgate": false,
+        "calls_operation_layer": false,
+        "places_order": false
+      },
+      "strategy_asset_state_reason": "",
+      "strategy_group_id": "CPM-RO-001",
+      "strategy_uncertainty_is_execution_blocker": false,
+      "tier_review_source": "registry_and_tier_policy"
     },
     {
       "authority_boundary": "tier_review_support_only; runtime_safety_gate_required; no_real_order_scope_change; no_exchange_write; no_live_profile_or_sizing_change",

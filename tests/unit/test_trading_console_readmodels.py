@@ -746,6 +746,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/runtime-execution-first-real-submit-evidence-preparations/authorizations/{authorization_id}",
         "/api/trading-console/runtime-execution-exchange-gateway-readiness",
         "/api/trading-console/runtime-execution-controlled-submit/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-operation-layer-handoffs/tickets/{ticket_id}/finalgate-passes/{finalgate_pass_id}",
     }
     routes = [
         route for route in router.routes

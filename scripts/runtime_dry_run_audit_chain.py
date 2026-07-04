@@ -49,10 +49,20 @@ SCHEMA = "brc.runtime_dry_run_audit_chain.v1"
 RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
-EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+ACTION_TIME_TICKET_ID = "dry-run-action-time-ticket-1"
+FINALGATE_PASS_ID = "dry-run-finalgate-pass-1"
+EXPECTED_STRATEGY_GROUPS = {
+    "CPM-RO-001",
+    "MPG-001",
+    "TEQ-001",
+    "FBS-001",
+    "PMR-001",
+    "SOR-001",
+}
 EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS = {"BTPC-001"}
 EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS = 120
 EXPECTED_RUNTIME_TIERS = {
+    "CPM-RO-001": "L3",
     "MPG-001": "L4",
     "TEQ-001": "L2",
     "FBS-001": "L3",
@@ -853,6 +863,7 @@ def _resume_pack_ready_for_finalgate(
         "status": "ready_for_action_time_final_gate",
         "runtime_instance_id": runtime_instance_id,
         "selected_runtime_instance_ids": [runtime_instance_id],
+        "ticket_id": ACTION_TIME_TICKET_ID,
         "signal_input_json": "/tmp/dry-run-signal-input.json",
         "shadow_candidate_id": "dry-run-shadow-candidate-1",
         "prepared_authorization_id": AUTHORIZATION_ID,
@@ -866,6 +877,7 @@ def _resume_pack_ready_for_finalgate(
                 "signal_input_json": "/tmp/dry-run-signal-input.json",
                 "shadow_candidate_id": "dry-run-shadow-candidate-1",
                 "prepared_authorization_id": AUTHORIZATION_ID,
+                "ticket_id": ACTION_TIME_TICKET_ID,
                 "status": "ready_for_action_time_final_gate",
             }
         ],
@@ -873,6 +885,7 @@ def _resume_pack_ready_for_finalgate(
             "status": "ready_for_action_time_final_gate",
             "runtime_instance_id": runtime_instance_id,
             "strategy_family_id": strategy_group_id,
+            "ticket_id": ACTION_TIME_TICKET_ID,
             "next_step": "run_official_action_time_final_gate_preflight",
             "allowed_auto_actions": [
                 "run_official_action_time_final_gate_preflight"
@@ -903,6 +916,7 @@ def _resume_pack_ready_for_non_executing_prepare(
         "status": "ready_for_non_executing_prepare",
         "runtime_instance_id": runtime_instance_id,
         "selected_runtime_instance_ids": [runtime_instance_id],
+        "ticket_id": ACTION_TIME_TICKET_ID,
         "signal_input_json": signal_input_json,
         "runtime_signal_summaries": [
             {
@@ -912,6 +926,7 @@ def _resume_pack_ready_for_non_executing_prepare(
                 "symbol": "MSTR/USDT:USDT",
                 "side": "long",
                 "signal_input_json": signal_input_json,
+                "ticket_id": ACTION_TIME_TICKET_ID,
                 "status": "ready_for_non_executing_prepare",
             }
         ],
@@ -919,6 +934,7 @@ def _resume_pack_ready_for_non_executing_prepare(
             "status": "ready_for_non_executing_prepare",
             "runtime_instance_id": runtime_instance_id,
             "strategy_family_id": strategy_group_id,
+            "ticket_id": ACTION_TIME_TICKET_ID,
             "next_step": "prepare_fresh_candidate_authorization_evidence",
             "allowed_auto_actions": [
                 "prepare_fresh_candidate_authorization_evidence"
@@ -946,6 +962,7 @@ def _resume_pack_finalgate_ready() -> dict[str, Any]:
         "dispatch_status": "official_finalgate_preflight_passed",
         "command_plan": {
             "prepared_authorization_id": FRESH_AUTHORIZATION_ID,
+            "ticket_id": ACTION_TIME_TICKET_ID,
             "api_base": "http://dry-run.local",
         },
         "finalgate_preflight_result": {
@@ -955,6 +972,8 @@ def _resume_pack_finalgate_ready() -> dict[str, Any]:
             "body": {
                 "status": "ready_for_controlled_submit_adapter",
                 "final_gate_verdict": "PASS",
+                "ticket_id": ACTION_TIME_TICKET_ID,
+                "finalgate_pass_id": FINALGATE_PASS_ID,
                 "blockers": [],
                 "submit_executed": False,
                 "order_created": False,
@@ -2030,12 +2049,49 @@ def _scenario_execution_attempt_rehearsal_prepare(output_dir: Path) -> dict[str,
 
     def request_json(**kwargs: Any) -> dict[str, Any]:
         finalgate_calls.append(dict(kwargs))
+        if kwargs.get("method") == "POST":
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "operation_layer_handoff_ready",
+                    "operation_layer_verdict": "ready",
+                    "ticket_id": ACTION_TIME_TICKET_ID,
+                    "finalgate_pass_id": FINALGATE_PASS_ID,
+                    "operation_layer_handoff_id": "dry-run-handoff-1",
+                    "operation_submit_command_id": "dry-run-operation-submit-1",
+                    "blockers": [],
+                    "warnings": [],
+                    "command_plan": {
+                        "kind": "ticket_bound_operation_layer_handoff",
+                        "ticket_id": ACTION_TIME_TICKET_ID,
+                        "finalgate_pass_id": FINALGATE_PASS_ID,
+                        "operation_submit_command_id": "dry-run-operation-submit-1",
+                        "requires_ticket_bound_protected_submit": True,
+                        "places_order": False,
+                        "exchange_write_called": False,
+                        "order_lifecycle_called": False,
+                    },
+                    "submit_executed": False,
+                    "operation_layer_submit_called": False,
+                    "order_created": False,
+                    "exchange_called": False,
+                    "exchange_write_called": False,
+                    "owner_bounded_execution_called": False,
+                    "order_lifecycle_called": False,
+                    "withdrawal_or_transfer_created": False,
+                    "live_profile_changed": False,
+                    "order_sizing_changed": False,
+                },
+            }
         return {
             "http_status": 200,
             "error": False,
             "body": {
                 "status": "ready_for_controlled_submit_adapter",
                 "final_gate_verdict": "PASS",
+                "ticket_id": ACTION_TIME_TICKET_ID,
+                "finalgate_pass_id": FINALGATE_PASS_ID,
                 "blockers": [],
                 "warnings": [],
                 "submit_executed": False,
@@ -2065,6 +2121,12 @@ def _scenario_execution_attempt_rehearsal_prepare(output_dir: Path) -> dict[str,
         dispatcher._session_cookie = original_session_cookie  # noqa: SLF001
         dispatcher._request_json = original_request_json  # noqa: SLF001
 
+    finalgate_preflight_calls = [
+        call for call in finalgate_calls if call.get("method") != "POST"
+    ]
+    operation_layer_handoff_calls = [
+        call for call in finalgate_calls if call.get("method") == "POST"
+    ]
     checks = {
         "prepare_runner_called_once": len(prepare_calls) == 1,
         "prepare_uses_runtime_and_signal_input": (
@@ -2077,12 +2139,19 @@ def _scenario_execution_attempt_rehearsal_prepare(output_dir: Path) -> dict[str,
             dispatch.get("non_executing_prepare_result", {}).get("status")
             == "ready_for_final_gate_preflight"
         ),
-        "dispatcher_reaches_finalgate_ready": (
-            dispatch.get("status") == "finalgate_ready"
+        "dispatcher_reaches_ticket_bound_operation_layer_handoff_ready": (
+            dispatch.get("status") == "operation_layer_ready"
+            and dispatch.get("dispatch_status")
+            == "ticket_bound_operation_layer_handoff_ready"
             and dispatch.get("dispatch_action")
-            == "prepare_official_operation_layer_submit"
+            == "prepare_ticket_bound_protected_submit"
+            and dispatch.get("ticket_id") == ACTION_TIME_TICKET_ID
+            and dispatch.get("finalgate_pass_id") == FINALGATE_PASS_ID
+            and dispatch.get("operation_submit_command_id")
+            == "dry-run-operation-submit-1"
         ),
-        "finalgate_called_once": len(finalgate_calls) == 1,
+        "finalgate_preflight_called_once": len(finalgate_preflight_calls) == 1,
+        "operation_layer_handoff_called_once": len(operation_layer_handoff_calls) == 1,
         "operation_layer_submit_not_called": (
             _operation_layer_submit_called(dispatch) is False
         ),

@@ -9,7 +9,6 @@ from pathlib import Path
 from scripts.build_strategygroup_quality_wave import (
     INCLUDED_GROUPS,
     build_quality_wave_artifact,
-    load_inputs,
     validate_artifact,
 )
 
@@ -20,8 +19,8 @@ REGISTRY_PATH = Path(
 TIER_REVIEW_PATH = Path(
     "docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json"
 )
-STRATEGY_ASSET_STATE_PATH = Path(
-    "output/runtime-monitor/latest-strategy-asset-state.json"
+CURRENT_QUALITY_WAVE_PATH = Path(
+    "docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json"
 )
 TIER_POLICY_PATH = Path(
     "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
@@ -32,15 +31,60 @@ REQUIRED_FACTS_PATH = Path(
 LOCAL_MONITOR_PATH = Path("output/runtime-monitor/latest-local-monitor-sequence.json")
 
 
-def _artifact():
-    inputs = load_inputs(
-        REGISTRY_PATH,
-        TIER_REVIEW_PATH,
-        STRATEGY_ASSET_STATE_PATH,
-        TIER_POLICY_PATH,
-        REQUIRED_FACTS_PATH,
-        LOCAL_MONITOR_PATH,
+def _strategy_asset_state_source() -> dict:
+    current = json.loads(CURRENT_QUALITY_WAVE_PATH.read_text(encoding="utf-8"))
+    asset_rows = []
+    for row in current["rows"]:
+        decision = row["current_decision"]
+        if decision == "promote_review_only":
+            decision = "promote"
+        asset_rows.append(
+            {
+                "strategy_group_id": row["strategy_group_id"],
+                "current_tier": row["current_tier"],
+                "current_decision": decision,
+                "promotion_scope": row["promotion_scope"],
+                "promotion_target": row["promotion_target"],
+                "required_next_evidence": row["required_next_evidence"],
+                "next_checkpoint": row["next_engineering_checkpoint"],
+                "reason": row["do_not_promote_reason"],
+            }
+        )
+    return {
+        "status": "strategy_asset_state_ready",
+        "strategy_asset_state": {
+            "status": "strategy_asset_state_ready",
+            "asset_rows": asset_rows,
+        },
+    }
+
+
+def _write_strategy_asset_state_source(tmp_path: Path) -> Path:
+    path = tmp_path / "strategy-asset-state-source.json"
+    path.write_text(
+        json.dumps(_strategy_asset_state_source(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
+    return path
+
+
+def _inputs() -> tuple[dict, dict, dict, dict, str, dict]:
+    return (
+        json.loads(REGISTRY_PATH.read_text(encoding="utf-8")),
+        json.loads(TIER_REVIEW_PATH.read_text(encoding="utf-8")),
+        _strategy_asset_state_source(),
+        json.loads(TIER_POLICY_PATH.read_text(encoding="utf-8")),
+        REQUIRED_FACTS_PATH.read_text(encoding="utf-8")
+        if REQUIRED_FACTS_PATH.exists()
+        else "",
+        json.loads(LOCAL_MONITOR_PATH.read_text(encoding="utf-8"))
+        if LOCAL_MONITOR_PATH.exists()
+        else {},
+    )
+
+
+def _artifact():
+    inputs = _inputs()
     return build_quality_wave_artifact(*inputs)
 
 
@@ -132,16 +176,7 @@ def test_quality_wave_keeps_brf_promote_review_scoped() -> None:
 
 
 def test_quality_wave_uses_strategy_asset_state_before_injected_legacy_rows() -> None:
-    inputs = list(
-        load_inputs(
-            REGISTRY_PATH,
-            TIER_REVIEW_PATH,
-            STRATEGY_ASSET_STATE_PATH,
-            TIER_POLICY_PATH,
-            REQUIRED_FACTS_PATH,
-            LOCAL_MONITOR_PATH,
-        )
-    )
+    inputs = list(_inputs())
     tier_review = deepcopy(inputs[1])
     strategy_asset_state_source = deepcopy(inputs[2])
     for row in tier_review["rows"]:
@@ -167,16 +202,7 @@ def test_quality_wave_uses_strategy_asset_state_before_injected_legacy_rows() ->
 
 
 def test_quality_wave_fails_closed_without_strategy_asset_state_rows() -> None:
-    inputs = list(
-        load_inputs(
-            REGISTRY_PATH,
-            TIER_REVIEW_PATH,
-            STRATEGY_ASSET_STATE_PATH,
-            TIER_POLICY_PATH,
-            REQUIRED_FACTS_PATH,
-            LOCAL_MONITOR_PATH,
-        )
-    )
+    inputs = list(_inputs())
     strategy_asset_state_source = deepcopy(inputs[2])
     strategy_asset_state_source.pop("strategy_asset_state")
     inputs[2] = strategy_asset_state_source
@@ -273,16 +299,7 @@ def test_negative_unknown_gap_class_is_rejected() -> None:
 
 
 def test_contradiction_detection_reports_registry_tier_drift() -> None:
-    inputs = list(
-        load_inputs(
-            REGISTRY_PATH,
-            TIER_REVIEW_PATH,
-            STRATEGY_ASSET_STATE_PATH,
-            TIER_POLICY_PATH,
-            REQUIRED_FACTS_PATH,
-            LOCAL_MONITOR_PATH,
-        )
-    )
+    inputs = list(_inputs())
     registry = deepcopy(inputs[0])
     for row in registry["rows"]:
         if row["strategy_group_id"] == "BTPC-001":
@@ -298,13 +315,14 @@ def test_contradiction_detection_reports_registry_tier_drift() -> None:
     )
 
 
-def test_check_mode_passes_against_generated_files() -> None:
+def test_check_mode_passes_against_generated_files(tmp_path: Path) -> None:
+    strategy_asset_state_path = _write_strategy_asset_state_source(tmp_path)
     result = subprocess.run(
         [
             sys.executable,
             "scripts/build_strategygroup_quality_wave.py",
             "--strategy-asset-state-json",
-            str(STRATEGY_ASSET_STATE_PATH),
+            str(strategy_asset_state_path),
             "--local-monitor-json",
             str(LOCAL_MONITOR_PATH),
             "--check",
@@ -325,13 +343,14 @@ def test_check_mode_passes_against_generated_files() -> None:
 def test_quality_wave_cli_omitted_local_monitor_stays_missing(tmp_path: Path) -> None:
     output_json = tmp_path / "quality-wave.json"
     output_md = tmp_path / "quality-wave.md"
+    strategy_asset_state_path = _write_strategy_asset_state_source(tmp_path)
 
     result = subprocess.run(
         [
             sys.executable,
             "scripts/build_strategygroup_quality_wave.py",
             "--strategy-asset-state-json",
-            str(STRATEGY_ASSET_STATE_PATH),
+            str(strategy_asset_state_path),
             "--output-json",
             str(output_json),
             "--output-md",

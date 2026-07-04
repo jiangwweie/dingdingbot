@@ -49,6 +49,60 @@ def _legacy_monitor_checks(report: dict) -> dict:
     return report.get("checks", {})
 
 
+def _owner_pretrade_authorization() -> dict:
+    required_gates = [
+        "fresh_signal",
+        "required_facts",
+        "server_runtime_coverage",
+        "action_time_facts",
+        "finalgate",
+        "operation_layer",
+        "protection",
+        "reconciliation",
+    ]
+    strategy_groups = {
+        "CPM-RO-001": (["ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"], ["long"], "scoped", []),
+        "MPG-001": (["OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"], ["long"], "scoped", []),
+        "MI-001": (["AVAXUSDT", "ETHUSDT", "SOLUSDT"], ["long"], "scoped", []),
+        "SOR-001": (["ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"], ["long", "short"], "scoped", []),
+        "BRF2-001": (
+            ["BTCUSDT", "AVAXUSDT", "ETHUSDT"],
+            ["short"],
+            "conditional_hard_gated",
+            ["short_side_disable_clear", "squeeze_clear", "liquidity_clear"],
+        ),
+    }
+    return {
+        "schema": "brc.owner_pretrade_runtime_authorization.v0",
+        "status": "owner_pretrade_runtime_authorization_recorded",
+        "pretrade_candidate_allowed": True,
+        "action_time_rehearsal_allowed": True,
+        "v0_single_action_time_lane": True,
+        "v0_single_real_submit_intent": True,
+        "strategy_groups": {
+            strategy_group_id: {
+                "candidate_symbols": symbols,
+                "side_scope": sides,
+                "pretrade_candidate_allowed": True,
+                "action_time_rehearsal_allowed": True,
+                "live_submit_allowed": live_submit_allowed,
+                "real_submit_required_gates": [*required_gates, *extra_gates],
+            }
+            for strategy_group_id, (
+                symbols,
+                sides,
+                live_submit_allowed,
+                extra_gates,
+            ) in strategy_groups.items()
+        },
+        "authority_boundary": (
+            "owner_pretrade_authorization_only; finalgate_required; "
+            "operation_layer_required; no_exchange_write_bypass; "
+            "no_live_profile_or_sizing_change"
+        ),
+    }
+
+
 def test_local_monitor_sequence_run_step_reads_output_json_once(
     tmp_path: Path,
     monkeypatch,
@@ -2448,6 +2502,7 @@ def _maybe_write_strategygroup_closure_step(
                 if runtime_active_monitor_path.exists()
                 else {}
             ),
+            owner_pretrade_authorization=_owner_pretrade_authorization(),
             generated_at_utc="2026-07-01T00:00:00+00:00",
         )
         output_json.write_text(json.dumps(artifact), encoding="utf-8")

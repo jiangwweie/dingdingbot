@@ -249,6 +249,61 @@ belongs to explicit Owner policy or current scoped decisions. Generated monitor,
 replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
 into authority.
 
+## PG Cutover Source Discipline
+
+After PG cutover, agents and skills must treat PG current state plus append-only
+audit lineage as the explanation authority for L2-L7 runtime state.
+
+Required source order for runtime explanation:
+
+```text
+PG current state
+-> PG audit / lineage events
+-> DB-backed read-model exports
+-> generated JSON/MD exports for display only
+-> archive / replay / old artifacts only as historical evidence
+```
+
+Agents must not treat these as production authority after cutover:
+
+```text
+latest-*.json
+repo MD policy files
+output artifacts
+Single Lane Packet
+local monitor cache
+Codex heartbeat state
+old StrategyGroup handoff JSON
+old DEFAULT_SIDE_SCOPE / code fallback
+```
+
+When PG lineage exists, no-trade, chain-position, forensics, review, and monitor
+analysis must explain:
+
+```text
+stage_reached
+first_blocker
+plain_language_reason
+next_system_action
+owner_action_required
+signal / promotion / lane / ticket / order lineage refs
+```
+
+For PG implementation tasks, prompts must explicitly forbid:
+
+```text
+MVP or transitional runtime fallback
+long-term PG + JSON dual authority
+FinalGate loose parameter input
+Operation Layer loose submit input
+unsupported side mirroring
+generated_at as event_time_ms
+replay event as fresh live signal
+JSON export as runtime scope source
+```
+
+Reviewer agents must check negative constraints, not only happy paths.
+
 Strategy-research artifacts from `/Users/jiangwei/Documents/final-strategy-research`
 must not become unconditional runtime monitor dependencies. Main control should
 first copy, normalize, or absorb the research package into a final-owned

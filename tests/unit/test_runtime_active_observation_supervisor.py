@@ -18,6 +18,10 @@ def _args(tmp_path, **overrides):
         "source": "live_market",
         "runtime_instance_id": [],
         "strategy_family_id": [],
+        "candidate_universe_json": None,
+        "database_url": "",
+        "require_database_url": False,
+        "allow_non_postgres_for_test": False,
         "max_iterations": 2,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 180.0,
@@ -153,6 +157,49 @@ def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
     assert "--strategy-family-id" in calls[0]
     assert "MPG-001" in calls[0]
     assert "TEQ-001" in calls[0]
+
+
+def test_supervisor_passes_pg_candidate_universe_flags_to_loop(tmp_path):
+    calls = []
+
+    def runner(command, stdout_path):
+        calls.append(command)
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-artifact.json",
+                {
+                    "status": "waiting_for_signal",
+                    "safety_invariants": {},
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-artifact.json",
+                {
+                    "status": "waiting_for_ready_final_gate_preflight",
+                    "safety_invariants": {},
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    runtime_active_observation_supervisor.build_supervisor_artifact(
+        _args(
+            tmp_path,
+            database_url="postgresql://unit/runtime",
+            require_database_url=True,
+        ),
+        runner=runner,
+    )
+
+    assert "--database-url" in calls[0]
+    assert "postgresql://unit/runtime" in calls[0]
+    assert "--require-database-url" in calls[0]
+    assert "--candidate-universe-json" not in calls[0]
 
 
 def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):

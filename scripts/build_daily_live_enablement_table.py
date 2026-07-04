@@ -10,9 +10,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -21,25 +24,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     FileBackedRuntimeControlStateRepository,
+    PgBackedRuntimeControlStateRepository,
 )
 
-DEFAULT_TRADEABILITY_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-tradeability-decision.json"
-)
-DEFAULT_REPLAY_LIVE_PARITY_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-replay-live-parity-audit.json"
-)
-DEFAULT_ACTION_TIME_BOUNDARY_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
-)
-DEFAULT_MI_TRIAL_ADMISSION_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.json"
-)
-DEFAULT_RUNTIME_SAFETY_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-runtime-safety-state.json"
-)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
 )
@@ -124,17 +111,11 @@ BLOCKER_STAGE_TIER = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tradeability-json", default=str(DEFAULT_TRADEABILITY_JSON))
-    parser.add_argument(
-        "--replay-live-parity-json", default=str(DEFAULT_REPLAY_LIVE_PARITY_JSON)
-    )
-    parser.add_argument(
-        "--action-time-boundary-json", default=str(DEFAULT_ACTION_TIME_BOUNDARY_JSON)
-    )
-    parser.add_argument(
-        "--mi-trial-admission-json", default=str(DEFAULT_MI_TRIAL_ADMISSION_JSON)
-    )
-    parser.add_argument("--runtime-safety-json", default=str(DEFAULT_RUNTIME_SAFETY_JSON))
+    parser.add_argument("--tradeability-json")
+    parser.add_argument("--replay-live-parity-json")
+    parser.add_argument("--action-time-boundary-json")
+    parser.add_argument("--mi-trial-admission-json")
+    parser.add_argument("--runtime-safety-json")
     parser.add_argument(
         "--candidate-pool-json",
         default="",
@@ -142,27 +123,104 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
+    parser.add_argument(
+        "--database-url",
+        default=os.getenv("PG_DATABASE_URL", ""),
+        help=(
+            "PostgreSQL DSN for the DB-backed production current source. "
+            "When omitted, the legacy file path is used only for local migration "
+            "comparison."
+        ),
+    )
+    parser.add_argument(
+        "--require-database-url",
+        action="store_true",
+        help="Fail instead of falling back to legacy JSON inputs when PG_DATABASE_URL is absent.",
+    )
+    parser.add_argument(
+        "--allow-local-file-diagnostic",
+        action="store_true",
+        help=(
+            "Allow explicit local JSON inputs for migration diagnostics only. "
+            "Production current Daily Table must use PG."
+        ),
+    )
+    parser.add_argument(
+        "--allow-non-postgres-for-test",
+        action="store_true",
+        help="Allow SQLite/non-PG DSNs only in tests.",
+    )
     args = parser.parse_args(argv)
 
-    repository = FileBackedRuntimeControlStateRepository()
-    inputs = repository.daily_table_inputs(
-        tradeability_json=Path(args.tradeability_json),
-        replay_live_parity_json=Path(args.replay_live_parity_json),
-        action_time_boundary_json=Path(args.action_time_boundary_json),
-        mi_trial_admission_json=Path(args.mi_trial_admission_json),
-        runtime_safety_json=Path(args.runtime_safety_json),
-        candidate_pool_json=Path(args.candidate_pool_json)
-        if args.candidate_pool_json
-        else None,
-    )
-    artifact = build_daily_live_enablement_table(
-        tradeability=inputs["tradeability"],
-        replay_live_parity=inputs["replay_live_parity"],
-        action_time_boundary=inputs["action_time_boundary"],
-        mi_trial_admission=inputs["mi_trial_admission"],
-        runtime_safety=inputs["runtime_safety"],
-        candidate_pool=inputs["candidate_pool"],
-    )
+    if args.require_database_url and not args.database_url:
+        print(
+            "ERROR: PG_DATABASE_URL is required for DB-backed Daily Table",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.database_url:
+        if not args.database_url.startswith(
+            ("postgresql://", "postgresql+psycopg://")
+        ) and not args.allow_non_postgres_for_test:
+            print(
+                "ERROR: DB-backed Daily Table requires PostgreSQL DSN",
+                file=sys.stderr,
+            )
+            return 2
+        engine = sa.create_engine(args.database_url)
+        try:
+            with engine.connect() as conn:
+                repository = PgBackedRuntimeControlStateRepository(conn)
+                artifact = build_daily_live_enablement_table_from_control_state(
+                    repository.read_control_state(),
+                )
+        finally:
+            engine.dispose()
+    else:
+        if not args.allow_local_file_diagnostic:
+            print(
+                "ERROR: PG_DATABASE_URL is required for DB-backed Daily Table; "
+                "use --allow-local-file-diagnostic only for explicit local diagnostics",
+                file=sys.stderr,
+            )
+            return 2
+        required_local_inputs = {
+            "--tradeability-json": args.tradeability_json,
+            "--replay-live-parity-json": args.replay_live_parity_json,
+            "--action-time-boundary-json": args.action_time_boundary_json,
+            "--mi-trial-admission-json": args.mi_trial_admission_json,
+            "--runtime-safety-json": args.runtime_safety_json,
+        }
+        missing_local_inputs = [
+            flag for flag, value in required_local_inputs.items() if not value
+        ]
+        if missing_local_inputs:
+            print(
+                "ERROR: explicit local diagnostic inputs required: "
+                + ", ".join(missing_local_inputs),
+                file=sys.stderr,
+            )
+            return 2
+        repository = FileBackedRuntimeControlStateRepository()
+        inputs = repository.daily_table_inputs(
+            tradeability_json=Path(args.tradeability_json),
+            replay_live_parity_json=Path(args.replay_live_parity_json),
+            action_time_boundary_json=Path(args.action_time_boundary_json),
+            mi_trial_admission_json=Path(args.mi_trial_admission_json),
+            runtime_safety_json=Path(args.runtime_safety_json),
+            candidate_pool_json=Path(args.candidate_pool_json)
+            if args.candidate_pool_json
+            else None,
+        )
+        artifact = build_daily_live_enablement_table(
+            tradeability=inputs["tradeability"],
+            replay_live_parity=inputs["replay_live_parity"],
+            action_time_boundary=inputs["action_time_boundary"],
+            mi_trial_admission=inputs["mi_trial_admission"],
+            runtime_safety=inputs["runtime_safety"],
+            candidate_pool=inputs["candidate_pool"],
+        )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)
@@ -287,6 +345,108 @@ def build_daily_live_enablement_table(
             "live_profile_changed": False,
             "order_sizing_changed": False,
         },
+    }
+
+
+def build_daily_live_enablement_table_from_control_state(
+    control_state: dict[str, Any],
+    *,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    if control_state.get("source_mode") != "db_backed":
+        raise ValueError("Daily Table production path requires DB-backed state")
+    generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
+    from scripts.build_strategy_live_candidate_pool import (  # noqa: PLC0415
+        build_strategy_live_candidate_pool_from_control_state,
+        build_strategy_live_candidate_pool_inputs_from_control_state,
+    )
+
+    candidate_pool_inputs = build_strategy_live_candidate_pool_inputs_from_control_state(
+        control_state,
+        generated_at_utc=generated,
+    )
+    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc=generated,
+    )
+    artifact = build_daily_live_enablement_table(
+        tradeability=candidate_pool_inputs["tradeability"],
+        replay_live_parity=candidate_pool_inputs["replay_live_parity"],
+        action_time_boundary=candidate_pool_inputs["action_time_boundary"],
+        mi_trial_admission=_pg_mi_trial_admission_projection(control_state),
+        runtime_safety=_pg_runtime_safety_projection(control_state),
+        candidate_pool=candidate_pool,
+        generated_at_utc=generated,
+    )
+    artifact["source_mode"] = "db_backed"
+    artifact["projection_target"] = "production_current"
+    artifact["control_state_watermark"] = {
+        "schema": str(control_state.get("schema") or ""),
+        "table_counts": _as_dict(control_state.get("table_counts")),
+    }
+    artifact["source_validation"] = {
+        **_as_dict(artifact.get("source_validation")),
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "legacy_file_authority": False,
+    }
+    return artifact
+
+
+def _pg_mi_trial_admission_projection(control_state: dict[str, Any]) -> dict[str, Any]:
+    mi_rows = [
+        row
+        for row in _dict_rows(control_state.get("candidate_scope"))
+        if row.get("strategy_group_id") == "MI-001" and row.get("status") == "active"
+    ]
+    return {
+        "schema": "brc.mi_trial_admission_decision.v1",
+        "status": "mi_trial_admission_decision_ready",
+        "strategy_group_id": "MI-001",
+        "trial_admission_decision": "pg_runtime_control_state_scope_recorded",
+        "side": "long",
+        "symbol_scope": {
+            "reviewed_symbols": sorted(
+                {str(row.get("symbol") or "") for row in mi_rows if row.get("symbol")}
+            )
+        },
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, Any]:
+    rows = sorted(
+        _dict_rows(control_state.get("runtime_safety_state")),
+        key=lambda row: int(row.get("created_at_ms") or row.get("snapshot_at_ms") or 0),
+        reverse=True,
+    )
+    if rows:
+        row = rows[0]
+        submit_allowed = row.get("submit_allowed") is True
+        return {
+            "schema": "brc.strategygroup_runtime_safety_state.v1",
+            "status": "live_submit_ready"
+            if submit_allowed
+            else "runtime_safety_state_ready",
+            "runtime_safety_state": {
+                "live_submit_ready": submit_allowed,
+                "live_submit_ready_false_reason": str(
+                    row.get("safety_state")
+                    or row.get("first_blocker_class")
+                    or "submit_allowed_false"
+                ),
+                "snapshot_id": str(row.get("safety_snapshot_id") or ""),
+            },
+            "source_mode": "db_backed",
+        }
+    return {
+        "schema": "brc.strategygroup_runtime_safety_state.v1",
+        "status": "runtime_safety_state_ready",
+        "runtime_safety_state": {
+            "live_submit_ready": False,
+            "live_submit_ready_false_reason": "pg_runtime_safety_snapshot_missing",
+        },
+        "source_mode": "db_backed",
     }
 
 
@@ -447,7 +607,7 @@ def _candidate_pool_evidence(
     coverage = _as_dict(candidate_pool_row.get("server_runtime_coverage"))
     coverage_state = str(coverage.get("state") or "unknown")
     return (
-        "output/runtime-monitor/latest-strategy-live-candidate-pool.json:"
+        "candidate_pool_input:"
         f"{strategy_group_id}/{candidate_pool_row.get('symbol') or 'strategy_scope'} "
         f"first_blocker={first_blocker} "
         f"server_runtime_coverage={coverage_state}"
@@ -625,7 +785,7 @@ def _evidence(
             else ""
         )
         return (
-            "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+            "replay_live_parity_input:"
             f"{strategy_group_id}/{parity_row.get('symbol') or 'strategy_scope'} "
             f"first_blocker={first_blocker} "
             f"{source_detail}"
@@ -633,17 +793,17 @@ def _evidence(
         )
     if action_row:
         return (
-            "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json:"
+            "action_time_boundary_input:"
             f"{strategy_group_id} first_blocker={action_row.get('first_blocker')}"
         )
     if strategy_group_id == "MI-001" and mi_trial_admission:
         return (
-            "output/runtime-monitor/latest-mi-trial-admission-decision.json:"
+            "mi_trial_admission_input:"
             f"trial_admission_decision={mi_trial_admission.get('trial_admission_decision')}"
         )
     detail = str(tradeability_row.get("first_blocker_detail") or first_blocker)
     return (
-        "output/runtime-monitor/latest-strategygroup-tradeability-decision.json:"
+        "tradeability_decision_input:"
         f"{strategy_group_id} {detail}"
     )
 

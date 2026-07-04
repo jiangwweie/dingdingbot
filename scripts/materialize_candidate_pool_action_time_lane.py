@@ -18,15 +18,21 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Callable
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    PgBackedRuntimeControlStateRepository,
+)
 from scripts import runtime_next_attempt_observation_api_prepare_flow as prepare_flow  # noqa: E402
 from scripts.build_runtime_observation_operator_evidence import (  # noqa: E402
     build_operator_evidence_from_path,
@@ -36,9 +42,6 @@ from scripts.build_runtime_observation_wakeup_evidence import (  # noqa: E402
 )
 
 
-DEFAULT_CANDIDATE_POOL_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
-)
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "action-time-lane-materialization.json"
 LIVE_SUBMIT_SCOPE_STATES = {"live_submit_allowed"}
@@ -59,6 +62,7 @@ class LaneSelection:
     symbol: str
     side: str
     fresh_signal_timestamp_utc: str
+    fresh_signal_timestamp_source: str
     lane_fingerprint: str
     runtime_profile: dict[str, Any]
 
@@ -68,6 +72,70 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _candidate_pool_from_pg(
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool,
+) -> dict[str, Any]:
+    if not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not allow_non_postgres_for_test:
+        raise ValueError("DB-backed action-time lane materializer requires PostgreSQL DSN")
+    from scripts.build_strategy_live_candidate_pool import (  # noqa: PLC0415
+        build_strategy_live_candidate_pool_from_control_state,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            return build_strategy_live_candidate_pool_from_control_state(
+                repository.read_control_state()
+            )
+    finally:
+        engine.dispose()
+
+
+def _candidate_pool_for_args(
+    *,
+    args: argparse.Namespace,
+    candidate_pool_json: Path | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    database_url = str(getattr(args, "database_url", "") or "")
+    if getattr(args, "require_database_url", False) and not database_url:
+        raise ValueError("PG_DATABASE_URL is required for DB-backed action-time lane materializer")
+    if database_url:
+        return (
+            _candidate_pool_from_pg(
+                database_url=database_url,
+                allow_non_postgres_for_test=bool(
+                    getattr(args, "allow_non_postgres_for_test", False)
+                ),
+            ),
+            {
+                "source_mode": "db_backed",
+                "projection_target": "production_current",
+                "source": "pg_runtime_control_state:strategy_live_candidate_pool",
+                "candidate_pool_json_read": False,
+            },
+        )
+    if not getattr(args, "allow_local_file_diagnostic", False):
+        raise ValueError(
+            "PG_DATABASE_URL is required for DB-backed action-time lane materializer; "
+            "use --allow-local-file-diagnostic only for explicit local diagnostics"
+        )
+    if candidate_pool_json is None:
+        raise ValueError("explicit --candidate-pool-json is required for local diagnostics")
+    return (
+        _read_json(candidate_pool_json),
+        {
+            "source_mode": "local_file_comparison",
+            "source": str(candidate_pool_json),
+            "candidate_pool_json_read": True,
+        },
+    )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -101,6 +169,19 @@ def _safe_file_id(value: str) -> str:
         .replace(":", "_")
         .replace(" ", "_")
         .replace("\\", "_")
+    )
+
+
+def _materialization_key(selection: LaneSelection) -> str:
+    return "|".join(
+        [
+            selection.strategy_group_id,
+            selection.symbol,
+            selection.side,
+            selection.fresh_signal_timestamp_utc,
+            selection.lane_fingerprint,
+            selection.runtime_instance_id,
+        ]
     )
 
 
@@ -155,11 +236,20 @@ def _select_lane(candidate_pool: dict[str, Any]) -> tuple[LaneSelection | None, 
     if not side:
         blockers.append("action_time_lane_side_missing")
     fresh_signal_timestamp_utc = str(lane.get("fresh_signal_timestamp_utc") or "").strip()
+    fresh_signal_timestamp_source = str(
+        lane.get("fresh_signal_timestamp_source") or ""
+    ).strip()
     lane_fingerprint = str(lane.get("lane_fingerprint") or "").strip()
     if not fresh_signal_timestamp_utc:
         blockers.append("action_time_lane_fresh_signal_timestamp_missing")
+    if not fresh_signal_timestamp_source:
+        blockers.append("action_time_lane_fresh_signal_timestamp_source_missing")
+    if fresh_signal_timestamp_source == "action_time_boundary:_artifact_generated_at_utc":
+        blockers.append("action_time_lane_fresh_signal_timestamp_is_artifact_time")
     if not lane_fingerprint:
         blockers.append("action_time_lane_fingerprint_missing")
+    if lane.get("strategy_signal_fact_side_supported") is not True:
+        blockers.append("action_time_lane_strategy_signal_fact_side_unsupported")
     runtime_profile = _as_dict(lane.get("runtime_profile"))
     for key in ("target_notional_usdt", "max_notional", "leverage"):
         if not str(runtime_profile.get(key) or "").strip():
@@ -180,6 +270,7 @@ def _select_lane(candidate_pool: dict[str, Any]) -> tuple[LaneSelection | None, 
             symbol=str(symbol),
             side=str(side),
             fresh_signal_timestamp_utc=fresh_signal_timestamp_utc,
+            fresh_signal_timestamp_source=fresh_signal_timestamp_source,
             lane_fingerprint=lane_fingerprint,
             runtime_profile=runtime_profile,
         ),
@@ -223,6 +314,7 @@ def _prepare_args(
         context_id=(
             "candidate-pool-action-time-lane:"
             f"{selection.strategy_group_id}:{selection.symbol}:{selection.side}:"
+            f"{selection.fresh_signal_timestamp_utc}:"
             f"{selection.lane_fingerprint}"
         ),
         owner_operator_id=args.owner_operator_id,
@@ -317,7 +409,9 @@ def _upsert_runtime_summary(
         _as_dict(item)
         for item in _as_list(status_artifact.get("runtime_signal_summaries"))
     ]
+    materialization_key = _materialization_key(selection)
     updated_row = {
+        "materialization_key": materialization_key,
         "runtime_instance_id": selection.runtime_instance_id,
         "strategy_group_id": selection.strategy_group_id,
         "strategy_family_id": selection.strategy_group_id,
@@ -327,6 +421,7 @@ def _upsert_runtime_summary(
         "status": READY_PREPARE_STATUS,
         "signal_state": "fresh",
         "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "fresh_signal_timestamp_source": selection.fresh_signal_timestamp_source,
         "lane_fingerprint": selection.lane_fingerprint,
         "promotion_state": "action_time_lane",
         "first_blocker": READY_BLOCKER,
@@ -337,7 +432,18 @@ def _upsert_runtime_summary(
     }
     replaced = False
     for index, row in enumerate(rows):
-        if str(row.get("runtime_instance_id") or "") == selection.runtime_instance_id:
+        existing_key = str(row.get("materialization_key") or "")
+        same_lane_signal = (
+            str(row.get("runtime_instance_id") or "") == selection.runtime_instance_id
+            and str(row.get("strategy_group_id") or row.get("strategy_family_id") or "")
+            == selection.strategy_group_id
+            and str(row.get("symbol") or "") == selection.symbol
+            and str(row.get("side") or "") == selection.side
+            and str(row.get("fresh_signal_timestamp_utc") or "")
+            == selection.fresh_signal_timestamp_utc
+            and str(row.get("lane_fingerprint") or "") == selection.lane_fingerprint
+        )
+        if existing_key == materialization_key or same_lane_signal:
             rows[index] = {**row, **updated_row}
             replaced = True
             break
@@ -426,7 +532,9 @@ def _patch_status_artifacts(
         "symbol": selection.symbol,
         "side": selection.side,
         "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "fresh_signal_timestamp_source": selection.fresh_signal_timestamp_source,
         "lane_fingerprint": selection.lane_fingerprint,
+        "materialization_key": _materialization_key(selection),
         "runtime_profile": selection.runtime_profile,
         "signal_input_json": signal_input_json,
         "shadow_candidate_id": shadow_candidate_id,
@@ -457,18 +565,23 @@ def _refresh_operator_and_wakeup(
 
 def materialize_action_time_lane(
     *,
-    candidate_pool_json: Path = DEFAULT_CANDIDATE_POOL_JSON,
+    candidate_pool_json: Path | None = None,
     report_dir: Path = DEFAULT_REPORT_DIR,
     output_json: Path = DEFAULT_OUTPUT_JSON,
     args: argparse.Namespace,
     prepare_builder: PrepareBuilder | None = None,
 ) -> dict[str, Any]:
-    candidate_pool = _read_json(candidate_pool_json)
+    candidate_pool, candidate_pool_source = _candidate_pool_for_args(
+        args=args,
+        candidate_pool_json=candidate_pool_json,
+    )
     selection, blockers = _select_lane(candidate_pool)
     base = {
         "schema": "brc.candidate_pool_action_time_lane_materialization.v1",
         "scope": "candidate_pool_action_time_lane_non_executing_prepare",
-        "candidate_pool_json": str(candidate_pool_json),
+        "candidate_pool_json": str(candidate_pool_json or ""),
+        "candidate_pool_source": candidate_pool_source,
+        "source_mode": candidate_pool_source["source_mode"],
         "report_dir": str(report_dir),
         "authority_boundary": (
             "non_executing_prepare_only; no_finalgate_no_operation_layer_no_exchange_write"
@@ -515,7 +628,14 @@ def materialize_action_time_lane(
     materialization_dir = Path(args.materialization_dir).expanduser()
     signal_path = (
         materialization_dir
-        / f"{_safe_file_id(selection.runtime_instance_id)}-signal-input.json"
+        / (
+            f"{_safe_file_id(selection.strategy_group_id)}-"
+            f"{_safe_file_id(selection.symbol)}-"
+            f"{_safe_file_id(selection.side)}-"
+            f"{_safe_file_id(selection.fresh_signal_timestamp_utc)}-"
+            f"{_safe_file_id(selection.lane_fingerprint)}-"
+            f"{_safe_file_id(selection.runtime_instance_id)}-signal-input.json"
+        )
     )
     prepare_args = _prepare_args(
         args,
@@ -582,7 +702,9 @@ def materialize_action_time_lane(
         "symbol": selection.symbol,
         "side": selection.side,
         "fresh_signal_timestamp_utc": selection.fresh_signal_timestamp_utc,
+        "fresh_signal_timestamp_source": selection.fresh_signal_timestamp_source,
         "lane_fingerprint": selection.lane_fingerprint,
+        "materialization_key": _materialization_key(selection),
         "runtime_profile": selection.runtime_profile,
         "prepare_artifact": prepare_artifact,
         "status_artifact_status": status_artifact.get("status"),
@@ -598,7 +720,26 @@ def materialize_action_time_lane(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidate-pool-json", default=str(DEFAULT_CANDIDATE_POOL_JSON))
+    parser.add_argument("--candidate-pool-json")
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument(
+        "--require-database-url",
+        action="store_true",
+        help="Fail instead of falling back to Candidate Pool JSON when PG_DATABASE_URL is absent.",
+    )
+    parser.add_argument(
+        "--allow-non-postgres-for-test",
+        action="store_true",
+        help="Allow SQLite/non-PG DSNs only in tests.",
+    )
+    parser.add_argument(
+        "--allow-local-file-diagnostic",
+        action="store_true",
+        help=(
+            "Allow explicit Candidate Pool JSON for local diagnostics only. "
+            "Production action-time materialization must use PG."
+        ),
+    )
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--materialization-dir")
@@ -622,12 +763,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    payload = materialize_action_time_lane(
-        candidate_pool_json=Path(args.candidate_pool_json).expanduser(),
-        report_dir=Path(args.report_dir).expanduser(),
-        output_json=Path(args.output_json).expanduser(),
-        args=args,
-    )
+    try:
+        payload = materialize_action_time_lane(
+            candidate_pool_json=Path(args.candidate_pool_json).expanduser()
+            if args.candidate_pool_json
+            else None,
+            report_dir=Path(args.report_dir).expanduser(),
+            output_json=Path(args.output_json).expanduser(),
+            args=args,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     if payload["status"] in {
         "no_action_time_lane_input",

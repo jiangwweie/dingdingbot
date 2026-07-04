@@ -168,7 +168,7 @@
       "source_coverage": {
         "handoff_pack": true,
         "handoff_path": "docs/current/strategy-group-handoffs/BTPC-001/handoff.json",
-        "local_monitor_entrypoint": null,
+        "local_monitor_entrypoint": "btpc_l2_shadow_fact_quality_review,btpc_l2_keep_revise_fact_source_review,btpc_live_derivatives_fact_source_mapping,btpc_classifier_rule_review,strategy_asset_state",
         "registry_baseline_row": true,
         "replay_corpus": true,
         "replay_path": "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json",
@@ -197,7 +197,7 @@
       "source_coverage": {
         "handoff_pack": false,
         "handoff_path": null,
-        "local_monitor_entrypoint": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
         "registry_baseline_row": true,
         "replay_corpus": true,
         "replay_path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json",
@@ -226,7 +226,7 @@
       "source_coverage": {
         "handoff_pack": false,
         "handoff_path": null,
-        "local_monitor_entrypoint": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
         "registry_baseline_row": true,
         "replay_corpus": true,
         "replay_path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json",
@@ -255,7 +255,7 @@
       "source_coverage": {
         "handoff_pack": false,
         "handoff_path": null,
-        "local_monitor_entrypoint": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
         "registry_baseline_row": true,
         "replay_corpus": true,
         "replay_path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json",
@@ -284,7 +284,7 @@
       "source_coverage": {
         "handoff_pack": false,
         "handoff_path": null,
-        "local_monitor_entrypoint": null,
+        "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
         "registry_baseline_row": true,
         "replay_corpus": false,
         "replay_path": null,
@@ -320,7 +320,7 @@
     "BRF-001": {
       "handoff_pack": false,
       "handoff_path": null,
-      "local_monitor_entrypoint": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
       "registry_baseline_row": true,
       "replay_corpus": true,
       "replay_path": "docs/current/strategy-group-handoffs/BRF-001/replay/brf-001-l1-observe-replay-corpus.json",
@@ -332,7 +332,7 @@
     "BTPC-001": {
       "handoff_pack": true,
       "handoff_path": "docs/current/strategy-group-handoffs/BTPC-001/handoff.json",
-      "local_monitor_entrypoint": null,
+      "local_monitor_entrypoint": "btpc_l2_shadow_fact_quality_review,btpc_l2_keep_revise_fact_source_review,btpc_live_derivatives_fact_source_mapping,btpc_classifier_rule_review,strategy_asset_state",
       "registry_baseline_row": true,
       "replay_corpus": true,
       "replay_path": "docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json",
@@ -344,7 +344,7 @@
     "LSR-001": {
       "handoff_pack": false,
       "handoff_path": null,
-      "local_monitor_entrypoint": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
       "registry_baseline_row": true,
       "replay_corpus": true,
       "replay_path": "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json",
@@ -356,7 +356,7 @@
     "RBR-001": {
       "handoff_pack": false,
       "handoff_path": null,
-      "local_monitor_entrypoint": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
       "registry_baseline_row": true,
       "replay_corpus": false,
       "replay_path": null,
@@ -368,7 +368,7 @@
     "VCB-001": {
       "handoff_pack": false,
       "handoff_path": null,
-      "local_monitor_entrypoint": null,
+      "local_monitor_entrypoint": "post_revision_replay_review,strategy_asset_state",
       "registry_baseline_row": true,
       "replay_corpus": true,
       "replay_path": "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json",
@@ -468,7 +468,7 @@
     "state_family": "Strategy Asset State"
   },
   "strategy_asset_state_source": {
-    "row_count": 12,
+    "row_count": 5,
     "source": "strategy_asset_state.asset_rows"
   }
 }

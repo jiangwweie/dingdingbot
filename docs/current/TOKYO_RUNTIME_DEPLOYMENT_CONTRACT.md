@@ -63,6 +63,7 @@ Before deploy apply, the deployment operator must know:
 | Test state | Required focused tests, validators, and `git diff --check` result are recorded |
 | Output scope | Generated runtime/deploy evidence is not committed unless explicitly named |
 | Authority scan | No FinalGate bypass, Operation Layer bypass, exchange write, order creation, credential mutation, live profile mutation, or sizing mutation |
+| PG cutover scope | If the deploy changes PG runtime authority, schema, seed, runtime readers, ticket path, old-source removal, and rollback/fail-closed behavior are explicit |
 | Deploy reason | Stage-worthy fix, deployable milestone, fresh-signal unblock, safety regression repair, or explicit Owner request |
 
 ## Apply Boundary
@@ -90,6 +91,11 @@ Deploy apply must not:
   scope;
 - treat deploy success as `live_submit_ready`.
 
+If a deploy includes PG cutover, deploy apply may run bounded migration and seed
+commands only when the task explicitly scopes them. It must not import old
+fresh signals, old action-time lanes, old packets, generated timestamps, replay
+opportunities, or output artifacts as current live state.
+
 ## Postdeploy Acceptance
 
 A deploy is accepted only when postdeploy readonly verification records:
@@ -100,6 +106,11 @@ A deploy is accepted only when postdeploy readonly verification records:
 | Service health | Required services are running or explicitly classified |
 | Runtime status | Runtime is healthy, waiting, or clearly unavailable with blocker class |
 | Monitor path | Tokyo server-side monitor path remains the production monitor owner |
+| PG migration version | PG schema and seed versions match the expected cutover version when the deploy includes PG changes |
+| PG source mode | Production runtime readers use PG current state; repo MD/JSON/output fallback is disabled |
+| Runtime bootstrap | Current coverage, account facts, active position, open orders, balance, service health, and monitor run were refreshed from real Tokyo/runtime sources |
+| Ticket handoff | FinalGate rejects missing `ticket_id`; Operation Layer rejects missing `ticket_id + finalgate_pass_id` when the deploy touches this path |
+| Old-source removal | Candidate Pool, Daily Table, Goal Status, server monitor, forensics, and gate preconditions do not use old JSON/MD/output as production authority |
 | Forbidden effects | FinalGate, Operation Layer, exchange write, order creation, withdrawal, transfer, credential mutation, live profile mutation, and sizing mutation are false |
 | Owner state | Any Owner-facing notification is justified by the server monitor contract |
 
@@ -135,8 +146,11 @@ authority.
 | Runtime health regression | Roll back release or classify degraded state; do not continue toward live submit |
 | Monitor failure | Keep trading authority unchanged; classify monitor/runtime data gap |
 | Deploy transport failure | Stop before symlink switch when possible |
+| PG current state unavailable | Stop ticket, FinalGate, and submit progression; forward-fix PG state rather than falling back to old files |
+| PG migration/seed failure | Keep or restore previous release, mark runtime unavailable or fail closed, and do not import current state from old output JSON |
 
 Rollback must not use manual production edits as the normal recovery method.
+Rollback must not restore old repo MD/JSON/output authority after PG cutover.
 
 ## Report Format
 

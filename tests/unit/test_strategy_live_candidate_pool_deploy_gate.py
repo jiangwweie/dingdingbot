@@ -66,7 +66,7 @@ def _single_lane() -> dict:
 
 def _candidate_pool(deploy_ready: bool = False) -> dict:
     candidate_fixtures = _candidate_pool_test_module()
-    artifact = candidate_fixtures._builder().build_strategy_live_candidate_pool(
+    artifact = candidate_fixtures._build_candidate_pool(
         daily_table=_daily_table(),
         tradeability=candidate_fixtures._tradeability(),
         replay_live_parity=candidate_fixtures._parity(),

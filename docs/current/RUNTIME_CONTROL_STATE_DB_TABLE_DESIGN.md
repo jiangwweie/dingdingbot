@@ -74,16 +74,31 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_strategy_groups` | Runtime-facing StrategyGroup identity and lifecycle | P1 |
 | `brc_strategy_group_versions` | Versioned StrategyGroup semantics | P1 |
 | `brc_required_fact_contracts` | Versioned RequiredFacts contract rows | P1 |
+| `brc_strategy_side_event_specs` | Versioned StrategyGroup + side + event specs | P0 |
+| `brc_strategy_event_required_facts` | Event-specific RequiredFacts and disable facts | P0 |
+| `brc_candidate_scope_event_bindings` | Allowed candidate scope to event spec binding | P0 |
 | `brc_owner_policy_events` | Append-only Owner/system policy changes | P0 |
 | `brc_owner_policy_current` | Current scoped policy projection | P0 |
 | `brc_strategy_group_candidate_scope` | Candidate symbol/side/timeframe universe | P0 |
 | `brc_runtime_scope_bindings` | Runtime profile and live-submit scope binding | P0 |
+| `brc_symbols` | Canonical strategy symbols | P0 |
+| `brc_exchange_instruments` | Exchange instrument identity and precision | P0 |
+| `brc_symbol_instrument_mappings` | Canonical symbol to exchange instrument mapping | P0 |
 | `brc_watcher_runtime_coverage` | Server-backed watcher/detector coverage | P0 |
+| `brc_market_data_sources` | Market data source identity | P0 |
+| `brc_candle_snapshots` | Closed candle snapshots used by signal events | P0 |
+| `brc_market_data_quality_events` | Data gap, stale, clock skew, and conflict events | P1 |
 | `brc_runtime_fact_snapshots` | Public/account/action-time fact snapshots | P1 |
 | `brc_live_signal_events` | Fresh/stale/invalid signal event records | P1 |
 | `brc_pretrade_readiness_rows` | Per-symbol readiness and first blocker projection | P1 |
 | `brc_promotion_candidates` | Fresh satisfied promotion candidates | P1 |
 | `brc_action_time_lane_inputs` | Narrowed action-time lane input records | P1 |
+| `brc_action_time_tickets` | Formal machine identity of the exact candidate trade | P0 |
+| `brc_action_time_ticket_events` | Append-only ticket lifecycle events | P0 |
+| `brc_budget_reservations` | Short-lived budget reservations for real-submit candidates | P0 |
+| `brc_protection_references` | Strategy-event-derived protection and invalidation refs | P0 |
+| `brc_execution_policies` | Order type, time-in-force, slippage, and execution intent policy | P0 |
+| `brc_state_transition_events` | Append-only state transition audit events | P1 |
 | `brc_runtime_safety_state_snapshots` | Runtime Safety State snapshots | P1 |
 | `brc_projection_runs` | Projection lineage and input watermark records | P0 |
 | `brc_current_projection_ownership` | Single-owner registry for current projections | P0 |
@@ -92,6 +107,628 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_control_read_model_snapshots` | Generated read-model payload history | P2 |
 | `brc_server_monitor_runs` | Tokyo server monitor run records | P1 |
 | `brc_server_monitor_notifications` | Feishu notification and dedupe state | P1 |
+| `brc_runtime_incidents` | Fail-closed incidents and recovery classification | P1 |
+| `brc_recovery_runs` | Recovery attempts and outcomes | P1 |
+| `brc_strategy_intake_cases` | Research-to-runtime strategy intake cases | P1 |
+| `brc_strategy_intake_stage_events` | Append-only strategy intake stage transitions | P1 |
+| `brc_strategy_review_outcomes` | Signal/ticket/order/no-trade review outcomes | P1 |
+| `brc_strategy_governance_decisions` | Governance decisions from review recommendations | P1 |
+| `brc_strategy_policy_change_requests` | Validated policy change requests | P1 |
+
+## Owner-Confirmed L2-L7 Constraint Extension
+
+This section records the Owner-confirmed L2-L7 reset that supersedes broad
+file-backed or compatibility-led runtime authority.
+
+The chain is:
+
+```text
+strategy/event/scope/policy
+-> watcher coverage
+-> event-specific facts
+-> live signal event
+-> promotion candidate
+-> action-time lane
+-> Action-Time Ticket
+-> FinalGate ticket check
+-> Operation Layer ticket handoff
+-> protection / reconciliation / review
+```
+
+No repo MD, generated JSON, output artifact, local cache, old packet, or code
+fallback may become current runtime authority after PG cutover.
+
+### Confirmed Active Event Seed
+
+The initial PG seed must include only these current event specs and their
+confirmed symbol/side scope. Historical signals and replay opportunities must
+not be imported as current live signals.
+
+| StrategyGroup | Symbols | Side | Event spec | Time authority | Protection ref |
+| --- | --- | --- | --- | --- | --- |
+| `CPM-RO-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | `long` | `CPM-LONG` | Closed 1h trigger candle close | `pullback_low_reference` |
+| `MPG-001` | `OPUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | `long` | `MPG-LONG` | Closed 1h trigger candle close | `momentum_floor_reference` |
+| `MI-001` | `AVAXUSDT`, `ETHUSDT`, `SOLUSDT` | `long` | `MI-LONG` | Closed 1h candle anchoring 12h impulse | impulse invalidation / fast reversal threshold |
+| `SOR-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `BTCUSDT` | `long` | `SOR-LONG` | Closed 15m session breakout candle close | opening range low / session invalidation |
+| `SOR-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `BTCUSDT` | `short` | `SOR-SHORT` | Closed 15m session breakdown candle close | opening range high / reclaim invalidation |
+| `BRF2-001` | `BTCUSDT`, `AVAXUSDT`, `ETHUSDT` | `short` | `BRF2-SHORT` | Closed 1h rally-failure candle close | `rally_high_reference` |
+
+Unsupported opposite sides require a new StrategyGroup or versioned strategy
+variant. They must not be created by mirroring.
+
+### Event Spec And RequiredFacts Tables
+
+`brc_strategy_side_event_specs` must define the allowed
+`strategy_group_id + strategy_group_version_id + side + event_id + timeframe`
+surface.
+
+Required fields or equivalents:
+
+```text
+event_spec_id
+strategy_group_id
+strategy_group_version_id
+event_id
+side
+timeframe
+event_spec_version
+status
+freshness_window_ms
+time_authority
+protection_ref_type
+created_at_ms
+created_by
+```
+
+Constraints:
+
+| Constraint | Rule |
+| --- | --- |
+| unique current event | Partial unique current `(strategy_group_id, side, event_id)` |
+| time authority | Current six event specs require `event_time_ms = trigger_candle_close_time_ms` |
+| side support | Unsupported side cannot bind to event spec |
+| version lineage | Historical specs remain readable after retirement |
+
+`brc_strategy_event_required_facts` must define required facts and disable facts
+for each event spec version.
+
+Required fields or equivalents:
+
+```text
+event_required_fact_id
+event_spec_id
+required_facts_version_id
+fact_key
+fact_role
+fact_surface
+operator
+expected_value
+value_source
+disable_on_match
+missing_blocker_class
+failed_blocker_class
+freshness_ms
+required_for_promotion
+required_for_ticket
+required_for_finalgate
+status
+created_at_ms
+```
+
+RequiredFacts rows must be machine evaluable. `expected_condition` may appear only
+as a generated human-readable export derived from `operator`, `expected_value`,
+`value_source`, and `disable_on_match`; it must not be the stored source of
+runtime truth.
+
+Current required operators are:
+
+| Operator | Meaning |
+| --- | --- |
+| `eq` | observed value equals expected value |
+| `neq` | observed value does not equal expected value |
+| `gte` | observed value is greater than or equal to expected value |
+| `lte` | observed value is less than or equal to expected value |
+| `gt` | observed value is greater than expected value |
+| `lt` | observed value is less than expected value |
+| `in` | observed value is in expected set |
+| `not_in` | observed value is not in expected set |
+| `exists` | fact key exists and is non-null |
+| `not_exists` | fact key is absent or null |
+| `expr_ref` | expression is defined by a versioned code/schema reference, not free text |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_strategy_event_required_facts_version_key_surface` | Unique `(event_spec_id, required_facts_version_id, fact_key, fact_surface)` |
+| `ck_brc_strategy_event_required_facts_operator` | `operator` is one of the supported operator values |
+| `ck_brc_strategy_event_required_facts_disable_shape` | `disable_on_match=true` rows must name a `failed_blocker_class` and cannot be silently ignored |
+| `ck_brc_strategy_event_required_facts_no_v0_exception` | Current production rows must not encode `explicit_not_required_for_v0` or similar transitional text |
+
+MI-LONG current seed has no `v0` exception. `relative_strength_confirmed` is a
+hard RequiredFact for the current `MI-LONG` event spec unless a future versioned
+strategy variant explicitly changes that requirement through a new
+`required_facts_version_id`.
+
+Legacy aliases from earlier drafts map as follows:
+
+```text
+expected_condition -> generated display only
+explicit_not_required_for_v0 -> invalid production value
+```
+
+`brc_candidate_scope_event_bindings` must bind only authorized candidate scopes
+to allowed event specs.
+
+Required invariant:
+
+```text
+no candidate_scope_event_binding
+-> no watcher runtime coverage target
+-> no live_signal_event
+-> no promotion_candidate
+-> no action_time_lane_input
+-> no Action-Time Ticket
+```
+
+### Time, Candle, And Market Data Authority
+
+`brc_live_signal_events` must reference closed-candle market data.
+
+Additional required fields or equivalents:
+
+```text
+event_spec_id
+event_spec_version_id
+candidate_scope_id
+market_data_source_id
+candle_snapshot_id
+event_id
+event_time_ms
+trigger_candle_open_time_ms
+trigger_candle_close_time_ms
+detected_at_ms
+written_at_ms
+fact_snapshot_id
+status
+```
+
+Required constraints:
+
+| Constraint | Rule |
+| --- | --- |
+| event time | `event_time_ms = trigger_candle_close_time_ms` |
+| event identity | Unique `(strategy_group_id, symbol, side, event_spec_id, event_time_ms)` |
+| freshness source | `detected_at_ms`, `written_at_ms`, and `exported_at_ms` cannot define freshness |
+| closed candle | Unclosed candles cannot create fresh live signal events |
+| replay boundary | Replay or historical events cannot insert current live events with `status='facts_validated'` and `freshness_state='fresh'` |
+
+`brc_candle_snapshots` must be unique by:
+
+```text
+exchange_instrument_id
+timeframe
+trigger_candle_open_time_ms
+market_data_source_id
+```
+
+### Symbol And Instrument Authority
+
+Runtime scope must use canonical symbols. Exchange access must use exchange
+instrument IDs.
+
+`brc_symbols`, `brc_exchange_instruments`, and
+`brc_symbol_instrument_mappings` must enforce:
+
+```text
+canonical_symbol
+exchange_id
+market_type
+settlement_asset
+exchange_instrument
+instrument_status
+price_precision
+quantity_precision
+min_notional
+tick_size
+lot_size
+```
+
+Required invariant:
+
+```text
+no active unambiguous symbol/instrument mapping
+-> no watcher scope
+-> no signal
+-> no ticket
+-> no submit
+```
+
+String replacement must not infer instrument identity.
+
+### Fact Snapshot Binding
+
+`brc_runtime_fact_snapshots` must bind event-specific facts when used for
+promotion and ticket lineage.
+
+Additional required fields or equivalents:
+
+```text
+event_spec_id
+event_spec_version_id
+candidate_scope_id
+signal_event_id
+trigger_candle_close_time_ms
+fact_snapshot_hash
+```
+
+Required invariant:
+
+```text
+no event-specific fact snapshot -> no live signal event
+stale public facts -> no promotion
+stale action-time facts -> no ticket or FinalGate pass
+fact side / event mismatch -> reject
+```
+
+### Promotion, Lane, And Ticket State Machines
+
+`brc_live_signal_events.status`, `brc_promotion_candidates.status`,
+`brc_action_time_lane_inputs.status`, and `brc_action_time_tickets.status` must
+be independent state machines.
+
+Required status categories:
+
+| Table | Required status categories |
+| --- | --- |
+| `brc_live_signal_events` | `detected`, `facts_validated`, `stale`, `rejected`, `superseded` |
+| `brc_promotion_candidates` | `eligible`, `blocked`, `arbitration_pending`, `arbitration_won`, `arbitration_lost`, `expired` |
+| `brc_action_time_lane_inputs` | `opened`, `facts_refreshing`, `ticket_pending`, `ticket_created`, `closed`, `expired`, `invalidated` |
+| `brc_action_time_tickets` | `created`, `preflight_pending`, `finalgate_ready`, `finalgate_rejected`, `expired`, `superseded`, `submitted`, `closed`, `invalidated` |
+
+Freshness is not a primary lifecycle status. It is represented by
+`freshness_state` or derived from event time and freshness window:
+
+```text
+fresh = status='facts_validated'
+        and freshness_state='fresh'
+        and now_ms <= expires_at_ms
+        and not superseded/rejected
+```
+
+Legal transitions:
+
+| State machine | Allowed transitions |
+| --- | --- |
+| `brc_live_signal_events` | `detected -> facts_validated`; `detected -> rejected`; `facts_validated -> stale`; `facts_validated -> superseded`; `detected -> stale` |
+| `brc_promotion_candidates` | `eligible -> arbitration_pending`; `eligible -> blocked`; `arbitration_pending -> arbitration_won`; `arbitration_pending -> arbitration_lost`; `eligible/arbitration_pending/arbitration_won/arbitration_lost -> expired` |
+| `brc_action_time_lane_inputs` | `opened -> facts_refreshing`; `facts_refreshing -> ticket_pending`; `ticket_pending -> ticket_created`; `opened/facts_refreshing/ticket_pending/ticket_created -> closed`; `opened/facts_refreshing/ticket_pending -> expired`; `opened/facts_refreshing/ticket_pending/ticket_created -> invalidated` |
+| `brc_action_time_tickets` | `created -> preflight_pending`; `preflight_pending -> finalgate_ready`; `preflight_pending -> finalgate_rejected`; `finalgate_ready -> submitted`; `created/preflight_pending/finalgate_ready -> expired`; `created/preflight_pending/finalgate_ready -> superseded`; `created/preflight_pending/finalgate_ready -> invalidated`; `submitted -> closed` |
+
+Forbidden transitions:
+
+| State machine | Forbidden examples |
+| --- | --- |
+| `brc_live_signal_events` | `rejected -> facts_validated`; `stale -> facts_validated`; `superseded -> facts_validated` |
+| `brc_promotion_candidates` | `blocked -> arbitration_won`; `arbitration_lost -> arbitration_won`; `expired -> arbitration_won` |
+| `brc_action_time_lane_inputs` | `expired -> ticket_pending`; `invalidated -> ticket_created`; `closed -> facts_refreshing` |
+| `brc_action_time_tickets` | `expired -> finalgate_ready`; `finalgate_rejected -> submitted`; `submitted -> submitted`; `closed -> preflight_pending` |
+
+Every transition must append an event row in `brc_state_transition_events` or a
+domain-specific event table with:
+
+```text
+from_status
+to_status
+transition_reason
+trigger_ref
+writer
+occurred_at_ms
+```
+
+Fresh signal must not imply order readiness. Promotion candidate must not imply
+ticket existence.
+
+### Action-Time Ticket
+
+`brc_action_time_tickets` is the formal identity of one exact candidate trade.
+
+Required fields or equivalents:
+
+```text
+ticket_id
+action_time_lane_input_id
+promotion_candidate_id
+signal_event_id
+event_spec_id
+event_spec_version_id
+candidate_scope_id
+runtime_scope_binding_id
+strategy_group_id
+strategy_group_version_id
+symbol
+exchange_instrument_id
+side
+event_id
+event_time_ms
+trigger_candle_close_time_ms
+runtime_profile_id
+public_fact_snapshot_id
+action_time_fact_snapshot_id
+account_safe_fact_snapshot_id
+account_mode_snapshot_id
+budget_reservation_id
+protection_ref_id
+execution_policy_id
+execution_policy_version
+owner_policy_version
+sizing_policy_version
+protection_policy_version
+target_notional
+leverage
+expires_at_ms
+status
+authority_boundary
+ticket_hash
+created_under_versions_hash
+```
+
+Constraints:
+
+| Constraint | Rule |
+| --- | --- |
+| lineage | Ticket requires lane, promotion, signal, event spec, candidate scope, runtime binding, facts, budget, protection, and execution policy |
+| one active ticket | One open real-submit lane has at most one active ticket |
+| expiry | Ticket requires `expires_at_ms` |
+| hash | `ticket_hash` covers strategy, symbol, side, event, event time, profile, notional, leverage, protection, and execution intent |
+| no order authority | Ticket does not create exchange orders |
+
+FinalGate may consume only `ticket_id` as the trade identity input.
+
+### Budget Reservation
+
+`brc_budget_reservations` must reserve capital before real-submit ticket
+progression.
+
+Creation order is:
+
+```text
+promotion arbitration winner
+-> action_time_lane_input
+-> budget_reservation scoped to lane/candidate, without requiring ticket_id
+-> action_time_ticket references budget_reservation_id
+-> budget_reservation may backfill ticket_id after ticket creation
+```
+
+This avoids a circular dependency between reservation creation and ticket
+creation. A ticket must reference an active reservation, but a reservation must
+not require `ticket_id` at initial insert.
+
+Required fields or equivalents:
+
+```text
+budget_reservation_id
+promotion_candidate_id
+action_time_lane_input_id
+ticket_id nullable unique
+signal_event_id
+event_spec_id
+runtime_profile_id
+account_id
+strategy_group_id
+symbol
+side
+target_notional
+leverage
+reserved_margin
+reserved_at_ms
+expires_at_ms
+status
+release_reason
+policy_version
+```
+
+Required invariant:
+
+```text
+available balance alone is not sufficient for real-submit progression.
+ticket.budget_reservation_id must reference active budget_reservation.
+budget_reservation lineage must match ticket lineage before FinalGate.
+```
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_budget_reservations_active_lane` | Partial unique active reservation per `action_time_lane_input_id` |
+| `uq_brc_budget_reservations_ticket` | Unique nullable `ticket_id`; once filled, one ticket binds one reservation |
+| `ck_brc_budget_reservations_lineage` | StrategyGroup, symbol, side, profile, notional, leverage, and event refs must match the ticket before FinalGate |
+| `ck_brc_budget_reservations_expiry` | Active reservation requires `expires_at_ms` and cannot be consumed after expiry |
+
+### Protection Reference
+
+`brc_protection_references` must store strategy-event-derived protection refs.
+
+Required fields or equivalents:
+
+```text
+protection_ref_id
+event_spec_id
+strategy_group_id
+symbol
+side
+reference_type
+reference_price
+invalidation_condition
+stop_order_type
+stop_time_in_force
+protection_policy_version
+source_fact_snapshot_id
+expires_at_ms
+```
+
+Required invariant:
+
+```text
+ticket without protection_ref_id -> reject
+Operation Layer cannot guess stops
+protection failure or detachment -> submit path not complete
+```
+
+### Execution Policy And Normalized Order Intent
+
+`brc_execution_policies` must define execution semantics for runtime profile,
+strategy, event, and side.
+
+Required fields or equivalents:
+
+```text
+execution_policy_id
+execution_policy_version
+runtime_profile_id
+strategy_group_id
+event_spec_id
+side
+order_type
+time_in_force
+reduce_only
+post_only
+close_position
+allowed_slippage_bps
+price_protection_mode
+submit_deadline_ms
+cancel_if_not_filled_policy
+```
+
+Operation submit commands must persist normalized Decimal-computed order intent:
+
+```text
+ticket_id
+exchange_instrument_id
+side
+order_type
+target_notional
+leverage
+price_reference
+raw_quantity
+normalized_quantity
+normalized_price
+rounding_policy
+min_notional_check
+tick_size_check
+lot_size_check
+precision_check
+```
+
+Financial calculations must use Decimal. Float-based financial quantity or
+price calculations are invalid.
+
+### Account Mode And Exchange Authority
+
+Tickets must bind account mode facts:
+
+```text
+expected_margin_mode
+expected_position_mode
+expected_leverage
+actual_margin_mode
+actual_position_mode
+actual_leverage
+position_side
+account_mode_snapshot_id
+mode_checked_at_ms
+```
+
+Operation Layer must not mutate margin mode, position mode, or leverage inside
+the signal submit path. Such mutations, if ever allowed, require a separate
+policy-governed administrative action.
+
+Every real exchange write must bind:
+
+```text
+ticket_id
+finalgate_pass_id
+operation_submit_command_id
+```
+
+Watcher, monitor, projector, Candidate Pool, Goal Status, FinalGate,
+reconciliation, and review paths must not write exchange orders.
+
+### Owner Policy Operations And Versioning
+
+Owner operations must append policy events and create new policy versions.
+
+Required operation categories:
+
+```text
+enable_strategy
+pause_strategy
+resume_strategy
+retire_strategy
+narrow_scope
+expand_scope
+enable_ticket_eligibility
+disable_ticket_eligibility
+enable_real_submit
+disable_real_submit
+set_budget
+set_runtime_profile
+set_notification_policy
+```
+
+Signals, promotions, tickets, orders, protection, reconciliation, and review
+must bind the policy/spec versions under which they were created. New versions
+affect future events. Active tickets affected by version changes must revalidate
+or invalidate.
+
+### Review To Governance
+
+`brc_strategy_review_outcomes`,
+`brc_strategy_governance_decisions`, and
+`brc_strategy_policy_change_requests` must preserve:
+
+```text
+signal_event_id
+promotion_candidate_id
+action_time_lane_input_id
+ticket_id
+order_id
+stage_reached
+first_blocker
+market_after_event
+execution_outcome
+strategy_learning
+governance_recommendation
+owner_action_required
+created_under_versions_hash
+```
+
+Review may recommend governance changes. It must not directly grant current
+submit authority, expand scope, increase budget, mutate active tickets, or
+reinterpret old orders under current strategy versions.
+
+### Fail-Closed And Negative Tests
+
+The PG implementation must include negative tests proving rejection of:
+
+```text
+CPM-RO-001 short
+MPG-001 short
+MI-001 short
+BRF2-001 long
+SOR generic signal without SOR-LONG or SOR-SHORT
+unsupported symbol
+generated_at as event_time_ms
+live_signal_event without event_spec_id
+promotion_candidate without signal_event_id
+action_time_ticket without promotion_candidate_id
+ticket without expires_at_ms
+FinalGate without ticket_id
+Operation Layer without ticket_id + finalgate_pass_id
+replay event as fresh live signal
+Candidate Pool JSON as authority input
+duplicate live signal / promotion / ticket / accepted submit
+```
 
 ## Registry Tables
 
@@ -434,7 +1071,8 @@ read-model state, not a row.
 | `side` | `String(32)` | Side |
 | `detector_key` | `String(128)` | Detector ID |
 | `signal_type` | `String(64)` | Strategy-specific signal |
-| `signal_state` | `String(64)` | `fresh`, `stale`, `invalidated` |
+| `status` | `String(64)` | `detected`, `facts_validated`, `stale`, `rejected`, `superseded` |
+| `freshness_state` | `String(64)` | `fresh`, `stale`, `expired`, `unknown` |
 | `confidence` | `Numeric` nullable | Confidence if available |
 | `fact_snapshot_id` | `String(192)` nullable | Facts supporting signal |
 | `reason_codes` | `JSONB` | Reason codes |
@@ -449,7 +1087,9 @@ Checks and indexes:
 | Constraint/index | Rule |
 | --- | --- |
 | `idx_brc_live_signal_events_scope_time` | `(strategy_group_id, symbol, side, observed_at_ms)` |
-| `idx_brc_live_signal_events_state_expiry` | `(signal_state, expires_at_ms)` |
+| `idx_brc_live_signal_events_status_expiry` | `(status, freshness_state, expires_at_ms)` |
+| `uq_brc_live_signal_events_identity` | Unique `(strategy_group_id, symbol, side, detector_key, signal_type, observed_at_ms)` |
+| `ck_brc_live_signal_events_fresh_validated` | `freshness_state='fresh'` requires `status='facts_validated'` and non-expired `expires_at_ms` |
 
 Writer: live detectors/watcher.
 
@@ -473,7 +1113,8 @@ Table.
 | `detector_state` | `String(64)` | `missing`, `ready`, `running`, `stale` |
 | `watcher_state` | `String(64)` | `missing`, `fresh`, `stale` |
 | `public_facts_state` | `String(64)` | `missing`, `computed_not_satisfied`, `satisfied` |
-| `signal_state` | `String(64)` | `absent`, `fresh`, `stale`, `invalidated` |
+| `signal_lifecycle_status` | `String(64)` | `absent`, `detected`, `facts_validated`, `stale`, `rejected`, `superseded` |
+| `signal_freshness_state` | `String(64)` | `fresh`, `stale`, `expired`, `missing`, `unknown` |
 | `risk_state` | `String(64)` | `acceptable`, `warning`, `disable` |
 | `scope_state` | `String(64)` | Pre-trade contract scope state |
 | `promotion_state` | `String(64)` | `idle`, `promotion_candidate`, `action_time_lane`, `blocked` |
@@ -512,7 +1153,7 @@ without exchange-write authority.
 | `symbol` | `String(128)` | Symbol |
 | `side` | `String(32)` | Side |
 | `promotion_scope` | `String(64)` | `pretrade_candidate`, `action_time_rehearsal`, `live_submit_candidate`, `conditional_action_time_rehearsal` |
-| `status` | `String(64)` | `open`, `selected_for_action_time`, `blocked`, `expired`, `closed` |
+| `status` | `String(64)` | `eligible`, `blocked`, `arbitration_pending`, `arbitration_won`, `arbitration_lost`, `expired` |
 | `scope_state` | `String(64)` | Scope state at promotion |
 | `risk_state` | `String(64)` | Risk state |
 | `facts_snapshot_id` | `String(192)` nullable | Supporting facts |
@@ -549,7 +1190,7 @@ does not bypass FinalGate or Operation Layer.
 | `side` | `String(32)` | Side |
 | `runtime_profile_id` | `String(128)` | Runtime profile |
 | `lane_scope` | `String(64)` | `rehearsal`, `paper`, `conditional_rehearsal`, or `real_submit_candidate` |
-| `status` | `String(64)` | `open`, `facts_refreshing`, `candidate_evidence_ready`, `finalgate_pending`, `blocked`, `expired`, `closed` |
+| `status` | `String(64)` | `opened`, `facts_refreshing`, `ticket_pending`, `ticket_created`, `closed`, `expired`, `invalidated` |
 | `signal_event_id` | `String(192)` nullable | Fresh signal ref |
 | `public_fact_snapshot_id` | `String(192)` nullable | Public fact ref |
 | `action_time_fact_snapshot_id` | `String(192)` nullable | Action-time fact ref |
@@ -566,7 +1207,7 @@ Checks and indexes:
 
 | Constraint/index | Rule |
 | --- | --- |
-| `uq_brc_action_time_lane_inputs_single_open_real` | Partial unique one open real-submit lane where `lane_scope='real_submit_candidate'` and `status IN ('open', 'facts_refreshing', 'candidate_evidence_ready', 'finalgate_pending')` |
+| `uq_brc_action_time_lane_inputs_single_open_real` | Partial unique one open real-submit lane where `lane_scope='real_submit_candidate'` and `status IN ('opened', 'facts_refreshing', 'ticket_pending', 'ticket_created')` |
 | `ck_brc_action_time_lane_inputs_lane_scope` | `lane_scope` in `rehearsal`, `paper`, `conditional_rehearsal`, `real_submit_candidate` |
 | `idx_brc_action_time_lane_inputs_status` | `(lane_scope, status, created_at_ms)` |
 | `ck_brc_action_time_lane_inputs_no_submit_bypass` | Status cannot imply order creation |
@@ -592,7 +1233,7 @@ model.
 | `model_type` | `String(96)` | `candidate_pool`, `daily_live_enablement_table`, `goal_status`, `runtime_safety_state`, `server_monitor`, or other read model |
 | `owner_projector` | `String(128)` | One named writer for this projection |
 | `code_version` | `String(128)` nullable | Release head or build version |
-| `source_mode` | `String(32)` | `file_backed`, `hybrid`, or `db_backed` |
+| `source_mode` | `String(32)` | `db_backed`, `local_file_inventory`, or `local_migration_comparison` |
 | `projection_target` | `String(64)` | `production_current`, `diagnostic`, or `export` |
 | `input_watermark` | `JSONB` | Source fact/event/projection refs and timestamps |
 | `source_priority` | `JSONB` | Ordered source priority used by the projector |
@@ -607,8 +1248,9 @@ Checks and indexes:
 
 | Constraint/index | Rule |
 | --- | --- |
-| `ck_brc_projection_runs_source_mode` | `source_mode` in `file_backed`, `hybrid`, `db_backed` |
+| `ck_brc_projection_runs_source_mode` | `source_mode` in `db_backed`, `local_file_inventory`, `local_migration_comparison` |
 | `ck_brc_projection_runs_target` | `projection_target` in `production_current`, `diagnostic`, `export` |
+| `ck_brc_projection_runs_prod_db` | `projection_target='production_current'` requires `source_mode='db_backed'` |
 | `ck_brc_projection_runs_legacy_current` | `legacy_diagnostics_affected_current=false` when `source_mode='db_backed'`, `projection_target='production_current'`, and `status='succeeded'` |
 | `idx_brc_projection_runs_model_time` | `(model_type, started_at_ms)` |
 | `idx_brc_projection_runs_owner_status` | `(owner_projector, status)` |
@@ -629,8 +1271,8 @@ Purpose: declare the only allowed writer for each current projection.
 | `owner_projector` | `String(128)` | Only writer allowed to mutate current rows |
 | `export_paths` | `JSONB` | Compatibility JSON/MD export paths |
 | `legacy_writer_allowed` | `Boolean` | Must be false in production |
-| `current_source_mode` | `String(32)` | `file_backed`, `hybrid`, or `db_backed` |
-| `sunset_condition` | `Text` nullable | Removal condition for transitional file backing |
+| `current_source_mode` | `String(32)` | `db_backed`; diagnostic/local comparison modes must not own production current projections |
+| `sunset_condition` | `Text` nullable | Must be null for production current rows; local comparison rows are not production current |
 | `updated_at_ms` | `BIGINT` | Last update |
 
 Checks and indexes:
@@ -867,6 +1509,7 @@ Readers: notifier retry loop, Owner Console audit.
 | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` | `brc_owner_policy_events`, `brc_owner_policy_current` |
 | `docs/current/strategy-group-handoffs/owner-pretrade-runtime-authorization-v0.json` | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_strategy_group_candidate_scope`, `brc_runtime_scope_bindings` |
 | `DEFAULT_CANDIDATE_UNIVERSE` in scripts | `brc_strategy_group_candidate_scope` |
+| `DEFAULT_SIDE_SCOPE` and broad side fallbacks in scripts | `brc_strategy_group_candidate_scope`, `brc_candidate_scope_event_bindings` |
 | `output/runtime-monitor/latest-runtime-active-observation-status.json` | `brc_watcher_runtime_coverage`, `brc_pretrade_readiness_rows` |
 | `output/runtime-monitor/latest-binance-usdm-public-facts.json` | `brc_runtime_fact_snapshots` |
 | `output/runtime-monitor/latest-account-safe-facts.json` | `brc_runtime_fact_snapshots` |
@@ -916,6 +1559,8 @@ Tables:
 Acceptance:
 
 - Strategy semantics and RequiredFacts are versioned;
+- RequiredFacts are machine-evaluable with explicit operator/value/disable
+  fields, not free-text `expected_condition` authority;
 - fact snapshots have source and freshness;
 - fresh signal events are stored as events, not inferred from output file
   presence.
@@ -927,13 +1572,20 @@ Tables:
 - `brc_pretrade_readiness_rows`;
 - `brc_promotion_candidates`;
 - `brc_action_time_lane_inputs`;
+- `brc_budget_reservations`;
+- `brc_protection_references`;
+- `brc_action_time_tickets`;
 - `brc_runtime_safety_state_snapshots`.
 
 Acceptance:
 
 - five active StrategyGroups have per-symbol readiness rows;
 - fresh satisfied candidates promote without exchange-write authority;
-- at most one open real-submit action-time lane input exists.
+- at most one open real-submit action-time lane input exists;
+- budget reservations can be created before ticket creation without circular
+  dependency and must bind to the ticket before FinalGate;
+- ticket, lane, promotion, and live-signal status transitions follow explicit
+  legal transition graphs and write audit events.
 
 ### Batch 4: P1/P2 Read Models And Monitor
 
@@ -971,18 +1623,33 @@ shape for builders:
 ```json
 {
   "strategy_groups": [],
+  "strategy_group_versions": [],
+  "required_fact_contracts": [],
+  "strategy_side_event_specs": [],
+  "strategy_event_required_facts": [],
+  "owner_policy_events": [],
   "owner_policy_current": [],
   "candidate_scope": [],
+  "candidate_scope_event_bindings": [],
   "runtime_scope_bindings": [],
+  "execution_policies": [],
   "watcher_runtime_coverage": [],
   "runtime_fact_snapshots": [],
   "live_signal_events": [],
   "pretrade_readiness_rows": [],
   "promotion_candidates": [],
   "action_time_lane_inputs": [],
+  "budget_reservations": [],
+  "protection_references": [],
+  "action_time_tickets": [],
+  "action_time_ticket_events": [],
   "runtime_safety_state": [],
   "goal_status_current": {},
-  "projection_runs": []
+  "projection_runs": [],
+  "current_projection_ownership": [],
+  "control_read_model_snapshots": [],
+  "server_monitor_runs": [],
+  "server_monitor_notifications": []
 }
 ```
 

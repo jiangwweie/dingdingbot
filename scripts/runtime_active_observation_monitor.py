@@ -17,14 +17,20 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stdout
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Callable
+
+import sqlalchemy as sa
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    PgBackedRuntimeControlStateRepository,
+)
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
     DEFAULT_API_BASE,
@@ -44,27 +50,6 @@ OBSERVE_ONLY_REVIEW_BLOCKERS = {
 }
 WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
-}
-DEFAULT_CANDIDATE_UNIVERSE = {
-    "CPM-RO-001": ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
-    "MPG-001": ("OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
-    "MI-001": ("AVAXUSDT", "SOLUSDT", "ETHUSDT"),
-    "SOR-001": ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"),
-    "BRF2-001": ("BTCUSDT", "ETHUSDT", "AVAXUSDT"),
-}
-STRATEGY_SIDE = {
-    "CPM-RO-001": "long",
-    "MPG-001": "long",
-    "MI-001": "long",
-    "SOR-001": "long",
-    "BRF2-001": "short",
-}
-DEFAULT_SIDE_SCOPE = {
-    "CPM-RO-001": ("long", "short"),
-    "MPG-001": ("long", "short"),
-    "MI-001": ("long", "short"),
-    "SOR-001": ("long", "short"),
-    "BRF2-001": ("long", "short"),
 }
 DEFAULT_HANDOFF_DIR = ROOT_DIR / "docs/current/strategy-group-handoffs"
 
@@ -170,12 +155,106 @@ def _read_candidate_universe(path_value: str | None) -> tuple[dict[str, list[str
                     selected.append(compact)
             if selected:
                 parsed[str(strategy_group_id)] = selected
+    side_scope = _side_scope_from_payload(payload)
     return parsed, {
         "source": "candidate_universe_json",
         "path": str(path),
         "loaded": bool(parsed),
         "strategy_group_count": len(parsed),
+        "side_scope": side_scope,
     }
+
+
+def _side_scope_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
+    raw_side_scope = payload.get("side_scope")
+    if isinstance(raw_side_scope, dict):
+        return _parse_side_scope(raw_side_scope)
+    owner_authorization = (
+        _as_dict(_as_dict(payload.get("pretrade_runtime")).get("owner_authorization"))
+    )
+    scopes = owner_authorization.get("strategy_group_scopes")
+    if not isinstance(scopes, dict):
+        return {}
+    return _parse_side_scope(
+        {
+            strategy_group_id: _as_dict(scope).get("side_scope")
+            for strategy_group_id, scope in scopes.items()
+        }
+    )
+
+
+def _parse_side_scope(raw: dict[str, Any]) -> dict[str, list[str]]:
+    parsed: dict[str, list[str]] = {}
+    for strategy_group_id, sides in raw.items():
+        selected: list[str] = []
+        for side in sides if isinstance(sides, list) else []:
+            normalized = _normalize_side(side)
+            if normalized and normalized not in selected:
+                selected.append(normalized)
+        if selected:
+            parsed[str(strategy_group_id)] = selected
+    return parsed
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _candidate_universe_from_control_state(
+    control_state: dict[str, Any],
+) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    universe: dict[str, list[str]] = {}
+    side_scope: dict[str, list[str]] = {}
+    for row in control_state.get("candidate_scope") or []:
+        if not isinstance(row, dict) or row.get("status") != "active":
+            continue
+        strategy_group_id = str(row.get("strategy_group_id") or "").strip()
+        symbol = _compact_symbol(row.get("symbol"))
+        side = _normalize_side(row.get("side"))
+        if not strategy_group_id or not symbol or not side:
+            continue
+        universe.setdefault(strategy_group_id, [])
+        if symbol not in universe[strategy_group_id]:
+            universe[strategy_group_id].append(symbol)
+        side_scope.setdefault(strategy_group_id, [])
+        if side not in side_scope[strategy_group_id]:
+            side_scope[strategy_group_id].append(side)
+
+    return (
+        {
+            strategy_group_id: sorted(symbols)
+            for strategy_group_id, symbols in sorted(universe.items())
+        },
+        {
+            "source": "pg_runtime_control_state:candidate_scope",
+            "loaded": bool(universe),
+            "strategy_group_count": len(universe),
+            "side_scope": {
+                strategy_group_id: sorted(sides)
+                for strategy_group_id, sides in sorted(side_scope.items())
+            },
+            "source_mode": str(control_state.get("source_mode") or ""),
+            "projection_target": str(control_state.get("projection_target") or ""),
+        },
+    )
+
+
+def _read_candidate_universe_from_pg(
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool,
+) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    if not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not allow_non_postgres_for_test:
+        raise RuntimeError("DB-backed active observation monitor requires PostgreSQL DSN")
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            return _candidate_universe_from_control_state(repository.read_control_state())
+    finally:
+        engine.dispose()
 
 
 def _compact_symbol(value: Any) -> str:
@@ -190,34 +269,51 @@ def _compact_symbol(value: Any) -> str:
 
 
 def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    database_url = str(getattr(args, "database_url", "") or "")
+    if getattr(args, "require_database_url", False) and not database_url:
+        raise RuntimeError(
+            "PG_DATABASE_URL is required for DB-backed active observation candidate universe"
+        )
+    if database_url:
+        return _read_candidate_universe_from_pg(
+            database_url=database_url,
+            allow_non_postgres_for_test=bool(
+                getattr(args, "allow_non_postgres_for_test", False)
+            ),
+        )
+
     loaded, source = _read_candidate_universe(
         getattr(args, "candidate_universe_json", None)
     )
     if loaded:
         return loaded, source
-    requested = [
-        str(item).strip()
-        for item in (getattr(args, "strategy_family_id", None) or [])
-        if str(item or "").strip()
-    ]
-    if not requested and not getattr(args, "candidate_universe_json", None):
-        return {}, source
-    fallback = {
-        strategy_group_id: list(symbols)
-        for strategy_group_id, symbols in DEFAULT_CANDIDATE_UNIVERSE.items()
-        if not requested or strategy_group_id in set(requested)
-    }
-    source = {
-        **source,
-        "fallback": "default_pretrade_candidate_universe",
-        "strategy_group_count": len(fallback),
-    }
-    return fallback, source
+    return {}, source
+
+
+def _side_scope_from_source(source: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    raw = source.get("side_scope")
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, tuple[str, ...]] = {}
+    for strategy_group_id, sides in raw.items():
+        parsed = tuple(
+            side
+            for side in (
+                _normalize_side(item)
+                for item in (sides if isinstance(sides, list) else [])
+            )
+            if side
+        )
+        if parsed:
+            result[str(strategy_group_id)] = parsed
+    return result
 
 
 def _filter_selected_to_candidate_universe(
     selected: list[dict[str, Any]],
     candidate_universe: dict[str, list[str]],
+    *,
+    side_scope: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     if not candidate_universe:
         return selected, []
@@ -225,7 +321,7 @@ def _filter_selected_to_candidate_universe(
         (str(strategy_group_id), str(symbol), side)
         for strategy_group_id, symbols in candidate_universe.items()
         for symbol in symbols
-        for side in _expected_sides(strategy_group_id)
+        for side in _expected_sides(strategy_group_id, side_scope=side_scope)
     }
     filtered: list[dict[str, Any]] = []
     excluded_runtime_ids: list[str] = []
@@ -252,6 +348,7 @@ def _candidate_universe_coverage(
     active: list[dict[str, Any]],
     selected: list[dict[str, Any]],
     handoff_risk_defaults: dict[str, dict[str, Any]] | None = None,
+    side_scope: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     selected_lanes: dict[tuple[str, str, str], list[str]] = {}
     active_lanes: dict[tuple[str, str, str], list[str]] = {}
@@ -280,7 +377,7 @@ def _candidate_universe_coverage(
     rows: list[dict[str, Any]] = []
     for strategy_group_id in sorted(candidate_universe):
         for symbol in sorted(set(candidate_universe[strategy_group_id])):
-            for expected_side in _expected_sides(strategy_group_id):
+            for expected_side in _expected_sides(strategy_group_id, side_scope=side_scope):
                 lane_key = (strategy_group_id, symbol, expected_side)
                 pair_key = (strategy_group_id, symbol)
                 selected_matches = selected_lanes.get(lane_key, [])
@@ -370,15 +467,15 @@ def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _expected_side(strategy_group_id: Any) -> str:
-    return STRATEGY_SIDE.get(str(strategy_group_id), "")
-
-
-def _expected_sides(strategy_group_id: Any) -> tuple[str, ...]:
-    return DEFAULT_SIDE_SCOPE.get(
-        str(strategy_group_id),
-        (STRATEGY_SIDE.get(str(strategy_group_id), ""),),
-    )
+def _expected_sides(
+    strategy_group_id: Any,
+    *,
+    side_scope: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[str, ...]:
+    strategy_group_id = str(strategy_group_id)
+    if side_scope and strategy_group_id in side_scope:
+        return side_scope[strategy_group_id]
+    return ()
 
 
 def _runtime_profile_for_lane(
@@ -728,6 +825,7 @@ def _build_monitor_artifact(
         getattr(args, "strategy_family_id", None) or []
     )
     candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
+    side_scope = _side_scope_from_source(candidate_universe_source)
     handoff_risk_defaults = _handoff_risk_defaults(
         getattr(args, "strategy_handoff_dir", None)
     )
@@ -738,11 +836,19 @@ def _build_monitor_artifact(
         max_runtimes=int(args.max_runtimes or 100),
     )
     enforce_candidate_universe_scope = (
-        candidate_universe_source.get("source") == "candidate_universe_json"
+        candidate_universe_source.get("source")
+        in {
+            "candidate_universe_json",
+            "pg_runtime_control_state:candidate_scope",
+        }
         and candidate_universe_source.get("loaded") is True
     )
     selected, candidate_universe_excluded_runtime_instance_ids = (
-        _filter_selected_to_candidate_universe(selected, candidate_universe)
+        _filter_selected_to_candidate_universe(
+            selected,
+            candidate_universe,
+            side_scope=side_scope,
+        )
         if enforce_candidate_universe_scope
         else (selected, [])
     )
@@ -752,6 +858,7 @@ def _build_monitor_artifact(
         active=active,
         selected=selected,
         handoff_risk_defaults=handoff_risk_defaults,
+        side_scope=side_scope,
     )
 
     runtime_artifacts: list[dict[str, Any]] = []
@@ -1041,6 +1148,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Optional Strategy Live Candidate Pool JSON. When present, emit "
             "read-only per-symbol runtime scope coverage."
         ),
+    )
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument(
+        "--require-database-url",
+        action="store_true",
+        help="Fail instead of falling back to JSON/default candidate universe when PG_DATABASE_URL is absent.",
+    )
+    parser.add_argument(
+        "--allow-non-postgres-for-test",
+        action="store_true",
+        help="Allow SQLite/non-PG DSNs only in tests.",
     )
     parser.add_argument(
         "--strategy-handoff-dir",

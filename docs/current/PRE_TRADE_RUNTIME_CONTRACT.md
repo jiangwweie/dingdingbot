@@ -37,20 +37,56 @@ Read-only observation, pre-trade readiness, and promotion candidates are not
 FinalGate input, Operation Layer input, exchange-write authority, live profile
 expansion, or order-sizing expansion.
 
+## PG-Backed L2-L7 Runtime Chain
+
+The target pre-trade runtime is PG-backed after cutover:
+
+```text
+L2 Candidate Universe
+-> L3 Runtime Coverage
+-> L4 Event-Specific Facts
+-> L5 Live Signal Event
+-> L6 Promotion Candidate
+-> L7 Action-Time Lane
+-> Action-Time Ticket
+-> FinalGate ticket check
+-> Operation Layer ticket handoff
+```
+
+`L2-L7` means:
+
+| Layer | Chinese name | Runtime owner |
+| --- | --- | --- |
+| L2 Candidate Universe | 候选交易范围 | PG candidate scope and event bindings |
+| L3 Runtime Coverage | 服务器运行覆盖 | watcher coverage writer |
+| L4 Market / Account Facts | 事实快照 | fact writer |
+| L5 Live Signal Event | 实时事件信号 | live detector |
+| L6 Promotion Candidate | 可升级候选 | promotion projector |
+| L7 Action-Time Lane | 临近交易通道 | arbitration projector |
+| Action-Time Ticket | 交易前正式票据 | ticket issuer |
+
+After PG cutover, runtime and trading decisions must not depend on repo MD,
+generated JSON, output artifacts, local cache, Single Lane Packet, or code
+fallbacks. Those may exist only as exports, diagnostics, archives, fixtures, or
+curated seed inputs.
+
 ## Active StrategyGroups
 
 The V0 pre-trade runtime carries these active StrategyGroups:
 
-| Slot | StrategyGroup | V0 role |
-| --- | --- | --- |
-| `P0-A` | `CPM-RO-001` | Pullback/reclaim long candidates across several crypto symbols |
-| `P0-B` | `MPG-001` | Momentum/leader continuation candidates across several crypto symbols |
-| `P1-A` | `MI-001` | Relative-strength/admission candidates across several crypto symbols |
-| `P1-B` | `SOR-001` | Session/flow candidates across several crypto symbols |
-| `P2-A` | `BRF2-001` | Conditional short-side candidates while disable facts remain decision-relevant |
+| Slot | StrategyGroup | Symbols | Supported side/event | V0 role |
+| --- | --- | --- | --- | --- |
+| `P0-A` | `CPM-RO-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long / `CPM-LONG` | Pullback/reclaim long candidates |
+| `P0-B` | `MPG-001` | `OPUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long / `MPG-LONG` | Momentum/leader continuation candidates |
+| `P1-A` | `MI-001` | `AVAXUSDT`, `ETHUSDT`, `SOLUSDT` | long / `MI-LONG` | Relative-strength/impulse candidates |
+| `P1-B` | `SOR-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `BTCUSDT` | long / `SOR-LONG`; short / `SOR-SHORT` | Session opening-range candidates |
+| `P2-A` | `BRF2-001` | `BTCUSDT`, `AVAXUSDT`, `ETHUSDT` | short / `BRF2-SHORT` | Bear-rally-failure short candidates |
 
 Non-active StrategyGroups remain support-only unless the WIP contract replaces
 one of these active StrategyGroups.
+
+Unsupported opposite sides must not be created by mirroring. They require a new
+StrategyGroup or a versioned strategy variant.
 
 ## Candidate Universe
 
@@ -96,7 +132,8 @@ Each row must expose:
 | `detector_state` | `missing`, `ready`, `running`, or `stale` |
 | `watcher_state` | `missing`, `fresh`, or `stale` |
 | `public_facts_state` | `missing`, `computed_not_satisfied`, or `satisfied` with fact details |
-| `signal_state` | `absent`, `fresh`, `stale`, or `invalidated` |
+| `signal_lifecycle_status` | `absent`, `detected`, `facts_validated`, `stale`, `rejected`, or `superseded` |
+| `signal_freshness_state` | `fresh`, `stale`, `expired`, `missing`, or `unknown` |
 | `risk_state` | `acceptable`, `warning`, or `disable` |
 | `scope_state` | `readonly_only`, `trial_scope_proposed`, `live_submit_allowed`, or `conditional_action_time_rehearsal_allowed` |
 | `promotion_state` | `idle`, `promotion_candidate`, `action_time_lane`, or `blocked` |
@@ -111,16 +148,40 @@ Fresh-signal promotion is deterministic and non-executing:
 
 | Condition | Result |
 | --- | --- |
-| `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=readonly_only` | `promotion_candidate` with scope decision required |
-| `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=trial_scope_proposed` | `promotion_candidate` awaiting action-time scope closure |
-| `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=live_submit_allowed` | `action_time_lane` input may be generated |
-| `signal_state=fresh` and public facts satisfied and risk acceptable and `scope_state=conditional_action_time_rehearsal_allowed` | non-executing `action_time_lane` rehearsal input may be generated, but real submit remains blocked until the strategy-specific hard gates are satisfied |
-| stale or absent signal | no promotion |
+| `signal_lifecycle_status=facts_validated` and `signal_freshness_state=fresh` and public facts satisfied and risk acceptable and `scope_state=readonly_only` | `promotion_candidate` with scope decision required |
+| `signal_lifecycle_status=facts_validated` and `signal_freshness_state=fresh` and public facts satisfied and risk acceptable and `scope_state=trial_scope_proposed` | `promotion_candidate` awaiting action-time scope closure |
+| `signal_lifecycle_status=facts_validated` and `signal_freshness_state=fresh` and public facts satisfied and risk acceptable and `scope_state=live_submit_allowed` | `action_time_lane` input may be generated |
+| `signal_lifecycle_status=facts_validated` and `signal_freshness_state=fresh` and public facts satisfied and risk acceptable and `scope_state=conditional_action_time_rehearsal_allowed` | non-executing `action_time_lane` rehearsal input may be generated, but real submit remains blocked until the strategy-specific hard gates are satisfied |
+| stale, expired, rejected, superseded, or absent signal | no promotion |
 | missing or failed public facts | no promotion |
 | `risk_state=disable` | blocked |
 
 Promotion candidates must not call FinalGate, Operation Layer, exchange APIs,
 order lifecycle, or mutate runtime budget.
+
+Promotion requires PG-backed lineage:
+
+```text
+event spec
+-> candidate scope event binding
+-> runtime coverage
+-> event-specific fact snapshot
+-> live_signal_event
+-> promotion_candidate
+```
+
+Historical replay events, old artifacts, generated timestamps, monitor refresh
+times, or local cache times must not create current fresh live signal events.
+
+A **fresh signal** is not a stored one-word lifecycle status. It is the derived
+condition:
+
+```text
+live_signal_event.status = facts_validated
+and live_signal_event.freshness_state = fresh
+and now_ms <= live_signal_event.expires_at_ms
+and event_time_ms comes from the strategy event time authority
+```
 
 ## Action-Time Narrowing
 
@@ -132,7 +193,9 @@ StrategyGroup
 symbol or basket
 side
 runtime profile
-fresh signal timestamp/state
+fresh signal event id
+signal lifecycle status
+signal freshness state
 public facts
 action-time private facts required
 risk state
@@ -141,6 +204,21 @@ scope state
 
 V0 allows many readiness rows and many promotion candidates, but at most one
 real-submit candidate may be selected for the official path at a time.
+
+The real-submit lane must have:
+
+```text
+lane_scope = real_submit_candidate
+status in opened / facts_refreshing / ticket_pending / ticket_created
+PG arbitration winner
+budget reservation
+fresh action-time facts
+protection reference
+execution policy
+```
+
+Rehearsal and paper lanes must use explicit `lane_scope` and must not masquerade
+as real-submit lanes.
 
 ## Arbitration
 
@@ -152,6 +230,120 @@ explicitly introduced.
 
 Arbitration is not strategy-return optimization. It is a safety and process
 selector for one bounded action-time lane.
+
+Arbitration must be deterministic and PG-backed. It must first eliminate
+unsupported scope, stale facts, missing runtime coverage, missing policy,
+missing budget, missing protection, active-position conflicts, and open-order
+conflicts. It then selects one winner by configured policy, signal freshness,
+strategy priority, signal quality, budget fit, and deterministic tie-breaker.
+
+Candidate Pool, Daily Table, Goal Status, and Server Monitor may display the
+arbitration result. They must not independently create the real-submit winner.
+
+## Action-Time Ticket
+
+The Action-Time Ticket is the formal machine identity of one exact candidate
+trade.
+
+It must bind:
+
+```text
+strategy_group_id
+strategy_group_version_id
+symbol
+exchange_instrument_id
+side
+event_id
+event_spec_id
+event_spec_version_id
+event_time_ms
+trigger_candle_close_time_ms
+signal_event_id
+promotion_candidate_id
+action_time_lane_input_id
+runtime_profile_id
+owner_policy_version
+sizing_policy_version
+execution_policy_version
+protection_policy_version
+budget_reservation_id
+protection_ref_id
+public_fact_snapshot_id
+action_time_fact_snapshot_id
+account_safe_fact_snapshot_id
+ticket_hash
+expires_at_ms
+```
+
+The ticket is not order authority. It may unlock non-executing preflight and
+FinalGate inspection. It must not bypass FinalGate, bypass Operation Layer,
+write exchange orders, mutate live profiles, mutate sizing defaults, or mutate
+exchange account configuration.
+
+Tickets are short-lived. Expired, invalidated, superseded, rejected, or submitted
+tickets cannot re-enter FinalGate or Operation Layer.
+
+Budget reservation happens before real-submit ticket progression, but the
+reservation is initially scoped to the action-time lane and promotion candidate.
+The reservation does not require `ticket_id` at insert time. The ticket then
+binds `budget_reservation_id`, and the reservation may backfill `ticket_id` after
+ticket creation. This prevents a circular dependency while preserving the rule
+that FinalGate can inspect only ticket-bound budget lineage.
+
+## FinalGate And Operation Layer Boundary
+
+FinalGate input must be `ticket_id`.
+
+FinalGate may inspect ticket-bound lineage and current safety facts. It must not
+reconstruct trade identity from Candidate Pool, Daily Table, Goal Status, repo
+MD, generated JSON, output artifacts, loose parameters, or old packets.
+
+Operation Layer input must be:
+
+```text
+ticket_id + finalgate_pass_id
+```
+
+Operation Layer may normalize and submit the approved ticket-bound execution
+intent. It must not choose StrategyGroup, symbol, side, event, notional,
+leverage, order type, time-in-force, reduce-only, or protection semantics from
+loose parameters.
+
+Every real exchange write must trace to:
+
+```text
+ticket_id
+finalgate_pass_id
+operation_submit_command_id
+```
+
+Watcher, monitor, projector, Candidate Pool, Daily Table, Goal Status,
+FinalGate, reconciliation, and review paths must not write exchange orders.
+
+## Protection / Reconciliation / Review Lineage
+
+After an accepted submit command, the post-submit chain must remain connected:
+
+```text
+live_signal_event
+-> promotion_candidate
+-> action_time_lane_input
+-> action_time_ticket
+-> finalgate_pass
+-> operation_submit_command
+-> exchange_order
+-> protection_state
+-> reconciliation_state
+-> review_outcome
+```
+
+Protection must be event-derived through `protection_ref_id`. Operation Layer
+must not guess stops. A main order with detached or failed protection is not a
+complete success.
+
+Review may recommend future strategy governance changes. It must not directly
+grant current submit authority, expand scope, increase budget, mutate active
+tickets, or reinterpret historical outcomes under current strategy versions.
 
 ## Daily Table Relationship
 

@@ -18,6 +18,7 @@ last_verified: 2026-06-20
 | StrategyGroup | 策略含义 | 层级 | 可试运行 | 证据状态 |
 | --- | --- | --- | --- | --- |
 | `MPG-001` | 动量延续 | `L4` | `true` | `reviewed_handoff_plus_replay` |
+| `CPM-RO-001` | CPM 回踩收复 | `L3` | `true` | `standalone_trial_asset_identity_closed` |
 | `TEQ-001` | 类股权永续动量 | `L2` | `false` | `reviewed_handoff_partial_runtime_history` |
 | `FBS-001` | 资金费率/基差压力 | `L3` | `false` | `reviewed_handoff_derivatives_heavy` |
 | `SOR-001` | 开盘区间结构 | `L3` | `false` | `reviewed_handoff_session_conditional` |
@@ -52,6 +53,19 @@ last_verified: 2026-06-20
 - 风险缺口: strategy_quality_risk: false breakout, fast reversal, choppy no-trade regime; fact_coverage_risk: closed-candle and member-state freshness remain action-time runtime facts; economic_risk: fee, funding, fill-gap slippage, and min-size friction; execution_safety_risk: missing protection, stale account facts, open-order or active-position conflict; authority_risk: L4 tier still is not direct submit authority
 - 下一证据: first allocated-subaccount live outcome when fresh signal and official runtime chain pass
 - 证据引用: `docs/current/strategy-group-handoffs/MPG-001/handoff.json`, `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-corpus.json`, `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json`
+
+### `CPM-RO-001` CPM 回踩收复
+
+- 策略边际: Capture trend-intact pullback followed by reclaim, distinct from MPG momentum continuation.
+- 交易逻辑: Long-only pullback-reclaim lane with trend break, failed reclaim, liquidity, funding, and action-time account disables.
+- 适用市场结构: Bullish rebound or trend-continuation regime where pullback depth remains normal and reclaim confirms.
+- 层级 / 可试运行: `L3` / `true`
+- 运行边界: 静态 registry 只定义策略资产，不授权运行时提交
+- 晋级条件: Armed observation only; real submit still depends on fresh signal, action-time RequiredFacts, FinalGate, and Operation Layer.
+- 降级 / 停放 / 淘汰: Downshift if pullback/reclaim facts, action-time account facts, liquidity, or funding context become unavailable. / Park if identity evidence regresses or CPM becomes redundant with MPG after review. / Kill if replay/live review shows pullback-reclaim has persistent false continuation after costs and protection.
+- 风险缺口: strategy_quality_risk: failed reclaim, trend break after pullback, choppy rebound regime; fact_coverage_risk: trend, pullback depth, reclaim, liquidity, funding, and action-time account facts; economic_risk: fee, funding, fill-gap slippage, and pullback continuation failure; execution_safety_risk: missing protection, stale account facts, open-order or active-position conflict; authority_risk: L3 armed observation is not real submit authority
+- 下一证据: fresh CPM-LONG signal followed by non-executing candidate authorization and action-time rehearsal evidence
+- 证据引用: `docs/current/strategy-group-handoffs/CPM-RO-001/handoff.json`, `output/runtime-monitor/latest-cpm-identity-routing-decision.json`, `output/runtime-monitor/latest-cpm-required-facts-mapping.json`, `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json`
 
 ### `TEQ-001` 类股权永续动量
 

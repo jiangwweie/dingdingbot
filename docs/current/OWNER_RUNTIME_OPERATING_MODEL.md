@@ -50,6 +50,39 @@ The Owner decides:
 - whether to keep, revise, promote, park, or kill a StrategyGroup after review;
 - when the project moves from development-stage pilot to production operations.
 
+Owner decisions become runtime authority only through validated PG policy
+events and policy versions. Chat statements, MD edits, JSON patches, and agent
+memory are not current runtime authorization.
+
+## Owner Policy Operations
+
+The Owner operating surface should support these first-class policy operations:
+
+| Operation | Owner meaning | Runtime effect |
+| --- | --- | --- |
+| `enable_strategy` | 启用策略 | Allows observation and candidacy under policy |
+| `pause_strategy` | 暂停策略 | Blocks new promotion and ticket creation |
+| `resume_strategy` | 恢复策略 | Allows runtime under current policy again |
+| `retire_strategy` | 下线策略 | Closes future runtime for the StrategyGroup |
+| `narrow_scope` | 缩小范围 | Removes symbol, side, or event scope |
+| `expand_scope` | 扩大范围 | Adds symbol, side, or event scope after validation |
+| `enable_ticket_eligibility` | 允许生成交易前正式票据 | Allows Action-Time Ticket stage |
+| `disable_ticket_eligibility` | 禁止生成交易前正式票据 | Keeps strategy at observation/candidate stage |
+| `enable_real_submit` | 允许真实提交 | Allows real-submit narrow lane when all gates pass |
+| `disable_real_submit` | 关闭真实提交 | Blocks FinalGate-to-submit progression |
+| `set_budget` | 设置预算 | Sets notional, leverage, margin, or exposure scope |
+| `set_runtime_profile` | 设置运行配置 | Binds account, environment, and execution policy |
+| `set_notification_policy` | 设置通知策略 | Sets Feishu / Owner notification behavior |
+
+Every operation must create a new policy version and append an audit event.
+Affected promotion candidates, action-time lanes, budget reservations, and
+Action-Time Tickets must revalidate or invalidate when policy changes.
+
+Scope expansion, ticket eligibility, and real-submit enablement require
+validation of event specs, RequiredFacts, runtime coverage, ticket lineage,
+FinalGate handoff, Operation Layer handoff, protection, reconciliation, and
+negative tests as applicable.
+
 The Owner-provided subaccount allocation is already the upstream risk-control
 decision. Within that allocation and the selected official runtime profile, the
 system should behave aggressively toward eligible right-tail opportunities. It
@@ -250,6 +283,23 @@ Main Owner screens should avoid internal gate names. Use terse language:
 
 If everything is healthy, the Owner product surface should say `运行中`, `等待机会`, or `无需操作`.
 Do not show a next-step prompt for healthy automation.
+
+Owner-facing no-trade explanations must answer:
+
+```text
+市场有没有给机会
+系统有没有抓到
+推到了哪一步
+第一阻断是什么
+是市场原因、工程原因、授权原因、安全原因还是对账/保护原因
+下一步由系统处理还是需要 Owner 介入
+```
+
+Primary Owner messages must use product language. Internal terms such as
+`FinalGate`, `Operation Layer`, `RequiredFacts`, `candidate`, `authorization
+evidence`, `preflight`, `proof chain`, `refId`, raw artifact path, blocker code,
+and `runtime grant` belong in developer/audit details, not the main Owner
+surface.
 
 ## Document Authority
 

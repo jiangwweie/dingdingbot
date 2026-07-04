@@ -468,6 +468,9 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         runtime_instance_id=list(args.runtime_instance_id or []),
         strategy_family_id=list(args.strategy_family_id or []),
         candidate_universe_json=getattr(args, "candidate_universe_json", None),
+        database_url=getattr(args, "database_url", ""),
+        require_database_url=getattr(args, "require_database_url", False),
+        allow_non_postgres_for_test=getattr(args, "allow_non_postgres_for_test", False),
         max_iterations=args.max_iterations,
         loop_interval_seconds=args.loop_interval_seconds,
         cycle_timeout_seconds=args.cycle_timeout_seconds,
@@ -729,6 +732,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-instance-id", action="append", default=[])
     parser.add_argument("--strategy-family-id", action="append", default=[])
     parser.add_argument("--candidate-universe-json")
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)

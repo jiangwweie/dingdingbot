@@ -89,6 +89,7 @@ def _source_args(args: argparse.Namespace) -> argparse.Namespace:
         context_id=args.context_id,
         expires_at_ms=args.expires_at_ms,
         active_positions_count=args.active_positions_count,
+        allow_live_runtime_handoff_prepare=False,
         metadata_json=args.metadata_json,
     )
 
