@@ -2,12 +2,12 @@
 """Run the server-side product-state refresh sequence after watcher ticks.
 
 The sequence is non-authority from a trading perspective. It refreshes control
-read models, may materialize one Candidate Pool action-time lane into
-non-executing prepare evidence, may materialize a PG Action-Time Ticket when a
-PG real-submit lane is present, and may run the ticket-bound non-executing
-FinalGate preflight and Operation Layer handoff. It does not call Operation
-Layer submit, exchange write APIs, OrderLifecycle, withdrawals, transfers,
-credential mutation, live profile changes, or order sizing changes.
+read models, may materialize PG fresh signals into one action-time lane,
+may materialize a PG Action-Time Ticket when a PG real-submit lane is present,
+and may run the ticket-bound non-executing FinalGate preflight and Operation
+Layer handoff. It does not call Operation Layer submit, exchange write APIs,
+OrderLifecycle, withdrawals, transfers, credential mutation, live profile
+changes, or order sizing changes.
 """
 
 from __future__ import annotations
@@ -425,6 +425,16 @@ def _refresh_steps(
         ),
         RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
         RefreshStep(
+            "materialize_pg_promotion_action_time_lane",
+            (
+                python,
+                "scripts/materialize_pg_promotion_action_time_lane.py",
+                *pg_required,
+                "--output-json",
+                str(report_dir / "pg-promotion-action-time-lane-materialization.json"),
+            ),
+        ),
+        RefreshStep(
             "materialize_action_time_ticket",
             (
                 python,
@@ -454,6 +464,19 @@ def _refresh_steps(
                 str(report_dir / "operation-layer-handoff.json"),
             ),
         ),
+        RefreshStep(
+            "build_candidate_pool_after_materialization",
+            (
+                python,
+                "scripts/build_strategy_live_candidate_pool.py",
+                *pg_required,
+                "--output-json",
+                str(candidate_pool),
+                "--output-owner-progress",
+                str(candidate_pool_md),
+            ),
+        ),
+        RefreshStep("validate_candidate_pool_after_materialization", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
         RefreshStep(
             "build_readiness_pack_after_materialization",
             (

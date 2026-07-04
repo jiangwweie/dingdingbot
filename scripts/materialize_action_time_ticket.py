@@ -565,9 +565,9 @@ def _fact_condition_satisfied(row: dict[str, Any], fact_values: dict[str, Any]) 
     if operator == "not_exists":
         return observed is None
     if operator == "eq":
-        return observed == expected
+        return _normalized_scalar(observed) == _normalized_scalar(expected)
     if operator == "neq":
-        return observed != expected
+        return _normalized_scalar(observed) != _normalized_scalar(expected)
     if operator in {"gt", "gte", "lt", "lte"}:
         observed_dec = _decimal(observed)
         expected_dec = _decimal(expected)
@@ -585,6 +585,22 @@ def _fact_condition_satisfied(row: dict[str, Any], fact_values: dict[str, Any]) 
     if operator == "expr_ref":
         return observed is True
     return False
+
+
+def _normalized_scalar(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if text.lower() == "true":
+        return True
+    if text.lower() == "false":
+        return False
+    if text.lower() == "null":
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 def _insert_ticket_bundle(
