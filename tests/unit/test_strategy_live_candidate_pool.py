@@ -548,6 +548,120 @@ def test_candidate_pool_pg_state_fails_closed_without_runtime_scope(
         )
 
 
+def test_candidate_pool_pg_state_fails_closed_without_owner_policy(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    control_state["owner_policy_current"] = [
+        row
+        for row in control_state["owner_policy_current"]
+        if row["policy_current_id"]
+        != "policy_current:candidate_scope:MPG-001:OPUSDT:long:MPG-LONG"
+    ]
+
+    with pytest.raises(ValueError, match="has no PG owner policy"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
+
+
+def test_candidate_pool_pg_state_fails_closed_when_runtime_scope_blocks_live_submit(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    for row in control_state["runtime_scope_bindings"]:
+        if (
+            row["strategy_group_id"] == "MPG-001"
+            and row["symbol"] == "OPUSDT"
+            and row["side"] == "long"
+        ):
+            row["live_submit_allowed"] = False
+
+    with pytest.raises(ValueError, match="PG runtime scope blocks live submit"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
+
+
+def test_candidate_pool_pg_state_fails_closed_without_policy_notional_leverage(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    for row in control_state["owner_policy_current"]:
+        if (
+            row["strategy_group_id"] == "MPG-001"
+            and row["symbol"] == "OPUSDT"
+            and row["side"] == "long"
+        ):
+            row["max_notional"] = None
+
+    with pytest.raises(ValueError, match="PG owner policy missing notional/leverage"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
+
+
+def test_candidate_pool_pg_side_support_comes_from_pg_authorization_scope(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "SOR-001"
+        and item["symbol"] == "ETHUSDT"
+        and item["side"] == "short"
+    )
+    assert row["strategy_signal_fact_side_supported"] is True
+    assert row["strategy_signal_fact_side_scope"] == ["long", "short"]
+
+
+def test_candidate_pool_does_not_fallback_to_tradeability_policy_when_owner_auth_invalid():
+    tradeability = _tradeability()
+    row = next(
+        item
+        for item in tradeability["decision_rows"]
+        if item["strategy_group_id"] == "MPG-001"
+    )
+    row["policy_scope"] = {"live_submit_symbols": ["OPUSDT"]}
+    authorization = _owner_pretrade_authorization()
+    authorization["status"] = "stale_owner_authorization"
+
+    artifact = _builder().build_strategy_live_candidate_pool(
+        daily_table=_daily_table(),
+        tradeability=tradeability,
+        replay_live_parity=_parity(),
+        action_time_boundary=_action_time(),
+        single_lane_task_packet=_single_lane(),
+        owner_pretrade_authorization=authorization,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    readiness_row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "MPG-001" and item["symbol"] == "OPUSDT"
+    )
+    assert readiness_row["owner_authorization"]["live_submit_allowed"] == "none"
+    assert readiness_row["scope_state"] == "readonly_only"
+    assert readiness_row["strategy_signal_fact_side_scope"] == []
+    assert readiness_row["strategy_signal_fact_side_supported"] is False
+    assert artifact["action_time_lane_inputs"] == []
+
+
 def test_candidate_pool_pg_cli_round_trip(tmp_path: Path):
     migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
@@ -1869,7 +1983,7 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
     errors = _validator().validate_strategy_live_candidate_pool(artifact)
 
     assert any(
-        "owner_authorization.live_submit_allowed must be conditional_hard_gated"
+        "owner_authorization.live_submit_allowed must match pretrade summary"
         in error
         for error in errors
     )

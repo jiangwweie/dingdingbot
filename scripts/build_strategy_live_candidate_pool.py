@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -62,13 +63,6 @@ PRIMARY_SYMBOLS = {
     "SOR-001": "ETHUSDT",
     "BRF2-001": "BTCUSDT",
 }
-STRATEGY_SIGNAL_FACT_SIDE_SCOPE = {
-    "CPM-RO-001": ("long",),
-    "MPG-001": ("long",),
-    "MI-001": ("long",),
-    "SOR-001": ("long", "short"),
-    "BRF2-001": ("short",),
-}
 FRESH_SIGNAL_TIMESTAMP_KEYS = (
     "event_time_utc",
     "fresh_signal_time_utc",
@@ -107,12 +101,6 @@ ACTION_TIME_INPUT_BLOCKERS = {
     "runtime_profile_scope_missing",
     "hard_safety_stop",
     "replay_live_rule_mismatch",
-}
-SCOPED_LIVE_SUBMIT_STRATEGIES = {
-    "CPM-RO-001",
-    "MPG-001",
-    "MI-001",
-    "SOR-001",
 }
 P0_P1_ITEMS = (
     ("P0", "five_strategy_candidate_pool_control_surface"),
@@ -381,13 +369,22 @@ def _candidate_pool_inputs_from_control_state(
     coverage_by_lane = _current_watcher_coverage_by_lane(control_state)
     for row in candidate_rows:
         candidate_scope_id = str(row.get("candidate_scope_id") or "")
+        if not candidate_scope_id:
+            raise ValueError("PG candidate scope row missing candidate_scope_id")
+        policy_current_id = str(row.get("policy_current_id") or "")
+        if not policy_current_id:
+            raise ValueError(f"{candidate_scope_id} missing PG owner policy ref")
         if candidate_scope_id not in binding_by_candidate:
             raise ValueError(f"{candidate_scope_id} has no active PG event binding")
         if candidate_scope_id not in runtime_by_candidate:
             raise ValueError(f"{candidate_scope_id} has no active PG runtime scope")
-        policy_current_id = str(row.get("policy_current_id") or "")
-        if policy_current_id and policy_current_id not in policy_by_id:
+        if policy_current_id not in policy_by_id:
             raise ValueError(f"{candidate_scope_id} has no PG owner policy")
+        _require_pg_policy_runtime_scope(
+            candidate=row,
+            runtime_scope=runtime_by_candidate[candidate_scope_id],
+            policy=policy_by_id[policy_current_id],
+        )
 
     return {
         "daily_table": _pg_daily_table_projection(
@@ -489,6 +486,52 @@ def _active_runtime_scope_by_candidate(
             raise ValueError(f"multiple active runtime scope bindings for {candidate_scope_id}")
         bindings[candidate_scope_id] = row
     return bindings
+
+
+def _positive_decimal(value: Any) -> bool:
+    try:
+        return Decimal(str(value)) > 0
+    except Exception:
+        return False
+
+
+def _require_pg_policy_runtime_scope(
+    *,
+    candidate: dict[str, Any],
+    runtime_scope: dict[str, Any],
+    policy: dict[str, Any],
+) -> None:
+    candidate_scope_id = str(candidate.get("candidate_scope_id") or "unknown_candidate")
+    for key in ("strategy_group_id", "symbol", "side", "policy_current_id"):
+        if str(runtime_scope.get(key) or "") != str(candidate.get(key) or ""):
+            raise ValueError(f"{candidate_scope_id} PG runtime scope mismatches {key}")
+    for key in ("strategy_group_id", "symbol", "side"):
+        if str(policy.get(key) or "") != str(candidate.get(key) or ""):
+            raise ValueError(f"{candidate_scope_id} PG owner policy mismatches {key}")
+    if runtime_scope.get("selected_strategygroup_scope") is not True:
+        raise ValueError(f"{candidate_scope_id} PG runtime scope missing selected StrategyGroup")
+    if runtime_scope.get("symbol_side_scope_closed") is not True:
+        raise ValueError(f"{candidate_scope_id} PG runtime scope missing symbol/side closure")
+    if runtime_scope.get("notional_leverage_scope_closed") is not True:
+        raise ValueError(f"{candidate_scope_id} PG runtime scope missing notional/leverage closure")
+    if runtime_scope.get("live_submit_allowed") is not True:
+        raise ValueError(f"{candidate_scope_id} PG runtime scope blocks live submit")
+    if str(runtime_scope.get("runtime_profile_id") or "") != str(
+        policy.get("runtime_profile_id") or ""
+    ):
+        raise ValueError(f"{candidate_scope_id} PG runtime profile mismatches owner policy")
+    if policy.get("enabled_state") != "enabled":
+        raise ValueError(f"{candidate_scope_id} PG owner policy is not enabled")
+    if policy.get("pretrade_candidate_allowed") is not True:
+        raise ValueError(f"{candidate_scope_id} PG owner policy blocks pretrade")
+    if policy.get("action_time_rehearsal_allowed") is not True:
+        raise ValueError(f"{candidate_scope_id} PG owner policy blocks action-time rehearsal")
+    if policy.get("live_submit_allowed") not in {"scoped", "conditional_hard_gated"}:
+        raise ValueError(f"{candidate_scope_id} PG owner policy blocks live submit")
+    if not _positive_decimal(policy.get("max_notional")) or not _positive_decimal(
+        policy.get("leverage")
+    ):
+        raise ValueError(f"{candidate_scope_id} PG owner policy missing notional/leverage")
 
 
 def _current_pretrade_readiness_by_lane(
@@ -2127,9 +2170,14 @@ def _symbol_readiness_row(
         computed=computed,
         failed_facts=failed_facts,
     )
+    strategy_signal_fact_side_scope = _strategy_signal_fact_side_scope(
+        strategy_group_id,
+        owner_pretrade_authorization,
+    )
     strategy_signal_fact_side_supported = _strategy_signal_fact_side_supported(
         strategy_group_id,
         candidate_side,
+        owner_pretrade_authorization,
     )
     fresh_signal_timestamp_utc = _fresh_signal_timestamp(action_row, parity_row)
     fresh_signal_timestamp_source = _fresh_signal_timestamp_source(
@@ -2220,9 +2268,7 @@ def _symbol_readiness_row(
         ),
         "action_time": _action_time_readiness(action_row),
         "server_runtime_coverage": runtime_coverage_row or {},
-        "strategy_signal_fact_side_scope": list(
-            STRATEGY_SIGNAL_FACT_SIDE_SCOPE.get(strategy_group_id, ())
-        ),
+        "strategy_signal_fact_side_scope": list(strategy_signal_fact_side_scope),
         "strategy_signal_fact_side_supported": strategy_signal_fact_side_supported,
         "lane_fingerprint": _lane_fingerprint(
             strategy_group_id=strategy_group_id,
@@ -2323,40 +2369,15 @@ def _scope_state(
         owner_authorization.get("pretrade_candidate_allowed") is True
         and owner_authorization.get("action_time_rehearsal_allowed") is True
         and owner_authorization.get("live_submit_allowed") == "scoped"
-        and strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES
     ):
         return "live_submit_allowed"
     if (
-        strategy_group_id == "BRF2-001"
-        and owner_authorization.get("pretrade_candidate_allowed") is True
+        owner_authorization.get("pretrade_candidate_allowed") is True
         and owner_authorization.get("action_time_rehearsal_allowed") is True
         and owner_authorization.get("live_submit_allowed")
         == "conditional_hard_gated"
     ):
         return "conditional_action_time_rehearsal_allowed"
-    policy = _as_dict(tradeability_row.get("policy_scope"))
-    live_symbols = (
-        policy.get("live_submit_symbols")
-        or policy.get("live_submit_symbol_scope")
-        or _as_dict(policy.get("live_submit_scope")).get("symbols")
-    )
-    if isinstance(live_symbols, list) and symbol in {
-        str(item) for item in live_symbols
-    }:
-        return "live_submit_allowed"
-    canonical = _as_dict(daily_row.get("canonical_lane"))
-    if canonical.get("symbol") == symbol and candidate.get("first_blocker") not in {
-        "scope_not_attached",
-        "policy_scope_missing",
-        "runtime_profile_scope_missing",
-    }:
-        return "trial_scope_proposed"
-    if strategy_group_id == "BRF2-001":
-        return "readonly_only"
-    if symbol == str(candidate.get("selected_symbol") or "") and candidate.get(
-        "first_blocker"
-    ) not in {"scope_not_attached", "policy_scope_missing"}:
-        return "trial_scope_proposed"
     return "readonly_only"
 
 
@@ -2585,9 +2606,25 @@ def _server_runtime_scope_ready(
     return True
 
 
-def _strategy_signal_fact_side_supported(strategy_group_id: str, side: str) -> bool:
+def _strategy_signal_fact_side_scope(
+    strategy_group_id: str,
+    owner_pretrade_authorization: dict[str, Any],
+) -> tuple[str, ...]:
+    if _owner_authorization_valid(owner_pretrade_authorization):
+        return _candidate_side_scope(strategy_group_id, owner_pretrade_authorization)
+    return ()
+
+
+def _strategy_signal_fact_side_supported(
+    strategy_group_id: str,
+    side: str,
+    owner_pretrade_authorization: dict[str, Any],
+) -> bool:
     return str(side or "").lower() in set(
-        STRATEGY_SIGNAL_FACT_SIDE_SCOPE.get(strategy_group_id, ())
+        _strategy_signal_fact_side_scope(
+            strategy_group_id,
+            owner_pretrade_authorization,
+        )
     )
 
 

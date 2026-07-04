@@ -25,8 +25,6 @@ from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
     OWNER_AUTHORIZATION_SCHEMA,
     PLACEHOLDER_SYMBOLS,
     SCHEMA,
-    SCOPED_LIVE_SUBMIT_STRATEGIES,
-    STRATEGY_SIGNAL_FACT_SIDE_SCOPE,
 )
 
 
@@ -117,6 +115,7 @@ def validate_strategy_live_candidate_pool(artifact: dict[str, Any]) -> list[str]
     if summary.get("symbol_readiness_count") != len(symbol_rows):
         errors.append("summary.symbol_readiness_count must match readiness rows")
     errors.extend(_validate_owner_authorization_summary(artifact))
+    errors.extend(_validate_rows_match_authorization_summary(artifact))
     if artifact.get("authority_boundary") != AUTHORITY_BOUNDARY:
         errors.append("authority_boundary is invalid")
     errors.extend(_forbidden_true_paths(artifact))
@@ -288,7 +287,11 @@ def _validate_symbol_readiness_row(index: int, row: dict[str, Any]) -> list[str]
         )
     strategy_group_id = str(row.get("strategy_group_id") or "")
     side = str(row.get("side") or "")
-    side_scope = set(STRATEGY_SIGNAL_FACT_SIDE_SCOPE.get(strategy_group_id, ()))
+    side_scope = {
+        str(item)
+        for item in row.get("strategy_signal_fact_side_scope") or []
+        if str(item or "")
+    }
     if row.get("strategy_signal_fact_side_supported") is True and side not in side_scope:
         errors.append(
             f"{prefix}.strategy_signal_fact_side_supported contradicts side scope"
@@ -607,21 +610,64 @@ def _validate_owner_authorization_summary(artifact: dict[str, Any]) -> list[str]
         errors.append(
             "pretrade_runtime.owner_authorization.v0_single_real_submit_intent must be true"
         )
-    if set(summary.get("scoped_live_submit_strategy_groups") or []) != set(
-        SCOPED_LIVE_SUBMIT_STRATEGIES
-    ):
+    strategy_group_scopes = _as_dict(summary.get("strategy_group_scopes"))
+    scoped_groups = {
+        strategy_group_id
+        for strategy_group_id, row in strategy_group_scopes.items()
+        if _as_dict(row).get("live_submit_allowed") == "scoped"
+    }
+    conditional_groups = {
+        strategy_group_id
+        for strategy_group_id, row in strategy_group_scopes.items()
+        if _as_dict(row).get("live_submit_allowed") == "conditional_hard_gated"
+    }
+    if set(summary.get("scoped_live_submit_strategy_groups") or []) != scoped_groups:
         errors.append(
             "pretrade_runtime.owner_authorization.scoped_live_submit_strategy_groups is invalid"
         )
-    if set(summary.get("conditional_hard_gated_strategy_groups") or []) != {
-        "BRF2-001"
-    }:
+    if set(summary.get("conditional_hard_gated_strategy_groups") or []) != conditional_groups:
         errors.append(
             "pretrade_runtime.owner_authorization.conditional_hard_gated_strategy_groups is invalid"
         )
     boundary = str(summary.get("authority_boundary") or "")
     if "no_exchange_write_bypass" not in boundary:
         errors.append("pretrade_runtime.owner_authorization.authority_boundary is invalid")
+    return errors
+
+
+def _validate_rows_match_authorization_summary(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    summary = _as_dict(_as_dict(artifact.get("pretrade_runtime")).get("owner_authorization"))
+    strategy_group_scopes = _as_dict(summary.get("strategy_group_scopes"))
+    rows = _dict_rows(artifact.get("symbol_readiness_rows")) + _dict_rows(
+        artifact.get("action_time_lane_inputs")
+    )
+    for row in rows:
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        expected = str(
+            _as_dict(strategy_group_scopes.get(strategy_group_id)).get(
+                "live_submit_allowed"
+            )
+            or ""
+        )
+        actual = str(_as_dict(row.get("owner_authorization")).get("live_submit_allowed") or "")
+        prefix = (
+            f"{strategy_group_id}/{row.get('symbol')}/{row.get('side')}"
+        )
+        if expected and actual != expected:
+            errors.append(
+                f"{prefix}.owner_authorization.live_submit_allowed must match pretrade summary"
+            )
+        scope_state = str(row.get("scope_state") or "")
+        if expected == "scoped" and scope_state != "live_submit_allowed":
+            errors.append(f"{prefix}.scope_state must be live_submit_allowed")
+        if (
+            expected == "conditional_hard_gated"
+            and scope_state != "conditional_action_time_rehearsal_allowed"
+        ):
+            errors.append(
+                f"{prefix}.scope_state must be conditional_action_time_rehearsal_allowed"
+            )
     return errors
 
 
@@ -662,27 +708,18 @@ def _validate_row_owner_authorization(
     }
     if not common_gates.issubset(gates):
         errors.append(f"{prefix}.owner_authorization.real_submit_required_gates incomplete")
-    if strategy_group_id == "BRF2-001":
-        if mode != "conditional_hard_gated":
-            errors.append(
-                f"{prefix}.owner_authorization.live_submit_allowed must be conditional_hard_gated"
-            )
+    if mode == "scoped":
+        if row.get("scope_state") != "live_submit_allowed":
+            errors.append(f"{prefix}.scope_state must be live_submit_allowed")
+    elif mode == "conditional_hard_gated":
         if row.get("scope_state") != "conditional_action_time_rehearsal_allowed":
             errors.append(
                 f"{prefix}.scope_state must be conditional_action_time_rehearsal_allowed"
             )
-        if not {"short_side_disable_clear", "squeeze_clear", "liquidity_clear"}.issubset(gates):
-            errors.append(f"{prefix}.owner_authorization.brf2_hard_gates incomplete")
+        if gates == common_gates:
+            errors.append(f"{prefix}.owner_authorization.conditional_hard_gates incomplete")
     else:
-        if strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES and mode != "scoped":
-            errors.append(
-                f"{prefix}.owner_authorization.live_submit_allowed must be scoped"
-            )
-        if (
-            strategy_group_id in SCOPED_LIVE_SUBMIT_STRATEGIES
-            and row.get("scope_state") != "live_submit_allowed"
-        ):
-            errors.append(f"{prefix}.scope_state must be live_submit_allowed")
+        errors.append(f"{prefix}.owner_authorization.live_submit_allowed is invalid")
     candidate_symbols = {
         str(item)
         for item in authorization.get("candidate_symbols") or []

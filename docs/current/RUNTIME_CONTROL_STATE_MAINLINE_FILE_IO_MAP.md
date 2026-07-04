@@ -166,7 +166,7 @@ historical research script.
 | --- | --- | --- | --- |
 | Strategy registry | registry baseline JSON and handoff JSON | `brc_strategy_groups`, `brc_strategy_group_versions`, `brc_required_fact_contracts` | registry export |
 | Owner policy and live-submit scope | `owner-pretrade-runtime-authorization-v0.json`, tier policy JSON | `brc_owner_policy_events`, `brc_owner_policy_current` | policy export for audit only |
-| Candidate universe | PG candidate scope/runtime bindings in production; code constants, policy JSON, and Candidate Pool export are not production runtime authority | `brc_strategy_group_candidate_scope` | Candidate Pool export for audit/diagnostic only |
+| Candidate universe | PG candidate scope/runtime bindings in production; code constants, policy JSON, and Candidate Pool export are not production runtime authority | `brc_strategy_group_candidate_scope`, `brc_owner_policy_current`, `brc_runtime_scope_bindings`, event specs | Candidate Pool export for audit/diagnostic only |
 | Runtime scope/profile binding | policy JSON, runtime reports | `brc_runtime_scope_bindings`, `runtime_profiles` | Runtime Safety / Candidate Pool export |
 | Runtime bootstrap admission | handoff/intake/Candidate Pool JSON only in explicit plan-only local diagnostics | `brc_strategy_group_candidate_scope`, `brc_owner_policy_current`, `brc_runtime_scope_bindings` | runtime bootstrap artifact |
 | Watcher coverage | watcher `latest-status.json`, active monitor JSON | `brc_watcher_runtime_coverage` | watcher coverage export |
