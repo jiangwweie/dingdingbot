@@ -146,7 +146,7 @@ historical research script.
 
 | Conflict | Current shape | Impact | Required PG closure |
 | --- | --- | --- | --- |
-| Goal Status multiple writer history | `70-goal-status.conf` and product-state refresh are retired as Goal Status writers; final Goal Status is written by the dedicated PG-backed builder in the 80 sequence | Last writer can overwrite current status with older inputs if retired writers return | `brc_goal_status_current` has one owner projector |
+| Goal Status multiple writer history | `70-goal-status.conf` and product-state refresh are retired as Goal Status writers; product-state refresh must not expose a `--refresh-goal-status` CLI or builder hook; final Goal Status is written by the dedicated PG-backed builder in the 80 sequence | Last writer can overwrite current status with older inputs if retired writers return | `brc_goal_status_current` has one owner projector |
 | Optional Candidate Pool in Goal Status | Goal Status can be invoked with or without `--candidate-pool-json` | Same code can decide from different facts | Candidate Pool/current readiness projection is mandatory input |
 | Legacy pilot status as blocker | `strategygroup-runtime-pilot-status.json` contains watcher scope alignment | Old scope mismatch can hide fresh/waiting state | Store as `brc_legacy_diagnostics`; cannot set current blocker |
 | Tradeability as broad generated source | Tradeability reads registry/tier policy and many optional latest artifacts, then feeds Daily Table and Candidate Pool | One stale optional artifact can alter first-blocker classification downstream | Tradeability becomes a DB-backed read model over typed current projections |

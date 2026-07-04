@@ -1072,15 +1072,15 @@ refreshes the non-executing dry-run audit chain and then rebuilds
 `strategygroup-runtime-goal-status.json` from the same report directory.
 
 If local operator auth is missing, API readmodel refresh is recorded as a
-reviewable blocker, but local dry-run audit and goal-status artifacts are still
-written. This prevents no-signal development turns from stopping only because
-the local console server/auth environment is not running.
+reviewable blocker, but local dry-run audit artifacts are still written. This
+prevents no-signal development turns from stopping only because the local
+console server/auth environment is not running.
 
 | Item | Result |
 | --- | --- |
 | Optional dry-run refresh | `--refresh-dry-run-audit-chain` writes `runtime-dry-run-audit-chain.json` |
 | Optional closure-status refresh | `--refresh-chain-closure-status` writes `runtime-execution-chain-closure-status.json` from the current dry-run audit artifact |
-| Retired goal-status refresh | `--refresh-goal-status` no longer writes `strategygroup-runtime-goal-status.json`; final Goal Status is owned by `build_strategygroup_runtime_goal_status.py --require-database-url` |
+| Removed goal-status refresh | Product-state refresh no longer exposes `--refresh-goal-status` or a Goal Status builder hook; final Goal Status is owned by `build_strategygroup_runtime_goal_status.py --require-database-url` |
 | Tokyo watcher hook | `80-product-state-refresh.conf` now writes `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-execution-chain-closure-status.json` after the dry-run audit post-step |
 | Local auth missing | Records `operator_cookie_unavailable` and skips API readmodel refresh instead of aborting the local audit refresh |
 | Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, source-readiness unavailable evidence was written, and no forbidden safety effect is present; Goal Status remains owned by the external PG projector |

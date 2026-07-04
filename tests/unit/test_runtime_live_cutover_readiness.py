@@ -111,15 +111,14 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "dry_run",
         "chain_closure",
         "live_closure",
-        "goal_status",
         "api:/api/trading-console/strategy-group-live-facts-readiness",
         "api:/api/trading-console/owner-console-source-readiness",
         "api:/api/trading-console/strategygroup-runtime-pilot-status",
     ]
     assert visibility["checks"] == {
         "product_state_refresh_status_ok": True,
-        "product_state_live_closure_before_goal_status": True,
-        "product_state_goal_status_before_source_readiness": True,
+        "product_state_live_closure_before_api_readmodels": True,
+        "product_state_goal_status_external_pg_projector_required": True,
         "product_state_refresh_has_no_dangerous_effects": True,
     }
 

@@ -97,7 +97,7 @@ def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side
         "optional_chain_closure_status_refresh": False,
         "optional_live_closure_evidence_refresh": False,
         "optional_goal_status_refresh": False,
-        "goal_status_external_pg_projector_required": False,
+        "goal_status_external_pg_projector_required": True,
         "optional_source_readiness_unavailable_evidence": False,
         "exchange_write_called": False,
         "order_created": False,
@@ -265,7 +265,7 @@ def test_refresh_product_state_artifacts_passes_selected_strategygroup_scope_to_
     )
 
 
-def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp_path):
+def test_refresh_product_state_artifacts_refreshes_local_artifacts_without_goal_status_writer(tmp_path):
     events = []
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
@@ -306,24 +306,6 @@ def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp
                 "order_created": False,
                 "withdrawal_or_transfer_created": False,
             },
-        }
-
-    def goal_status_builder(**kwargs):
-        events.append("goal_status")
-        assert kwargs["report_dir"] == tmp_path
-        assert kwargs["release_manifest"] == tmp_path / "manifest.json"
-        assert kwargs["expected_head"] == "abc123"
-        return {
-            "scope": "strategygroup_runtime_goal_status",
-            "status": "waiting_for_signal",
-            "ready_for_real_order_action": False,
-            "non_authority_checkpoint": "continue_watcher_observation",
-            "checks": {
-                "runtime_dry_run_audit_passed": True,
-                "ready_for_real_order_action": True,
-            },
-            "owner_state": {"non_authority_checkpoint": "continue_watcher_observation"},
-            "real_order_boundary": {"ready_for_real_order_action": True},
         }
 
     def chain_closure_status_builder(**kwargs):
@@ -379,11 +361,6 @@ def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp
         chain_closure_status_builder=chain_closure_status_builder,
         refresh_live_closure_evidence=True,
         live_closure_evidence_refresher=live_closure_evidence_refresher,
-        refresh_goal_status=True,
-        goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
-        release_manifest=tmp_path / "manifest.json",
-        expected_head="abc123",
-        goal_status_builder=goal_status_builder,
     )
 
     assert artifact["status"] == "refreshed"
@@ -391,14 +368,10 @@ def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp
         "dry_run",
         "chain_closure",
         "live_closure",
-        "goal_status",
         "api:/api/trading-console/strategy-group-live-facts-readiness",
         "api:/api/trading-console/owner-console-source-readiness",
         "api:/api/trading-console/strategygroup-runtime-pilot-status",
     ]
-    assert events.index("goal_status") < events.index(
-        "api:/api/trading-console/owner-console-source-readiness"
-    )
     assert artifact["dry_run_audit_refresh"] == {
         "enabled": True,
         "status": "passed",
@@ -433,21 +406,24 @@ def test_refresh_product_state_artifacts_can_refresh_dry_run_and_goal_status(tmp
         "reject_reasons": [],
     }
     assert artifact["goal_status_refresh"] == {
-        "enabled": True,
-        "status": "waiting_for_signal",
-        "output_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
-        "goal_status_input_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
-        "non_authority_checkpoint": "continue_watcher_observation",
-        "runtime_dry_run_audit_passed": True,
-        "ready_for_real_order_action": False,
+        "enabled": False,
+        "status": "retired_external_pg_projector_required",
+        "reason": (
+            "Goal Status current projection is owned by "
+            "build_strategygroup_runtime_goal_status.py --require-database-url"
+        ),
     }
     assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
     assert (tmp_path / "runtime-execution-chain-closure-status.json").exists()
-    assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
+    assert not (tmp_path / "strategygroup-runtime-goal-status.json").exists()
     assert artifact["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
     assert artifact["safety_invariants"]["optional_chain_closure_status_refresh"] is True
     assert artifact["safety_invariants"]["optional_live_closure_evidence_refresh"] is True
-    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is True
+    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is False
+    assert (
+        artifact["safety_invariants"]["goal_status_external_pg_projector_required"]
+        is True
+    )
     assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is False
     assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert artifact["safety_invariants"]["places_order"] is False
@@ -493,8 +469,6 @@ def test_refresh_product_state_artifacts_retires_default_goal_status_writer(
         dry_run_output_dir=tmp_path / "dry",
         dry_run_output_json=external_dry_run_json,
         dry_run_builder=dry_run_builder,
-        refresh_goal_status=True,
-        goal_status_output_json=external_goal_status_json,
     )
 
     mirrored_dry_run_json = output_dir / "runtime-dry-run-audit-chain.json"
@@ -547,16 +521,23 @@ def test_refresh_product_state_artifacts_auth_missing_does_not_block_local_audit
             },
         }
 
-    def goal_status_builder(**kwargs):
-        return {
-            "scope": "strategygroup_runtime_goal_status",
-            "status": "missing_fact",
-            "checks": {"runtime_dry_run_audit_passed": True},
-            "owner_state": {
-                "non_authority_checkpoint": "refresh_or_repair_owner_console_source_readiness"
+    (tmp_path / "strategygroup-runtime-goal-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "strategygroup_runtime_goal_status",
+                "status": "missing_fact",
+                "checks": {"runtime_dry_run_audit_passed": True},
+                "owner_state": {
+                    "non_authority_checkpoint": (
+                        "refresh_or_repair_owner_console_source_readiness"
+                    )
+                },
+                "real_order_boundary": {"ready_for_real_order_action": False},
             },
-            "real_order_boundary": {"ready_for_real_order_action": False},
-        }
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
     (tmp_path / "tokyo-readonly-probe-current.json").write_text(
@@ -581,14 +562,13 @@ def test_refresh_product_state_artifacts_auth_missing_does_not_block_local_audit
         dry_run_output_dir=tmp_path / "dry",
         dry_run_output_json=tmp_path / "runtime-dry-run-audit-chain.json",
         dry_run_builder=dry_run_builder,
-        refresh_goal_status=True,
-        goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
-        goal_status_builder=goal_status_builder,
     )
 
     assert artifact["status"] == "refresh_blocked"
     assert artifact["dry_run_audit_refresh"]["status"] == "passed"
-    assert artifact["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert artifact["goal_status_refresh"]["status"] == (
+        "retired_external_pg_projector_required"
+    )
     assert artifact["source_readiness_unavailable_evidence"] == {
         "enabled": True,
         "status": "source_unavailable",
@@ -787,7 +767,6 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
             "--output-json",
             str(output_json),
             "--refresh-dry-run-audit-chain",
-            "--refresh-goal-status",
             "--allow-degraded-local-refresh-success",
             "--selected-strategy-group-id",
             "MPG-001",
@@ -840,7 +819,6 @@ def test_cli_keeps_default_blocked_exit_for_degraded_refresh(
             "--output-dir",
             str(tmp_path),
             "--refresh-dry-run-audit-chain",
-            "--refresh-goal-status",
             "--selected-strategy-group-id",
             "MPG-001",
             "--max-symbols",

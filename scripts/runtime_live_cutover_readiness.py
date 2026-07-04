@@ -113,8 +113,8 @@ CHECK_GROUP_CHECKS: dict[str, list[str]] = {
     ],
     "same_tick_product_state_visibility": [
         "product_state_refresh_status_ok",
-        "product_state_live_closure_before_goal_status",
-        "product_state_goal_status_before_source_readiness",
+        "product_state_live_closure_before_api_readmodels",
+        "product_state_goal_status_external_pg_projector_required",
         "product_state_refresh_has_no_dangerous_effects",
     ],
     "dry_run_safety": [
@@ -595,23 +595,6 @@ def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, 
             },
         }
 
-    def goal_status_builder(**kwargs: Any) -> dict[str, Any]:
-        events.append("goal_status")
-        return {
-            "scope": "strategygroup_runtime_goal_status",
-            "status": "waiting_for_market",
-            "ready_for_real_order_action": False,
-            "checks": {
-                "runtime_dry_run_audit_passed": True,
-                "ready_for_real_order_action": False,
-            },
-            "owner_state": {
-                "status": "waiting_for_opportunity",
-                "non_authority_checkpoint": "continue_watcher_observation",
-            },
-            "real_order_boundary": {"ready_for_real_order_action": False},
-        }
-
     refresh = refresh_product_state_artifacts(
         api_base="http://cutover.local",
         output_dir=contract_dir,
@@ -631,25 +614,20 @@ def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, 
         chain_closure_status_builder=chain_closure_status_builder,
         refresh_live_closure_evidence=True,
         live_closure_evidence_refresher=live_closure_evidence_refresher,
-        refresh_goal_status=True,
-        goal_status_output_json=contract_dir / "strategygroup-runtime-goal-status.json",
-        release_manifest=contract_dir / "manifest.json",
-        expected_head="local-cutover-contract",
-        goal_status_builder=goal_status_builder,
     )
     safety = refresh.get("safety_invariants") if isinstance(refresh, dict) else {}
     checks = {
         "product_state_refresh_status_ok": refresh.get("status") == "refreshed",
-        "product_state_live_closure_before_goal_status": (
+        "product_state_live_closure_before_api_readmodels": (
             "live_closure" in events
-            and "goal_status" in events
-            and events.index("live_closure") < events.index("goal_status")
-        ),
-        "product_state_goal_status_before_source_readiness": (
-            "goal_status" in events
             and "api:/api/trading-console/owner-console-source-readiness" in events
-            and events.index("goal_status")
+            and events.index("live_closure")
             < events.index("api:/api/trading-console/owner-console-source-readiness")
+        ),
+        "product_state_goal_status_external_pg_projector_required": (
+            isinstance(safety, dict)
+            and safety.get("optional_goal_status_refresh") is False
+            and safety.get("goal_status_external_pg_projector_required") is True
         ),
         "product_state_refresh_has_no_dangerous_effects": (
             isinstance(safety, dict)

@@ -518,11 +518,6 @@ def refresh_product_state_artifacts(
     live_closure_evidence_verification_output_json: Path | None = None,
     live_closure_evidence_refresh_output_json: Path | None = None,
     live_closure_evidence_refresher: Callable[..., dict[str, Any]] | None = None,
-    refresh_goal_status: bool = False,
-    goal_status_output_json: Path | None = None,
-    release_manifest: Path | None = None,
-    expected_head: str | None = None,
-    goal_status_builder: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     generated_at_ms = generated_at_ms or int(time.time() * 1000)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -777,70 +772,13 @@ def refresh_product_state_artifacts(
             }
 
     goal_status_refresh: dict[str, Any] = {
-        "enabled": refresh_goal_status,
-        "status": "skipped",
+        "enabled": False,
+        "status": "retired_external_pg_projector_required",
+        "reason": (
+            "Goal Status current projection is owned by "
+            "build_strategygroup_runtime_goal_status.py --require-database-url"
+        ),
     }
-    if refresh_goal_status:
-        if goal_status_builder is None:
-            goal_status_refresh = {
-                "enabled": False,
-                "status": "retired_external_pg_projector_required",
-                "reason": (
-                    "Goal Status current projection is owned by "
-                    "build_strategygroup_runtime_goal_status.py --require-database-url"
-                ),
-            }
-        else:
-            from scripts.build_strategygroup_runtime_goal_status import (  # noqa: PLC0415
-                DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
-            )
-
-            builder = goal_status_builder
-            resolved_goal_status_output_json = (
-                goal_status_output_json
-                or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-            )
-            try:
-                goal_status_artifact = builder(
-                    report_dir=output_dir,
-                    release_manifest=release_manifest,
-                    expected_head=expected_head,
-                )
-                _write_json(resolved_goal_status_output_json, goal_status_artifact)
-                goal_status_input_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-                if (
-                    resolved_goal_status_output_json.resolve()
-                    != goal_status_input_json.resolve()
-                ):
-                    _write_json(goal_status_input_json, goal_status_artifact)
-                goal_status_refresh = {
-                    "enabled": True,
-                    "status": goal_status_artifact.get("status"),
-                    "output_json": str(resolved_goal_status_output_json),
-                    "goal_status_input_json": str(goal_status_input_json),
-                    "non_authority_checkpoint": owner_non_authority_checkpoint(
-                        goal_status_artifact,
-                        goal_status_artifact.get("owner_state") or {},
-                        default="refresh_runtime_goal_status",
-                    ),
-                    "runtime_dry_run_audit_passed": (
-                        (goal_status_artifact.get("checks") or {}).get(
-                            "runtime_dry_run_audit_passed"
-                        )
-                        is True
-                    ),
-                    "ready_for_real_order_action": (
-                        _goal_status_ready_for_real_order_action(goal_status_artifact)
-                    ),
-                }
-            except Exception as exc:
-                blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
-                warnings.append(str(exc))
-                goal_status_refresh = {
-                    "enabled": True,
-                    "status": "failed",
-                    "output_json": str(resolved_goal_status_output_json),
-                }
 
     if refresh_api_readmodels and cookie is None:
         try:
@@ -972,9 +910,7 @@ def refresh_product_state_artifacts(
             "optional_chain_closure_status_refresh": refresh_chain_closure_status,
             "optional_live_closure_evidence_refresh": refresh_live_closure_evidence,
             "optional_goal_status_refresh": goal_status_refresh.get("enabled") is True,
-            "goal_status_external_pg_projector_required": (
-                refresh_goal_status and goal_status_refresh.get("enabled") is not True
-            ),
+            "goal_status_external_pg_projector_required": True,
             "optional_source_readiness_unavailable_evidence": source_readiness_unavailable_evidence.get(
                 "enabled"
             )
@@ -1023,17 +959,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--live-closure-evidence-output-json")
     parser.add_argument("--live-closure-evidence-verification-output-json")
     parser.add_argument("--live-closure-evidence-refresh-output-json")
-    parser.add_argument("--refresh-goal-status", action="store_true")
-    parser.add_argument("--goal-status-output-json")
-    parser.add_argument("--release-manifest")
-    parser.add_argument("--expected-head")
     parser.add_argument(
         "--allow-degraded-local-refresh-success",
         action="store_true",
         help=(
             "Return exit code 0 when local operator auth is unavailable but "
-            "non-executing dry-run audit and goal-status refresh completed "
-            "with only operator-cookie skip blockers. This is for local "
+            "non-executing dry-run audit completed with only operator-cookie "
+            "skip blockers. This is for local "
             "long-running goal loops; server/systemd runs should keep the "
             "default fail-visible exit behavior."
         ),
@@ -1079,12 +1011,6 @@ def _degraded_local_refresh_is_continuable(artifact: dict[str, Any]) -> bool:
     dry_run = artifact.get("dry_run_audit_refresh")
     if isinstance(dry_run, dict) and dry_run.get("enabled") is True:
         if dry_run.get("status") != "passed":
-            return False
-    goal_status = artifact.get("goal_status_refresh")
-    if isinstance(goal_status, dict) and goal_status.get("enabled") is True:
-        if goal_status.get("status") in {None, "failed"}:
-            return False
-        if goal_status.get("runtime_dry_run_audit_passed") is not True:
             return False
     unavailable_evidence = artifact.get("source_readiness_unavailable_evidence")
     if not isinstance(unavailable_evidence, dict):
@@ -1167,18 +1093,6 @@ def main(argv: list[str] | None = None) -> int:
             if args.live_closure_evidence_refresh_output_json
             else None
         ),
-        refresh_goal_status=args.refresh_goal_status,
-        goal_status_output_json=(
-            Path(args.goal_status_output_json).expanduser()
-            if args.goal_status_output_json
-            else None
-        ),
-        release_manifest=(
-            Path(args.release_manifest).expanduser()
-            if args.release_manifest
-            else None
-        ),
-        expected_head=args.expected_head,
     )
     exit_code = 0 if artifact["status"] == "refreshed" else 2
     if (
