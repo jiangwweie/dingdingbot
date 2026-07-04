@@ -2,7 +2,7 @@
 title: RUNTIME_CONTROL_STATE_DB_ARCHITECTURE
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
-last_verified: 2026-07-03
+last_verified: 2026-07-05
 ---
 
 # Runtime Control State DB Architecture
@@ -149,7 +149,7 @@ JSON/MD only for compatibility.
 
 | Mainline node | Current reads | Current writes | Current risk | PG target |
 | --- | --- | --- | --- | --- |
-| Watcher tick / active monitor | systemd runtime, exchange/public inputs, Candidate Pool export as candidate universe, runtime scope files | server report JSON such as `latest-status.json`, local `latest-runtime-active-observation-status.json` | Watcher coverage becomes a file-presence interpretation and a generated view can drive the observer universe | `brc_strategy_group_candidate_scope`, `brc_watcher_runtime_coverage`, plus fact/event rows |
+| Watcher tick / active monitor | systemd runtime, exchange/public inputs, PG candidate scope/runtime bindings; `--candidate-universe-json` is explicit local diagnostic only | server report JSON such as `latest-status.json`, local `latest-runtime-active-observation-status.json` | Production watcher coverage fails closed without PG instead of letting a previous-cycle generated view drive the observer universe | `brc_strategy_group_candidate_scope`, `brc_watcher_runtime_coverage`, plus fact/event rows |
 | Public/account fact collectors | exchange APIs, fallback JSON, live-facts report JSON | `latest-binance-usdm-public-facts.json`, `latest-account-safe-facts.json` | Freshness and fallback source can drift across builders | `brc_runtime_fact_snapshots` with observed/valid-until timestamps |
 | Strategy detector builders | public facts JSON, strategy constants, local artifacts | detector fact JSON/MD such as SOR/MI/BRF2/MPG outputs | Detector output becomes a downstream file authority | `brc_live_signal_events` and fact snapshots |
 | Tradeability Decision | PG current projections for strategy, policy, scope, facts, signals, and safety; explicit local JSON only under `--allow-local-file-diagnostic` | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | DB-backed Tradeability read model over current projections |
@@ -170,7 +170,7 @@ ownership, not just a DB table for every existing artifact.
 | Multiple writers for one current file | `strategygroup-runtime-goal-status.json` can be written by more than one post-step path | Last writer wins even if it used older inputs | One current projection has exactly one owner projector |
 | Optional control source | Goal Status can run with or without `--candidate-pool-json` | Same command can produce different authority conclusions | Candidate Pool/current projection is required once it becomes the control-plane source |
 | Legacy diagnostic promoted to blocker | `pilot_status.watcher_scope_alignment` can still emit scope mismatch after Candidate Pool proves coverage | Old status can hide real waiting/fresh-signal state | Legacy artifacts may write diagnostics only |
-| Watcher universe from generated view | watcher tick reads Candidate Pool export as `--candidate-universe-json` | A previous-cycle read model can define the current observation universe | Watcher reads DB candidate scope/runtime bindings |
+| Watcher universe from generated view | production watcher tick reads PG candidate scope/runtime bindings; `--candidate-universe-json` is guarded by `--allow-local-file-diagnostic` | A previous-cycle read model must not define the current observation universe | Watcher reads DB candidate scope/runtime bindings; Candidate Pool export is diagnostic/export only |
 | Generated view consumed as source | Candidate Pool, Daily Table, Packet, Goal Status read each other's JSON outputs | Read models become second-order truth | Builders read repository/current projections; JSON is export |
 | No shared lineage | Candidate Pool and Goal Status do not share a required `projection_run_id` and input watermark | It is hard to prove they describe the same watcher tick | Every projection records run ID, input watermark, source priority, and owner projector |
 | Hard-coded scope | Candidate universes and primary symbols appear in code constants and docs JSON | Owner scope and runtime scope can diverge silently | Candidate scope and runtime bindings are DB current projections |

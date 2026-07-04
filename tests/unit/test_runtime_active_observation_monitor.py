@@ -38,6 +38,7 @@ def _args(**overrides):
         "database_url": "",
         "require_database_url": False,
         "allow_non_postgres_for_test": False,
+        "allow_local_file_diagnostic": False,
         "strategy_handoff_dir": None,
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
@@ -358,6 +359,7 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
             output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
             candidate_universe_json=str(candidate_pool),
+            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=builder,
@@ -425,6 +427,7 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
             output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
             candidate_universe_json=str(candidate_pool),
+            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {
@@ -532,6 +535,21 @@ def test_active_monitor_requires_pg_candidate_universe_when_requested():
         )
 
 
+def test_active_monitor_rejects_candidate_universe_json_without_diagnostic_flag(
+    tmp_path,
+):
+    candidate_pool = tmp_path / "candidate-pool.json"
+    candidate_pool.write_text(
+        json.dumps({"candidate_universe": {"SOR-001": ["ETHUSDT"]}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="local diagnostic only"):
+        runtime_active_observation_monitor._candidate_universe_for_args(
+            _args(candidate_universe_json=str(candidate_pool))
+        )
+
+
 def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_path):
     candidate_pool = tmp_path / "candidate-pool.json"
     candidate_pool.write_text(
@@ -560,6 +578,7 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
             output_dir=str(tmp_path),
             strategy_family_id=["SOR-001"],
             candidate_universe_json=str(candidate_pool),
+            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {
@@ -595,6 +614,29 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
     assert long_row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
     assert short_row["state"] == "active_watcher_scope"
     assert short_row["active_runtime_instance_ids"] == ["runtime-sor-eth-short"]
+
+
+def test_active_monitor_rejects_handoff_risk_defaults_without_diagnostic_flag(
+    tmp_path,
+):
+    handoff_dir = tmp_path / "handoffs"
+    handoff_dir.mkdir()
+
+    with pytest.raises(RuntimeError, match="local diagnostic only"):
+        runtime_active_observation_monitor._handoff_risk_defaults(str(handoff_dir))
+
+
+def test_active_monitor_cli_does_not_default_to_handoff_file_authority():
+    args = runtime_active_observation_monitor._parse_args(
+        ["--api-base", "http://unit", "--output-dir", "output/unit"]
+    )
+
+    assert args.strategy_handoff_dir is None
+    assert args.allow_local_file_diagnostic is False
+    assert runtime_active_observation_monitor._handoff_risk_defaults(
+        args.strategy_handoff_dir,
+        allow_local_file_diagnostic=args.allow_local_file_diagnostic,
+    ) == {}
 
 
 def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_path):
@@ -643,6 +685,7 @@ def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_pat
             strategy_family_id=["SOR-001"],
             candidate_universe_json=str(candidate_pool),
             strategy_handoff_dir=str(handoff_dir),
+            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {

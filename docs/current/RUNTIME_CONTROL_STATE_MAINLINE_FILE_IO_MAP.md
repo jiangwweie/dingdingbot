@@ -2,7 +2,7 @@
 title: RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
-last_verified: 2026-07-03
+last_verified: 2026-07-05
 ---
 
 # Runtime Control State Mainline File I/O Map
@@ -151,7 +151,7 @@ historical research script.
 | Legacy pilot status as blocker | `strategygroup-runtime-pilot-status.json` contains watcher scope alignment | Old scope mismatch can hide fresh/waiting state | Store as `brc_legacy_diagnostics`; cannot set current blocker |
 | Tradeability as broad generated source | Tradeability reads registry/tier policy and many optional latest artifacts, then feeds Daily Table and Candidate Pool | One stale optional artifact can alter first-blocker classification downstream | Tradeability becomes a DB-backed read model over typed current projections |
 | Replay/live diagnostics as readiness proxy | Replay/live parity audit output is consumed by Tradeability, Daily Table, Candidate Pool, and task packet evidence refs | Historical parity diagnostics can be confused with current live detector coverage | Store parity as diagnostic/read-model rows, separate from watcher coverage current projection |
-| Watcher reads Candidate Pool export | `runtime_signal_watcher_tick.py` receives `--candidate-universe-json latest-strategy-live-candidate-pool.json`, then post-steps rebuild Candidate Pool from watcher status | The observer's input universe is a generated view from a previous cycle | Watcher reads `brc_strategy_group_candidate_scope` and runtime scope bindings, not Candidate Pool export |
+| Watcher reads Candidate Pool export | Production `runtime_signal_watcher_tick.py` reads PG candidate scope/runtime bindings; `--candidate-universe-json` requires `--allow-local-file-diagnostic` | A previous-cycle read model must not define the observer universe | Watcher reads `brc_strategy_group_candidate_scope` and runtime scope bindings, not Candidate Pool export |
 | Candidate Pool / Daily Table / Packet feedback loop | Candidate Pool reads previous Daily Table and Packet; Daily Table reads Candidate Pool; Packet reads Daily Table | A stale previous export can influence a new current projection | All three read DB current projections and write exports only |
 | File freshness hidden in path names | Files named `latest-*` encode recency by convention | Builders may treat stale latest files as current | Fact/projection rows include `observed_at_ms`, `valid_until_ms`, and `input_watermark` |
 | Same fact family in multiple directories | Public facts can exist under both `output/runtime-monitor` and server report dirs | Different consumers can read different snapshots | Fact snapshots are DB rows; file paths are exports |
@@ -166,7 +166,7 @@ historical research script.
 | --- | --- | --- | --- |
 | Strategy registry | registry baseline JSON and handoff JSON | `brc_strategy_groups`, `brc_strategy_group_versions`, `brc_required_fact_contracts` | registry export |
 | Owner policy and live-submit scope | `owner-pretrade-runtime-authorization-v0.json`, tier policy JSON | `brc_owner_policy_events`, `brc_owner_policy_current` | policy export for audit only |
-| Candidate universe | code constants, systemd symbol list, policy JSON, Candidate Pool export passed to watcher | `brc_strategy_group_candidate_scope` | Candidate Pool export |
+| Candidate universe | PG candidate scope/runtime bindings in production; code constants, policy JSON, and Candidate Pool export are not production runtime authority | `brc_strategy_group_candidate_scope` | Candidate Pool export for audit/diagnostic only |
 | Runtime scope/profile binding | policy JSON, runtime reports | `brc_runtime_scope_bindings`, `runtime_profiles` | Runtime Safety / Candidate Pool export |
 | Watcher coverage | watcher `latest-status.json`, active monitor JSON | `brc_watcher_runtime_coverage` | watcher coverage export |
 | Public/account/action-time facts | `latest-*facts.json`, live-facts input | `brc_runtime_fact_snapshots` | fact export |

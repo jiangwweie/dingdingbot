@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import runtime_signal_watcher_tick
 
 
@@ -21,6 +23,7 @@ def _args(tmp_path: Path, **overrides):
         "database_url": "",
         "require_database_url": False,
         "allow_non_postgres_for_test": False,
+        "allow_local_file_diagnostic": False,
         "max_iterations": 1,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 0.0,
@@ -335,12 +338,14 @@ def test_watcher_tick_passes_candidate_universe_to_supervisor(tmp_path, monkeypa
 
     def supervisor_builder(args):
         captured["candidate_universe_json"] = args.candidate_universe_json
+        captured["allow_local_file_diagnostic"] = args.allow_local_file_diagnostic
         return _fake_supervisor("waiting_for_signal")(args)
 
     runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
             candidate_universe_json="/srv/current/latest-strategy-live-candidate-pool.json",
+            allow_local_file_diagnostic=True,
         ),
         supervisor_builder=supervisor_builder,
     )
@@ -348,6 +353,22 @@ def test_watcher_tick_passes_candidate_universe_to_supervisor(tmp_path, monkeypa
     assert captured["candidate_universe_json"] == (
         "/srv/current/latest-strategy-live-candidate-pool.json"
     )
+    assert captured["allow_local_file_diagnostic"] is True
+
+
+def test_watcher_tick_rejects_candidate_universe_json_without_diagnostic_flag(
+    tmp_path,
+):
+    with pytest.raises(RuntimeError, match="local diagnostic only"):
+        runtime_signal_watcher_tick.build_watcher_tick_artifact(
+            _args(
+                tmp_path,
+                candidate_universe_json="/srv/current/latest-strategy-live-candidate-pool.json",
+            ),
+            supervisor_builder=lambda args: pytest.fail(
+                "watcher tick must fail before launching file-backed supervisor"
+            ),
+        )
 
 
 def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
@@ -386,6 +407,7 @@ def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
         captured["database_url"] = args.database_url
         captured["require_database_url"] = args.require_database_url
         captured["candidate_universe_json"] = args.candidate_universe_json
+        captured["allow_local_file_diagnostic"] = args.allow_local_file_diagnostic
         return _fake_supervisor("waiting_for_signal")(args)
 
     runtime_signal_watcher_tick.build_watcher_tick_artifact(
@@ -401,6 +423,7 @@ def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
         "database_url": "postgresql://unit/runtime",
         "require_database_url": True,
         "candidate_universe_json": None,
+        "allow_local_file_diagnostic": False,
     }
 
 

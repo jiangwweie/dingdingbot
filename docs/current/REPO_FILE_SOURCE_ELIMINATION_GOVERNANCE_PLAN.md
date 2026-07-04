@@ -88,7 +88,7 @@ live-enablement chain.
 
 | Node | Reads today | Writes today | Key conflict | Target treatment |
 | --- | --- | --- | --- | --- |
-| Watcher active status | systemd/runtime scope, exchange/public inputs, Candidate Pool export as candidate universe | server `latest-status.json`, local active-observation JSON | File existence can be mistaken for runtime coverage truth and previous-cycle export can drive observation | Read candidate scope from DB and write watcher coverage rows/events |
+| Watcher active status | systemd/runtime scope, exchange/public inputs, PG candidate scope/runtime bindings; Candidate Pool export only under explicit local diagnostic mode | server `latest-status.json`, local active-observation JSON | File existence can be mistaken for runtime coverage truth and previous-cycle export must not drive production observation | Read candidate scope from DB and write watcher coverage rows/events |
 | Public/account facts | exchange API, fallback JSON, live-facts packet | public/account fact JSON and MD exports | Freshness source differs by consumer | Write `brc_runtime_fact_snapshots` |
 | Detector builders | public facts JSON and strategy-specific files/constants | detector facts JSON/MD | Detector facts become file sources for downstream decisions | Write signal events and fact snapshots |
 | Tradeability Decision | PG current projections for strategy, policy, scope, facts, signals, and safety; explicit local JSON only under `--allow-local-file-diagnostic` | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | Keep production Tradeability DB-backed and treat JSON/MD as export only |
@@ -106,7 +106,7 @@ live-enablement chain.
 | Multiple writers for current state | One status JSON can be rewritten by different post-step paths | A current projection has one owner projector |
 | Optional core input | Goal Status can run with or without Candidate Pool | Required current projections must be mandatory inputs |
 | Legacy artifact precedence | `pilot_status.watcher_scope_alignment` can still produce scope mismatch | Legacy artifacts become diagnostics only |
-| Watcher candidate-universe source | Watcher reads Candidate Pool export as candidate universe | Watcher reads DB candidate scope/runtime bindings |
+| Watcher candidate-universe source | Watcher production path reads DB candidate scope/runtime bindings; Candidate Pool export requires `--allow-local-file-diagnostic` | Watcher reads DB candidate scope/runtime bindings |
 | Broad read-model source | Tradeability reads many files and then feeds Candidate Pool / Daily Table | Tradeability becomes a DB-backed read model over current projections |
 | Parity diagnostic source | Replay/live parity can influence readiness classification | Parity rows stay diagnostic unless promoted through current detector/coverage projections |
 | Generated output as runtime input | Candidate Pool, Daily Table, Packet, Goal Status read prior JSON outputs | Runtime builders read repository/current projections |

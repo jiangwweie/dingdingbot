@@ -270,6 +270,9 @@ def _compact_symbol(value: Any) -> str:
 
 def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, list[str]], dict[str, Any]]:
     database_url = str(getattr(args, "database_url", "") or "")
+    allow_local_file_diagnostic = bool(
+        getattr(args, "allow_local_file_diagnostic", False)
+    )
     if getattr(args, "require_database_url", False) and not database_url:
         raise RuntimeError(
             "PG_DATABASE_URL is required for DB-backed active observation candidate universe"
@@ -282,9 +285,19 @@ def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, li
             ),
         )
 
+    if getattr(args, "candidate_universe_json", None) and not allow_local_file_diagnostic:
+        raise RuntimeError(
+            "--candidate-universe-json is local diagnostic only; "
+            "production active observation candidate universe must be PG-backed"
+        )
     loaded, source = _read_candidate_universe(
         getattr(args, "candidate_universe_json", None)
     )
+    if source.get("source") == "candidate_universe_json":
+        source["source_mode"] = "local_file_diagnostic"
+        source["authority_boundary"] = (
+            "local_file_diagnostic_only; not_production_runtime_authority"
+        )
     if loaded:
         return loaded, source
     return {}, source
@@ -549,7 +562,19 @@ def _runtime_profile_for_lane(
     return {}
 
 
-def _handoff_risk_defaults(path_value: str | None) -> dict[str, dict[str, Any]]:
+def _handoff_risk_defaults(
+    path_value: str | None,
+    *,
+    allow_local_file_diagnostic: bool = False,
+) -> dict[str, dict[str, Any]]:
+    if path_value and not allow_local_file_diagnostic:
+        raise RuntimeError(
+            "--strategy-handoff-dir is local diagnostic only; "
+            "production active observation runtime scope must be PG-backed"
+        )
+    if not allow_local_file_diagnostic:
+        return {}
+
     root = Path(path_value or DEFAULT_HANDOFF_DIR).expanduser()
     result: dict[str, dict[str, Any]] = {}
     if not root.exists():
@@ -827,7 +852,10 @@ def _build_monitor_artifact(
     candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
     side_scope = _side_scope_from_source(candidate_universe_source)
     handoff_risk_defaults = _handoff_risk_defaults(
-        getattr(args, "strategy_handoff_dir", None)
+        getattr(args, "strategy_handoff_dir", None),
+        allow_local_file_diagnostic=bool(
+            getattr(args, "allow_local_file_diagnostic", False)
+        ),
     )
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
@@ -1145,8 +1173,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--candidate-universe-json",
         help=(
-            "Optional Strategy Live Candidate Pool JSON. When present, emit "
-            "read-only per-symbol runtime scope coverage."
+            "Local diagnostic-only Strategy Live Candidate Pool JSON. Requires "
+            "--allow-local-file-diagnostic; production active observation "
+            "candidate universe must be PG-backed."
         ),
     )
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
@@ -1161,12 +1190,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
     parser.add_argument(
+        "--allow-local-file-diagnostic",
+        action="store_true",
+        help=(
+            "Allow candidate-universe JSON and handoff risk defaults for explicit "
+            "local diagnostics only. Production active observation must use PG."
+        ),
+    )
+    parser.add_argument(
         "--strategy-handoff-dir",
-        default=str(DEFAULT_HANDOFF_DIR),
         help=(
             "Directory containing StrategyGroup handoff.json files used only "
             "to project existing risk-boundary metadata into read-only "
-            "runtime coverage rows."
+            "runtime coverage rows. This is local diagnostic only; when "
+            "--allow-local-file-diagnostic is set and this option is omitted, "
+            "the repository handoff directory is used."
         ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)

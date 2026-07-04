@@ -3,6 +3,8 @@ from __future__ import annotations
 from argparse import Namespace
 import json
 
+import pytest
+
 from scripts import runtime_active_observation_supervisor
 
 
@@ -22,6 +24,7 @@ def _args(tmp_path, **overrides):
         "database_url": "",
         "require_database_url": False,
         "allow_non_postgres_for_test": False,
+        "allow_local_file_diagnostic": False,
         "max_iterations": 2,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 180.0,
@@ -200,6 +203,54 @@ def test_supervisor_passes_pg_candidate_universe_flags_to_loop(tmp_path):
     assert "postgresql://unit/runtime" in calls[0]
     assert "--require-database-url" in calls[0]
     assert "--candidate-universe-json" not in calls[0]
+    assert "--allow-local-file-diagnostic" not in calls[0]
+
+
+def test_supervisor_rejects_candidate_universe_json_without_diagnostic_flag(
+    tmp_path,
+):
+    with pytest.raises(RuntimeError, match="local diagnostic only"):
+        runtime_active_observation_supervisor.build_supervisor_artifact(
+            _args(tmp_path, candidate_universe_json="/tmp/candidate-pool.json"),
+            runner=lambda command, stdout_path: pytest.fail(
+                "supervisor must fail before launching file-backed loop"
+            ),
+        )
+
+
+def test_supervisor_passes_local_file_diagnostic_flag_to_loop(tmp_path):
+    calls = []
+
+    def runner(command, stdout_path):
+        calls.append(command)
+        stdout_path.write_text(
+            json.dumps(
+                {
+                    "status": "waiting_for_signal",
+                    "safety_invariants": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    runtime_active_observation_supervisor.build_supervisor_artifact(
+        _args(
+            tmp_path,
+            candidate_universe_json="/tmp/candidate-pool.json",
+            allow_local_file_diagnostic=True,
+        ),
+        runner=runner,
+    )
+
+    assert "--candidate-universe-json" in calls[0]
+    assert "/tmp/candidate-pool.json" in calls[0]
+    assert "--allow-local-file-diagnostic" in calls[0]
 
 
 def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):

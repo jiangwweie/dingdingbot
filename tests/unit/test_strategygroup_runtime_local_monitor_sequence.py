@@ -3132,6 +3132,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         single_lane_command.index("--output-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
     runtime_active_command = runtime_active_observation_monitor_commands[0]
+    assert "--allow-local-file-diagnostic" in runtime_active_command
     assert runtime_active_command[
         runtime_active_command.index("--candidate-universe-json") + 1
     ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")

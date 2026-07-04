@@ -55,6 +55,13 @@ def _loop_command(
     loop_artifact_path: Path,
     status_artifact_path: Path,
 ) -> list[str]:
+    if getattr(args, "candidate_universe_json", None) and not getattr(
+        args, "allow_local_file_diagnostic", False
+    ):
+        raise RuntimeError(
+            "--candidate-universe-json is local diagnostic only; "
+            "production active observation candidate universe must be PG-backed"
+        )
     command = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "runtime_active_observation_loop.py"),
@@ -95,6 +102,8 @@ def _loop_command(
         command.append("--require-database-url")
     if getattr(args, "allow_non_postgres_for_test", False):
         command.append("--allow-non-postgres-for-test")
+    if getattr(args, "allow_local_file_diagnostic", False):
+        command.append("--allow-local-file-diagnostic")
     if args.allow_prepare_records:
         command.append("--allow-prepare-records")
     if args.include_artifacts:
@@ -444,10 +453,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "to this strategy family. May be repeated."
         ),
     )
-    parser.add_argument("--candidate-universe-json")
+    parser.add_argument(
+        "--candidate-universe-json",
+        help=(
+            "Local diagnostic-only candidate universe export. Requires "
+            "--allow-local-file-diagnostic; production observation must use PG."
+        ),
+    )
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
+    parser.add_argument(
+        "--allow-local-file-diagnostic",
+        action="store_true",
+        help="Allow local file diagnostic inputs that are forbidden in production.",
+    )
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
