@@ -393,9 +393,23 @@ def _daily_row(
     candidate_pool_row: dict[str, Any],
 ) -> dict[str, Any]:
     candidate_pool_first_blocker = str(candidate_pool_row.get("first_blocker") or "")
-    first_blocker = candidate_pool_first_blocker or str(
+    raw_first_blocker = candidate_pool_first_blocker or str(
         tradeability_row.get("first_blocker_class") or "artifact_missing"
     )
+    market_wait_validation = _market_wait_validation_for_row(
+        tradeability_row=tradeability_row,
+        candidate_pool_row=candidate_pool_row,
+        first_blocker=raw_first_blocker,
+    )
+    first_blocker = _resolve_daily_first_blocker(
+        raw_first_blocker=raw_first_blocker,
+        market_wait_validation=market_wait_validation,
+    )
+    if raw_first_blocker != first_blocker:
+        market_wait_validation = {
+            **market_wait_validation,
+            "reclassified_to": first_blocker,
+        }
     canonical_lane = _as_dict(tradeability_row.get("canonical_lane"))
     parity_row = _best_parity_row(
         strategy_group_id=strategy_group_id,
@@ -473,11 +487,7 @@ def _daily_row(
         "authority_boundary": AUTHORITY_BOUNDARY,
         "replay_signal": _replay_signal(strategy_group_id, parity_row),
         "live_detector": _live_detector_state(first_blocker, parity_row),
-        "market_wait_validation": _market_wait_validation_for_row(
-            tradeability_row=tradeability_row,
-            candidate_pool_row=candidate_pool_row,
-            first_blocker=first_blocker,
-        ),
+        "market_wait_validation": market_wait_validation,
         "runtime_safety_reference": _runtime_safety_reference(
             strategy_group_id, runtime_safety
         ),
@@ -830,22 +840,31 @@ def _market_wait_validation_for_row(
     candidate_pool_row: dict[str, Any],
     first_blocker: str,
 ) -> dict[str, Any]:
-    if (
-        first_blocker != "market_wait_validated"
-        or str(candidate_pool_row.get("promotion_state") or "") != "action_time_lane"
-    ):
+    if first_blocker != "market_wait_validated":
+        return _market_wait_validation(tradeability_row)
+    if not candidate_pool_row:
         return _market_wait_validation(tradeability_row)
 
     coverage = _as_dict(candidate_pool_row.get("server_runtime_coverage"))
     public_facts_state = _as_dict(candidate_pool_row.get("public_facts_state"))
     action_time = _as_dict(candidate_pool_row.get("action_time"))
     owner_authorization = _as_dict(candidate_pool_row.get("owner_authorization"))
+    detector_state = str(candidate_pool_row.get("detector_state") or "")
+    scope_state = str(candidate_pool_row.get("scope_state") or "")
+    signal_state = str(candidate_pool_row.get("signal_state") or "")
+    live_submit_allowed = str(owner_authorization.get("live_submit_allowed") or "")
     checks = {
         "asset_admission": True,
-        "scope": str(candidate_pool_row.get("scope_state") or "")
+        "scope": scope_state
         in {"live_submit_allowed", "conditional_action_time_rehearsal_allowed"},
-        "policy": bool(owner_authorization),
-        "detector": True,
+        "policy": (
+            owner_authorization.get("pretrade_candidate_allowed") is True
+            and owner_authorization.get("action_time_rehearsal_allowed") is True
+            and live_submit_allowed in {"scoped", "conditional_hard_gated"}
+        ),
+        "detector": detector_state != "missing" and (
+            bool(detector_state) or bool(public_facts_state)
+        ),
         "watcher_input": (
             str(coverage.get("state") or "") == "active_watcher_scope"
             and bool(coverage.get("active_runtime_instance_ids") or [])
@@ -854,14 +873,44 @@ def _market_wait_validation_for_row(
         "facts": str(public_facts_state.get("state") or "") == "satisfied",
         "classification": True,
         "action_time_path": action_time.get("action_time_path_ready") is True,
-        "fresh_signal": str(candidate_pool_row.get("signal_state") or "") == "fresh",
+        "fresh_signal_absent": signal_state == "absent",
     }
     return {
         "valid": all(checks.values()),
         "not_applicable": False,
-        "mode": "fresh_action_time_lane",
+        "mode": "candidate_pool_market_wait",
         "checks": checks,
     }
+
+
+def _resolve_daily_first_blocker(
+    *,
+    raw_first_blocker: str,
+    market_wait_validation: dict[str, Any],
+) -> str:
+    if raw_first_blocker != "market_wait_validated":
+        return raw_first_blocker
+    if market_wait_validation.get("valid") is True:
+        return raw_first_blocker
+    return _market_wait_failed_blocker(market_wait_validation)
+
+
+def _market_wait_failed_blocker(validation: dict[str, Any]) -> str:
+    checks = _as_dict(validation.get("checks"))
+    for check_name, blocker in (
+        ("asset_admission", "artifact_missing"),
+        ("scope", "scope_not_attached"),
+        ("policy", "policy_scope_missing"),
+        ("detector", "detector_not_attached"),
+        ("watcher_input", "watcher_tick_missing"),
+        ("facts", "computed_not_satisfied"),
+        ("classification", "schema_invalid"),
+        ("action_time_path", "action_time_boundary_not_reproduced"),
+        ("fresh_signal_absent", "action_time_boundary_not_reproduced"),
+    ):
+        if checks.get(check_name) is False:
+            return blocker
+    return "artifact_missing"
 
 
 def _runtime_safety_reference(
