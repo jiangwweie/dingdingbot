@@ -6,12 +6,15 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,11 +26,9 @@ from strategygroup_non_executing_projection import (  # noqa: E402
     non_executing_interaction,
     non_executing_safety_invariants,
 )
+from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
 
 
-DEFAULT_PUBLIC_FACTS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
-)
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "output/runtime-monitor"
 BASE_URL = "https://fapi.binance.com"
 PRIMARY_LIVE_SCOPE = ("BTCUSDT", "ETHUSDT")
@@ -37,7 +38,9 @@ SYMBOLS = ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT")
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument(
         "--ssh-host",
@@ -46,10 +49,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    artifacts = build_sor_session_scope_detector(
-        public_facts=_read_optional_json(Path(args.public_facts_json)),
-        ssh_host=args.ssh_host,
-    )
+    if not args.database_url:
+        print("ERROR: PG_DATABASE_URL is required for DB-backed SOR detector", file=sys.stderr)
+        return 2
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print("ERROR: DB-backed SOR detector requires PostgreSQL DSN", file=sys.stderr)
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            public_facts = read_pretrade_public_facts_artifact(conn, symbols=list(SYMBOLS))
+    finally:
+        engine.dispose()
+
+    artifacts = build_sor_session_scope_detector(public_facts=public_facts, ssh_host=args.ssh_host)
     output_dir = Path(args.output_dir)
     for artifact in artifacts.values():
         json_path = output_dir / artifact["output_file_names"]["json"]
@@ -349,13 +364,6 @@ def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
             f"- Output JSON: `{output_json}`",
         ]
     ) + "\n"
-
-
-def _read_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else {}
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

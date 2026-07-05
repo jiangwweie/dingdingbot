@@ -13,9 +13,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +36,7 @@ from strategygroup_non_executing_projection import (  # noqa: E402
     non_executing_interaction,
     non_executing_safety_invariants,
 )
+from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
 
 DEFAULT_SOURCE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-live-market-strategy-preview.json"
@@ -43,10 +47,6 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_OUTPUT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-brf2-runtime-signal-facts.md"
 )
-DEFAULT_PUBLIC_FACTS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
-)
-
 SCHEMA = "brc.brf2_runtime_signal_facts.v1"
 READY_STATUS = "brf2_runtime_signal_facts_ready"
 MISSING_STATUS = "brf2_runtime_signal_facts_missing_watcher_input"
@@ -63,11 +63,27 @@ def main(argv: list[str] | None = None) -> int:
         choices=["sample", "local_sqlite_read_only", "live_market"],
         default="local_sqlite_read_only",
     )
-    parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
+    if not args.database_url:
+        print("ERROR: PG_DATABASE_URL is required for DB-backed BRF2 facts", file=sys.stderr)
+        return 2
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print("ERROR: DB-backed BRF2 facts require PostgreSQL DSN", file=sys.stderr)
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            public_facts = read_pretrade_public_facts_artifact(conn, symbols=list(DEFAULT_SYMBOLS))
+    finally:
+        engine.dispose()
     source_artifact, source_path = _load_source_artifact(
         source_json=args.source_json,
         strategy_source=args.strategy_source,
@@ -75,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     artifact = build_brf2_runtime_signal_facts(
         source_artifact=source_artifact,
         source_path=source_path,
-        public_facts=_read_optional_json(Path(args.public_facts_json)),
+        public_facts=public_facts,
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)

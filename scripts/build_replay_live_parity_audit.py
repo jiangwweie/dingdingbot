@@ -44,7 +44,6 @@ DEFAULT_OUTPUT_MD = REPO_ROOT / "output/runtime-monitor/latest-replay-live-parit
 STRATEGY_IDS = ("CPM-RO-001", "MPG-001", "SOR-001")
 CPM_READY_STATUSES = {
     "cpm_runtime_signal_facts_ready",
-    "cpm_runtime_signal_facts_ready_from_fallback",
 }
 BLOCKER_PRIORITY = {
     "artifact_missing": 10,

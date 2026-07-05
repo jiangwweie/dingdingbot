@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -414,12 +415,30 @@ def test_brf2_runtime_signal_facts_cli_writes_artifacts(tmp_path: Path):
     source_json = tmp_path / "facts.json"
     output_json = tmp_path / "latest-brf2-runtime-signal-facts.json"
     output_md = tmp_path / "latest-brf2-runtime-signal-facts.md"
+    db_path = tmp_path / "runtime.db"
     source_json.write_text(json.dumps(_fresh_fact_artifact()), encoding="utf-8")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE brc_runtime_fact_snapshots (
+              fact_snapshot_id TEXT,
+              symbol TEXT,
+              fact_surface TEXT,
+              satisfied BOOLEAN,
+              failed_facts TEXT,
+              fact_values TEXT,
+              observed_at_ms INTEGER
+            )
+            """
+        )
 
     exit_code = module.main(
         [
             "--source-json",
             str(source_json),
+            "--database-url",
+            f"sqlite:///{db_path}",
+            "--allow-non-postgres-for-test",
             "--output-json",
             str(output_json),
             "--output-owner-progress",

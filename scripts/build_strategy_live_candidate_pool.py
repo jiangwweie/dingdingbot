@@ -458,6 +458,8 @@ def _current_fact_snapshot_by_lane(
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     snapshots: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_fact_snapshots")):
+        if row.get("fact_surface") != "pretrade_public":
+            continue
         key = _lane_key(row)
         if not all(key):
             continue

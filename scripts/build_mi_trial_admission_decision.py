@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -20,14 +23,12 @@ from strategygroup_non_executing_projection import (  # noqa: E402
     non_executing_interaction,
     non_executing_safety_invariants,
 )
+from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
 
 
 DEFAULT_REPLAY_JSON = (
     REPO_ROOT
     / "output/runtime-monitor/latest-four-candidate-recent-live-submit-replay.json"
-)
-DEFAULT_PUBLIC_FACTS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
 )
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-mi-trial-admission-decision.json"
@@ -42,14 +43,30 @@ SYMBOLS = ("AVAXUSDT", "SOLUSDT", "ETHUSDT")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--replay-json", default=str(DEFAULT_REPLAY_JSON))
-    parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
+    if not args.database_url:
+        print("ERROR: PG_DATABASE_URL is required for DB-backed MI admission", file=sys.stderr)
+        return 2
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print("ERROR: DB-backed MI admission requires PostgreSQL DSN", file=sys.stderr)
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            public_facts = read_pretrade_public_facts_artifact(conn, symbols=list(SYMBOLS))
+    finally:
+        engine.dispose()
     artifact = build_mi_trial_admission_decision(
         replay=_read_optional_json(Path(args.replay_json)),
-        public_facts=_read_optional_json(Path(args.public_facts_json)),
+        public_facts=public_facts,
     )
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)

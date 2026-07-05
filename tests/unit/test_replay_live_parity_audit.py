@@ -222,9 +222,9 @@ def _cpm_symbol_row(symbol: str, failed: list[str]) -> dict:
     }
 
 
-def _cpm_fallback_facts() -> dict:
+def _cpm_ready_facts() -> dict:
     return {
-        "status": "cpm_runtime_signal_facts_ready_from_fallback",
+        "status": "cpm_runtime_signal_facts_ready",
         "detector_source_mode": "binance_usdm_public_closed_candles",
         "watcher_tick_present": True,
         "fact_input_present": True,
@@ -490,7 +490,7 @@ def test_replay_live_parity_never_marks_unreproduced_signal_as_market_wait():
     assert checks["order_created"] is False
 
 
-def test_cpm_fallback_ready_classifies_current_false_facts_as_computed_not_satisfied():
+def test_cpm_ready_facts_classify_current_false_facts_as_computed_not_satisfied():
     module = _load_module()
 
     artifact = module.build_replay_live_parity_audit(
@@ -500,7 +500,7 @@ def test_cpm_fallback_ready_classifies_current_false_facts_as_computed_not_satis
             _cpm_event("AVAXUSDT"),
             _cpm_event("SUIUSDT"),
         ),
-        cpm_facts=_cpm_fallback_facts(),
+        cpm_facts=_cpm_ready_facts(),
         mpg_watcher={},
         sor_evidence={},
         generated_at_utc="2026-06-30T00:00:00+00:00",
@@ -539,7 +539,7 @@ def test_cpm_replay_live_rule_mismatch_precedes_computed_fact_failure():
                 replay_required_facts=["legacy_reclaim_rule", "htf_trend_intact"],
             )
         ),
-        cpm_facts=_cpm_fallback_facts(),
+        cpm_facts=_cpm_ready_facts(),
         mpg_watcher={},
         sor_evidence={},
         generated_at_utc="2026-06-30T00:00:00+00:00",
@@ -568,7 +568,7 @@ def test_per_symbol_blocker_priority_is_deterministic_for_mixed_cpm_mismatches()
                 replay_required_facts=["legacy_reclaim_rule", "htf_trend_intact"],
             ),
         ),
-        cpm_facts=_cpm_fallback_facts(),
+        cpm_facts=_cpm_ready_facts(),
         mpg_watcher={},
         sor_evidence={},
         generated_at_utc="2026-06-30T00:00:00+00:00",

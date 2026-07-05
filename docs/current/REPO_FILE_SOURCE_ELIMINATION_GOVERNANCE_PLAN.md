@@ -90,8 +90,8 @@ live-enablement chain.
 | --- | --- | --- | --- | --- |
 | Watcher active status | systemd/runtime scope, exchange/public inputs, PG candidate scope/runtime bindings | server `latest-status.json`, local active-observation JSON exports | File existence can be mistaken for runtime coverage truth and previous-cycle export must not drive production observation | Read candidate scope from DB and write watcher coverage rows/events |
 | Runtime bootstrap | PG candidate scope/runtime bindings in production; handoff/intake/Candidate Pool JSON only under explicit plan-only local diagnostic mode | runtime bootstrap artifact and optional runtime admission records | File-backed bootstrap can admit stale or unsupported StrategyGroup / symbol / side scope | Read runtime admission scope from DB and reject file-backed execute |
-| Public/account facts | exchange API, fallback JSON, live-facts packet | public/account fact JSON and MD exports | Freshness source differs by consumer | Write `brc_runtime_fact_snapshots` |
-| Detector builders | public facts JSON and strategy-specific files/constants | detector facts JSON/MD | Detector facts become file sources for downstream decisions | Write signal events and fact snapshots |
+| Public/account facts | exchange API and live-facts packet; public facts already write PG `pretrade_public` rows | public/account fact JSON and MD exports | Account/action-time freshness source can still differ until the private fact cutover | Write `brc_runtime_fact_snapshots` |
+| Detector builders | PG public fact snapshots and strategy-specific files/constants | detector facts JSON/MD | Detector facts must not become file sources for downstream decisions | Write signal events and fact snapshots |
 | Tradeability Decision | PG current projections through `PgBackedRuntimeControlStateRepository`; production CLI rejects repo/output JSON inputs | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | Keep Tradeability PG-only and treat JSON/MD as export only |
 | Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | Store diagnostic/read-model rows separate from watcher coverage |
 | Candidate Pool | PG control state through `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-strategy-live-candidate-pool.json/md` | Reintroducing file-backed inputs would let one generated view recompute many source priorities | Project readiness, promotion, and action-time lane rows |
@@ -516,7 +516,7 @@ Disallowed MD/JSON in git:
 | --- | --- |
 | Current runtime state | `latest-runtime-active-observation-status.json` |
 | Generated control read models | `latest-daily-live-enablement-table.json` |
-| Public/account fact snapshots | `latest-binance-usdm-public-facts.json` |
+| Public/account fact snapshots | `latest-binance-usdm-public-facts.json` is export-only after the public-fact PG cutover; account-safe facts remain queued for the account/action-time fact cutover |
 | Owner current policy snapshots | `owner-pretrade-runtime-authorization-v0.json` after DB migration |
 | Strategy packs | `strategy-group-handoffs/*/handoff.json` after DB migration |
 | Large replay corpora | `strategy-group-handoffs/*/replay/*.json` |
