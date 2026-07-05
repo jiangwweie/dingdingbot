@@ -54,7 +54,7 @@
     {
       "path": "output/runtime-monitor/latest-strategy-live-candidate-pool.json",
       "paired_path": "output/runtime-monitor/latest-strategy-live-candidate-pool.md",
-      "source_command": "python3 scripts/build_strategy_live_candidate_pool.py",
+      "source_command": "python3 scripts/build_strategy_live_candidate_pool.py --require-database-url",
       "validator": "python3 scripts/validate_strategy_live_candidate_pool.py output/runtime-monitor/latest-strategy-live-candidate-pool.json",
       "consumed_by": "live_candidate_pool_deploy_gate"
     }

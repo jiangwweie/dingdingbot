@@ -67,6 +67,23 @@ def pg_control_connection():
     engine.dispose()
 
 
+def _seed_runtime_control_db(db_path: Path) -> str:
+    migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
+    database_url = f"sqlite:///{db_path}"
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    engine.dispose()
+    return database_url
+
+
 def _daily_table() -> dict:
     rows = [
         ("CPM-RO-001", "ETHUSDT", "long", "armed", "computed_not_satisfied", 4),
@@ -2740,49 +2757,17 @@ def test_candidate_pool_validator_rejects_preflight_ready_without_public_facts()
 
 def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    daily = tmp_path / "daily.json"
-    tradeability = tmp_path / "tradeability.json"
-    parity = tmp_path / "parity.json"
-    action_time = tmp_path / "action_time.json"
-    mi_trial = tmp_path / "mi_trial.json"
-    brf2_facts = tmp_path / "brf2_facts.json"
-    single_lane = tmp_path / "single_lane.json"
-    owner_authorization = tmp_path / "owner_authorization.json"
+    database_url = _seed_runtime_control_db(tmp_path / "runtime-control-state.db")
     output_json = tmp_path / "candidate_pool.json"
     output_md = tmp_path / "candidate_pool.md"
-    daily.write_text(json.dumps(_daily_table()), encoding="utf-8")
-    tradeability.write_text(json.dumps(_tradeability()), encoding="utf-8")
-    parity.write_text(json.dumps(_parity()), encoding="utf-8")
-    action_time.write_text(json.dumps(_action_time()), encoding="utf-8")
-    mi_trial.write_text(json.dumps({}), encoding="utf-8")
-    brf2_facts.write_text(json.dumps({}), encoding="utf-8")
-    single_lane.write_text(json.dumps(_single_lane()), encoding="utf-8")
-    owner_authorization.write_text(
-        json.dumps(_owner_pretrade_authorization()),
-        encoding="utf-8",
-    )
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
-            "--allow-local-file-diagnostic",
-            "--daily-table-json",
-            str(daily),
-            "--tradeability-json",
-            str(tradeability),
-            "--replay-live-parity-json",
-            str(parity),
-            "--action-time-boundary-json",
-            str(action_time),
-            "--mi-trial-admission-json",
-            str(mi_trial),
-            "--brf2-runtime-signal-facts-json",
-            str(brf2_facts),
-            "--single-lane-task-packet-json",
-            str(single_lane),
-            "--owner-pretrade-authorization-json",
-            str(owner_authorization),
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
             "--output-json",
             str(output_json),
             "--output-owner-progress",
@@ -2801,3 +2786,38 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path, monkeyp
         check=False,
     )
     assert validate.returncode == 0, validate.stdout + validate.stderr
+
+
+@pytest.mark.parametrize(
+    "legacy_args",
+    [
+        ["--allow-local-file-diagnostic"],
+        ["--daily-table-json", "daily.json"],
+        ["--tradeability-json", "tradeability.json"],
+        ["--runtime-active-monitor-json", "runtime-active-monitor.json"],
+        ["--single-lane-task-packet-json", "single-lane-task-packet.json"],
+    ],
+)
+def test_candidate_pool_cli_rejects_legacy_file_inputs(
+    legacy_args: list[str],
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER_PATH),
+            *legacy_args,
+            "--output-json",
+            str(tmp_path / "candidate_pool.json"),
+            "--output-owner-progress",
+            str(tmp_path / "candidate_pool.md"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "unrecognized arguments" in result.stderr

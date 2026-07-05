@@ -21,7 +21,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
-    FileBackedRuntimeControlStateRepository,
     PgBackedRuntimeControlStateRepository,
 )
 
@@ -120,25 +119,6 @@ P0_P1_ITEMS = (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--daily-table-json")
-    parser.add_argument("--tradeability-json")
-    parser.add_argument("--replay-live-parity-json")
-    parser.add_argument("--action-time-boundary-json")
-    parser.add_argument("--sor-detector-json")
-    parser.add_argument("--mi-trial-admission-json")
-    parser.add_argument("--brf2-runtime-signal-facts-json")
-    parser.add_argument("--single-lane-task-packet-json")
-    parser.add_argument(
-        "--runtime-active-monitor-json",
-        help=(
-            "Optional runtime active monitor/status artifact with "
-            "candidate_universe_coverage."
-        ),
-    )
-    parser.add_argument(
-        "--owner-pretrade-authorization-json",
-        help="Explicit local diagnostic Owner pre-trade runtime authorization JSON.",
-    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
@@ -146,22 +126,13 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("PG_DATABASE_URL", ""),
         help=(
             "PostgreSQL DSN for the DB-backed production current source. "
-            "When omitted, the legacy file path is used only for local migration "
-            "comparison."
+            "Defaults to PG_DATABASE_URL."
         ),
     )
     parser.add_argument(
         "--require-database-url",
         action="store_true",
-        help="Fail instead of falling back to legacy JSON inputs when PG_DATABASE_URL is absent.",
-    )
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow explicit local JSON inputs for migration diagnostics only. "
-            "Production current Candidate Pool must use PG."
-        ),
+        help="Require an explicit database URL; retained for command consistency.",
     )
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -170,91 +141,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.require_database_url and not args.database_url:
+    if not args.database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for DB-backed candidate pool",
             file=sys.stderr,
         )
         return 2
 
-    if args.database_url:
-        if not args.database_url.startswith(
-            ("postgresql://", "postgresql+psycopg://")
-        ) and not args.allow_non_postgres_for_test:
-            print(
-                "ERROR: DB-backed candidate pool requires PostgreSQL DSN",
-                file=sys.stderr,
-            )
-            return 2
-        engine = sa.create_engine(args.database_url)
-        try:
-            with engine.connect() as conn:
-                repository = PgBackedRuntimeControlStateRepository(conn)
-                artifact = build_strategy_live_candidate_pool_from_control_state(
-                    repository.read_control_state(),
-                )
-        finally:
-            engine.dispose()
-    else:
-        if not args.allow_local_file_diagnostic:
-            print(
-                "ERROR: PG_DATABASE_URL is required for DB-backed candidate pool; "
-                "use --allow-local-file-diagnostic only for explicit local diagnostics",
-                file=sys.stderr,
-            )
-            return 2
-        required_local_inputs = {
-            "--daily-table-json": args.daily_table_json,
-            "--tradeability-json": args.tradeability_json,
-            "--replay-live-parity-json": args.replay_live_parity_json,
-            "--action-time-boundary-json": args.action_time_boundary_json,
-            "--mi-trial-admission-json": args.mi_trial_admission_json,
-            "--brf2-runtime-signal-facts-json": args.brf2_runtime_signal_facts_json,
-            "--single-lane-task-packet-json": args.single_lane_task_packet_json,
-        }
-        missing_local_inputs = [
-            flag for flag, value in required_local_inputs.items() if not value
-        ]
-        if missing_local_inputs:
-            print(
-                "ERROR: explicit local diagnostic inputs required: "
-                + ", ".join(missing_local_inputs),
-                file=sys.stderr,
-            )
-            return 2
-        repository = FileBackedRuntimeControlStateRepository()
-        inputs = repository.candidate_pool_inputs(
-            daily_table_json=Path(args.daily_table_json),
-            tradeability_json=Path(args.tradeability_json),
-            replay_live_parity_json=Path(args.replay_live_parity_json),
-            action_time_boundary_json=Path(args.action_time_boundary_json),
-            sor_detector_json=Path(args.sor_detector_json)
-            if args.sor_detector_json
-            else None,
-            mi_trial_admission_json=Path(args.mi_trial_admission_json),
-            brf2_runtime_signal_facts_json=Path(args.brf2_runtime_signal_facts_json),
-            single_lane_task_packet_json=Path(args.single_lane_task_packet_json),
-            runtime_active_monitor_json=Path(args.runtime_active_monitor_json)
-            if args.runtime_active_monitor_json
-            else None,
-            owner_pretrade_authorization_json=Path(
-                args.owner_pretrade_authorization_json
-            )
-            if args.owner_pretrade_authorization_json
-            else None,
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print(
+            "ERROR: DB-backed candidate pool requires PostgreSQL DSN",
+            file=sys.stderr,
         )
-        artifact = build_strategy_live_candidate_pool(
-            daily_table=inputs["daily_table"],
-            tradeability=inputs["tradeability"],
-            replay_live_parity=inputs["replay_live_parity"],
-            action_time_boundary=inputs["action_time_boundary"],
-            sor_detector=inputs["sor_detector"],
-            mi_trial_admission=inputs["mi_trial_admission"],
-            brf2_runtime_signal_facts=inputs["brf2_runtime_signal_facts"],
-            single_lane_task_packet=inputs["single_lane_task_packet"],
-            runtime_active_monitor=inputs["runtime_active_monitor"],
-            owner_pretrade_authorization=inputs["owner_pretrade_authorization"],
-        )
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            artifact = build_strategy_live_candidate_pool_from_control_state(
+                repository.read_control_state(),
+            )
+    finally:
+        engine.dispose()
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)

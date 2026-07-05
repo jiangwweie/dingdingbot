@@ -2467,39 +2467,41 @@ def _maybe_write_strategygroup_closure_step(
             build_strategy_live_candidate_pool,
         )
 
-        daily_table_path = Path(command[command.index("--daily-table-json") + 1])
-        tradeability_path = Path(command[command.index("--tradeability-json") + 1])
-        parity_path = Path(command[command.index("--replay-live-parity-json") + 1])
-        action_time_path = Path(command[command.index("--action-time-boundary-json") + 1])
-        mi_trial_path = Path(command[command.index("--mi-trial-admission-json") + 1])
-        brf2_facts_path = Path(
-            command[command.index("--brf2-runtime-signal-facts-json") + 1]
-        )
-        packet_path = Path(command[command.index("--single-lane-task-packet-json") + 1])
-        runtime_active_monitor_path = Path(
-            command[command.index("--runtime-active-monitor-json") + 1]
-        )
         output_json = Path(command[command.index("--output-json") + 1])
         output_md = Path(command[command.index("--output-owner-progress") + 1])
+        fixture_dir = output_json.parent
+        fixtures = _ensure_candidate_pool_fixture_files(fixture_dir)
         artifact = build_strategy_live_candidate_pool(
-            daily_table=json.loads(daily_table_path.read_text(encoding="utf-8")),
-            tradeability=json.loads(tradeability_path.read_text(encoding="utf-8")),
-            replay_live_parity=json.loads(parity_path.read_text(encoding="utf-8")),
-            action_time_boundary=json.loads(action_time_path.read_text(encoding="utf-8")),
+            daily_table=json.loads(
+                fixtures["daily_table"].read_text(encoding="utf-8")
+            ),
+            tradeability=json.loads(
+                fixtures["tradeability"].read_text(encoding="utf-8")
+            ),
+            replay_live_parity=json.loads(
+                fixtures["parity"].read_text(encoding="utf-8")
+            ),
+            action_time_boundary=json.loads(
+                fixtures["action_time"].read_text(encoding="utf-8")
+            ),
             mi_trial_admission=(
-                json.loads(mi_trial_path.read_text(encoding="utf-8"))
-                if mi_trial_path.exists()
+                json.loads(fixtures["mi_trial"].read_text(encoding="utf-8"))
+                if fixtures["mi_trial"].exists()
                 else {}
             ),
             brf2_runtime_signal_facts=(
-                json.loads(brf2_facts_path.read_text(encoding="utf-8"))
-                if brf2_facts_path.exists()
+                json.loads(fixtures["brf2_facts"].read_text(encoding="utf-8"))
+                if fixtures["brf2_facts"].exists()
                 else {}
             ),
-            single_lane_task_packet=json.loads(packet_path.read_text(encoding="utf-8")),
+            single_lane_task_packet=json.loads(
+                fixtures["packet"].read_text(encoding="utf-8")
+            ),
             runtime_active_monitor=(
-                json.loads(runtime_active_monitor_path.read_text(encoding="utf-8"))
-                if runtime_active_monitor_path.exists()
+                json.loads(
+                    fixtures["runtime_active_monitor"].read_text(encoding="utf-8")
+                )
+                if fixtures["runtime_active_monitor"].exists()
                 else {}
             ),
             owner_pretrade_authorization=_owner_pretrade_authorization(),
@@ -2595,6 +2597,100 @@ def _maybe_write_strategygroup_closure_step(
         _write_ready_strategygroup_research_intake_review(command)
         return subprocess.CompletedProcess(command, 0, "", "")
     return None
+
+
+def _ensure_candidate_pool_fixture_files(fixture_dir: Path) -> dict[str, Path]:
+    daily_table_path = fixture_dir / "daily-live-table.json"
+    tradeability_path = fixture_dir / "strategygroup-tradeability-decision.json"
+    parity_path = fixture_dir / "replay-live-parity.json"
+    action_time_path = fixture_dir / "fresh-signal-action-time-boundary.json"
+    mi_trial_path = fixture_dir / "mi-trial-admission.json"
+    brf2_facts_path = fixture_dir / "brf2-runtime-signal-facts.json"
+    packet_path = fixture_dir / "single-lane-task-packet.json"
+
+    if not daily_table_path.exists():
+        _write_ready_daily_live_enablement_table(
+            [
+                "python",
+                "build_daily_live_enablement_table.py",
+                "--output-json",
+                str(daily_table_path),
+            ]
+        )
+    if not tradeability_path.exists():
+        _write_ready_tradeability_decision(
+            [
+                "python",
+                "build_strategygroup_tradeability_decision.py",
+                "--output-json",
+                str(tradeability_path),
+            ]
+        )
+    if not parity_path.exists():
+        _write_ready_cpm_artifact(
+            [
+                "python",
+                "build_replay_live_parity_audit.py",
+                "--output-json",
+                str(parity_path),
+            ],
+            "build_replay_live_parity_audit.py",
+        )
+    if not action_time_path.exists():
+        _write_ready_cpm_artifact(
+            [
+                "python",
+                "build_strategy_fresh_signal_action_time_boundary.py",
+                "--output-json",
+                str(action_time_path),
+            ],
+            "build_strategy_fresh_signal_action_time_boundary.py",
+        )
+    if not mi_trial_path.exists():
+        _write_ready_cpm_artifact(
+            [
+                "python",
+                "build_mi_trial_admission_decision.py",
+                "--output-json",
+                str(mi_trial_path),
+            ],
+            "build_mi_trial_admission_decision.py",
+        )
+    if not brf2_facts_path.exists():
+        _write_missing_brf2_runtime_signal_facts(
+            [
+                "python",
+                "build_brf2_runtime_signal_facts.py",
+                "--output-json",
+                str(brf2_facts_path),
+            ]
+        )
+    if not packet_path.exists():
+        result = _maybe_write_strategygroup_closure_step(
+            "build_single_lane_task_packet.py",
+            [
+                "python",
+                "build_single_lane_task_packet.py",
+                "--daily-table-json",
+                str(daily_table_path),
+                "--output-json",
+                str(packet_path),
+                "--output-owner-progress",
+                str(fixture_dir / "single-lane-task-packet.md"),
+            ],
+        )
+        assert result is not None and result.returncode == 0
+
+    return {
+        "daily_table": daily_table_path,
+        "tradeability": tradeability_path,
+        "parity": parity_path,
+        "action_time": action_time_path,
+        "mi_trial": mi_trial_path,
+        "brf2_facts": brf2_facts_path,
+        "packet": packet_path,
+        "runtime_active_monitor": fixture_dir / "runtime-active-monitor.json",
+    }
 
 
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
@@ -3139,13 +3235,21 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         runtime_active_command.index("--output-json") + 1
     ] == str(tmp_path / "runtime-active-monitor.json")
     candidate_pool_command = strategy_live_candidate_pool_commands[-1]
+    assert "--require-database-url" in candidate_pool_command
+    for legacy_arg in (
+        "--daily-table-json",
+        "--tradeability-json",
+        "--replay-live-parity-json",
+        "--action-time-boundary-json",
+        "--mi-trial-admission-json",
+        "--brf2-runtime-signal-facts-json",
+        "--single-lane-task-packet-json",
+        "--runtime-active-monitor-json",
+    ):
+        assert legacy_arg not in candidate_pool_command
     assert candidate_pool_command[
-        candidate_pool_command.index("--daily-table-json") + 1
-    ] == str(tmp_path / "daily-live-table.json")
-    assert candidate_pool_command[
-        candidate_pool_command.index("--single-lane-task-packet-json") + 1
-    ] == str(tmp_path / "single-lane-task-packet.json")
-    assert "--runtime-active-monitor-json" in candidate_pool_command
+        candidate_pool_command.index("--output-json") + 1
+    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
     portfolio_board_command = portfolio_board_commands[0]
     assert "--capture-gap-audit-json" in portfolio_board_command
     assert portfolio_board_command[
