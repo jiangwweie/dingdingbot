@@ -82,7 +82,8 @@ from scripts.build_strategy_group_handoff_intake_artifact import (
     build_artifact as build_strategy_group_handoff_intake_artifact,
 )
 from scripts.build_strategy_group_live_facts_readiness_artifact import (
-    build_readiness_artifact as build_strategy_group_live_facts_readiness_artifact,
+    build_blocked_pg_readiness_artifact as build_strategy_group_blocked_pg_live_facts_artifact,
+    build_readiness_artifact_from_database_url as build_strategy_group_live_facts_readiness_artifact_from_database_url,
 )
 from scripts.build_strategygroup_runtime_pilot_status import (
     build_status_artifact as build_strategygroup_runtime_pilot_status_artifact,
@@ -97,10 +98,6 @@ DEFAULT_STRATEGY_GROUP_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/strategygro
 DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-intake-evidence.json"
-)
-DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "strategy-group-live-facts-input.json"
 )
 DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
@@ -147,7 +144,6 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
 DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_GLOB = "strategy-group-intake-evidence-*.json"
-DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
@@ -2063,41 +2059,28 @@ class TradingConsoleReadModelService:
             live_ready=False,
         )
 
-    def strategy_group_live_facts_readiness(
-        self,
-        *,
-        live_facts_path: Optional[str] = None,
-    ) -> TradingConsoleReadModelResponse:
+    def strategy_group_live_facts_readiness(self) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
         intake = self.strategy_group_handoff_intake().data
-        configured_live_facts_path = (
-            live_facts_path or os.environ.get("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH")
+        database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+        allow_non_postgres_for_test = (
+            os.getenv("BRC_ALLOW_NON_POSTGRES_FOR_TEST") == "1"
         )
-        resolved_live_facts_path = Path(
-            configured_live_facts_path or DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH
-        ).expanduser()
-        if configured_live_facts_path is None and not resolved_live_facts_path.exists():
-            latest_live_facts_path = _latest_existing_path(
-                Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
-                DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB,
+        try:
+            artifact = (
+                build_strategy_group_live_facts_readiness_artifact_from_database_url(
+                    database_url=database_url,
+                    intake_artifact=intake,
+                    generated_at_ms=generated_at_ms,
+                    allow_non_postgres_for_test=allow_non_postgres_for_test,
+                )
             )
-            if latest_live_facts_path is not None:
-                resolved_live_facts_path = latest_live_facts_path
-        live_facts = _read_json_file(resolved_live_facts_path)
-        artifact = build_strategy_group_live_facts_readiness_artifact(
-            intake_artifact=intake,
-            live_facts=live_facts,
-            generated_at_ms=generated_at_ms,
-        )
-        artifact["live_facts_source"] = {
-            "path": str(resolved_live_facts_path),
-            "present": resolved_live_facts_path.exists(),
-        }
-        if not resolved_live_facts_path.exists():
-            artifact["blockers"] = sorted(
-                set(list(artifact.get("blockers") or []) + ["live_facts_path_missing"])
+        except Exception as exc:
+            artifact = build_strategy_group_blocked_pg_live_facts_artifact(
+                intake_artifact=intake,
+                generated_at_ms=generated_at_ms,
+                reason=f"pg_live_facts_unavailable:{type(exc).__name__}",
             )
-            artifact["status"] = "strategy_group_live_facts_blocked"
         blockers = [
             {
                 "code": "strategy_group_live_facts_blocked",
@@ -2208,14 +2191,16 @@ class TradingConsoleReadModelService:
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
         )
-        live_facts_path_value = (
-            (live_facts_response.data.get("live_facts_source") or {}).get("path")
-            if isinstance(live_facts_response.data, dict)
-            else None
-        )
         live_facts = (
-            _read_json_file(Path(str(live_facts_path_value)).expanduser())
-            if live_facts_path_value
+            live_facts_response.data.get("live_facts")
+            if isinstance(live_facts_response.data, dict)
+            and isinstance(live_facts_response.data.get("live_facts"), dict)
+            else {}
+        )
+        live_facts_source = (
+            live_facts_response.data.get("live_facts_source")
+            if isinstance(live_facts_response.data, dict)
+            and isinstance(live_facts_response.data.get("live_facts_source"), dict)
             else {}
         )
         report_dir = Path(
@@ -2272,7 +2257,7 @@ class TradingConsoleReadModelService:
             watcher_response=watcher_response,
             runtime_response=runtime_response,
             live_facts=live_facts,
-            live_facts_path=str(live_facts_path_value or ""),
+            live_facts_source=live_facts_source,
             dry_run_audit=dry_run_audit,
             dry_run_audit_path=str(dry_run_audit_path),
             runtime_goal_status=runtime_goal_status,
@@ -7301,7 +7286,7 @@ def _owner_console_source_readiness_artifact(
     watcher_response: TradingConsoleReadModelResponse,
     runtime_response: TradingConsoleReadModelResponse,
     live_facts: dict[str, Any],
-    live_facts_path: str,
+    live_facts_source: dict[str, Any],
     dry_run_audit: dict[str, Any],
     dry_run_audit_path: str,
     runtime_goal_status: dict[str, Any],
@@ -7455,7 +7440,7 @@ def _owner_console_source_readiness_artifact(
             "stale_after_seconds": stale_after_seconds,
         },
         "source_paths": {
-            "live_facts_path": live_facts_path,
+            "live_facts_source": live_facts_source,
             "runtime_dry_run_audit_chain_path": dry_run_audit_path,
             "strategygroup_runtime_goal_status_path": runtime_goal_status_path,
             "tokyo_deploy_channel_status_path": deploy_channel_path,

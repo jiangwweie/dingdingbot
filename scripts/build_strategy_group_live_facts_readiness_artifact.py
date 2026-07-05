@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
 from typing import Any
+
+import sqlalchemy as sa
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -23,6 +26,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.build_strategy_group_handoff_intake_artifact import (
     DEFAULT_HANDOFF_DIR,
     build_artifact as build_handoff_intake_artifact,
+)
+from scripts.runtime_pg_fact_snapshots import (
+    read_latest_account_safe_facts_artifact,
+    read_pretrade_public_facts_artifact,
 )
 
 
@@ -360,13 +367,224 @@ def build_readiness_artifact(
     }
 
 
+def build_readiness_artifact_from_pg(
+    *,
+    conn: sa.engine.Connection,
+    intake_artifact: dict[str, Any],
+    generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    live_facts = build_live_facts_from_pg_snapshots(
+        conn=conn,
+        intake_artifact=intake_artifact,
+    )
+    artifact = build_readiness_artifact(
+        intake_artifact=intake_artifact,
+        live_facts=live_facts,
+        generated_at_ms=generated_at_ms,
+    )
+    artifact["live_facts_source"] = live_facts.get("source") or {}
+    artifact["live_facts"] = live_facts
+    if live_facts.get("source_mode") != "db_backed":
+        artifact["blockers"] = sorted(
+            set(list(artifact.get("blockers") or []) + ["pg_live_facts_missing"])
+        )
+        artifact["status"] = "strategy_group_live_facts_blocked"
+    return artifact
+
+
+def build_readiness_artifact_from_database_url(
+    *,
+    database_url: str,
+    intake_artifact: dict[str, Any],
+    generated_at_ms: int | None = None,
+    allow_non_postgres_for_test: bool = False,
+) -> dict[str, Any]:
+    if not database_url:
+        raise RuntimeError(
+            "PG_DATABASE_URL is required for DB-backed live-facts readiness"
+        )
+    if not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not allow_non_postgres_for_test:
+        raise RuntimeError("DB-backed live-facts readiness requires PostgreSQL DSN")
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            return build_readiness_artifact_from_pg(
+                conn=conn,
+                intake_artifact=intake_artifact,
+                generated_at_ms=generated_at_ms,
+            )
+    finally:
+        engine.dispose()
+
+
+def build_live_facts_from_pg_snapshots(
+    *,
+    conn: sa.engine.Connection,
+    intake_artifact: dict[str, Any],
+) -> dict[str, Any]:
+    public = read_pretrade_public_facts_artifact(conn)
+    account_safe = read_latest_account_safe_facts_artifact(conn)
+    public_rows = {
+        str(item.get("symbol") or "").upper(): item
+        for item in public.get("symbols") or []
+        if isinstance(item, dict)
+    }
+    supported_symbols = sorted(
+        {
+            str(symbol or "").upper()
+            for group in intake_artifact.get("strategy_picker") or []
+            if isinstance(group, dict)
+            for symbol in group.get("supported_symbols") or []
+            if str(symbol or "").strip()
+        }
+    )
+    exchange_symbols: dict[str, dict[str, Any]] = {}
+    for symbol in supported_symbols:
+        row = public_rows.get(symbol)
+        ready = bool(row) and row.get("public_facts_ready") is True
+        exchange_symbols[symbol] = {
+            "status": "TRADING" if ready else "missing",
+            "fact_snapshot_ready": ready,
+            "source_ref": row.get("fact_snapshot_id") if row else None,
+        }
+
+    checks = (
+        account_safe.get("checks")
+        if isinstance(account_safe.get("checks"), dict)
+        else {}
+    )
+    account_ready = checks.get("account_trade_permission") is True
+    active_position_clear = checks.get("active_position_clear") is True or checks.get(
+        "active_position_or_open_order_clear"
+    ) is True
+    open_orders_clear = checks.get("open_orders_clear") is True or checks.get(
+        "active_position_or_open_order_clear"
+    ) is True
+    budget_available = checks.get("budget_available") is True or checks.get(
+        "action_time_available_balance"
+    ) is True
+    protection_ready = checks.get("protection_template_ready") is True
+    next_attempt_ready = checks.get("next_attempt_gate_ready") is True
+    return {
+        "scope": "strategy_group_live_facts_input",
+        "status": (
+            "ready"
+            if account_safe.get("status") == "runtime_account_safe_facts_ready"
+            and exchange_symbols
+            and all(
+                item.get("fact_snapshot_ready") is True
+                for item in exchange_symbols.values()
+            )
+            else "partial"
+        ),
+        "source_mode": "db_backed",
+        "source": {
+            "mode": "pg_runtime_fact_snapshots",
+            "public_facts_status": public.get("status"),
+            "account_safe_status": account_safe.get("status"),
+            "account_safe_fact_snapshot_id": account_safe.get(
+                "account_safe_fact_snapshot_id"
+            ),
+            "account_mode_snapshot_id": account_safe.get("account_mode_snapshot_id"),
+        },
+        "exchange_rules": {
+            "status": "ready" if exchange_symbols else "missing",
+            "symbols": exchange_symbols,
+        },
+        "account": {
+            "status": "fresh" if account_ready else "missing",
+            "available_balance_present": checks.get("account_balance_present") is True
+            or checks.get("action_time_available_balance") is True,
+            "available_balance_positive": checks.get("account_balance_positive") is True
+            or checks.get("action_time_available_balance") is True,
+            "total_wallet_balance_present": checks.get("total_wallet_balance_present")
+            is True
+            or checks.get("account_balance_present") is True
+            or checks.get("action_time_available_balance") is True,
+            "exchange_account_trade_permission": account_ready,
+        },
+        "active_position": {
+            "status": (
+                "no_active_position"
+                if active_position_clear
+                else "active_position_present"
+            ),
+            "active_count": 0 if active_position_clear else 1,
+            "active_symbols": [],
+        },
+        "open_orders": {
+            "status": "no_open_orders" if open_orders_clear else "open_orders_present",
+            "open_order_count": 0 if open_orders_clear else 1,
+            "open_order_symbols": [],
+        },
+        "protection": {
+            "status": (
+                "ready_for_candidate_specific_plan"
+                if protection_ready
+                else "missing"
+            )
+        },
+        "budget": {
+            "status": (
+                "available_for_candidate_specific_reservation"
+                if budget_available
+                else "missing"
+            ),
+            "reason": (
+                "account_available_balance_covers_strategygroup_tiny_notional"
+                if budget_available
+                else "budget_fact_not_ready"
+            ),
+            "max_notional_requirement_usdt": checks.get("max_notional_requirement_usdt"),
+        },
+        "next_attempt_gate": {
+            "status": "ready_for_strategy_signal" if next_attempt_ready else "missing"
+        },
+        "collector_errors": {},
+        "safety_invariants": {
+            "signed_get_only": checks.get("source_signed_get_only") is True,
+            "exchange_write_called": checks.get("source_exchange_write_called") is True,
+            "order_created": checks.get("source_order_created") is True,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def build_blocked_pg_readiness_artifact(
+    *,
+    intake_artifact: dict[str, Any],
+    generated_at_ms: int | None,
+    reason: str,
+) -> dict[str, Any]:
+    artifact = build_readiness_artifact(
+        intake_artifact=intake_artifact,
+        live_facts={},
+        generated_at_ms=generated_at_ms,
+    )
+    artifact["status"] = "strategy_group_live_facts_blocked"
+    artifact["blockers"] = sorted(
+        set(list(artifact.get("blockers") or []) + [reason])
+    )
+    artifact["live_facts_source"] = {
+        "mode": "pg_runtime_fact_snapshots",
+        "present": False,
+        "reason": reason,
+    }
+    artifact["live_facts"] = {}
+    return artifact
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build StrategyGroup live-facts readiness from intake and facts.",
     )
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--intake-json")
     parser.add_argument("--handoff-dir")
-    parser.add_argument("--live-facts-json")
     parser.add_argument("--output-json", required=True)
     return parser.parse_args(argv)
 
@@ -381,10 +599,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.handoff_dir
             else DEFAULT_HANDOFF_DIR
         )
-    live_facts = _read_json(args.live_facts_json)
-    artifact = build_readiness_artifact(
+    artifact = build_readiness_artifact_from_database_url(
+        database_url=args.database_url,
         intake_artifact=intake,
-        live_facts=live_facts,
+        allow_non_postgres_for_test=args.allow_non_postgres_for_test,
     )
     _write_json(args.output_json, artifact)
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))

@@ -2,7 +2,7 @@
 title: OWNER_CONSOLE_SOURCE_READINESS_CONFIRMATION
 status: CURRENT_PILOT_EVIDENCE
 authority: docs/current/OWNER_CONSOLE_SOURCE_READINESS_CONFIRMATION.md
-last_verified: 2026-06-16
+last_verified: 2026-07-05
 ---
 
 # Owner Console Source Readiness Confirmation
@@ -36,11 +36,11 @@ StrategyGroup product design.
 | Strategy runtime repository | `ready` for Tokyo reports; `degraded` for local shell | Tokyo `strategygroup-runtime-pilot-status.json` reports active runtime rows and `status=waiting_for_market`; current local shell does not have PG env loaded. | Use Tokyo/read-only service as source for live runtime overlay. If local Owner Console backend lacks PG env, show catalog rows with `暂不可用`, not an empty catalog. |
 | Runtime admission/binding | `ready` | `strategygroup-runtime-pilot-status.json` reports `runtime_binding=configured`; current control board counts: `total=5`, `observing=4`, `observe_only_ready=1`, `selected=1`. | StrategyGroup rows may show running/waiting states when readmodel is reachable. Admission unavailability should degrade row status only. |
 | Watcher status | `ready` | `brc-runtime-signal-watcher.timer` is `active/enabled`; latest service run exited `SUCCESS`; latest `post-signal-resume-pack.json` reports `status=waiting_for_market`. | System freshness can be shown as running/waiting. Current user-facing state is `等待机会` / `无需操作`. |
-| Live facts readiness | `ready` | `strategy-group-live-facts-readiness.json` reports `strategy_group_live_facts_ready_for_armed_observation`, `blockers=[]`, `observe_ready=5`, `armed_candidate_prepare_ready=4`. | Funds/orders/positions/protection health can be displayed as current. Fresh signal is still required before candidate/action path. |
-| Account funds | `ready` | `strategy-group-live-facts-input.json` reports `account.status=fresh`, `available_balance_present=true`, `available_balance_positive=true`, and budget coverage for the Owner-allocated subaccount/profile boundary. | Show sanitized fund pool status. Do not show API keys, account ids, raw secrets, or full wallet detail. |
-| Local orders | `ready_empty` | `strategy-group-live-facts-input.json` reports `open_orders.open_order_count=0`, `status=no_open_orders`; no exchange write was called. | Show `暂无订单`, not `订单状态暂不可用`. |
-| Local positions | `ready_empty` | `strategy-group-live-facts-input.json` reports `active_position.active_count=0`, `status=no_active_position`. | Show `暂无持仓`, not `持仓状态暂不可用`. |
-| Protection state | `ready` | `strategy-group-live-facts-input.json` reports `protection.status=ready_for_candidate_specific_plan`; handoff risk defaults define stop-loss and exit plan. | Show `保护正常` for observation state; candidate-specific protection is created only when a fresh candidate exists. |
+| Live facts readiness | `ready` when PG fact snapshots are current | `strategy-group-live-facts-readiness.json` is now a PG-derived export from `brc_runtime_fact_snapshots`; it is not a runtime input file. | Funds/orders/positions/protection health can be displayed as current. Fresh signal is still required before candidate/action path. |
+| Account funds | `ready` when PG `account_safe` snapshots prove account facts | `brc_runtime_fact_snapshots` stores account/budget facts; `strategy-group-live-facts-input.json` is retired and must not be read as the source. | Show sanitized fund pool status. Do not show API keys, account ids, raw secrets, or full wallet detail. |
+| Local orders | `ready_empty` when PG account snapshots prove no open orders | `brc_runtime_fact_snapshots` stores open-order summary facts; no exchange write is called. | Show `暂无订单`, not `订单状态暂不可用`. |
+| Local positions | `ready_empty` when PG account snapshots prove no active position | `brc_runtime_fact_snapshots` stores active-position summary facts. | Show `暂无持仓`, not `持仓状态暂不可用`. |
+| Protection state | `ready` when PG account/protection snapshots prove the protection template is ready | Runtime fact snapshots carry protection readiness; candidate-specific protection is created only when a fresh candidate exists. | Show `保护正常` for observation state. |
 | Reconciliation state | `degraded` | Current readiness reports prove no active position, no open order, no order creation, and no exchange write in the latest watcher cycle; no separate latest reconciliation summary was included in the source-readiness evidence set. | Homepage can show `系统正常` only for no-active-order/no-position observation. Detailed reconciliation panel should show `对账详情暂不可用` until a dedicated latest reconciliation source is wired. |
 | Operation audit | `degraded` | Main runtime contains Operation Layer API/repository code (`/api/brc/operations`, `PgBrcOperationRepository`) and Trading Console operations cockpit endpoint, but the current watcher source-readiness evidence set does not include an authenticated operation-audit list probe. | Do not block StrategyGroup visibility. Hide or degrade audit/detail history with `审计详情暂不可用` until Owner Console has a read-only operation-audit source. |
 
@@ -53,7 +53,7 @@ StrategyGroup product design.
 | StrategyGroup handoff files | `/Users/jiangwei/Documents/final/docs/current/strategy-group-handoffs/*/handoff.json` |
 | Tokyo runtime pilot status | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-pilot-status.json` |
 | Tokyo live facts readiness | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readiness.json` |
-| Tokyo live facts input | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-input.json` |
+| Tokyo live facts input | retired; runtime/readmodel source is `brc_runtime_fact_snapshots` |
 | Tokyo watcher resume pack | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/post-signal-resume-pack.json` |
 | Tokyo product refresh artifact | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/product-state-refresh-packet.json` |
 
@@ -70,7 +70,7 @@ This confirmation did not copy, print, or commit secrets.
 | Current shell `DATABASE_URL` | not loaded | Local shell did not expose database env. |
 | Current shell `RUNTIME_PROFILE` | not loaded | Local shell did not expose runtime profile. |
 | Current shell exchange key env | not loaded | No key values were read or printed. |
-| Tokyo live fact precollect | ready | Product-state refresh artifact reports `signed_get_only=true`, `status=ready`. |
+| Tokyo live fact precollect | retired | Product-state refresh no longer writes or consumes `strategy-group-live-facts-input.json`; account/public facts are PG-backed snapshots. |
 
 ## Owner Console Source Contract
 

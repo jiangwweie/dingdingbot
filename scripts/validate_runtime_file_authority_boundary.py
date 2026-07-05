@@ -44,6 +44,32 @@ AUTHORITY_FALSE_KEYS = (
     "order_sizing_changed",
 )
 
+FORBIDDEN_PRODUCTION_TEXT_BY_PATH: dict[str, tuple[str, ...]] = {
+    "scripts/refresh_strategygroup_runtime_product_state_artifacts.py": (
+        "--collect-live-facts-before-refresh",
+        "--live-facts-output",
+        "--live-facts-base-url",
+        "collect_live_facts_before_refresh",
+        "live_facts_precollect",
+        "DEFAULT_LIVE_FACTS_FILENAME",
+    ),
+    "scripts/run_server_product_state_refresh_sequence.py": (
+        "--collect-live-facts-before-refresh",
+        "--live-facts-output",
+        "--live-facts-json",
+        "strategy-group-live-facts-input.json",
+    ),
+    "scripts/build_strategy_group_live_facts_readiness_artifact.py": (
+        "--live-facts-json",
+    ),
+    "src/application/readmodels/trading_console.py": (
+        "BRC_STRATEGY_GROUP_LIVE_FACTS_PATH",
+        "DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH",
+        "DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB",
+        "strategy-group-live-facts-input.json",
+    ),
+}
+
 
 @dataclass(frozen=True)
 class Occurrence:
@@ -66,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     errors = validate_manifest(manifest)
     if not errors:
         errors.extend(validate_occurrences(manifest, repo_root=repo_root))
+    errors.extend(validate_forbidden_production_text(repo_root=repo_root))
 
     if errors:
         for error in errors:
@@ -162,6 +189,28 @@ def validate_occurrences(
                 f"{path}:{pattern_id} occurrence_count changed; expected "
                 f"{expected_count}, observed {observed.occurrence_count}"
             )
+    return errors
+
+
+def validate_forbidden_production_text(
+    *,
+    repo_root: Path,
+    forbidden_by_path: dict[str, tuple[str, ...]] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    paths = forbidden_by_path or FORBIDDEN_PRODUCTION_TEXT_BY_PATH
+    for relative_path, forbidden_items in sorted(paths.items()):
+        source_path = repo_root / relative_path
+        if not source_path.exists():
+            errors.append(f"{relative_path} is missing; update forbidden text guard")
+            continue
+        text = source_path.read_text(encoding="utf-8")
+        for forbidden in forbidden_items:
+            if forbidden in text:
+                errors.append(
+                    f"{relative_path} contains retired production file-authority "
+                    f"text: {forbidden}"
+                )
     return errors
 
 

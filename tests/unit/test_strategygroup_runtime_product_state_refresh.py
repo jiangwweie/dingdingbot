@@ -91,7 +91,6 @@ def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side
     assert all(call[2] == "session=test" for call in calls)
     assert artifact["safety_invariants"] == {
         "readmodel_refresh_only": True,
-        "optional_signed_get_live_facts_precollect": False,
         "optional_api_readmodel_refresh": True,
         "optional_dry_run_audit_chain_refresh": False,
         "optional_chain_closure_status_refresh": False,
@@ -108,87 +107,18 @@ def test_refresh_product_state_artifacts_writes_readmodel_artifacts_without_side
         "places_order": False,
         "mutates_pg": False,
     }
+    assert "live_facts_precollect" not in artifact
 
 
-def test_refresh_product_state_artifacts_can_precollect_live_facts_before_readmodel_refresh(tmp_path):
-    payloads = {
-        "/api/trading-console/strategy-group-live-facts-readiness": {
-            "freshness_status": "fresh",
-            "blockers": [],
-            "warnings": [],
-            "data": {
-                "status": "strategy_group_live_facts_ready_for_armed_observation",
-                "blockers": [],
-                "candidate_prepare_blockers": [],
-            },
-        },
-        "/api/trading-console/owner-console-source-readiness": {
-            "freshness_status": "fresh",
-            "blockers": [],
-            "warnings": [],
-            "data": {"status": "ready"},
-        },
-        "/api/trading-console/strategygroup-runtime-pilot-status": {
-            "freshness_status": "warning",
-            "blockers": [],
-            "warnings": [{"code": "strategygroup_runtime_pilot_waiting_for_market"}],
-            "data": {"status": "waiting_for_market"},
-        },
-    }
+def test_refresh_product_state_artifacts_retires_live_facts_precollect_cli():
+    parser = refresh_script._parse_args
 
-    def opener(request, timeout):
-        path = request.full_url.replace("http://unit", "")
-        return _FakeResponse(payloads[path])
-
-    def collect_live_facts(**kwargs):
-        assert kwargs["handoff_dir"] == tmp_path / "handoffs"
-        assert kwargs["env_file"] == tmp_path / "live-readonly.env"
-        assert kwargs["base_url"] == "https://unit-binance.test"
-        return {
-            "scope": "strategy_group_live_facts_input",
-            "status": "ready",
-            "collector_errors": {},
-            "safety_invariants": {
-                "signed_get_only": True,
-                "exchange_write_called": False,
-                "order_created": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
-
-    artifact = refresh_product_state_artifacts(
-        api_base="http://unit",
-        output_dir=tmp_path,
-        label="unit",
-        timeout_seconds=7,
-        cookie="session=test",
-        opener=opener,
-        generated_at_ms=1,
-        collect_live_facts_before_refresh=True,
-        handoff_dir=tmp_path / "handoffs",
-        env_file=tmp_path / "live-readonly.env",
-        live_facts_base_url="https://unit-binance.test",
-        live_facts_collector=collect_live_facts,
-    )
-
-    live_facts_path = tmp_path / "strategy-group-live-facts-input.json"
-    assert live_facts_path.exists()
-    assert json.loads(live_facts_path.read_text())["status"] == "ready"
-    assert artifact["status"] == "refreshed"
-    assert artifact["live_facts_precollect"] == {
-        "enabled": True,
-        "status": "ready",
-        "output_json": str(live_facts_path),
-        "collector_error_count": 0,
-        "signed_get_only": True,
-    }
-    assert artifact["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
-    assert artifact["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
-    assert artifact["safety_invariants"]["optional_live_closure_evidence_refresh"] is False
-    assert artifact["safety_invariants"]["optional_goal_status_refresh"] is False
-    assert artifact["safety_invariants"]["optional_source_readiness_unavailable_evidence"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
+    try:
+        parser(["--collect-live-facts-before-refresh"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("retired live-facts precollect flag must be rejected")
 
 
 def test_refresh_product_state_artifacts_passes_selected_strategygroup_scope_to_pilot_status(tmp_path):

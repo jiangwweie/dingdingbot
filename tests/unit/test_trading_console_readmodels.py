@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -117,6 +118,128 @@ def _login(client: TestClient):
         "/api/auth/login",
         json={"username": "owner", "password": "pw", "totp_code": _totp()},
     )
+
+
+def _configure_pg_live_fact_snapshots(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT"),
+    account_ready: bool = False,
+) -> Path:
+    db_path = tmp_path / "runtime-control-state.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE brc_runtime_fact_snapshots (
+              fact_snapshot_id TEXT PRIMARY KEY,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              runtime_profile_id TEXT,
+              fact_surface TEXT,
+              source_kind TEXT,
+              source_ref TEXT,
+              computed BOOLEAN,
+              satisfied BOOLEAN,
+              freshness_state TEXT,
+              failed_facts TEXT,
+              fact_values TEXT,
+              blocker_class TEXT,
+              observed_at_ms INTEGER,
+              valid_until_ms INTEGER,
+              created_at_ms INTEGER
+            )
+            """
+        )
+        for index, symbol in enumerate(symbols, start=1):
+            observed_at_ms = 1_780_000_000_000 + index
+            conn.execute(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id, strategy_group_id, symbol, side,
+                  runtime_profile_id, fact_surface, source_kind, source_ref,
+                  computed, satisfied, freshness_state, failed_facts, fact_values,
+                  blocker_class, observed_at_ms, valid_until_ms, created_at_ms
+                ) VALUES (
+                  ?, 'MPG-001', ?, 'long', 'runtime:MPG-001', 'pretrade_public',
+                  'live_market', 'unit', 1, 1, 'fresh', '[]', ?, NULL, ?, ?, ?
+                )
+                """,
+                (
+                    f"fact:MPG-001:{symbol}:long:pretrade_public:{observed_at_ms}",
+                    symbol,
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "public_facts_ready": True,
+                            "public_symbol_row": {
+                                "symbol": symbol,
+                                "public_facts_ready": True,
+                            },
+                        }
+                    ),
+                    observed_at_ms,
+                    observed_at_ms + 300_000,
+                    observed_at_ms,
+                ),
+            )
+        checks = {
+            "source_signed_get_only": True,
+            "source_exchange_write_called": False,
+            "source_order_created": False,
+            "account_trade_permission": True,
+            "account_balance_present": True,
+            "account_balance_positive": True,
+            "total_wallet_balance_present": True,
+            "active_position_clear": True,
+            "open_orders_clear": True,
+            "budget_available": account_ready,
+            "protection_template_ready": account_ready,
+            "next_attempt_gate_ready": account_ready,
+            "account_safe": account_ready,
+            "account_safe_facts_ready": account_ready,
+            "private_action_time_facts_ready": account_ready,
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": account_ready,
+        }
+        failed = (
+            []
+            if account_ready
+            else [
+                "budget_available",
+                "protection_template_ready",
+                "next_attempt_gate_ready",
+            ]
+        )
+        for surface in ("account_safe", "account_mode"):
+            conn.execute(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id, strategy_group_id, symbol, side,
+                  runtime_profile_id, fact_surface, source_kind, source_ref,
+                  computed, satisfied, freshness_state, failed_facts,
+                  fact_values, blocker_class, observed_at_ms, valid_until_ms,
+                  created_at_ms
+                ) VALUES (
+                  ?, NULL, NULL, NULL, NULL, ?, 'live_account_readonly',
+                  'unit', 1, ?, ?, ?, ?, ?, 1780000000100,
+                  1780000060100, 1780000000100
+                )
+                """,
+                (
+                    f"fact:global:{surface}:1780000000100",
+                    surface,
+                    1 if account_ready else 0,
+                    "fresh" if account_ready else "stale",
+                    json.dumps(failed),
+                    json.dumps(checks),
+                    None if account_ready else "computed_not_satisfied",
+                ),
+            )
+    monkeypatch.setenv("PG_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("BRC_ALLOW_NON_POSTGRES_FOR_TEST", "1")
+    return db_path
 
 
 def _assert_owner_primary_projection_has_no_internal_gate_terms(
@@ -6052,22 +6175,8 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
         default_mode="armed_observation",
     )
     _write_strategy_group_handoff_supplements(handoff_dir)
-    live_facts_path = tmp_path / "strategy-group-live-facts.json"
-    live_facts_path.write_text(
-        json.dumps(
-            {
-                "exchange_rules": {
-                    "symbols": {
-                        "BTCUSDT": {"status": "TRADING"},
-                        "ETHUSDT": {"status": "TRADING"},
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
 
     from src.interfaces.api import app
 
@@ -6090,7 +6199,12 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
     assert payload["warnings"][0]["code"] == (
         "strategy_group_candidate_prerequisites_pending"
     )
-    assert "MPG-001:account:missing" in payload["data"]["candidate_prepare_blockers"]
+    assert "MPG-001:budget:missing" in payload["data"]["candidate_prepare_blockers"]
+    assert "MPG-001:protection:missing" in payload["data"]["candidate_prepare_blockers"]
+    assert (
+        "MPG-001:next_attempt_gate:missing"
+        in payload["data"]["candidate_prepare_blockers"]
+    )
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
@@ -6113,26 +6227,6 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
         default_mode="armed_observation",
     )
     _write_strategy_group_handoff_supplements(handoff_dir)
-    live_facts_path = tmp_path / "strategy-group-live-facts.json"
-    live_facts_path.write_text(
-        json.dumps(
-            {
-                "exchange_rules": {
-                    "symbols": {
-                        "BTCUSDT": {"status": "TRADING"},
-                        "ETHUSDT": {"status": "TRADING"},
-                    }
-                },
-                "account": {"status": "fresh"},
-                "active_position": {"status": "no_active_position"},
-                "open_orders": {"status": "no_open_orders"},
-                "protection": {"status": "missing"},
-                "budget": {"status": "missing"},
-                "next_attempt_gate": {"status": "missing"},
-            }
-        ),
-        encoding="utf-8",
-    )
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     tick = {
@@ -6183,7 +6277,7 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -6251,55 +6345,6 @@ def test_owner_console_source_readiness_returns_owner_runtime_projection(
             ),
         )
     _write_strategy_group_handoff_supplements(handoff_dir)
-    live_facts_path = tmp_path / "strategy-group-live-facts.json"
-    live_facts_path.write_text(
-        json.dumps(
-            {
-                "status": "ready",
-                "account": {
-                    "status": "fresh",
-                    "available_balance_present": True,
-                    "available_balance_positive": True,
-                    "total_wallet_balance_present": True,
-                    "exchange_account_trade_permission": True,
-                },
-                "active_position": {
-                    "status": "no_active_position",
-                    "active_count": 0,
-                    "active_symbols": [],
-                },
-                "open_orders": {
-                    "status": "no_open_orders",
-                    "open_order_count": 0,
-                    "open_order_symbols": [],
-                },
-                "protection": {
-                    "status": "ready_for_candidate_specific_plan",
-                },
-                "budget": {
-                    "status": "available_for_candidate_specific_reservation",
-                    "reason": "account_available_balance_covers_strategygroup_tiny_notional",
-                    "max_notional_requirement_usdt": "8",
-                },
-                "next_attempt_gate": {
-                    "status": "ready_for_strategy_signal",
-                },
-                "exchange_rules": {
-                    "symbols": {
-                        "BTCUSDT": {"status": "TRADING"},
-                        "ETHUSDT": {"status": "TRADING"},
-                    }
-                },
-                "safety_invariants": {
-                    "signed_get_only": True,
-                    "exchange_write_called": False,
-                    "order_created": False,
-                    "withdrawal_or_transfer_created": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     auto_resume = {
@@ -6536,7 +6581,7 @@ def test_owner_console_source_readiness_returns_owner_runtime_projection(
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path, account_ready=True)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -7487,26 +7532,6 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
         default_mode="armed_observation",
     )
     _write_strategy_group_handoff_supplements(handoff_dir)
-    live_facts_path = tmp_path / "strategy-group-live-facts.json"
-    live_facts_path.write_text(
-        json.dumps(
-            {
-                "exchange_rules": {
-                    "symbols": {
-                        "BTCUSDT": {"status": "TRADING"},
-                        "ETHUSDT": {"status": "TRADING"},
-                    }
-                },
-                "account": {"status": "fresh"},
-                "active_position": {"status": "no_active_position"},
-                "open_orders": {"status": "no_open_orders"},
-                "protection": {"status": "missing"},
-                "budget": {"status": "missing"},
-                "next_attempt_gate": {"status": "missing"},
-            }
-        ),
-        encoding="utf-8",
-    )
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     tick = {
@@ -7565,7 +7590,7 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -7629,26 +7654,6 @@ def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifac
         ),
         encoding="utf-8",
     )
-    live_facts_path = tmp_path / "strategy-group-live-facts.json"
-    live_facts_path.write_text(
-        json.dumps(
-            {
-                "exchange_rules": {
-                    "symbols": {
-                        "BTCUSDT": {"status": "TRADING"},
-                        "ETHUSDT": {"status": "TRADING"},
-                    }
-                },
-                "account": {"status": "fresh"},
-                "active_position": {"status": "no_active_position"},
-                "open_orders": {"status": "no_open_orders"},
-                "protection": {"status": "missing"},
-                "budget": {"status": "missing"},
-                "next_attempt_gate": {"status": "missing"},
-            }
-        ),
-        encoding="utf-8",
-    )
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     blockers = ["runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"]
@@ -7679,7 +7684,7 @@ def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifac
         (report_dir / name).write_text(json.dumps(artifact), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH", str(intake_evidence_path))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing-handoffs"))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app

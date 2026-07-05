@@ -113,3 +113,47 @@ def test_runtime_file_authority_manifest_requires_replacement_and_no_authority()
     assert "authority_boundary.production_runtime_file_authority_allowed must be false" in errors
     assert "monitored_occurrences[0].replacement is required" in errors
     assert "monitored_occurrences[0].sunset_condition is required" in errors
+
+
+def test_runtime_file_authority_validator_rejects_retired_production_live_facts_flags(
+    tmp_path: Path,
+):
+    module = _load_module()
+    source = tmp_path / "production.py"
+    source.write_text('parser.add_argument("--collect-live-facts-before-refresh")\n')
+
+    errors = module.validate_forbidden_production_text(
+        repo_root=tmp_path,
+        forbidden_by_path={
+            "production.py": (
+                "--collect-live-facts-before-refresh",
+            )
+        },
+    )
+
+    assert errors == [
+        (
+            "production.py contains retired production file-authority text: "
+            "--collect-live-facts-before-refresh"
+        )
+    ]
+
+
+def test_runtime_file_authority_validator_accepts_clean_production_file(
+    tmp_path: Path,
+):
+    module = _load_module()
+    source = tmp_path / "production.py"
+    source.write_text('parser.add_argument("--output-json")\n')
+
+    assert (
+        module.validate_forbidden_production_text(
+            repo_root=tmp_path,
+            forbidden_by_path={
+                "production.py": (
+                    "--collect-live-facts-before-refresh",
+                )
+            },
+        )
+        == []
+    )
