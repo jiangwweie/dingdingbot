@@ -33,7 +33,6 @@ from src.domain.runtime_readiness_state import (  # noqa: E402
     runtime_safety_state_from_artifact,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
-    FileBackedRuntimeControlStateRepository,
     PgBackedRuntimeControlStateRepository,
 )
 from scripts.strategygroup_non_executing_projection import (  # noqa: E402
@@ -197,139 +196,20 @@ FORBIDDEN_TRUE_KEYS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--capital-trial-envelope-projection-json",
-        help=(
-            "Explicit capital-trial envelope projection input. Runtime callers "
-            "should pass this path; omitting it prevents stale capital-trial "
-            "projection output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument("--registry-json")
-    parser.add_argument("--tier-policy-json")
-    parser.add_argument(
-        "--signal-coverage-json",
-        help=(
-            "Explicit signal-coverage input. Runtime callers should pass this "
-            "path; omitting it prevents stale signal-coverage output from "
-            "changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--runtime-safety-state-json",
-        help=(
-            "Explicit Runtime Safety State input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "Runtime Safety evidence from granting Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--trial-asset-admission-proposal-json",
-        help=(
-            "Explicit Strategy Asset State admission proposal input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "trial-asset admission output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--brf2-owner-trial-policy-scope-json",
-        help=(
-            "Explicit BRF2 Owner trial policy scope input. Runtime callers "
-            "should pass this path; omitting it prevents stale Owner policy "
-            "scope output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--cpm-identity-routing-decision-json",
-        help="Explicit CPM identity routing decision input.",
-    )
-    parser.add_argument(
-        "--cpm-owner-trial-policy-scope-json",
-        help="Explicit CPM Owner trial policy scope input.",
-    )
-    parser.add_argument(
-        "--cpm-required-facts-mapping-json",
-        help="Explicit CPM RequiredFacts mapping input.",
-    )
-    parser.add_argument(
-        "--cpm-runtime-signal-capture-json",
-        help="Explicit CPM runtime signal capture input.",
-    )
-    parser.add_argument(
-        "--cpm-shadow-candidate-evidence-json",
-        help="Explicit CPM shadow candidate evidence input.",
-    )
-    parser.add_argument(
-        "--cpm-dry-run-submit-rehearsal-json",
-        help="Explicit CPM dry-run submit rehearsal input.",
-    )
-    parser.add_argument(
-        "--three-strategy-live-trial-portfolio-json",
-        help=(
-            "Explicit Strategy Asset / Trial Envelope portfolio input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "portfolio output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--brf2-runtime-signal-capture-json",
-        help=(
-            "Explicit BRF2 runtime signal capture input. Runtime callers should "
-            "pass this path; omitting it keeps signal-capture evidence absent "
-            "instead of reading a stale latest-* artifact."
-        ),
-    )
-    parser.add_argument(
-        "--brf2-shadow-candidate-evidence-json",
-        help=(
-            "Explicit BRF2 shadow candidate evidence provenance input. Runtime "
-            "callers should pass this path; omitting it keeps shadow evidence "
-            "provenance absent instead of reading a stale default artifact."
-        ),
-    )
-    parser.add_argument(
-        "--trial-grade-signal-gate-audit-json",
-        help=(
-            "Explicit trial-grade signal-gate audit input. Runtime callers "
-            "should pass this path; omitting it prevents stale trial-grade "
-            "audit output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--replay-live-parity-audit-json",
-        help="Explicit replay/live parity audit input for first-blocker classification.",
-    )
-    parser.add_argument(
-        "--mi-trial-admission-decision-json",
-        help="Explicit MI trial admission decision input.",
-    )
-    parser.add_argument(
-        "--strategy-fresh-signal-action-time-boundary-json",
-        help="Explicit action-time boundary readiness input.",
-    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
-        default=None,
+        default=os.getenv("PG_DATABASE_URL", ""),
         help=(
             "PostgreSQL DSN for the DB-backed production current source. "
-            "When omitted, the script fails unless --allow-local-file-diagnostic "
-            "is supplied with explicit JSON inputs."
+            "When omitted, PG_DATABASE_URL is used."
         ),
     )
     parser.add_argument(
         "--require-database-url",
         action="store_true",
-        help="Fail instead of allowing explicit local diagnostic JSON inputs.",
-    )
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow explicit local JSON inputs for migration diagnostics only. "
-            "Production current Tradeability Decision must use PG."
-        ),
+        help="Require a DB-backed production current source. This is the only production mode.",
     )
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -338,162 +218,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     database_url = args.database_url
-    if database_url is None:
-        database_url = "" if args.allow_local_file_diagnostic else os.getenv(
-            "PG_DATABASE_URL",
-            "",
-        )
-
-    if args.require_database_url and not database_url:
+    if not database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for DB-backed Tradeability Decision",
             file=sys.stderr,
         )
         return 2
 
-    if database_url:
-        if not database_url.startswith(
-            ("postgresql://", "postgresql+psycopg://")
-        ) and not args.allow_non_postgres_for_test:
-            print(
-                "ERROR: DB-backed Tradeability Decision requires PostgreSQL DSN",
-                file=sys.stderr,
-            )
-            return 2
-        engine = sa.create_engine(database_url)
-        try:
-            with engine.connect() as conn:
-                repository = PgBackedRuntimeControlStateRepository(conn)
-                decision_artifact = build_tradeability_decision_from_control_state(
-                    repository.read_control_state(),
-                )
-        finally:
-            engine.dispose()
-    else:
-        if not args.allow_local_file_diagnostic:
-            print(
-                "ERROR: PG_DATABASE_URL is required for DB-backed Tradeability "
-                "Decision; use --allow-local-file-diagnostic only for explicit "
-                "local diagnostics",
-                file=sys.stderr,
-            )
-            return 2
-        required_local_inputs = {
-            "--registry-json": args.registry_json,
-            "--tier-policy-json": args.tier_policy_json,
-        }
-        missing_local_inputs = [
-            flag for flag, value in required_local_inputs.items() if not value
-        ]
-        if missing_local_inputs:
-            print(
-                "ERROR: explicit local diagnostic inputs required: "
-                + ", ".join(missing_local_inputs),
-                file=sys.stderr,
-            )
-            return 2
-        repository = FileBackedRuntimeControlStateRepository()
-        decision_artifact = build_tradeability_decision(
-            capital_trial_envelope_projection=(
-                repository.read_json(Path(args.capital_trial_envelope_projection_json))
-                if args.capital_trial_envelope_projection_json
-                else {}
-            ),
-            registry=repository.read_json(Path(args.registry_json), missing_ok=False),
-            tier_policy=repository.read_json(
-                Path(args.tier_policy_json),
-                missing_ok=False,
-            ),
-            signal_coverage=(
-                repository.read_json(Path(args.signal_coverage_json))
-                if args.signal_coverage_json
-                else {}
-            ),
-            runtime_safety_state=(
-                repository.read_json(Path(args.runtime_safety_state_json))
-                if args.runtime_safety_state_json
-                else {}
-            ),
-            trial_asset_admission_proposal=repository.read_optional_json(
-                Path(args.trial_asset_admission_proposal_json)
-            )
-            if args.trial_asset_admission_proposal_json
-            else {},
-            brf2_owner_trial_policy_scope=(
-                repository.read_optional_json(Path(args.brf2_owner_trial_policy_scope_json))
-                if args.brf2_owner_trial_policy_scope_json
-                else {}
-            ),
-            cpm_identity_routing_decision=(
-                repository.read_optional_json(Path(args.cpm_identity_routing_decision_json))
-                if args.cpm_identity_routing_decision_json
-                else {}
-            ),
-            cpm_owner_trial_policy_scope=(
-                repository.read_optional_json(Path(args.cpm_owner_trial_policy_scope_json))
-                if args.cpm_owner_trial_policy_scope_json
-                else {}
-            ),
-            cpm_required_facts_mapping=(
-                repository.read_optional_json(Path(args.cpm_required_facts_mapping_json))
-                if args.cpm_required_facts_mapping_json
-                else {}
-            ),
-            cpm_runtime_signal_capture=(
-                repository.read_optional_json(Path(args.cpm_runtime_signal_capture_json))
-                if args.cpm_runtime_signal_capture_json
-                else {}
-            ),
-            cpm_shadow_candidate_evidence=(
-                repository.read_optional_json(Path(args.cpm_shadow_candidate_evidence_json))
-                if args.cpm_shadow_candidate_evidence_json
-                else {}
-            ),
-            cpm_dry_run_submit_rehearsal=(
-                repository.read_optional_json(Path(args.cpm_dry_run_submit_rehearsal_json))
-                if args.cpm_dry_run_submit_rehearsal_json
-                else {}
-            ),
-            three_strategy_live_trial_portfolio=(
-                repository.read_optional_json(
-                    Path(args.three_strategy_live_trial_portfolio_json)
-                )
-                if args.three_strategy_live_trial_portfolio_json
-                else {}
-            ),
-            brf2_runtime_signal_capture=(
-                repository.read_optional_json(Path(args.brf2_runtime_signal_capture_json))
-                if args.brf2_runtime_signal_capture_json
-                else {}
-            ),
-            brf2_shadow_candidate_evidence=(
-                repository.read_optional_json(Path(args.brf2_shadow_candidate_evidence_json))
-                if args.brf2_shadow_candidate_evidence_json
-                else {}
-            ),
-            trial_grade_signal_gate_audit=(
-                repository.read_optional_json(Path(args.trial_grade_signal_gate_audit_json))
-                if args.trial_grade_signal_gate_audit_json
-                else {}
-            ),
-            replay_live_parity_audit=(
-                repository.read_optional_json(Path(args.replay_live_parity_audit_json))
-                if args.replay_live_parity_audit_json
-                else {}
-            ),
-            mi_trial_admission_decision=(
-                repository.read_optional_json(Path(args.mi_trial_admission_decision_json))
-                if args.mi_trial_admission_decision_json
-                else {}
-            ),
-            strategy_fresh_signal_action_time_boundary=(
-                repository.read_optional_json(
-                    Path(args.strategy_fresh_signal_action_time_boundary_json)
-                )
-                if args.strategy_fresh_signal_action_time_boundary_json
-                else {}
-            ),
+    if not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print(
+            "ERROR: DB-backed Tradeability Decision requires PostgreSQL DSN",
+            file=sys.stderr,
         )
+        return 2
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            decision_artifact = build_tradeability_decision_from_control_state(
+                repository.read_control_state(),
+            )
+    finally:
+        engine.dispose()
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, decision_artifact)
@@ -4777,16 +4525,6 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return _read_json(path)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

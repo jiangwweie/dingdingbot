@@ -3439,42 +3439,34 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         three_strategy_command.index("--signal-coverage-json") + 1
     ] == str(tmp_path / "signal-coverage.json")
     tradeability_command = tradeability_commands[0]
-    assert "--capital-trial-envelope-projection-json" in tradeability_command
+    assert "--require-database-url" in tradeability_command
+    for legacy_arg in (
+        "--allow-local-file-diagnostic",
+        "--capital-trial-envelope-projection-json",
+        "--registry-json",
+        "--tier-policy-json",
+        "--signal-coverage-json",
+        "--runtime-safety-state-json",
+        "--trial-asset-admission-proposal-json",
+        "--brf2-owner-trial-policy-scope-json",
+        "--cpm-identity-routing-decision-json",
+        "--cpm-owner-trial-policy-scope-json",
+        "--cpm-required-facts-mapping-json",
+        "--cpm-runtime-signal-capture-json",
+        "--cpm-shadow-candidate-evidence-json",
+        "--cpm-dry-run-submit-rehearsal-json",
+        "--three-strategy-live-trial-portfolio-json",
+        "--brf2-runtime-signal-capture-json",
+        "--brf2-shadow-candidate-evidence-json",
+        "--trial-grade-signal-gate-audit-json",
+        "--replay-live-parity-audit-json",
+        "--mi-trial-admission-decision-json",
+        "--strategy-fresh-signal-action-time-boundary-json",
+    ):
+        assert legacy_arg not in tradeability_command
     assert tradeability_command[
-        tradeability_command.index("--capital-trial-envelope-projection-json") + 1
-    ] == str(tmp_path / "capital-trial-envelope-projection.json")
-    assert "--signal-coverage-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--signal-coverage-json") + 1
-    ] == str(tmp_path / "signal-coverage.json")
-    assert "--trial-asset-admission-proposal-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--trial-asset-admission-proposal-json") + 1
-    ] == str(tmp_path / "trial-admission-proposal.json")
-    assert "--brf2-owner-trial-policy-scope-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--brf2-owner-trial-policy-scope-json") + 1
-    ] == str(tmp_path / "brf2-policy.json")
-    assert "--three-strategy-live-trial-portfolio-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--three-strategy-live-trial-portfolio-json") + 1
-    ] == str(tmp_path / "three-strategy-portfolio.json")
-    assert "--trial-grade-signal-gate-audit-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--trial-grade-signal-gate-audit-json") + 1
-    ] == str(tmp_path / "trial-grade-audit.json")
-    assert "--runtime-safety-state-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--runtime-safety-state-json") + 1
-    ] == str(tmp_path / "runtime-safety-state.json")
-    assert "--brf2-runtime-signal-capture-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--brf2-runtime-signal-capture-json") + 1
-    ] == str(tmp_path / "brf2-signal-capture.json")
-    assert "--brf2-shadow-candidate-evidence-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--brf2-shadow-candidate-evidence-json") + 1
-    ] == str(tmp_path / "brf2-shadow-evidence.json")
+        tradeability_command.index("--output-json") + 1
+    ] == str(tmp_path / "tradeability.json")
     assert len(action_time_boundary_commands) == 1
     action_time_boundary_command = action_time_boundary_commands[0]
     assert action_time_boundary_command[
@@ -3503,23 +3495,6 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert mi_trial_admission_command[
         mi_trial_admission_command.index("--output-owner-progress") + 1
     ] == str(tmp_path / "mi-trial-admission.md")
-    assert "--replay-live-parity-audit-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--replay-live-parity-audit-json") + 1
-    ] == str(tmp_path / "replay-live-parity.json")
-    assert "--mi-trial-admission-decision-json" in tradeability_command
-    assert tradeability_command[
-        tradeability_command.index("--mi-trial-admission-decision-json") + 1
-    ] == str(tmp_path / "mi-trial-admission.json")
-    assert "--strategy-fresh-signal-action-time-boundary-json" in (
-        tradeability_command
-    )
-    assert tradeability_command[
-        tradeability_command.index(
-            "--strategy-fresh-signal-action-time-boundary-json"
-        )
-        + 1
-    ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
     assert len(daily_table_commands) == 2
     bootstrap_daily_table_command = daily_table_commands[0]
     server_backed_daily_table_command = daily_table_commands[1]
