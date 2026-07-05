@@ -125,3 +125,64 @@ def test_public_fact_snapshots_are_lane_scoped_and_exportable_from_pg():
         row["symbol"]: row["public_facts_ready"]
         for row in export["symbols"]
     } == {"ETHUSDT": True, "SOLUSDT": False}
+
+
+def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
+    helper = _load_file_module(HELPER_PATH, "runtime_pg_account_fact_helper_test")
+    engine = _seed_engine()
+    artifact = {
+        "generated_at_utc": "2026-07-05T00:00:00+00:00",
+        "status": "runtime_account_safe_facts_ready",
+        "source_status": "ready",
+        "checks": {
+            "account_safe_facts_ready": True,
+            "account_safe": True,
+            "private_action_time_facts_ready": True,
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+            "open_orders_clear": True,
+            "account_trade_permission": True,
+            "source_signed_get_only": True,
+            "source_exchange_write_called": False,
+            "source_order_created": False,
+        },
+        "facts": {
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+        },
+        "blockers": [],
+    }
+    try:
+        with engine.begin() as conn:
+            ids = helper.write_account_safe_fact_snapshots(
+                conn,
+                artifact=artifact,
+                source_ref="unit:live-facts",
+                source_kind="unit_test",
+            )
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT fact_snapshot_id, strategy_group_id, symbol, side,
+                           fact_surface, satisfied, freshness_state
+                    FROM brc_runtime_fact_snapshots
+                    WHERE fact_surface IN ('account_safe', 'account_mode')
+                    ORDER BY fact_surface
+                    """
+                )
+            ).mappings().all()
+            export = helper.read_latest_account_safe_facts_artifact(conn)
+    finally:
+        engine.dispose()
+
+    assert len(ids) == 2
+    assert {row["fact_surface"] for row in rows} == {"account_safe", "account_mode"}
+    assert all(row["strategy_group_id"] is None for row in rows)
+    assert all(row["symbol"] is None for row in rows)
+    assert all(row["side"] is None for row in rows)
+    assert all(row["satisfied"] in {True, 1} for row in rows)
+    assert all(row["freshness_state"] == "fresh" for row in rows)
+    assert export["source_mode"] == "db_backed"
+    assert export["checks"]["account_safe_facts_ready"] is True
+    assert export["checks"]["account_mode_snapshot_ready"] is True
+    assert export["checks"]["open_orders_clear"] is True

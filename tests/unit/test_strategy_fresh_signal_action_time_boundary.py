@@ -4,6 +4,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -368,3 +370,15 @@ def test_mpg_boundary_maps_public_facts_gap_to_watcher_tick_missing():
     assert mpg["first_blocker"] == "watcher_tick_missing"
     assert mpg["blocker_owner"] == "runtime"
     assert mpg["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_action_time_boundary_rejects_legacy_account_safe_facts_json_arg(tmp_path: Path):
+    module = _load_module()
+
+    with pytest.raises(SystemExit):
+        module.main(
+            [
+                "--account-safe-facts-json",
+                str(tmp_path / "latest-account-safe-facts.json"),
+            ]
+        )

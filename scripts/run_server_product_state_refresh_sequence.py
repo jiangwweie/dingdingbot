@@ -252,8 +252,7 @@ def _refresh_steps(
         str(sor_evidence),
         "--sor-detector-json",
         str(sor_detector),
-        "--account-safe-facts-json",
-        str(account),
+        *pg_required,
         "--output-json",
         str(action_time_boundary),
         "--output-owner-progress",
@@ -401,7 +400,7 @@ def _refresh_steps(
             ),
             required=False,
         ),
-        RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), "--output-json", str(account))),
+        RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), *pg_required, "--output-json", str(account))),
         RefreshStep(
             "build_action_time_boundary_account",
             (

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+from pathlib import Path
+
 from scripts import build_runtime_account_safe_facts as module
 
 
@@ -55,3 +59,64 @@ def test_runtime_account_safe_facts_blocks_open_position():
     assert artifact["status"] == "runtime_account_safe_facts_blocked"
     assert artifact["checks"]["account_safe_facts_ready"] is False
     assert "active_position_clear" in artifact["blockers"]
+
+
+def test_runtime_account_safe_facts_cli_writes_pg_snapshots(tmp_path: Path):
+    live_facts = tmp_path / "live-facts.json"
+    output_json = tmp_path / "account-safe.json"
+    db_path = tmp_path / "runtime.db"
+    live_facts.write_text(json.dumps(_live_facts()), encoding="utf-8")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE brc_runtime_fact_snapshots (
+              fact_snapshot_id TEXT PRIMARY KEY,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              runtime_profile_id TEXT,
+              fact_surface TEXT,
+              source_kind TEXT,
+              source_ref TEXT,
+              computed BOOLEAN,
+              satisfied BOOLEAN,
+              freshness_state TEXT,
+              failed_facts TEXT,
+              fact_values TEXT,
+              blocker_class TEXT,
+              observed_at_ms INTEGER,
+              valid_until_ms INTEGER,
+              created_at_ms INTEGER
+            )
+            """
+        )
+
+    exit_code = module.main(
+        [
+            "--live-facts-json",
+            str(live_facts),
+            "--database-url",
+            f"sqlite:///{db_path}",
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_json.read_text(encoding="utf-8"))
+    assert artifact["source_mode"] == "db_backed"
+    assert len(artifact["pg_fact_snapshot_ids"]) == 2
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT fact_surface, strategy_group_id, symbol, side, satisfied,
+                   freshness_state
+            FROM brc_runtime_fact_snapshots
+            ORDER BY fact_surface
+            """
+        ).fetchall()
+    assert {row[0] for row in rows} == {"account_safe", "account_mode"}
+    assert all(row[1] is None and row[2] is None and row[3] is None for row in rows)
+    assert all(row[4] == 1 for row in rows)
+    assert all(row[5] == "fresh" for row in rows)

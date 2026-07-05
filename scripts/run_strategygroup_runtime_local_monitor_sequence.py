@@ -1671,6 +1671,7 @@ def build_local_monitor_sequence_report(
         str(sor_runtime_activation_evidence_json),
         "--sor-detector-json",
         str(sor_session_detector_facts_json),
+        "--require-database-url",
         "--output-json",
         str(strategy_fresh_signal_action_time_boundary_json),
         "--output-owner-progress",

@@ -6,8 +6,20 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
+import sys
 from typing import Any
+
+import sqlalchemy as sa
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from runtime_pg_fact_snapshots import write_account_safe_fact_snapshots  # noqa: E402
 
 
 DEFAULT_LIVE_FACTS_JSON = Path(
@@ -21,12 +33,43 @@ DEFAULT_OUTPUT_JSON = Path(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live-facts-json", default=str(DEFAULT_LIVE_FACTS_JSON))
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     args = parser.parse_args(argv)
+
+    if not args.database_url:
+        print(
+            "ERROR: PG_DATABASE_URL is required for DB-backed account-safe facts",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print(
+            "ERROR: DB-backed account-safe facts require PostgreSQL DSN",
+            file=sys.stderr,
+        )
+        return 2
 
     artifact = build_runtime_account_safe_facts(
         live_facts=_read_json(Path(args.live_facts_json)),
     )
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.begin() as conn:
+            fact_snapshot_ids = write_account_safe_fact_snapshots(
+                conn,
+                artifact=artifact,
+                source_ref="runtime_live_facts_readonly",
+            )
+    finally:
+        engine.dispose()
+    artifact["source_mode"] = "db_backed"
+    artifact["projection_target"] = "production_current"
+    artifact["pg_fact_snapshot_ids"] = fact_snapshot_ids
     output_json = Path(args.output_json)
     _write_json(output_json, artifact)
     print(
