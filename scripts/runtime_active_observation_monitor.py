@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable
 
 import sqlalchemy as sa
@@ -52,6 +53,7 @@ OBSERVE_ONLY_REVIEW_BLOCKERS = {
 WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
+WATCHER_COVERAGE_DETECTOR_KEY = "runtime_active_observation_monitor"
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -377,6 +379,150 @@ def _candidate_universe_coverage(
             "does_not_create_runtime_or_expand_live_submit"
         ),
     }
+
+
+def write_candidate_universe_coverage_to_pg(
+    artifact: dict[str, Any],
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool = False,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    if not database_url:
+        return {
+            "status": "pg_watcher_runtime_coverage_skipped",
+            "reason": "database_url_missing",
+            "written_count": 0,
+        }
+    coverage = artifact.get("candidate_universe_coverage")
+    if not isinstance(coverage, dict):
+        return {
+            "status": "pg_watcher_runtime_coverage_skipped",
+            "reason": "candidate_universe_coverage_missing",
+            "written_count": 0,
+        }
+    rows = [row for row in coverage.get("rows") or [] if isinstance(row, dict)]
+    if not rows:
+        return {
+            "status": "pg_watcher_runtime_coverage_skipped",
+            "reason": "candidate_universe_coverage_rows_missing",
+            "written_count": 0,
+        }
+
+    normalized_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
+        raise RuntimeError("PG watcher runtime coverage write requires PostgreSQL DSN")
+    observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    engine = sa.create_engine(normalized_url)
+    try:
+        with engine.begin() as conn:
+            _replace_current_watcher_runtime_coverage(
+                conn,
+                rows=rows,
+                observed_ms=observed_ms,
+            )
+    finally:
+        engine.dispose()
+    return {
+        "status": "pg_watcher_runtime_coverage_written",
+        "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
+        "written_count": len(rows),
+        "observed_at_ms": observed_ms,
+        "authority_boundary": (
+            "watcher_runtime_coverage_projection_only; "
+            "no_finalgate_no_operation_layer_no_exchange_write"
+        ),
+    }
+
+
+def _replace_current_watcher_runtime_coverage(
+    conn: sa.engine.Connection,
+    *,
+    rows: list[dict[str, Any]],
+    observed_ms: int,
+) -> None:
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_watcher_runtime_coverage
+            SET is_current = false
+            WHERE is_current = true
+            """
+        ),
+    )
+    valid_until_ms = observed_ms + 15 * 60 * 1000
+    for index, row in enumerate(rows, start=1):
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        symbol = str(row.get("symbol") or "")
+        side = _normalize_side(row.get("side"))
+        if not strategy_group_id or not symbol or side not in {"long", "short"}:
+            continue
+        state = str(row.get("state") or "")
+        coverage_state = (
+            "covered"
+            if state == "active_watcher_scope"
+            else "not_covered"
+            if state == "active_runtime_filtered_out"
+            else "missing"
+        )
+        liveness_state = "active" if coverage_state == "covered" else coverage_state
+        runtime_profile = row.get("runtime_profile")
+        if not isinstance(runtime_profile, dict):
+            runtime_profile = {}
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO brc_watcher_runtime_coverage (
+                  runtime_coverage_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  detector_key,
+                  runtime_profile_id,
+                  coverage_state,
+                  liveness_state,
+                  last_tick_at_ms,
+                  valid_until_ms,
+                  is_current,
+                  created_at_ms
+                ) VALUES (
+                  :runtime_coverage_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :detector_key,
+                  :runtime_profile_id,
+                  :coverage_state,
+                  :liveness_state,
+                  :last_tick_at_ms,
+                  :valid_until_ms,
+                  :is_current,
+                  :created_at_ms
+                )
+                """
+            ),
+            {
+                "runtime_coverage_id": (
+                    "watcher_coverage:"
+                    f"{WATCHER_COVERAGE_DETECTOR_KEY}:"
+                    f"{strategy_group_id}:{symbol}:{side}:{observed_ms}:{index}"
+                ),
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
+                "runtime_profile_id": str(
+                    runtime_profile.get("runtime_profile_id") or ""
+                )
+                or None,
+                "coverage_state": coverage_state,
+                "liveness_state": liveness_state,
+                "last_tick_at_ms": observed_ms,
+                "valid_until_ms": valid_until_ms,
+                "is_current": True,
+                "created_at_ms": observed_ms,
+            },
+        )
 
 
 def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
@@ -1063,6 +1209,13 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
         artifact = _build_monitor_artifact(args)
+        artifact["pg_watcher_runtime_coverage"] = (
+            write_candidate_universe_coverage_to_pg(
+                artifact,
+                database_url=str(args.database_url or ""),
+                allow_non_postgres_for_test=bool(args.allow_non_postgres_for_test),
+            )
+        )
     output = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
         _write_json(args.output_json, artifact)

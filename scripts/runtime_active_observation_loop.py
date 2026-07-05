@@ -237,6 +237,27 @@ def _build_loop_artifact(
                 reason=_cycle_failure_reason(exc),
                 output_json=str(cycle_dir / "active-monitor.json"),
             )
+        else:
+            try:
+                cycle_artifact["pg_watcher_runtime_coverage"] = (
+                    active_monitor.write_candidate_universe_coverage_to_pg(
+                        cycle_artifact,
+                        database_url=str(
+                            getattr(cycle_args, "database_url", "") or ""
+                        ),
+                        allow_non_postgres_for_test=bool(
+                            getattr(cycle_args, "allow_non_postgres_for_test", False)
+                        ),
+                    )
+                )
+            except Exception as exc:
+                cycle_artifact = _blocked_cycle_artifact(
+                    reason=(
+                        "pg_watcher_runtime_coverage_write_failed:"
+                        f"{type(exc).__name__}:{str(exc)[:220]}"
+                    ),
+                    output_json=str(cycle_dir / "active-monitor.json"),
+                )
         status = str(cycle_artifact.get("status") or "unknown")
         summary = _summary(cycle_artifact, iteration=iteration, cycle_dir=cycle_dir)
         _write_json(cycle_dir / "active-monitor.json", cycle_artifact)

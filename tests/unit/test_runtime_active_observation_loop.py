@@ -152,6 +152,80 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
     )
 
 
+def test_active_observation_loop_writes_pg_coverage_after_cycle(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_write_pg(artifact, *, database_url, allow_non_postgres_for_test):
+        calls.append(
+            {
+                "database_url": database_url,
+                "allow_non_postgres_for_test": allow_non_postgres_for_test,
+                "coverage": artifact["candidate_universe_coverage"],
+            }
+        )
+        return {
+            "status": "pg_watcher_runtime_coverage_written",
+            "written_count": 1,
+        }
+
+    monkeypatch.setattr(
+        runtime_active_observation_loop.active_monitor,
+        "write_candidate_universe_coverage_to_pg",
+        fake_write_pg,
+    )
+
+    def builder(args):
+        return {
+            **_artifact(),
+            "candidate_universe_coverage": {
+                "rows": [
+                    {
+                        "strategy_group_id": "MPG-001",
+                        "symbol": "OPUSDT",
+                        "side": "long",
+                        "state": "active_watcher_scope",
+                    }
+                ]
+            },
+        }
+
+    args = _args(tmp_path, max_iterations=1)
+    args.monitor_args.database_url = "postgresql://unit/runtime"
+    args.monitor_args.allow_non_postgres_for_test = False
+
+    artifact = runtime_active_observation_loop._build_loop_artifact(
+        args,
+        artifact_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert artifact["status"] == "waiting_for_signal"
+    assert calls == [
+        {
+            "database_url": "postgresql://unit/runtime",
+            "allow_non_postgres_for_test": False,
+            "coverage": {
+                "rows": [
+                    {
+                        "strategy_group_id": "MPG-001",
+                        "symbol": "OPUSDT",
+                        "side": "long",
+                        "state": "active_watcher_scope",
+                    }
+                ]
+            },
+        }
+    ]
+    active_monitor_artifact = json.loads(
+        (tmp_path / "loop" / "cycle-1" / "active-monitor.json").read_text()
+    )
+    assert active_monitor_artifact["pg_watcher_runtime_coverage"] == {
+        "status": "pg_watcher_runtime_coverage_written",
+        "written_count": 1,
+    }
+
+
 def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path):
     output_path = tmp_path / "loop" / "loop-artifact.json"
     status_path = tmp_path / "loop" / "status-artifact.json"

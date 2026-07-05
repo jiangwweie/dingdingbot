@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 
 import pytest
@@ -649,6 +650,95 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(
     assert long_row["next_action"] == "bind_or_repair_runtime_profile_scope_side"
     assert short_row["state"] == "active_watcher_scope"
     assert short_row["active_runtime_instance_ids"] == ["runtime-sor-eth-short"]
+
+
+def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
+    db_path = tmp_path / "runtime.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE brc_watcher_runtime_coverage (
+              runtime_coverage_id TEXT PRIMARY KEY,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              detector_key TEXT,
+              runtime_profile_id TEXT,
+              coverage_state TEXT,
+              liveness_state TEXT,
+              last_tick_at_ms INTEGER,
+              valid_until_ms INTEGER,
+              is_current BOOLEAN,
+              created_at_ms INTEGER
+            )
+            """
+        )
+
+    artifact = {
+        "candidate_universe_coverage": {
+            "rows": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "state": "active_watcher_scope",
+                    "runtime_profile": {
+                        "runtime_profile_id": "owner-runtime-console-v1"
+                    },
+                },
+                {
+                    "strategy_group_id": "BRF2-001",
+                    "symbol": "BTCUSDT",
+                    "side": "short",
+                    "state": "runtime_profile_scope_missing",
+                    "runtime_profile": {},
+                },
+            ]
+        }
+    }
+
+    result = runtime_active_observation_monitor.write_candidate_universe_coverage_to_pg(
+        artifact,
+        database_url=f"sqlite:///{db_path}",
+        allow_non_postgres_for_test=True,
+        now_ms=1770000000000,
+    )
+
+    assert result["status"] == "pg_watcher_runtime_coverage_written"
+    assert result["written_count"] == 2
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT strategy_group_id, symbol, side, detector_key, runtime_profile_id,
+                   coverage_state, liveness_state, last_tick_at_ms, is_current
+            FROM brc_watcher_runtime_coverage
+            ORDER BY strategy_group_id, symbol, side
+            """
+        ).fetchall()
+    assert rows == [
+        (
+            "BRF2-001",
+            "BTCUSDT",
+            "short",
+            "runtime_active_observation_monitor",
+            None,
+            "missing",
+            "missing",
+            1770000000000,
+            1,
+        ),
+        (
+            "MPG-001",
+            "OPUSDT",
+            "long",
+            "runtime_active_observation_monitor",
+            "owner-runtime-console-v1",
+            "covered",
+            "active",
+            1770000000000,
+            1,
+        ),
+    ]
 
 
 def test_active_monitor_cli_rejects_strategy_handoff_dir():
