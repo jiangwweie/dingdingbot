@@ -47,7 +47,7 @@
     {
       "path": "output/runtime-monitor/latest-single-lane-task-packet.json",
       "paired_path": "output/runtime-monitor/latest-single-lane-task-packet.md",
-      "source_command": "python3 scripts/build_single_lane_task_packet.py",
+      "source_command": "python3 scripts/build_single_lane_task_packet.py --require-database-url",
       "validator": "python3 scripts/validate_single_lane_task_packet.py output/runtime-monitor/latest-single-lane-task-packet.json",
       "consumed_by": "single_lane_task_packet_gate"
     },

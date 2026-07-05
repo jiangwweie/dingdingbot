@@ -30,9 +30,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 
 
 SCHEMA = "brc.single_lane_task_packet.v1"
-DEFAULT_DAILY_TABLE_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
-)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
 )
@@ -112,7 +109,6 @@ MARKET_WAIT_STATUS = "single_lane_task_packet_not_applicable_market_wait"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--daily-table-json")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
@@ -120,73 +116,45 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("PG_DATABASE_URL", ""),
         help=(
             "PostgreSQL DSN for the DB-backed production current source. "
-            "When omitted, the legacy daily-table JSON path is used only for "
-            "local migration comparison."
+            "Defaults to PG_DATABASE_URL."
         ),
     )
     parser.add_argument(
         "--require-database-url",
         action="store_true",
-        help="Fail instead of falling back to legacy JSON inputs when PG_DATABASE_URL is absent.",
+        help="Require an explicit database URL; retained for command consistency.",
     )
     parser.add_argument(
         "--allow-non-postgres-for-test",
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow explicit local Daily Table JSON input for migration diagnostics "
-            "only. Production current Single Lane Packet must use PG."
-        ),
-    )
     args = parser.parse_args(argv)
 
-    if args.require_database_url and not args.database_url:
+    if not args.database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for DB-backed Single Lane Packet",
             file=sys.stderr,
         )
         return 2
 
-    if args.database_url:
-        if not args.database_url.startswith(
-            ("postgresql://", "postgresql+psycopg://")
-        ) and not args.allow_non_postgres_for_test:
-            print(
-                "ERROR: DB-backed Single Lane Packet requires PostgreSQL DSN",
-                file=sys.stderr,
-            )
-            return 2
-        engine = sa.create_engine(args.database_url)
-        try:
-            with engine.connect() as conn:
-                repository = PgBackedRuntimeControlStateRepository(conn)
-                artifact = build_single_lane_task_packet_from_control_state(
-                    repository.read_control_state(),
-                )
-        finally:
-            engine.dispose()
-    else:
-        if not args.allow_local_file_diagnostic:
-            print(
-                "ERROR: PG_DATABASE_URL is required for DB-backed Single Lane Packet; "
-                "use --allow-local-file-diagnostic only for explicit local diagnostics",
-                file=sys.stderr,
-            )
-            return 2
-        if not args.daily_table_json:
-            print(
-                "ERROR: explicit local diagnostic input required: --daily-table-json",
-                file=sys.stderr,
-            )
-            return 2
-        artifact = build_single_lane_task_packet(
-            daily_table=_read_json(Path(args.daily_table_json)),
-            source=str(_repo_relative(Path(args.daily_table_json))),
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print(
+            "ERROR: DB-backed Single Lane Packet requires PostgreSQL DSN",
+            file=sys.stderr,
         )
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            artifact = build_single_lane_task_packet_from_control_state(
+                repository.read_control_state(),
+            )
+    finally:
+        engine.dispose()
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)
@@ -212,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
 def build_single_lane_task_packet(
     *,
     daily_table: dict[str, Any],
-    source: str = "output/runtime-monitor/latest-daily-live-enablement-table.json",
+    source: str = "in_memory_daily_live_enablement_table_projection",
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     row = _rank_1_row(daily_table)
@@ -464,14 +432,6 @@ def _markdown(artifact: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -480,13 +440,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
-
-def _repo_relative(path: Path) -> Path:
-    try:
-        return path.resolve().relative_to(REPO_ROOT)
-    except ValueError:
-        return path
 
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:

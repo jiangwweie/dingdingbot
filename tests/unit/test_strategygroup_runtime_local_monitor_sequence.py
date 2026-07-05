@@ -2437,12 +2437,21 @@ def _maybe_write_strategygroup_closure_step(
             build_single_lane_task_packet,
         )
 
-        daily_table_path = Path(command[command.index("--daily-table-json") + 1])
         output_json = Path(command[command.index("--output-json") + 1])
         output_md = Path(command[command.index("--output-owner-progress") + 1])
+        daily_table_path = output_json.parent / "daily-live-table.json"
+        if not daily_table_path.exists():
+            _write_ready_daily_live_enablement_table(
+                [
+                    "python",
+                    "build_daily_live_enablement_table.py",
+                    "--output-json",
+                    str(daily_table_path),
+                ]
+            )
         packet = build_single_lane_task_packet(
             daily_table=json.loads(daily_table_path.read_text(encoding="utf-8")),
-            source="output/runtime-monitor/latest-daily-live-enablement-table.json",
+            source="in_memory_daily_live_enablement_table_projection",
             generated_at_utc="2026-07-01T00:00:00+00:00",
         )
         output_json.write_text(json.dumps(packet), encoding="utf-8")
@@ -3219,10 +3228,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     assert "--require-database-url" in bootstrap_daily_command
     assert "--require-database-url" in server_backed_daily_command
     single_lane_command = single_lane_task_packet_commands[-1]
-    assert "--daily-table-json" in single_lane_command
-    assert single_lane_command[
-        single_lane_command.index("--daily-table-json") + 1
-    ] == str(tmp_path / "daily-live-table.json")
+    assert "--require-database-url" in single_lane_command
+    assert "--daily-table-json" not in single_lane_command
     assert single_lane_command[
         single_lane_command.index("--output-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")

@@ -67,6 +67,23 @@ def pg_control_connection():
     engine.dispose()
 
 
+def _seed_runtime_control_db(db_path: Path) -> str:
+    migration = _load_module(MIGRATION_PATH, "migration_086_single_lane_cli")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_single_lane_cli")
+    database_url = f"sqlite:///{db_path}"
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    engine.dispose()
+    return database_url
+
+
 def _daily_table() -> dict:
     return {
         "schema": "brc.daily_live_enablement_table.v1",
@@ -174,21 +191,7 @@ def test_single_lane_packet_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: P
 
 
 def test_single_lane_packet_pg_cli_round_trip(tmp_path: Path):
-    migration = _load_module(MIGRATION_PATH, "migration_086_single_lane_cli")
-    seed = _load_module(SEED_PATH, "seed_runtime_control_state_single_lane_cli")
-    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
-    engine = create_engine(database_url)
-    try:
-        with engine.begin() as conn:
-            old_op = migration.op
-            migration.op = Operations(MigrationContext.configure(conn))
-            try:
-                migration.upgrade()
-            finally:
-                migration.op = old_op
-            seed.seed_runtime_control_state_foundation(conn)
-    finally:
-        engine.dispose()
+    database_url = _seed_runtime_control_db(tmp_path / "runtime.db")
     packet_json = tmp_path / "packet.json"
     packet_md = tmp_path / "packet.md"
 
@@ -316,61 +319,27 @@ def test_single_lane_packet_creates_preflight_task_for_action_time_ready_lane():
     assert _validator().validate_single_lane_task_packet(packet) == []
 
 
-def test_single_lane_packet_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
-    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    daily_table = tmp_path / "daily.json"
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
-    daily_table.write_text(json.dumps(_daily_table()), encoding="utf-8")
-
-    build = subprocess.run(
-        [
-            sys.executable,
-            str(BUILDER_PATH),
-            "--allow-local-file-diagnostic",
-            "--daily-table-json",
-            str(daily_table),
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert build.returncode == 0, build.stdout + build.stderr
-    assert packet_json.exists()
-    assert packet_md.exists()
-
-    validate = subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), str(packet_json)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert validate.returncode == 0, validate.stdout + validate.stderr
-
-
-def test_single_lane_packet_cli_missing_rank_one_does_not_validate(
+@pytest.mark.parametrize(
+    "legacy_args",
+    [
+        ["--allow-local-file-diagnostic"],
+        ["--daily-table-json", "daily.json"],
+    ],
+)
+def test_single_lane_packet_cli_rejects_legacy_file_inputs(
+    legacy_args: list[str],
     tmp_path: Path,
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    daily_table = tmp_path / "daily.json"
     packet_json = tmp_path / "packet.json"
     packet_md = tmp_path / "packet.md"
-    table = _daily_table()
-    table["rows"][0]["closest_to_live_rank"] = 2
-    daily_table.write_text(json.dumps(table), encoding="utf-8")
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
-            "--allow-local-file-diagnostic",
-            "--daily-table-json",
-            str(daily_table),
+            *legacy_args,
             "--output-json",
             str(packet_json),
             "--output-owner-progress",
@@ -380,19 +349,27 @@ def test_single_lane_packet_cli_missing_rank_one_does_not_validate(
         capture_output=True,
         check=False,
     )
-    assert build.returncode == 0, build.stdout + build.stderr
 
-    validate = subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), str(packet_json)],
-        text=True,
-        capture_output=True,
-        check=False,
+    assert build.returncode == 2
+    assert "unrecognized arguments" in build.stderr
+    assert not packet_json.exists()
+    assert not packet_md.exists()
+
+
+def test_single_lane_packet_missing_rank_one_does_not_validate():
+    table = _daily_table()
+    table["rows"][0]["closest_to_live_rank"] = 2
+    packet = _builder().build_single_lane_task_packet(
+        daily_table=table,
+        generated_at_utc="2026-07-01T00:00:00+00:00",
     )
-    assert validate.returncode == 1
-    assert "active_lane.strategy_group_id" in validate.stderr
+
+    errors = _validator().validate_single_lane_task_packet(packet)
+
+    assert any("active_lane.strategy_group_id" in error for error in errors)
 
 
-def test_single_lane_packet_cli_blocks_local_file_fallback_without_diagnostic_flag(
+def test_single_lane_packet_cli_rejects_daily_table_json_even_without_diagnostic_flag(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -419,7 +396,7 @@ def test_single_lane_packet_cli_blocks_local_file_fallback_without_diagnostic_fl
     )
 
     assert build.returncode == 2
-    assert "PG_DATABASE_URL is required" in build.stderr
+    assert "unrecognized arguments" in build.stderr
     assert not packet_json.exists()
     assert not packet_md.exists()
 

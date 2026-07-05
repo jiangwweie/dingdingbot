@@ -2447,8 +2447,7 @@ def build_local_monitor_sequence_report(
     single_lane_task_packet_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/build_single_lane_task_packet.py"),
-        "--daily-table-json",
-        str(daily_live_enablement_table_json),
+        "--require-database-url",
         "--output-json",
         str(single_lane_task_packet_json),
         "--output-owner-progress",
