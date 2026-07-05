@@ -2465,9 +2465,7 @@ def build_local_monitor_sequence_report(
     runtime_active_observation_monitor_command = [
         sys.executable,
         str(REPO_ROOT / "scripts/runtime_active_observation_monitor.py"),
-        "--allow-local-file-diagnostic",
-        "--candidate-universe-json",
-        str(strategy_live_candidate_pool_json),
+        "--require-database-url",
         "--output-json",
         str(runtime_active_monitor_json),
         "--max-cycles-per-runtime",

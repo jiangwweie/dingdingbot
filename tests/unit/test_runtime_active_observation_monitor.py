@@ -34,12 +34,9 @@ def _args(**overrides):
         "allow_prepare_records": False,
         "runtime_instance_id": [],
         "strategy_family_id": [],
-        "candidate_universe_json": None,
-        "database_url": "",
-        "require_database_url": False,
-        "allow_non_postgres_for_test": False,
-        "allow_local_file_diagnostic": False,
-        "strategy_handoff_dir": None,
+        "database_url": "sqlite://",
+        "require_database_url": True,
+        "allow_non_postgres_for_test": True,
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
         "interval_seconds": 0.0,
@@ -59,6 +56,52 @@ def _args(**overrides):
     return type("Args", (), values)()
 
 
+@pytest.fixture(autouse=True)
+def _default_pg_candidate_scope(monkeypatch):
+    def fake_pg_candidate_universe(*, database_url, allow_non_postgres_for_test):
+        assert database_url
+        assert allow_non_postgres_for_test is True
+        return {}, {
+            "source": "pg_runtime_control_state:candidate_scope",
+            "loaded": False,
+            "strategy_group_count": 0,
+            "side_scope": {},
+            "source_mode": "db_backed",
+            "projection_target": "production_current",
+        }
+
+    monkeypatch.setattr(
+        runtime_active_observation_monitor,
+        "_read_candidate_universe_from_pg",
+        fake_pg_candidate_universe,
+    )
+
+
+def _patch_pg_candidate_scope(
+    monkeypatch,
+    *,
+    universe: dict[str, list[str]],
+    side_scope: dict[str, list[str]] | None = None,
+) -> None:
+    def fake_pg_candidate_universe(*, database_url, allow_non_postgres_for_test):
+        assert database_url
+        assert allow_non_postgres_for_test is True
+        return universe, {
+            "source": "pg_runtime_control_state:candidate_scope",
+            "loaded": bool(universe),
+            "strategy_group_count": len(universe),
+            "side_scope": side_scope or {},
+            "source_mode": "db_backed",
+            "projection_target": "production_current",
+        }
+
+    monkeypatch.setattr(
+        runtime_active_observation_monitor,
+        "_read_candidate_universe_from_pg",
+        fake_pg_candidate_universe,
+    )
+
+
 def _runtime(
     runtime_id,
     *,
@@ -67,8 +110,9 @@ def _runtime(
     side="short",
     strategy_family_id="BTPC-001",
     strategy_family_version_id="BTPC-001-v0",
+    **extra,
 ):
-    return {
+    payload = {
         "runtime_instance_id": runtime_id,
         "status": status,
         "symbol": symbol,
@@ -76,6 +120,8 @@ def _runtime(
         "strategy_family_id": strategy_family_id,
         "strategy_family_version_id": strategy_family_version_id,
     }
+    payload.update(extra)
+    return payload
 
 
 def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path):
@@ -286,22 +332,20 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
     assert packet["selected_runtime_instance_ids"] == ["runtime-mpg", "runtime-teq"]
 
 
-def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_path):
-    candidate_pool = tmp_path / "candidate-pool.json"
-    candidate_pool.write_text(
-        json.dumps(
-            {
-                "candidate_universe": {
-                    "MPG-001": ["OPUSDT", "SOLUSDT"],
-                    "SOR-001": ["ETHUSDT"],
-                },
-                "side_scope": {
-                    "MPG-001": ["long"],
-                    "SOR-001": ["long"],
-                },
-            }
-        ),
-        encoding="utf-8",
+def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_pg_candidate_scope(
+        monkeypatch,
+        universe={
+            "MPG-001": ["OPUSDT", "SOLUSDT"],
+            "SOR-001": ["ETHUSDT"],
+        },
+        side_scope={
+            "MPG-001": ["long"],
+            "SOR-001": ["long"],
+        },
     )
     client = _FakeClient(
         [
@@ -358,8 +402,6 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
         _args(
             output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
-            candidate_universe_json=str(candidate_pool),
-            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=builder,
@@ -384,24 +426,22 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(tmp_p
     assert packet["candidate_universe_coverage"]["missing_row_count"] == 1
 
 
-def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
-    candidate_pool = tmp_path / "candidate-pool.json"
-    candidate_pool.write_text(
-        json.dumps(
-            {
-                "candidate_universe": {
-                    "MPG-001": ["OPUSDT", "SOLUSDT"],
-                    "BRF2-001": ["BTCUSDT"],
-                    "SOR-001": ["ETHUSDT"],
-                },
-                "side_scope": {
-                    "MPG-001": ["long"],
-                    "BRF2-001": ["short"],
-                    "SOR-001": ["long"],
-                },
-            }
-        ),
-        encoding="utf-8",
+def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_pg_candidate_scope(
+        monkeypatch,
+        universe={
+            "MPG-001": ["OPUSDT", "SOLUSDT"],
+            "BRF2-001": ["BTCUSDT"],
+            "SOR-001": ["ETHUSDT"],
+        },
+        side_scope={
+            "MPG-001": ["long"],
+            "BRF2-001": ["short"],
+            "SOR-001": ["long"],
+        },
     )
     client = _FakeClient(
         [
@@ -426,8 +466,6 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(tmp_path):
         _args(
             output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
-            candidate_universe_json=str(candidate_pool),
-            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {
@@ -531,35 +569,34 @@ def test_active_monitor_candidate_universe_from_pg_control_state_seed():
 def test_active_monitor_requires_pg_candidate_universe_when_requested():
     with pytest.raises(RuntimeError, match="PG_DATABASE_URL is required"):
         runtime_active_observation_monitor._candidate_universe_for_args(
-            _args(require_database_url=True)
+            _args(database_url="", require_database_url=True)
         )
 
 
-def test_active_monitor_rejects_candidate_universe_json_without_diagnostic_flag(
+def test_active_monitor_cli_rejects_candidate_universe_json():
+    with pytest.raises(SystemExit) as exc:
+        runtime_active_observation_monitor._parse_args(
+            [
+                "--api-base",
+                "http://unit",
+                "--output-dir",
+                "output/unit",
+                "--candidate-universe-json",
+                "candidate-pool.json",
+            ]
+        )
+
+    assert exc.value.code == 2
+
+
+def test_active_monitor_records_side_specific_candidate_universe_coverage(
     tmp_path,
+    monkeypatch,
 ):
-    candidate_pool = tmp_path / "candidate-pool.json"
-    candidate_pool.write_text(
-        json.dumps({"candidate_universe": {"SOR-001": ["ETHUSDT"]}}),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RuntimeError, match="local diagnostic only"):
-        runtime_active_observation_monitor._candidate_universe_for_args(
-            _args(candidate_universe_json=str(candidate_pool))
-        )
-
-
-def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_path):
-    candidate_pool = tmp_path / "candidate-pool.json"
-    candidate_pool.write_text(
-        json.dumps(
-            {
-                "candidate_universe": {"SOR-001": ["ETHUSDT"]},
-                "side_scope": {"SOR-001": ["long", "short"]},
-            }
-        ),
-        encoding="utf-8",
+    _patch_pg_candidate_scope(
+        monkeypatch,
+        universe={"SOR-001": ["ETHUSDT"]},
+        side_scope={"SOR-001": ["long", "short"]},
     )
     client = _FakeClient(
         [
@@ -577,8 +614,6 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
         _args(
             output_dir=str(tmp_path),
             strategy_family_id=["SOR-001"],
-            candidate_universe_json=str(candidate_pool),
-            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {
@@ -616,56 +651,39 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(tmp_pa
     assert short_row["active_runtime_instance_ids"] == ["runtime-sor-eth-short"]
 
 
-def test_active_monitor_rejects_handoff_risk_defaults_without_diagnostic_flag(
-    tmp_path,
-):
-    handoff_dir = tmp_path / "handoffs"
-    handoff_dir.mkdir()
+def test_active_monitor_cli_rejects_strategy_handoff_dir():
+    with pytest.raises(SystemExit) as exc:
+        runtime_active_observation_monitor._parse_args(
+            [
+                "--api-base",
+                "http://unit",
+                "--output-dir",
+                "output/unit",
+                "--strategy-handoff-dir",
+                "docs/current/strategy-group-handoffs",
+            ]
+        )
 
-    with pytest.raises(RuntimeError, match="local diagnostic only"):
-        runtime_active_observation_monitor._handoff_risk_defaults(str(handoff_dir))
+    assert exc.value.code == 2
 
 
-def test_active_monitor_cli_does_not_default_to_handoff_file_authority():
+def test_active_monitor_cli_does_not_expose_handoff_file_authority():
     args = runtime_active_observation_monitor._parse_args(
         ["--api-base", "http://unit", "--output-dir", "output/unit"]
     )
 
-    assert args.strategy_handoff_dir is None
-    assert args.allow_local_file_diagnostic is False
-    assert runtime_active_observation_monitor._handoff_risk_defaults(
-        args.strategy_handoff_dir,
-        allow_local_file_diagnostic=args.allow_local_file_diagnostic,
-    ) == {}
+    assert not hasattr(args, "strategy_handoff_dir")
+    assert not hasattr(args, "allow_local_file_diagnostic")
 
 
-def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_path):
-    candidate_pool = tmp_path / "candidate-pool.json"
-    candidate_pool.write_text(
-        json.dumps(
-            {
-                "candidate_universe": {"SOR-001": ["SOLUSDT"]},
-                "side_scope": {"SOR-001": ["long"]},
-            }
-        ),
-        encoding="utf-8",
-    )
-    handoff_dir = tmp_path / "handoffs"
-    sor_dir = handoff_dir / "SOR-001"
-    sor_dir.mkdir(parents=True)
-    (sor_dir / "handoff.json").write_text(
-        json.dumps(
-            {
-                "strategy_group_id": "SOR-001",
-                "risk_defaults": {
-                    "interpretation": "pilot_boundary_not_order_sizing_default",
-                    "max_notional_per_action_usdt": "8",
-                    "default_leverage": "1",
-                    "max_leverage": "1",
-                },
-            }
-        ),
-        encoding="utf-8",
+def test_active_monitor_projects_runtime_profile_boundary_for_runtime_scope(
+    tmp_path,
+    monkeypatch,
+):
+    _patch_pg_candidate_scope(
+        monkeypatch,
+        universe={"SOR-001": ["SOLUSDT"]},
+        side_scope={"SOR-001": ["long"]},
     )
     client = _FakeClient(
         [
@@ -675,6 +693,11 @@ def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_pat
                 strategy_family_version_id="SOR-001-v0",
                 symbol="SOL/USDT:USDT",
                 side="long",
+                runtime_profile={
+                    "runtime_profile_id": "profile:sor-sol-long",
+                    "max_notional_per_action_usdt": "8",
+                    "max_leverage": "1",
+                },
             ),
         ]
     )
@@ -683,9 +706,6 @@ def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_pat
         _args(
             output_dir=str(tmp_path),
             strategy_family_id=["SOR-001"],
-            candidate_universe_json=str(candidate_pool),
-            strategy_handoff_dir=str(handoff_dir),
-            allow_local_file_diagnostic=True,
         ),
         client=client,
         runtime_artifact_builder=lambda args: {
@@ -712,9 +732,10 @@ def test_active_monitor_projects_handoff_risk_boundary_for_runtime_scope(tmp_pat
     assert rows[("SOLUSDT", "long")]["state"] == "active_watcher_scope"
     assert profile["max_notional"] == "8"
     assert profile["leverage"] == "1"
-    assert profile["profile_source"] == "strategy_handoff_risk_defaults_boundary"
+    assert profile["runtime_profile_id"] == "profile:sor-sol-long"
+    assert profile["profile_source"] == "runtime"
     assert profile["authority_boundary"] == (
-        "strategy_handoff_boundary_only; no_live_profile_or_sizing_change"
+        "runtime_profile_projection_only; no_live_profile_or_sizing_change"
     )
 
 

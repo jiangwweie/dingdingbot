@@ -51,7 +51,6 @@ OBSERVE_ONLY_REVIEW_BLOCKERS = {
 WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
-DEFAULT_HANDOFF_DIR = ROOT_DIR / "docs/current/strategy-group-handoffs"
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -125,75 +124,6 @@ def _selected_active_runtimes(
     }
     missing = [runtime_id for runtime_id in requested if runtime_id not in found]
     return selected[: max(max_runtimes, 0)], missing
-
-
-def _read_candidate_universe(path_value: str | None) -> tuple[dict[str, list[str]], dict[str, Any]]:
-    if not path_value:
-        return {}, {"source": "not_configured", "path": None, "loaded": False}
-    path = Path(path_value).expanduser()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        return {}, {
-            "source": "candidate_universe_json",
-            "path": str(path),
-            "loaded": False,
-            "error": type(exc).__name__,
-        }
-    universe = payload.get("candidate_universe")
-    if not isinstance(universe, dict):
-        universe = payload
-    parsed: dict[str, list[str]] = {}
-    if isinstance(universe, dict):
-        for strategy_group_id, symbols in universe.items():
-            selected: list[str] = []
-            for symbol in symbols or []:
-                compact = _compact_symbol(symbol)
-                if not compact.endswith("USDT"):
-                    continue
-                if compact not in selected:
-                    selected.append(compact)
-            if selected:
-                parsed[str(strategy_group_id)] = selected
-    side_scope = _side_scope_from_payload(payload)
-    return parsed, {
-        "source": "candidate_universe_json",
-        "path": str(path),
-        "loaded": bool(parsed),
-        "strategy_group_count": len(parsed),
-        "side_scope": side_scope,
-    }
-
-
-def _side_scope_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
-    raw_side_scope = payload.get("side_scope")
-    if isinstance(raw_side_scope, dict):
-        return _parse_side_scope(raw_side_scope)
-    owner_authorization = (
-        _as_dict(_as_dict(payload.get("pretrade_runtime")).get("owner_authorization"))
-    )
-    scopes = owner_authorization.get("strategy_group_scopes")
-    if not isinstance(scopes, dict):
-        return {}
-    return _parse_side_scope(
-        {
-            strategy_group_id: _as_dict(scope).get("side_scope")
-            for strategy_group_id, scope in scopes.items()
-        }
-    )
-
-
-def _parse_side_scope(raw: dict[str, Any]) -> dict[str, list[str]]:
-    parsed: dict[str, list[str]] = {}
-    for strategy_group_id, sides in raw.items():
-        selected: list[str] = []
-        for side in sides if isinstance(sides, list) else []:
-            normalized = _normalize_side(side)
-            if normalized and normalized not in selected:
-                selected.append(normalized)
-        if selected:
-            parsed[str(strategy_group_id)] = selected
-    return parsed
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -270,37 +200,16 @@ def _compact_symbol(value: Any) -> str:
 
 def _candidate_universe_for_args(args: argparse.Namespace) -> tuple[dict[str, list[str]], dict[str, Any]]:
     database_url = str(getattr(args, "database_url", "") or "")
-    allow_local_file_diagnostic = bool(
-        getattr(args, "allow_local_file_diagnostic", False)
-    )
-    if getattr(args, "require_database_url", False) and not database_url:
+    if not database_url:
         raise RuntimeError(
             "PG_DATABASE_URL is required for DB-backed active observation candidate universe"
         )
-    if database_url:
-        return _read_candidate_universe_from_pg(
-            database_url=database_url,
-            allow_non_postgres_for_test=bool(
-                getattr(args, "allow_non_postgres_for_test", False)
-            ),
-        )
-
-    if getattr(args, "candidate_universe_json", None) and not allow_local_file_diagnostic:
-        raise RuntimeError(
-            "--candidate-universe-json is local diagnostic only; "
-            "production active observation candidate universe must be PG-backed"
-        )
-    loaded, source = _read_candidate_universe(
-        getattr(args, "candidate_universe_json", None)
+    return _read_candidate_universe_from_pg(
+        database_url=database_url,
+        allow_non_postgres_for_test=bool(
+            getattr(args, "allow_non_postgres_for_test", False)
+        ),
     )
-    if source.get("source") == "candidate_universe_json":
-        source["source_mode"] = "local_file_diagnostic"
-        source["authority_boundary"] = (
-            "local_file_diagnostic_only; not_production_runtime_authority"
-        )
-    if loaded:
-        return loaded, source
-    return {}, source
 
 
 def _side_scope_from_source(source: dict[str, Any]) -> dict[str, tuple[str, ...]]:
@@ -360,7 +269,6 @@ def _candidate_universe_coverage(
     source: dict[str, Any],
     active: list[dict[str, Any]],
     selected: list[dict[str, Any]],
-    handoff_risk_defaults: dict[str, dict[str, Any]] | None = None,
     side_scope: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     selected_lanes: dict[tuple[str, str, str], list[str]] = {}
@@ -448,7 +356,6 @@ def _candidate_universe_coverage(
                             strategy_group_id=strategy_group_id,
                             symbol=symbol,
                             side=expected_side,
-                            handoff_risk_defaults=handoff_risk_defaults or {},
                         ),
                         "next_action": next_action,
                         "authority_boundary": (
@@ -497,7 +404,6 @@ def _runtime_profile_for_lane(
     strategy_group_id: str,
     symbol: str,
     side: str,
-    handoff_risk_defaults: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     for runtime in runtimes:
         if (
@@ -509,9 +415,6 @@ def _runtime_profile_for_lane(
             profile = runtime.get("runtime_profile")
             if not isinstance(profile, dict):
                 profile = {}
-            risk_defaults = (handoff_risk_defaults or {}).get(strategy_group_id, {})
-            if not isinstance(risk_defaults, dict):
-                risk_defaults = {}
             runtime_profile_id = (
                 _runtime_value(runtime, "runtime_profile_id", "profile_id")
                 or profile.get("runtime_profile_id")
@@ -529,23 +432,17 @@ def _runtime_profile_for_lane(
                 or profile.get("max_notional")
                 or profile.get("max_notional_usdt")
                 or profile.get("max_notional_per_action_usdt")
-                or risk_defaults.get("max_notional_per_action_usdt")
-                or risk_defaults.get("max_notional_usdt")
                 or ""
             )
             leverage = (
                 _runtime_value(runtime, "leverage", "max_leverage")
                 or profile.get("leverage")
                 or profile.get("max_leverage")
-                or risk_defaults.get("default_leverage")
-                or risk_defaults.get("max_leverage")
                 or ""
             )
             profile_source = (
                 "runtime"
                 if any([runtime_profile_id, target_notional])
-                else "strategy_handoff_risk_defaults_boundary"
-                if any([max_notional, leverage])
                 else "missing_runtime_profile_boundary"
             )
             return {
@@ -555,45 +452,10 @@ def _runtime_profile_for_lane(
                 "leverage": str(leverage or ""),
                 "profile_source": profile_source,
                 "authority_boundary": (
-                    "strategy_handoff_boundary_only; "
-                    "no_live_profile_or_sizing_change"
+                    "runtime_profile_projection_only; no_live_profile_or_sizing_change"
                 ),
             }
     return {}
-
-
-def _handoff_risk_defaults(
-    path_value: str | None,
-    *,
-    allow_local_file_diagnostic: bool = False,
-) -> dict[str, dict[str, Any]]:
-    if path_value and not allow_local_file_diagnostic:
-        raise RuntimeError(
-            "--strategy-handoff-dir is local diagnostic only; "
-            "production active observation runtime scope must be PG-backed"
-        )
-    if not allow_local_file_diagnostic:
-        return {}
-
-    root = Path(path_value or DEFAULT_HANDOFF_DIR).expanduser()
-    result: dict[str, dict[str, Any]] = {}
-    if not root.exists():
-        return result
-    for handoff_path in root.glob("*/handoff.json"):
-        try:
-            payload = json.loads(handoff_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        strategy_group_id = str(
-            payload.get("strategy_group_id")
-            or payload.get("strategy_family_id")
-            or handoff_path.parent.name
-            or ""
-        )
-        risk_defaults = payload.get("risk_defaults")
-        if strategy_group_id and isinstance(risk_defaults, dict):
-            result[strategy_group_id] = dict(risk_defaults)
-    return result
 
 
 def _normalize_side(value: Any) -> str:
@@ -851,12 +713,6 @@ def _build_monitor_artifact(
     )
     candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
     side_scope = _side_scope_from_source(candidate_universe_source)
-    handoff_risk_defaults = _handoff_risk_defaults(
-        getattr(args, "strategy_handoff_dir", None),
-        allow_local_file_diagnostic=bool(
-            getattr(args, "allow_local_file_diagnostic", False)
-        ),
-    )
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
         runtime_instance_ids=requested_runtime_instance_ids,
@@ -865,10 +721,7 @@ def _build_monitor_artifact(
     )
     enforce_candidate_universe_scope = (
         candidate_universe_source.get("source")
-        in {
-            "candidate_universe_json",
-            "pg_runtime_control_state:candidate_scope",
-        }
+        == "pg_runtime_control_state:candidate_scope"
         and candidate_universe_source.get("loaded") is True
     )
     selected, candidate_universe_excluded_runtime_instance_ids = (
@@ -885,7 +738,6 @@ def _build_monitor_artifact(
         source=candidate_universe_source,
         active=active,
         selected=selected,
-        handoff_risk_defaults=handoff_risk_defaults,
         side_scope=side_scope,
     )
 
@@ -1170,42 +1022,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "family. May be repeated."
         ),
     )
-    parser.add_argument(
-        "--candidate-universe-json",
-        help=(
-            "Local diagnostic-only Strategy Live Candidate Pool JSON. Requires "
-            "--allow-local-file-diagnostic; production active observation "
-            "candidate universe must be PG-backed."
-        ),
-    )
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument(
         "--require-database-url",
         action="store_true",
-        help="Fail instead of falling back to JSON/default candidate universe when PG_DATABASE_URL is absent.",
+        help="Require PG_DATABASE_URL. Active observation candidate scope is PG-only.",
     )
     parser.add_argument(
         "--allow-non-postgres-for-test",
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
-    )
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow candidate-universe JSON and handoff risk defaults for explicit "
-            "local diagnostics only. Production active observation must use PG."
-        ),
-    )
-    parser.add_argument(
-        "--strategy-handoff-dir",
-        help=(
-            "Directory containing StrategyGroup handoff.json files used only "
-            "to project existing risk-boundary metadata into read-only "
-            "runtime coverage rows. This is local diagnostic only; when "
-            "--allow-local-file-diagnostic is set and this option is omitted, "
-            "the repository handoff directory is used."
-        ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)
     parser.add_argument("--max-cycles-per-runtime", type=int, default=1)

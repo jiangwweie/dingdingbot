@@ -2534,8 +2534,8 @@ def _maybe_write_strategygroup_closure_step(
             "\n".join(errors),
         )
     if script == "runtime_active_observation_monitor.py":
-        candidate_pool_path = Path(command[command.index("--candidate-universe-json") + 1])
         output_json = Path(command[command.index("--output-json") + 1])
+        candidate_pool_path = output_json.parent / "latest-strategy-live-candidate-pool.json"
         candidate_pool = json.loads(candidate_pool_path.read_text(encoding="utf-8"))
         rows = []
         for strategy_group_id, symbols in sorted(
@@ -3234,10 +3234,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         single_lane_command.index("--output-json") + 1
     ] == str(tmp_path / "single-lane-task-packet.json")
     runtime_active_command = runtime_active_observation_monitor_commands[0]
-    assert "--allow-local-file-diagnostic" in runtime_active_command
-    assert runtime_active_command[
-        runtime_active_command.index("--candidate-universe-json") + 1
-    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
+    assert "--require-database-url" in runtime_active_command
+    assert "--allow-local-file-diagnostic" not in runtime_active_command
+    assert "--candidate-universe-json" not in runtime_active_command
     assert runtime_active_command[
         runtime_active_command.index("--output-json") + 1
     ] == str(tmp_path / "runtime-active-monitor.json")

@@ -19,11 +19,9 @@ def _args(tmp_path: Path, **overrides):
         "strategy_source": "sample",
         "runtime_instance_id": [],
         "strategy_family_id": [],
-        "candidate_universe_json": None,
         "database_url": "",
         "require_database_url": False,
         "allow_non_postgres_for_test": False,
-        "allow_local_file_diagnostic": False,
         "max_iterations": 1,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 0.0,
@@ -307,71 +305,34 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     }
 
 
-def test_watcher_tick_passes_candidate_universe_to_supervisor(tmp_path, monkeypatch):
-    captured = {}
-    monkeypatch.setattr(
-        runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
-        lambda **kwargs: {
-            "scope": "runtime_observation_operator_evidence",
-            "status": "observation_running_no_signal",
-            "active_runtime_observation": {},
-            "signal_counts": {},
-            "runtime_prepare_context": {},
-            "operator_review_plan": {
-                "next_step": "continue_active_runtime_observation",
-                "creates_execution_intent": False,
-                "places_order": False,
-                "calls_order_lifecycle": False,
-            },
-            "safety_invariants": {
-                "operator_evidence_only": True,
-                "execution_intent_created": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "exchange_write_called": False,
-                "withdrawal_or_transfer_created": False,
-                "forbidden_effects": [],
-            },
-        },
-    )
-
-    def supervisor_builder(args):
-        captured["candidate_universe_json"] = args.candidate_universe_json
-        captured["allow_local_file_diagnostic"] = args.allow_local_file_diagnostic
-        return _fake_supervisor("waiting_for_signal")(args)
-
-    runtime_signal_watcher_tick.build_watcher_tick_artifact(
-        _args(
-            tmp_path,
-            candidate_universe_json="/srv/current/latest-strategy-live-candidate-pool.json",
-            allow_local_file_diagnostic=True,
-        ),
-        supervisor_builder=supervisor_builder,
-    )
-
-    assert captured["candidate_universe_json"] == (
-        "/srv/current/latest-strategy-live-candidate-pool.json"
-    )
-    assert captured["allow_local_file_diagnostic"] is True
-
-
-def test_watcher_tick_rejects_candidate_universe_json_without_diagnostic_flag(
-    tmp_path,
-):
-    with pytest.raises(RuntimeError, match="local diagnostic only"):
-        runtime_signal_watcher_tick.build_watcher_tick_artifact(
-            _args(
-                tmp_path,
-                candidate_universe_json="/srv/current/latest-strategy-live-candidate-pool.json",
-            ),
-            supervisor_builder=lambda args: pytest.fail(
-                "watcher tick must fail before launching file-backed supervisor"
-            ),
+def test_watcher_tick_cli_rejects_candidate_universe_json(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        runtime_signal_watcher_tick._parse_args(
+            [
+                "--output-dir",
+                str(tmp_path / "watcher"),
+                "--candidate-universe-json",
+                "/srv/current/latest-strategy-live-candidate-pool.json",
+            ]
         )
 
+    assert exc.value.code == 2
 
-def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
+
+def test_watcher_tick_cli_rejects_local_file_diagnostic_flag(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        runtime_signal_watcher_tick._parse_args(
+            [
+                "--output-dir",
+                str(tmp_path / "watcher"),
+                "--allow-local-file-diagnostic",
+            ]
+        )
+
+    assert exc.value.code == 2
+
+
+def test_watcher_tick_passes_pg_candidate_scope_flags_to_supervisor(
     tmp_path,
     monkeypatch,
 ):
@@ -406,8 +367,11 @@ def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
     def supervisor_builder(args):
         captured["database_url"] = args.database_url
         captured["require_database_url"] = args.require_database_url
-        captured["candidate_universe_json"] = args.candidate_universe_json
-        captured["allow_local_file_diagnostic"] = args.allow_local_file_diagnostic
+        captured["has_candidate_universe_json"] = hasattr(args, "candidate_universe_json")
+        captured["has_allow_local_file_diagnostic"] = hasattr(
+            args,
+            "allow_local_file_diagnostic",
+        )
         return _fake_supervisor("waiting_for_signal")(args)
 
     runtime_signal_watcher_tick.build_watcher_tick_artifact(
@@ -422,8 +386,8 @@ def test_watcher_tick_passes_pg_candidate_universe_flags_to_supervisor(
     assert captured == {
         "database_url": "postgresql://unit/runtime",
         "require_database_url": True,
-        "candidate_universe_json": None,
-        "allow_local_file_diagnostic": False,
+        "has_candidate_universe_json": False,
+        "has_allow_local_file_diagnostic": False,
     }
 
 

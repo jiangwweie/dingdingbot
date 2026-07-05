@@ -456,13 +456,6 @@ def _post_signal_auto_resume_plan(
 
 
 def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
-    if getattr(args, "candidate_universe_json", None) and not getattr(
-        args, "allow_local_file_diagnostic", False
-    ):
-        raise RuntimeError(
-            "--candidate-universe-json is local diagnostic only; "
-            "production watcher candidate universe must be PG-backed"
-        )
     return argparse.Namespace(
         output_dir=str(output_dir),
         supervisor_output_json=str(output_dir / "supervisor-artifact.json"),
@@ -474,11 +467,9 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         source=args.source,
         runtime_instance_id=list(args.runtime_instance_id or []),
         strategy_family_id=list(args.strategy_family_id or []),
-        candidate_universe_json=getattr(args, "candidate_universe_json", None),
         database_url=getattr(args, "database_url", ""),
         require_database_url=getattr(args, "require_database_url", False),
         allow_non_postgres_for_test=getattr(args, "allow_non_postgres_for_test", False),
-        allow_local_file_diagnostic=getattr(args, "allow_local_file_diagnostic", False),
         max_iterations=args.max_iterations,
         loop_interval_seconds=args.loop_interval_seconds,
         cycle_timeout_seconds=args.cycle_timeout_seconds,
@@ -739,21 +730,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--runtime-instance-id", action="append", default=[])
     parser.add_argument("--strategy-family-id", action="append", default=[])
-    parser.add_argument(
-        "--candidate-universe-json",
-        help=(
-            "Local diagnostic-only candidate universe export. Requires "
-            "--allow-local-file-diagnostic; production watcher scope must use PG."
-        ),
-    )
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help="Allow local file diagnostic inputs that are forbidden in production.",
-    )
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
