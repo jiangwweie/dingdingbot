@@ -2456,6 +2456,16 @@ async def _submit_ticket_bound_orders(
     from src.domain.models import Direction, Order, OrderRole, OrderStatus
 
     submit_request = dict(report.get("submit_request") or {})
+    identity_blockers = _ticket_bound_submit_request_identity_blockers(
+        report,
+        submit_request,
+    )
+    if identity_blockers:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_identity_mismatch",
+            blockers=identity_blockers,
+        )
     orders = [
         dict(item)
         for item in submit_request.get("orders", [])
@@ -2644,6 +2654,32 @@ async def _submit_ticket_bound_orders(
         "live_profile_changed": False,
         "order_sizing_changed": False,
     }
+
+
+def _ticket_bound_submit_request_identity_blockers(
+    report: dict[str, Any],
+    submit_request: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    for key in (
+        "ticket_id",
+        "operation_submit_command_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+    ):
+        expected = str(report.get(key) or "").strip()
+        actual = str(submit_request.get(key) or "").strip()
+        if not expected:
+            blockers.append(f"submit_report_identity_missing:{key}")
+        elif not actual:
+            blockers.append(f"submit_request_identity_missing:{key}")
+        elif actual != expected:
+            blockers.append(
+                f"submit_request_identity_mismatch:{key}:"
+                f"expected={expected}:actual={actual}"
+            )
+    return blockers
 
 
 def _ticket_bound_submit_blocked_result(

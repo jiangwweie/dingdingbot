@@ -157,3 +157,60 @@ def test_runtime_file_authority_validator_accepts_clean_production_file(
         )
         == []
     )
+
+
+def test_runtime_file_authority_validator_rejects_ticket_bound_loose_inputs(
+    tmp_path: Path,
+):
+    module = _load_module()
+    source = tmp_path / "ticket_bound.py"
+    source.write_text('parser.add_argument("--authorization-id")\n')
+
+    errors = module.validate_forbidden_production_text(
+        repo_root=tmp_path,
+        forbidden_by_path={
+            "ticket_bound.py": (
+                "--authorization-id",
+                "--candidate-json",
+            )
+        },
+    )
+
+    assert errors == [
+        (
+            "ticket_bound.py contains retired production file-authority text: "
+            "--authorization-id"
+        )
+    ]
+
+
+def test_runtime_file_authority_validator_accepts_ticket_only_inputs(
+    tmp_path: Path,
+):
+    module = _load_module()
+    source = tmp_path / "ticket_bound.py"
+    source.write_text(
+        "\n".join(
+            [
+                'parser.add_argument("--ticket-id")',
+                'parser.add_argument("--finalgate-pass-id")',
+                'parser.add_argument("--operation-submit-command-id")',
+            ]
+        )
+    )
+
+    assert (
+        module.validate_forbidden_production_text(
+            repo_root=tmp_path,
+            forbidden_by_path={
+                "ticket_bound.py": (
+                    "--authorization-id",
+                    "--candidate-json",
+                    "--strategy-group-id",
+                    "--symbol",
+                    "--side",
+                )
+            },
+        )
+        == []
+    )

@@ -198,6 +198,11 @@ async def test_ticket_bound_real_submit_helper_uses_gateway_and_order_lifecycle(
         "symbol": "ETHUSDT",
         "side": "long",
         "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
             "direction": "LONG",
             "exchange_symbol": "ETH/USDT:USDT",
             "orders": [
@@ -264,6 +269,11 @@ async def test_ticket_bound_real_submit_helper_marks_gateway_failure_as_exchange
         "symbol": "ETHUSDT",
         "side": "long",
         "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
             "direction": "LONG",
             "exchange_symbol": "ETH/USDT:USDT",
             "orders": [
@@ -294,6 +304,59 @@ async def test_ticket_bound_real_submit_helper_marks_gateway_failure_as_exchange
     assert result["order_created"] is True
     assert result["order_lifecycle_called"] is True
     assert result["submitted_orders"] == []
+
+
+@pytest.mark.asyncio
+async def test_ticket_bound_real_submit_helper_blocks_identity_mismatch_before_gateway():
+    gateway = _FakeGateway()
+    lifecycle = _FakeOrderLifecycle()
+    report = {
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "SOLUSDT",
+            "side": "long",
+            "direction": "LONG",
+            "exchange_symbol": "SOL/USDT:USDT",
+            "orders": [
+                {
+                    "local_order_id": "entry-1",
+                    "order_role": "ENTRY",
+                    "symbol": "SOL/USDT:USDT",
+                    "gateway_order_type": "market",
+                    "gateway_side": "buy",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": None,
+                    "reduce_only": False,
+                    "client_order_id": "entry-1",
+                }
+            ],
+        },
+    }
+
+    result = await api_trading_console._submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+    )
+
+    assert result["status"] == "submit_request_identity_mismatch"
+    assert result["exchange_write_called"] is False
+    assert result["order_created"] is False
+    assert result["order_lifecycle_called"] is False
+    assert "submit_request_identity_mismatch:symbol:expected=ETHUSDT:actual=SOLUSDT" in (
+        result["blockers"]
+    )
+    assert gateway.calls == []
+    assert lifecycle.registered_order_ids == []
 
 
 class _FakeGateway:
