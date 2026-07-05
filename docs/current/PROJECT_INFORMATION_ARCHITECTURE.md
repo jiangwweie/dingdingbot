@@ -121,6 +121,11 @@ Owner decisions.
 | Blocker classification and Live Enablement completion rules | `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
+| L1-L9 full-chain audit and optimization review | `docs/current/L1_L9_SYSTEM_REVIEW_AND_OPTIMIZATION_AUDIT.md` |
+| Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` |
+| Active StrategyGroup semantics review and optimization plan | `docs/current/ACTIVE_STRATEGYGROUP_SEMANTICS_REVIEW_AND_OPTIMIZATION_PLAN.md` |
+| Multi-StrategyGroup multi-symbol multi-side action-time evolution | `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
+| L1-L9 optimization execution plan | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
 | Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
 | Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
